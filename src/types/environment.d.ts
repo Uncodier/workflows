@@ -5,6 +5,8 @@ declare global {
       TEMPORAL_SERVER_URL: string;
       TEMPORAL_NAMESPACE: string;
       WORKFLOW_TASK_QUEUE: string;
+      TEMPORAL_API_KEY?: string;
+      TEMPORAL_TLS?: string;
       
       // Supabase Configuration
       SUPABASE_URL?: string;

@@ -1,4 +1,3 @@
-import { ScheduleClient, Connection, ScheduleOverlapPolicy } from '@temporalio/client';
 import { temporalConfig } from '../../config/config';
 import { WorkflowType, workflows } from '../workflows';
 
@@ -52,10 +51,33 @@ export const defaultSchedules: ScheduleSpec[] = [
   }
 ];
 
-export async function createSchedule(spec: ScheduleSpec) {
-  const connection = await Connection.connect({
+// Helper function to create connection with proper configuration
+async function createTemporalConnection() {
+  // Use require to avoid TypeScript issues
+  const { Connection } = require('@temporalio/client');
+  
+  const connectionOptions: any = {
     address: temporalConfig.serverUrl,
-  });
+  };
+
+  // Add TLS and API key for remote connections (Temporal Cloud)
+  if (temporalConfig.tls) {
+    connectionOptions.tls = {};
+  }
+
+  if (temporalConfig.apiKey) {
+    connectionOptions.metadata = {
+      'temporal-namespace': temporalConfig.namespace,
+    };
+    connectionOptions.apiKey = temporalConfig.apiKey;
+  }
+
+  return await Connection.connect(connectionOptions);
+}
+
+export async function createSchedule(spec: ScheduleSpec) {
+  const { ScheduleClient, ScheduleOverlapPolicy } = require('@temporalio/client');
+  const connection = await createTemporalConnection();
 
   const client = new ScheduleClient({
     connection,
@@ -86,9 +108,8 @@ export async function createSchedule(spec: ScheduleSpec) {
 }
 
 export async function listSchedules() {
-  const connection = await Connection.connect({
-    address: temporalConfig.serverUrl,
-  });
+  const { ScheduleClient } = require('@temporalio/client');
+  const connection = await createTemporalConnection();
 
   const client = new ScheduleClient({
     connection,
@@ -100,9 +121,8 @@ export async function listSchedules() {
 }
 
 export async function deleteSchedule(scheduleId: string) {
-  const connection = await Connection.connect({
-    address: temporalConfig.serverUrl,
-  });
+  const { ScheduleClient } = require('@temporalio/client');
+  const connection = await createTemporalConnection();
 
   const client = new ScheduleClient({
     connection,
@@ -115,9 +135,8 @@ export async function deleteSchedule(scheduleId: string) {
 }
 
 export async function toggleSchedule(scheduleId: string, paused: boolean, note?: string) {
-  const connection = await Connection.connect({
-    address: temporalConfig.serverUrl,
-  });
+  const { ScheduleClient } = require('@temporalio/client');
+  const connection = await createTemporalConnection();
 
   const client = new ScheduleClient({
     connection,

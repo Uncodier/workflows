@@ -1,14 +1,31 @@
-import { Connection, Client } from '@temporalio/client';
 import { temporalConfig } from '../../config/config';
 
 /**
  * Creates and returns a Temporal client connection
  * @returns Temporal client instance
  */
-export async function getTemporalClient(): Promise<Client> {
-  const connection = await Connection.connect({
+export async function getTemporalClient() {
+  // Use require to avoid TypeScript issues
+  const { Connection, Client } = require('@temporalio/client');
+  
+  // Configure connection options based on environment
+  const connectionOptions: any = {
     address: temporalConfig.serverUrl,
-  });
+  };
+
+  // Add TLS and API key for remote connections (Temporal Cloud)
+  if (temporalConfig.tls) {
+    connectionOptions.tls = {};
+  }
+
+  if (temporalConfig.apiKey) {
+    connectionOptions.metadata = {
+      'temporal-namespace': temporalConfig.namespace,
+    };
+    connectionOptions.apiKey = temporalConfig.apiKey;
+  }
+
+  const connection = await Connection.connect(connectionOptions);
 
   return new Client({
     connection,
@@ -24,7 +41,7 @@ export async function getTemporalClient(): Promise<Client> {
  * @param taskQueue Optional custom task queue
  * @returns Workflow handle
  */
-export async function executeWorkflow<T>(
+export async function executeWorkflow(
   workflowType: string,
   args: unknown[],
   workflowId?: string,

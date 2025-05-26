@@ -27,12 +27,30 @@ async function checkTemporalConnection() {
     const { Connection } = await import('@temporalio/client');
     
     const address = process.env.TEMPORAL_SERVER_URL || 'localhost:7233';
-    const connection = await Connection.connect({ address });
+    
+    // Configure connection options
+    const connectionOptions = { address };
+    
+    // Add TLS and API key for remote connections (Temporal Cloud)
+    if (process.env.TEMPORAL_TLS === 'true' || process.env.TEMPORAL_API_KEY) {
+      connectionOptions.tls = {};
+    }
+
+    if (process.env.TEMPORAL_API_KEY) {
+      connectionOptions.metadata = {
+        'temporal-namespace': process.env.TEMPORAL_NAMESPACE || 'default',
+      };
+      connectionOptions.apiKey = process.env.TEMPORAL_API_KEY;
+    }
+    
+    const connection = await Connection.connect(connectionOptions);
     
     // If we reach here, connection was successful
     return {
       connected: true,
-      address: address
+      address: address,
+      tls: !!connectionOptions.tls,
+      hasApiKey: !!process.env.TEMPORAL_API_KEY
     };
   } catch (error) {
     return {

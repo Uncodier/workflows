@@ -1,4 +1,4 @@
-import { ScheduleClient } from '@temporalio/client';
+// import { ScheduleClient } from '@temporalio/client';
 
 /**
  * Nota: Este archivo contiene definiciones de tipos para complementar las definiciones de la biblioteca Temporal.

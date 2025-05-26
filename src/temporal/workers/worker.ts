@@ -16,11 +16,29 @@ export async function startWorker() {
     logger.info('Available workflows:', { workflows: Object.keys(workflows) });
 
     // Connect to Temporal server
-    const connection = await NativeConnection.connect({
+    const connectionOptions: any = {
       address: temporalConfig.serverUrl,
-    });
+    };
 
-    logger.info('Connecting to Temporal server', { url: temporalConfig.serverUrl });
+    // Add TLS and API key for remote connections (Temporal Cloud)
+    if (temporalConfig.tls) {
+      connectionOptions.tls = {};
+    }
+
+    if (temporalConfig.apiKey) {
+      connectionOptions.metadata = {
+        'temporal-namespace': temporalConfig.namespace,
+      };
+      connectionOptions.apiKey = temporalConfig.apiKey;
+    }
+
+    const connection = await NativeConnection.connect(connectionOptions);
+
+    logger.info('Connecting to Temporal server', { 
+      url: temporalConfig.serverUrl,
+      tls: temporalConfig.tls,
+      hasApiKey: !!temporalConfig.apiKey
+    });
 
     // Create worker with explicit activities
     const worker = await TemporalWorker.create({

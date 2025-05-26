@@ -1,25 +1,17 @@
 #!/usr/bin/env node
-import { Connection, Client } from '@temporalio/client';
+import { getTemporalClient } from '../temporal/client';
 import { workflows } from '../temporal/workflows';
-import { temporalConfig } from '../config/config';
 
 async function run() {
-  // Connect to Temporal server
-  const connection = await Connection.connect({
-    address: temporalConfig.serverUrl,
-  });
+  // Use the configured Temporal client
+  const client = await getTemporalClient();
 
-  const client = new Client({
-    connection,
-    namespace: temporalConfig.namespace,
-  });
-
-  // Execute the hello world workflow
+  // Execute the data processing workflow
   try {
-    const handle = await client.workflow.start(workflows.helloWorldWorkflow, {
-      taskQueue: temporalConfig.taskQueue,
-      workflowId: 'hello-workflow-' + Date.now(),
-      args: ['Temporal'],
+    const handle = await client.workflow.start(workflows.dataProcessingWorkflow, {
+      taskQueue: 'default',
+      workflowId: 'data-processing-workflow-' + Date.now(),
+      args: ['test-resource', { transform: true }],
     });
 
     console.log('Started workflow:', handle.workflowId);

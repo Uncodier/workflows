@@ -6,10 +6,11 @@ const {
   fetchDataActivity, 
   createResourceActivity, 
   updateResourceActivity, 
-  deleteResourceActivity,
+  // deleteResourceActivity,
   logWorkflowExecutionActivity,
   storeWorkflowResultActivity,
-  fetchConfigurationActivity
+  fetchConfigurationActivity,
+  // trackApiCallActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '1 minute',
   retry: {
