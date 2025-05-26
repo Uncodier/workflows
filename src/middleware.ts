@@ -7,6 +7,7 @@ export function middleware(request: NextRequest) {
   
   // List of API endpoints that should be publicly accessible
   const publicApiPaths = [
+    '/api/health',
     '/api/status',
     '/api/worker', 
     '/api/schedules',
@@ -14,21 +15,33 @@ export function middleware(request: NextRequest) {
   ]
   
   // Check if the request is for a public API endpoint
-  const isPublicApiPath = publicApiPaths.some(path => pathname.startsWith(path))
+  const isPublicApiPath = publicApiPaths.some(path => pathname === path || pathname.startsWith(path + '/'))
   
   if (isPublicApiPath) {
     // Clone the request headers
     const requestHeaders = new Headers(request.headers)
     
-    // Add headers to bypass Vercel authentication for API endpoints
+    // Add multiple headers to try to bypass Vercel authentication
     requestHeaders.set('x-middleware-bypass-auth', 'true')
+    requestHeaders.set('x-vercel-bypass-protection', 'true')
+    requestHeaders.set('x-public-endpoint', 'true')
+    
+    // Remove authentication headers if present
+    requestHeaders.delete('authorization')
+    requestHeaders.delete('cookie')
     
     // Continue to the API endpoint without authentication
-    return NextResponse.next({
+    const response = NextResponse.next({
       request: {
         headers: requestHeaders,
       },
     })
+    
+    // Add response headers to indicate public access
+    response.headers.set('x-public-access', 'true')
+    response.headers.set('Access-Control-Allow-Origin', '*')
+    
+    return response
   }
   
   // For all other routes, continue with normal processing (authentication if enabled)
@@ -36,8 +49,9 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Match all API routes
+  // Match all API routes and some specific paths
   matcher: [
-    '/api/:path*'
+    '/api/:path*',
+    '/health.json'
   ]
 } 

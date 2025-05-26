@@ -1,0 +1,12 @@
+{
+  "status": "healthy",
+  "timestamp": "static-file",
+  "message": "This is a static health check. For dynamic status, API endpoints require authentication.",
+  "endpoints": {
+    "worker": "/api/worker",
+    "status": "/api/status", 
+    "schedules": "/api/schedules",
+    "health": "/api/health"
+  },
+  "note": "Check Vercel function logs for detailed worker status"
+} 
