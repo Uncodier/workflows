@@ -1,7 +1,7 @@
 require('dotenv').config();
 const { Client } = require('@temporalio/client');
 
-// Status endpoint to check if the service is running
+// Status endpoint to check if the service is running and auto-initialize schedules
 module.exports = async (req, res) => {
   const startTime = Date.now();
   
@@ -25,7 +25,12 @@ module.exports = async (req, res) => {
       connected: false,
       error: null,
       schedules: [],
-      connection_duration: null
+      connection_duration: null,
+      auto_initialization: {
+        attempted: false,
+        success: false,
+        error: null
+      }
     };
 
     // Try to connect to Temporal and check schedules
@@ -69,11 +74,38 @@ module.exports = async (req, res) => {
           for await (const schedule of schedules) {
             temporalStatus.schedules.push({
               id: schedule.scheduleId,
-              // Add more schedule details if available
             });
           }
           
           console.log(`Found ${temporalStatus.schedules.length} schedules`);
+          
+          // Auto-initialize schedules if none exist
+          if (temporalStatus.schedules.length === 0) {
+            console.log('🚀 No schedules found, attempting auto-initialization...');
+            temporalStatus.auto_initialization.attempted = true;
+            
+            try {
+              // Try to auto-initialize schedules
+              await autoInitializeSchedules();
+              temporalStatus.auto_initialization.success = true;
+              console.log('✅ Auto-initialization completed successfully');
+              
+              // Re-check schedules after initialization
+              const newSchedules = await scheduleHandle.list();
+              temporalStatus.schedules = [];
+              for await (const schedule of newSchedules) {
+                temporalStatus.schedules.push({
+                  id: schedule.scheduleId,
+                });
+              }
+              console.log(`After auto-init: Found ${temporalStatus.schedules.length} schedules`);
+              
+            } catch (initError) {
+              console.error('❌ Auto-initialization failed:', initError);
+              temporalStatus.auto_initialization.error = initError.message;
+            }
+          }
+          
         } catch (scheduleError) {
           console.error('Error listing schedules:', scheduleError);
           temporalStatus.schedule_error = scheduleError.message;
@@ -105,6 +137,7 @@ module.exports = async (req, res) => {
     const fileSystemStatus = {
       dist_exists: fs.existsSync(path.join(__dirname, '../dist')),
       worker_script_exists: fs.existsSync(path.join(__dirname, '../dist/scripts/start-worker.js')),
+      schedule_script_exists: fs.existsSync(path.join(__dirname, '../dist/scripts/create-all-schedules.js')),
       package_json_exists: fs.existsSync(path.join(__dirname, '../package.json')),
       current_directory: process.cwd(),
       __dirname: __dirname
@@ -132,6 +165,8 @@ module.exports = async (req, res) => {
     console.log('Response summary:', {
       temporalConnected: temporalStatus.connected,
       schedulesFound: temporalStatus.schedules?.length || 0,
+      autoInitAttempted: temporalStatus.auto_initialization.attempted,
+      autoInitSuccess: temporalStatus.auto_initialization.success,
       hasError: !!temporalStatus.error,
       duration: totalDuration
     });
@@ -156,6 +191,55 @@ module.exports = async (req, res) => {
     });
   }
 };
+
+// Auto-initialize schedules function
+async function autoInitializeSchedules() {
+  console.log('🔧 Starting auto-initialization of schedules...');
+  
+  const { spawn } = require('child_process');
+  const path = require('path');
+  
+  return new Promise((resolve, reject) => {
+    const scriptPath = path.join(__dirname, '../dist/scripts/create-all-schedules.js');
+    
+    console.log('📄 Executing schedule creation script:', scriptPath);
+    
+    const child = spawn('node', [scriptPath], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env },
+      timeout: 30000, // 30 second timeout for auto-init
+      killSignal: 'SIGTERM'
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('close', (code, signal) => {
+      console.log('🏁 Auto-init script completed:', { code, signal });
+      
+      if (code === 0) {
+        console.log('✅ Auto-initialization successful');
+        resolve({ success: true, stdout, stderr });
+      } else {
+        console.log('❌ Auto-initialization failed with code:', code);
+        reject(new Error(`Auto-init failed with code ${code}. stderr: ${stderr}`));
+      }
+    });
+
+    child.on('error', (error) => {
+      console.log('💥 Auto-init script error:', error);
+      reject(error);
+    });
+  });
+}
 
 async function checkTemporalConnection() {
   try {

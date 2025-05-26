@@ -10,6 +10,9 @@
     "api/schedules.js": {
       "maxDuration": 60
     },
+    "api/auto-init.js": {
+      "maxDuration": 60
+    },
     "api/health.js": {
       "maxDuration": 10
     }
@@ -39,8 +42,8 @@
       "schedule": "*/5 * * * *"
     },
     {
-      "path": "/api/schedules",
-      "schedule": "*/30 * * * *"
+      "path": "/api/auto-init",
+      "schedule": "*/15 * * * *"
     }
   ]
 } 
