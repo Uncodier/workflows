@@ -1,46 +1,24 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/node",
-      "config": {
-        "buildCommand": "npm run vercel:build",
-        "outputDirectory": "dist"
-      }
-    },
-    {
-      "src": "api/**/*.js",
-      "use": "@vercel/node"
-    }
-  ],
   "functions": {
     "api/worker.js": {
       "maxDuration": 300
+    },
+    "api/status.js": {
+      "maxDuration": 30
+    },
+    "api/schedules.js": {
+      "maxDuration": 60
     }
   },
-  "routes": [
-    {
-      "src": "/api/status",
-      "dest": "/api/status.js"
-    },
-    {
-      "src": "/api/worker",
-      "dest": "/api/worker.js"
-    },
-    {
-      "src": "/api/execute",
-      "dest": "/api/execute-workflow.js"
-    },
-    {
-      "src": "/api/schedules",
-      "dest": "/api/schedules.js"
-    }
-  ],
   "crons": [
     {
       "path": "/api/worker",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/schedules",
+      "schedule": "0 */6 * * *"
     }
   ]
 } 
