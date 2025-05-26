@@ -5,7 +5,7 @@
       "src": "package.json",
       "use": "@vercel/node",
       "config": {
-        "buildCommand": "npm run vercel:build",
+        "buildCommand": "npm run worker:build",
         "outputDirectory": "dist"
       }
     },
@@ -14,6 +14,17 @@
       "use": "@vercel/node"
     }
   ],
+  "functions": {
+    "api/worker.js": {
+      "maxDuration": 300
+    },
+    "api/status.js": {
+      "maxDuration": 30
+    },
+    "api/schedules.js": {
+      "maxDuration": 60
+    }
+  },
   "routes": [
     {
       "src": "/api/status",
@@ -30,16 +41,16 @@
     {
       "src": "/api/schedules",
       "dest": "/api/schedules.js"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/api/worker.js"
     }
   ],
   "crons": [
     {
       "path": "/api/worker",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/schedules",
+      "schedule": "0 */6 * * *"
     }
   ]
 } 

@@ -14,17 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.workflows = void 0;
-const dataProcessingWorkflow_1 = require("./dataProcessingWorkflow");
-const cronWorkflow_1 = require("./cronWorkflow");
-const syncEmailsWorkflow_1 = require("./syncEmailsWorkflow");
-// Export workflows individually
+// This file is specifically for the worker to load workflows
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
 __exportStar(require("./syncEmailsWorkflow"), exports);
-// Also export as a bundle for the client
-exports.workflows = {
-    dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
-    scheduledApiPollingWorkflow: cronWorkflow_1.scheduledApiPollingWorkflow,
-    syncEmailsWorkflow: syncEmailsWorkflow_1.syncEmailsWorkflow,
-};

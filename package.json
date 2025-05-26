@@ -21,7 +21,8 @@
     "build:all": "npm run build && npm run worker:build",
     "start:all": "concurrently \"npm run start\" \"npm run worker:start\"",
     "vercel:build": "npm run worker:build",
-    "vercel:start": "npm run worker:start"
+    "vercel:start": "npm run worker:start",
+    "diagnose": "node scripts/diagnose.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",

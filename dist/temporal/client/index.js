@@ -2,17 +2,30 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getTemporalClient = getTemporalClient;
 exports.executeWorkflow = executeWorkflow;
-const client_1 = require("@temporalio/client");
 const config_1 = require("../../config/config");
 /**
  * Creates and returns a Temporal client connection
  * @returns Temporal client instance
  */
 async function getTemporalClient() {
-    const connection = await client_1.Connection.connect({
+    // Use require to avoid TypeScript issues
+    const { Connection, Client } = require('@temporalio/client');
+    // Configure connection options based on environment
+    const connectionOptions = {
         address: config_1.temporalConfig.serverUrl,
-    });
-    return new client_1.Client({
+    };
+    // Add TLS and API key for remote connections (Temporal Cloud)
+    if (config_1.temporalConfig.tls) {
+        connectionOptions.tls = {};
+    }
+    if (config_1.temporalConfig.apiKey) {
+        connectionOptions.metadata = {
+            'temporal-namespace': config_1.temporalConfig.namespace,
+        };
+        connectionOptions.apiKey = config_1.temporalConfig.apiKey;
+    }
+    const connection = await Connection.connect(connectionOptions);
+    return new Client({
         connection,
         namespace: config_1.temporalConfig.namespace,
     });

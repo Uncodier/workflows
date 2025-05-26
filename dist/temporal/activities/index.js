@@ -8,4 +8,8 @@ exports.activities = {
     createResourceActivity: supabaseActivities_1.createResourceActivity,
     updateResourceActivity: supabaseActivities_1.updateResourceActivity,
     deleteResourceActivity: supabaseActivities_1.deleteResourceActivity,
+    logWorkflowExecutionActivity: supabaseActivities_1.logWorkflowExecutionActivity,
+    trackApiCallActivity: supabaseActivities_1.trackApiCallActivity,
+    fetchConfigurationActivity: supabaseActivities_1.fetchConfigurationActivity,
+    storeWorkflowResultActivity: supabaseActivities_1.storeWorkflowResultActivity,
 };

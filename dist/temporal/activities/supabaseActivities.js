@@ -1,4 +1,6 @@
 "use strict";
+// Temporary implementation without Supabase
+// TODO: Implement actual Supabase integration when credentials are available
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.logWorkflowExecutionActivity = logWorkflowExecutionActivity;
 exports.trackApiCallActivity = trackApiCallActivity;
@@ -7,89 +9,59 @@ exports.storeWorkflowResultActivity = storeWorkflowResultActivity;
 exports.createResourceActivity = createResourceActivity;
 exports.updateResourceActivity = updateResourceActivity;
 exports.deleteResourceActivity = deleteResourceActivity;
-const supabase_js_1 = require("@supabase/supabase-js");
-const config_1 = require("../../config/config");
-const supabase = (0, supabase_js_1.createClient)(config_1.supabaseConfig.url, config_1.supabaseConfig.key);
 /**
- * Activity to log workflow execution to Supabase
+ * Activity to log workflow execution (temporary console implementation)
  */
 async function logWorkflowExecutionActivity(data) {
-    const { data: result, error } = await supabase
-        .from('workflow_executions')
-        .insert(data);
-    if (error) {
-        console.error('Error logging workflow execution:', error);
-        throw error;
-    }
-    return result;
+    console.log('Workflow Execution Log:', JSON.stringify(data, null, 2));
+    return { id: Date.now(), ...data };
 }
 /**
- * Activity to track API call metrics in Supabase
+ * Activity to track API call metrics (temporary console implementation)
  */
 async function trackApiCallActivity(data) {
-    const { data: result, error } = await supabase
-        .from('api_call_metrics')
-        .insert(data);
-    if (error) {
-        console.error('Error tracking API call:', error);
-        throw error;
-    }
-    return result;
+    console.log('API Call Metrics:', JSON.stringify(data, null, 2));
+    return { id: Date.now(), ...data };
 }
 /**
- * Activity to fetch configuration from Supabase
+ * Activity to fetch configuration (temporary implementation)
  */
 async function fetchConfigurationActivity(configName) {
-    const { data, error } = await supabase
-        .from('configurations')
-        .select('*')
-        .eq('name', configName)
-        .single();
-    if (error) {
-        console.error(`Error fetching configuration ${configName}:`, error);
-        throw error;
-    }
-    return data?.value;
+    const mockConfig = {
+        name: configName,
+        value: {
+            enabled: true,
+            retryAttempts: 3,
+            timeout: '1m',
+        }
+    };
+    console.log('Fetching Configuration:', mockConfig);
+    return mockConfig.value;
 }
 /**
- * Activity to store workflow results in Supabase
+ * Activity to store workflow results (temporary console implementation)
  */
 async function storeWorkflowResultActivity(data) {
-    const { data: result, error } = await supabase
-        .from('workflow_results')
-        .insert(data);
-    if (error) {
-        console.error('Error storing workflow result:', error);
-        throw error;
-    }
-    return result;
+    console.log('Storing Workflow Result:', JSON.stringify(data, null, 2));
+    return { id: Date.now(), ...data };
 }
+/**
+ * Activity to create a resource (temporary implementation)
+ */
 async function createResourceActivity(data) {
-    const { data: result, error } = await supabase
-        .from('resources')
-        .insert(data)
-        .select()
-        .single();
-    if (error)
-        throw error;
-    return result;
+    console.log('Creating Resource:', JSON.stringify(data, null, 2));
+    return { id: Date.now(), ...data };
 }
+/**
+ * Activity to update a resource (temporary implementation)
+ */
 async function updateResourceActivity(id, data) {
-    const { data: result, error } = await supabase
-        .from('resources')
-        .update(data)
-        .eq('id', id)
-        .select()
-        .single();
-    if (error)
-        throw error;
-    return result;
+    console.log('Updating Resource:', id, JSON.stringify(data, null, 2));
+    return { id, ...data, updatedAt: new Date().toISOString() };
 }
+/**
+ * Activity to delete a resource (temporary implementation)
+ */
 async function deleteResourceActivity(id) {
-    const { error } = await supabase
-        .from('resources')
-        .delete()
-        .eq('id', id);
-    if (error)
-        throw error;
+    console.log('Deleting Resource:', id);
 }

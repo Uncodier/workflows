@@ -2,30 +2,28 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const client_1 = require("../temporal/client");
+const workflows_1 = require("../temporal/workflows");
 async function run() {
+    // Use the configured Temporal client
+    const client = await (0, client_1.getTemporalClient)();
+    // Execute the data processing workflow
     try {
-        // Get command line arguments
-        const args = process.argv.slice(2);
-        const workflowType = args[0];
-        const resourceId = args[1];
-        const options = args[2] ? JSON.parse(args[2]) : {};
-        if (!workflowType || !resourceId) {
-            console.error('Usage: npm run execute-workflow <workflowType> <resourceId> <optionsJSON>');
-            process.exit(1);
-        }
-        console.log(`Executing workflow ${workflowType} with resourceId ${resourceId}`);
-        console.log('Options:', options);
-        // Execute the workflow
-        const handle = await (0, client_1.executeWorkflow)(workflowType, [resourceId, options]);
-        console.log(`Workflow started with ID: ${handle.workflowId}`);
-        // Wait for the workflow to complete
+        const handle = await client.workflow.start(workflows_1.workflows.dataProcessingWorkflow, {
+            taskQueue: 'default',
+            workflowId: 'data-processing-workflow-' + Date.now(),
+            args: ['test-resource', { transform: true }],
+        });
+        console.log('Started workflow:', handle.workflowId);
+        // Wait for the result
         const result = await handle.result();
-        console.log('Workflow completed with result:', result);
-        process.exit(0);
+        console.log('Workflow result:', result);
     }
     catch (error) {
-        console.error('Error executing workflow:', error);
+        console.error('Workflow execution failed:', error);
         process.exit(1);
     }
 }
-run();
+run().catch((err) => {
+    console.error('Failed to execute workflow:', err);
+    process.exit(1);
+});
