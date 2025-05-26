@@ -6,6 +6,7 @@ const path = require('path');
 let workerInstance = null;
 let isStarting = false;
 let lastError = null;
+let schedulesVerified = false; // Track if schedules have been verified
 
 module.exports = async (req, res) => {
   const startTime = Date.now();
@@ -50,6 +51,7 @@ module.exports = async (req, res) => {
       timestamp: new Date().toISOString(),
       workerRunning: !!workerInstance,
       isStarting: isStarting,
+      schedulesVerified: schedulesVerified,
       lastError: lastError ? lastError.message : null,
       environment: {
         NODE_ENV: process.env.NODE_ENV,
@@ -109,6 +111,12 @@ module.exports = async (req, res) => {
 
         isStarting = false;
         console.log('=== Worker startup completed successfully ===');
+
+        // Verify schedules on first successful worker startup
+        if (!schedulesVerified && process.env.TEMPORAL_SERVER_URL && process.env.TEMPORAL_NAMESPACE) {
+          console.log('=== First worker startup - verifying schedules ===');
+          verifySchedulesOnStartup();
+        }
         
       } catch (error) {
         console.error('=== Worker startup failed ===');
@@ -144,4 +152,66 @@ module.exports = async (req, res) => {
       timestamp: new Date().toISOString()
     });
   }
-}; 
+};
+
+// Verify schedules on worker startup (called once per deployment)
+function verifySchedulesOnStartup() {
+  if (schedulesVerified) {
+    console.log('Schedules already verified, skipping...');
+    return;
+  }
+
+  console.log('=== Starting schedule verification on worker startup ===');
+  schedulesVerified = true; // Mark as verified to prevent multiple calls
+
+  setTimeout(async () => {
+    try {
+      const { exec } = require('child_process');
+      const path = require('path');
+      const fs = require('fs');
+      
+      // Check if compiled script exists
+      const scriptPath = path.join(__dirname, '../dist/scripts/create-all-schedules.js');
+      
+      if (fs.existsSync(scriptPath)) {
+        console.log('Using compiled JavaScript script for schedule verification');
+        
+        exec(`node ${scriptPath}`, { 
+          cwd: path.join(__dirname, '..'),
+          timeout: 45000 // 45 second timeout
+        }, (error, stdout, stderr) => {
+          if (error) {
+            console.error('Schedule verification on startup failed:', error);
+            console.error('stderr:', stderr);
+            schedulesVerified = false; // Reset flag so it can retry later
+          } else {
+            console.log('✅ Schedule verification on startup completed successfully');
+            console.log('stdout:', stdout);
+          }
+        });
+        
+      } else {
+        console.log('Compiled script not found, trying TypeScript version for schedule verification');
+        
+        // Try to run TypeScript version with ts-node
+        exec(`npx ts-node src/scripts/create-all-schedules.ts`, {
+          cwd: path.join(__dirname, '..'),
+          timeout: 45000
+        }, (error, stdout, stderr) => {
+          if (error) {
+            console.error('TypeScript schedule verification on startup failed:', error);
+            console.error('stderr:', stderr);
+            schedulesVerified = false; // Reset flag so it can retry later
+          } else {
+            console.log('✅ TypeScript schedule verification on startup completed successfully');
+            console.log('stdout:', stdout);
+          }
+        });
+      }
+      
+    } catch (bgError) {
+      console.error('Background schedule verification on startup failed:', bgError);
+      schedulesVerified = false; // Reset flag so it can retry later
+    }
+  }, 2000); // Wait 2 seconds after worker startup
+} 
