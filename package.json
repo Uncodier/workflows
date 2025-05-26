@@ -6,22 +6,45 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "worker:dev": "ts-node --transpile-only src/scripts/start-worker.ts",
+    "worker:build": "tsc -p worker.tsconfig.json",
+    "worker:start": "node dist/scripts/start-worker.js",
+    "workflow:execute": "ts-node src/scripts/execute-workflow.ts",
+    "schedule:create": "ts-node src/scripts/manage-schedule.ts create",
+    "schedule:list": "ts-node src/scripts/manage-schedule.ts list",
+    "schedule:delete": "ts-node src/scripts/manage-schedule.ts delete",
+    "schedule:email-sync": "ts-node src/scripts/create-email-sync-schedule.ts",
+    "schedule:create-all": "ts-node src/scripts/create-all-schedules.ts",
+    "schedule:delete-all": "ts-node src/scripts/delete-all-schedules.ts",
+    "dev:all": "concurrently \"npm run dev\" \"npm run worker:dev\"",
+    "build:all": "npm run build && npm run worker:build",
+    "start:all": "concurrently \"npm run start\" \"npm run worker:start\"",
+    "vercel:build": "npm run worker:build",
+    "vercel:start": "npm run worker:start"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.4",
+    "@temporalio/activity": "^1.11.8",
+    "@temporalio/client": "^1.11.8",
+    "@temporalio/worker": "^1.11.8",
+    "@temporalio/workflow": "^1.11.8",
+    "dotenv": "^16.5.0",
+    "next": "15.3.2",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "next": "15.3.2"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
+    "concurrently": "^8.2.2",
     "eslint": "^9",
     "eslint-config-next": "15.3.2",
-    "@eslint/eslintrc": "^3"
+    "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5"
   }
 }
