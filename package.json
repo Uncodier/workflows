@@ -17,6 +17,7 @@
     "schedule:email-sync": "ts-node src/scripts/create-email-sync-schedule.ts",
     "schedule:create-all": "ts-node src/scripts/create-all-schedules.ts",
     "schedule:delete-all": "ts-node src/scripts/delete-all-schedules.ts",
+    "schedule:recreate": "ts-node src/scripts/recreate-schedules.ts",
     "test:email-sync-real": "node test-email-sync-real-scheduling.js",
     "test:cron-activities": "node test-cron-activities.js",
     "test:email-sync-dryrun": "ts-node src/scripts/execute-workflow.ts syncEmailsScheduleWorkflow '{\"dryRun\":true,\"minHoursBetweenSyncs\":1}'",

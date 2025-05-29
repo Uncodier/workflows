@@ -14,6 +14,12 @@ export interface ScheduleSpec {
   cronSchedule: string;
   args?: WorkflowArgs[keyof WorkflowArgs];
   description?: string;
+  startTime?: Date;
+  endTime?: Date;
+  jitterMs?: number;
+  pauseOnFailure?: boolean;
+  catchupWindow?: string;
+  paused?: boolean;
 }
 
 // Central schedule that manages all other workflows
@@ -23,14 +29,24 @@ export const defaultSchedules: ScheduleSpec[] = [
     workflowType: 'scheduleActivitiesWorkflow',
     cronSchedule: '0 0 * * *', // Every day at midnight
     args: [],
-    description: 'Central schedule that manages all workflow orchestration'
+    description: 'Central schedule that manages all workflow orchestration',
+    startTime: new Date(), // Start immediately
+    jitterMs: 30000, // 30 seconds jitter
+    pauseOnFailure: false,
+    catchupWindow: '1h', // 1 hour catchup window
+    paused: false
   },
   {
     id: 'sync-emails-schedule-manager',
     workflowType: 'syncEmailsScheduleWorkflow',
     cronSchedule: '0 */1 * * *', // Every 1 hours
     args: [],
-    description: 'Schedule email sync workflows for all sites every 2 hours'
+    description: 'Schedule email sync workflows for all sites every hour',
+    startTime: new Date(), // Start immediately
+    jitterMs: 60000, // 1 minute jitter to spread load
+    pauseOnFailure: false,
+    catchupWindow: '2h', // 2 hour catchup window
+    paused: false
   }
 ];
 
@@ -175,14 +191,22 @@ export async function createSchedule(spec: ScheduleSpec) {
         workflowType: workflows[spec.workflowType],
         taskQueue: temporalConfig.taskQueue,
         args: spec.args || [],
+        workflowId: `${spec.id}-${Date.now()}`, // Unique workflow ID for each run
       },
       spec: {
-        cron: spec.cronSchedule
+        cron: spec.cronSchedule,
+        startTime: spec.startTime || new Date(),
+        endTime: spec.endTime || undefined,
+        jitter: spec.jitterMs ? `${spec.jitterMs}ms` : '30s', // Default 30 second jitter
       },
       policies: {
-        catchupWindow: '5m',
+        catchupWindow: spec.catchupWindow || '1h',
         overlap: ScheduleOverlapPolicy.SKIP,
-        pauseOnFailure: false,
+        pauseOnFailure: spec.pauseOnFailure !== undefined ? spec.pauseOnFailure : false,
+      },
+      state: {
+        note: `Schedule created: ${new Date().toISOString()}`,
+        paused: spec.paused || false,
       },
       timeZone: 'UTC',
     } as any;
@@ -192,6 +216,14 @@ export async function createSchedule(spec: ScheduleSpec) {
     console.log(`   - Workflow: ${workflows[spec.workflowType]}`);
     console.log(`   - Task Queue: ${temporalConfig.taskQueue}`);
     console.log(`   - Time Zone: UTC`);
+    console.log(`   - Start Time: ${(spec.startTime || new Date()).toISOString()}`);
+    if (spec.endTime) {
+      console.log(`   - End Time: ${spec.endTime.toISOString()}`);
+    }
+    console.log(`   - Jitter: ${spec.jitterMs ? `${spec.jitterMs}ms` : '30s'}`);
+    console.log(`   - Catchup Window: ${spec.catchupWindow || '1h'}`);
+    console.log(`   - Pause on Failure: ${spec.pauseOnFailure !== undefined ? spec.pauseOnFailure : false}`);
+    console.log(`   - Initially Paused: ${spec.paused || false}`);
     
     try {
       await withTimeout(
