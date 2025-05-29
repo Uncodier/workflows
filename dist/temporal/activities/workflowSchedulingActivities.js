@@ -31,13 +31,33 @@ async function scheduleEmailSyncWorkflowActivity(site, options = {}) {
             };
         }
         const client = await (0, client_1.getTemporalClient)();
+        // Calculate 'since' timestamp based on last successful sync to avoid reprocessing emails
+        let sinceTimestamp;
+        if (site.lastEmailSync?.last_run && site.lastEmailSync.status === 'COMPLETED') {
+            // Use the timestamp from the last successful sync to get only new emails
+            sinceTimestamp = new Date(site.lastEmailSync.last_run);
+            console.log(`📧 Using last successful sync time: ${sinceTimestamp.toISOString()}`);
+            console.log(`   - Will fetch emails since last completed sync to avoid reprocessing`);
+        }
+        else if (site.lastEmailSync?.last_run && site.lastEmailSync.status === 'FAILED') {
+            // If previous sync failed, use that timestamp to avoid missing emails
+            sinceTimestamp = new Date(site.lastEmailSync.last_run);
+            console.log(`📧 Using last failed sync time: ${sinceTimestamp.toISOString()}`);
+            console.log(`   - Retrying from last attempt to ensure no emails are missed`);
+        }
+        else {
+            // No previous sync found, fetch emails from last 24 hours (initial sync)
+            sinceTimestamp = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            console.log(`📧 No previous sync found, using last 24 hours: ${sinceTimestamp.toISOString()}`);
+            console.log(`   - Initial sync will fetch recent emails`);
+        }
         // Prepare workflow arguments
         const workflowArgs = [{
                 userId: site.user_id,
                 siteId: site.id,
                 provider: site.email?.incomingServer?.includes('gmail') ? 'gmail' :
                     site.email?.incomingServer?.includes('outlook') ? 'outlook' : 'imap',
-                since: new Date(Date.now() - 24 * 60 * 60 * 1000), // Last 24 hours
+                since: sinceTimestamp, // Use calculated timestamp instead of hardcoded 24 hours
                 batchSize: 50,
                 enableAnalysis: true, // Enable AI email analysis
                 analysisLimit: 15 // Analyze up to 15 emails
@@ -228,13 +248,19 @@ options = {}) {
         await scheduleClient.create({
             scheduleId,
             spec: {
-                intervals: [{ every: cronExpression }],
+                cron: cronExpression
             },
             action: {
                 type: 'startWorkflow',
                 workflowType: 'syncEmailsWorkflow',
                 taskQueue: config_1.temporalConfig.taskQueue,
                 args: workflowArgs,
+            },
+            timeZone: 'UTC',
+            policies: {
+                catchupWindow: '5m',
+                overlap: 'SKIP',
+                pauseOnFailure: false,
             },
         });
         console.log(`✅ Successfully created recurring schedule for ${site.name}`);

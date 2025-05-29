@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "buildCommand": "npm run build:all",
   "functions": {
     "api/trigger-workflow.js": {
       "maxDuration": 30
@@ -42,7 +43,7 @@
   "crons": [
     {
       "path": "/api/trigger-workflow",
-      "schedule": "*/2 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/auto-init",

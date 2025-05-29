@@ -28,7 +28,7 @@ export const defaultSchedules: ScheduleSpec[] = [
   {
     id: 'sync-emails-schedule-manager',
     workflowType: 'syncEmailsScheduleWorkflow',
-    cronSchedule: '0 */2 * * *', // Every 2 hours
+    cronSchedule: '0 */1 * * *', // Every 1 hours
     args: [],
     description: 'Schedule email sync workflows for all sites every 2 hours'
   }

@@ -20,16 +20,9 @@ exports.defaultSchedules = [
     {
         id: 'sync-emails-schedule-manager',
         workflowType: 'syncEmailsScheduleWorkflow',
-        cronSchedule: '0 */2 * * *', // Every 2 hours
+        cronSchedule: '0 */1 * * *', // Every 1 hours
         args: [],
         description: 'Schedule email sync workflows for all sites every 2 hours'
-    },
-    {
-        id: 'sync-emails-schedule',
-        workflowType: 'syncEmailsWorkflow',
-        cronSchedule: '0 */1 * * *', // Every 1 hour
-        args: [],
-        description: 'Synchronize emails from email providers every 1 hour'
     }
 ];
 // Connection timeout wrapper
@@ -120,9 +113,15 @@ async function createSchedule(spec) {
             policies: {
                 catchupWindow: '5m',
                 overlap: ScheduleOverlapPolicy.SKIP,
+                pauseOnFailure: false,
             },
+            timeZone: 'UTC',
         };
         console.log(`🚀 Creating schedule ${spec.id} in Temporal...`);
+        console.log(`   - Cron: ${spec.cronSchedule}`);
+        console.log(`   - Workflow: ${workflows_1.workflows[spec.workflowType]}`);
+        console.log(`   - Task Queue: ${config_1.temporalConfig.taskQueue}`);
+        console.log(`   - Time Zone: UTC`);
         await withTimeout(client.create(scheduleOptions), 20000, // 20 second timeout for schedule creation
         `Schedule creation for ${spec.id}`);
         console.log(`🔒 Closing connection for ${spec.id}...`);

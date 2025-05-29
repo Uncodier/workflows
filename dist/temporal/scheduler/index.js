@@ -17,13 +17,19 @@ async function createCronSchedule(scheduleName, workflowType, args, cronExpressi
         await scheduleClient.create({
             scheduleId: scheduleName,
             spec: {
-                intervals: [{ every: cronExpression }],
+                cron: cronExpression
             },
             action: {
                 type: 'startWorkflow',
                 workflowType,
                 taskQueue: options?.taskQueue ?? config_1.temporalConfig.taskQueue,
                 args,
+            },
+            timeZone: 'UTC',
+            policies: {
+                catchupWindow: '5m',
+                overlap: 'SKIP',
+                pauseOnFailure: false,
             },
         });
         console.log(`Schedule created: ${scheduleName} for workflow ${workflowType} with cron: ${cronExpression}`);
