@@ -26,5 +26,16 @@ export const workflows = {
   sendReportWorkflow,
 };
 
+// Workflow names for Temporal Client (strings)
+export const workflowNames = {
+  dataProcessingWorkflow: 'dataProcessingWorkflow',
+  scheduledApiPollingWorkflow: 'scheduledApiPollingWorkflow', 
+  syncEmailsWorkflow: 'syncEmailsWorkflow',
+  syncEmailsScheduleWorkflow: 'syncEmailsScheduleWorkflow',
+  scheduleActivitiesWorkflow: 'scheduleActivitiesWorkflow',
+  activityPrioritizationEngineWorkflow: 'activityPrioritizationEngineWorkflow',
+  sendReportWorkflow: 'sendReportWorkflow',
+};
+
 // Workflow types for type-safe execution
 export type WorkflowType = keyof typeof workflows; 

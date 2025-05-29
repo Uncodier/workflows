@@ -1,5 +1,5 @@
 import { temporalConfig } from '../../config/config';
-import { WorkflowType, workflows } from '../workflows';
+import { WorkflowType, workflowNames } from '../workflows';
 
 // Define specific argument types for each workflow
 type WorkflowArgs = {
@@ -188,7 +188,7 @@ export async function createSchedule(spec: ScheduleSpec) {
       scheduleId: spec.id,
       action: {
         type: 'startWorkflow',
-        workflowType: workflows[spec.workflowType],
+        workflowType: workflowNames[spec.workflowType],
         taskQueue: temporalConfig.taskQueue,
         args: spec.args || [],
         workflowId: `${spec.id}-${Date.now()}`, // Unique workflow ID for each run
@@ -213,7 +213,7 @@ export async function createSchedule(spec: ScheduleSpec) {
 
     console.log(`🚀 Creating schedule ${spec.id} in Temporal...`);
     console.log(`   - Cron: ${spec.cronSchedule}`);
-    console.log(`   - Workflow: ${workflows[spec.workflowType]}`);
+    console.log(`   - Workflow: ${workflowNames[spec.workflowType]}`);
     console.log(`   - Task Queue: ${temporalConfig.taskQueue}`);
     console.log(`   - Time Zone: UTC`);
     console.log(`   - Start Time: ${(spec.startTime || new Date()).toISOString()}`);

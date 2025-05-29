@@ -147,7 +147,7 @@ async function createSchedule(spec) {
             scheduleId: spec.id,
             action: {
                 type: 'startWorkflow',
-                workflowType: workflows_1.workflows[spec.workflowType],
+                workflowType: workflows_1.workflowNames[spec.workflowType],
                 taskQueue: config_1.temporalConfig.taskQueue,
                 args: spec.args || [],
                 workflowId: `${spec.id}-${Date.now()}`, // Unique workflow ID for each run
@@ -171,7 +171,7 @@ async function createSchedule(spec) {
         };
         console.log(`🚀 Creating schedule ${spec.id} in Temporal...`);
         console.log(`   - Cron: ${spec.cronSchedule}`);
-        console.log(`   - Workflow: ${workflows_1.workflows[spec.workflowType]}`);
+        console.log(`   - Workflow: ${workflows_1.workflowNames[spec.workflowType]}`);
         console.log(`   - Task Queue: ${config_1.temporalConfig.taskQueue}`);
         console.log(`   - Time Zone: UTC`);
         console.log(`   - Start Time: ${(spec.startTime || new Date()).toISOString()}`);

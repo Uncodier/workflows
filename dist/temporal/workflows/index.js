@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.workflows = void 0;
+exports.workflowNames = exports.workflows = void 0;
 const dataProcessingWorkflow_1 = require("./dataProcessingWorkflow");
 const cronWorkflow_1 = require("./cronWorkflow");
 const syncEmailsWorkflow_1 = require("./syncEmailsWorkflow");
@@ -39,4 +39,14 @@ exports.workflows = {
     scheduleActivitiesWorkflow: scheduleActivitiesWorkflow_1.scheduleActivitiesWorkflow,
     activityPrioritizationEngineWorkflow: activityPrioritizationEngineWorkflow_1.activityPrioritizationEngineWorkflow,
     sendReportWorkflow: sendReportWorkflow_1.sendReportWorkflow,
+};
+// Workflow names for Temporal Client (strings)
+exports.workflowNames = {
+    dataProcessingWorkflow: 'dataProcessingWorkflow',
+    scheduledApiPollingWorkflow: 'scheduledApiPollingWorkflow',
+    syncEmailsWorkflow: 'syncEmailsWorkflow',
+    syncEmailsScheduleWorkflow: 'syncEmailsScheduleWorkflow',
+    scheduleActivitiesWorkflow: 'scheduleActivitiesWorkflow',
+    activityPrioritizationEngineWorkflow: 'activityPrioritizationEngineWorkflow',
+    sendReportWorkflow: 'sendReportWorkflow',
 };
