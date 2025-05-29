@@ -5,15 +5,15 @@ const schedules_1 = require("../temporal/schedules");
 async function createEmailSyncSchedule() {
     try {
         // Find the email sync schedule from our default schedules
-        const emailSyncSchedule = schedules_1.defaultSchedules.find(schedule => schedule.id === 'email-sync-every-5min');
+        const emailSyncSchedule = schedules_1.defaultSchedules.find(schedule => schedule.id === 'sync-emails-schedule-manager');
         if (!emailSyncSchedule) {
             console.error('Email sync schedule not found in default schedules');
             process.exit(1);
         }
-        console.log('Creating email sync schedule (every 5 minutes)...');
+        console.log('Creating email sync schedule...');
         console.log(`Schedule ID: ${emailSyncSchedule.id}`);
         console.log(`Workflow Type: ${emailSyncSchedule.workflowType}`);
-        console.log(`Cron Schedule: ${emailSyncSchedule.cronSchedule}`);
+        console.log(`Interval: Every ${emailSyncSchedule.intervalMinutes} minutes`);
         console.log(`Description: ${emailSyncSchedule.description}`);
         const result = await (0, schedules_1.createSchedule)(emailSyncSchedule);
         console.log('✅ Schedule created successfully:', result.message);

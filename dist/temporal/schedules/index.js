@@ -13,10 +13,10 @@ exports.defaultSchedules = [
     {
         id: 'central-schedule-activities',
         workflowType: 'scheduleActivitiesWorkflow',
-        cronSchedule: '0 0 * * *', // Every day at midnight
+        intervalMinutes: 24 * 60, // Every 24 hours (1440 minutes)
         args: [],
         description: 'Central schedule that manages all workflow orchestration',
-        startTime: new Date(), // Start immediately
+        startAt: new Date(), // Start immediately
         jitterMs: 30000, // 30 seconds jitter
         pauseOnFailure: false,
         catchupWindow: '1h', // 1 hour catchup window
@@ -25,10 +25,10 @@ exports.defaultSchedules = [
     {
         id: 'sync-emails-schedule-manager',
         workflowType: 'syncEmailsScheduleWorkflow',
-        cronSchedule: '0 */1 * * *', // Every 1 hours
+        intervalMinutes: 60, // Every 60 minutes (1 hour)
         args: [],
         description: 'Schedule email sync workflows for all sites every hour',
-        startTime: new Date(), // Start immediately
+        startAt: new Date(), // Start immediately
         jitterMs: 60000, // 1 minute jitter to spread load
         pauseOnFailure: false,
         catchupWindow: '2h', // 2 hour catchup window
@@ -153,10 +153,14 @@ async function createSchedule(spec) {
                 workflowId: `${spec.id}-${Date.now()}`, // Unique workflow ID for each run
             },
             spec: {
-                cron: spec.cronSchedule,
-                startTime: spec.startTime || new Date(),
-                endTime: spec.endTime || undefined,
+                intervals: [{
+                        every: `${spec.intervalMinutes || 30}m`, // Use minutes format
+                        offset: '0s', // Start immediately
+                    }],
+                startAt: spec.startAt || new Date(),
+                endAt: spec.endAt || undefined,
                 jitter: spec.jitterMs ? `${spec.jitterMs}ms` : '30s', // Default 30 second jitter
+                timezone: 'UTC',
             },
             policies: {
                 catchupWindow: spec.catchupWindow || '1h',
@@ -167,16 +171,15 @@ async function createSchedule(spec) {
                 note: `Schedule created: ${new Date().toISOString()}`,
                 paused: spec.paused || false,
             },
-            timeZone: 'UTC',
         };
         console.log(`🚀 Creating schedule ${spec.id} in Temporal...`);
-        console.log(`   - Cron: ${spec.cronSchedule}`);
+        console.log(`   - Interval: Every ${spec.intervalMinutes || 30} minutes`);
         console.log(`   - Workflow: ${workflows_1.workflowNames[spec.workflowType]}`);
         console.log(`   - Task Queue: ${config_1.temporalConfig.taskQueue}`);
         console.log(`   - Time Zone: UTC`);
-        console.log(`   - Start Time: ${(spec.startTime || new Date()).toISOString()}`);
-        if (spec.endTime) {
-            console.log(`   - End Time: ${spec.endTime.toISOString()}`);
+        console.log(`   - Start At: ${(spec.startAt || new Date()).toISOString()}`);
+        if (spec.endAt) {
+            console.log(`   - End At: ${spec.endAt.toISOString()}`);
         }
         console.log(`   - Jitter: ${spec.jitterMs ? `${spec.jitterMs}ms` : '30s'}`);
         console.log(`   - Catchup Window: ${spec.catchupWindow || '1h'}`);
@@ -223,7 +226,7 @@ async function createAllSchedules() {
     console.log('Schedules to create:', exports.defaultSchedules.map(s => ({
         id: s.id,
         workflowType: s.workflowType,
-        cronSchedule: s.cronSchedule
+        intervalMinutes: s.intervalMinutes
     })));
     console.log('');
     const results = {
@@ -236,7 +239,7 @@ async function createAllSchedules() {
         try {
             console.log(`📅 Processing schedule: ${schedule.id}`);
             console.log(`   - Workflow: ${schedule.workflowType}`);
-            console.log(`   - Cron: ${schedule.cronSchedule}`);
+            console.log(`   - Interval: Every ${schedule.intervalMinutes} minutes`);
             console.log(`   - Description: ${schedule.description}`);
             const result = await createSchedule(schedule);
             console.log(`   ✅ ${result.message}`);
