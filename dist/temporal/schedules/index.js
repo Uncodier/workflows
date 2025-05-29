@@ -99,6 +99,28 @@ async function createSchedule(spec) {
             connection,
             namespace: config_1.temporalConfig.namespace,
         });
+        // First, check if the schedule already exists
+        try {
+            console.log(`🔍 Checking if schedule ${spec.id} already exists...`);
+            const handle = client.getHandle(spec.id);
+            const description = await handle.describe();
+            console.log(`✅ Schedule ${spec.id} already exists and is ${description.schedule.state.paused ? 'paused' : 'running'}`);
+            console.log(`🔒 Closing connection for ${spec.id}...`);
+            await connection.close();
+            return { message: `Schedule ${spec.id} already exists (no action needed)` };
+        }
+        catch (error) {
+            // If we get an error, it likely means the schedule doesn't exist
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            // Check if it's a "not found" error (schedule doesn't exist)
+            if (errorMessage.includes('not found') || errorMessage.includes('NotFound') || errorMessage.includes('NOT_FOUND')) {
+                console.log(`📝 Schedule ${spec.id} doesn't exist, proceeding with creation...`);
+            }
+            else {
+                console.log(`⚠️ Unexpected error checking schedule ${spec.id}: ${errorMessage}`);
+                console.log(`📝 Proceeding with creation attempt anyway...`);
+            }
+        }
         const scheduleOptions = {
             scheduleId: spec.id,
             action: {
@@ -122,11 +144,27 @@ async function createSchedule(spec) {
         console.log(`   - Workflow: ${workflows_1.workflows[spec.workflowType]}`);
         console.log(`   - Task Queue: ${config_1.temporalConfig.taskQueue}`);
         console.log(`   - Time Zone: UTC`);
-        await withTimeout(client.create(scheduleOptions), 20000, // 20 second timeout for schedule creation
-        `Schedule creation for ${spec.id}`);
-        console.log(`🔒 Closing connection for ${spec.id}...`);
-        await connection.close();
-        return { message: `Schedule ${spec.id} created successfully` };
+        try {
+            await withTimeout(client.create(scheduleOptions), 20000, // 20 second timeout for schedule creation
+            `Schedule creation for ${spec.id}`);
+            console.log(`🔒 Closing connection for ${spec.id}...`);
+            await connection.close();
+            return { message: `Schedule ${spec.id} created successfully` };
+        }
+        catch (createError) {
+            const createErrorMessage = createError instanceof Error ? createError.message : String(createError);
+            // If the error is that the schedule already exists, consider it a success
+            if (createErrorMessage.includes('already exists') || createErrorMessage.includes('AlreadyExists') || createErrorMessage.includes('ALREADY_EXISTS')) {
+                console.log(`✅ Schedule ${spec.id} already exists (detected during creation)`);
+                console.log(`🔒 Closing connection for ${spec.id}...`);
+                await connection.close();
+                return { message: `Schedule ${spec.id} already exists (no action needed)` };
+            }
+            // For any other error, close connection and re-throw
+            console.log(`🔒 Closing connection for ${spec.id} due to error...`);
+            await connection.close();
+            throw createError;
+        }
     }, 2, 2000, `createSchedule(${spec.id})`); // 2 retries, 2 second delay
 }
 async function createAllSchedules() {
@@ -152,6 +190,7 @@ async function createAllSchedules() {
     console.log('');
     const results = {
         success: [],
+        existing: [],
         failed: []
     };
     // Process schedules one by one to avoid connection overload
@@ -164,7 +203,13 @@ async function createAllSchedules() {
             const result = await createSchedule(schedule);
             console.log(`   ✅ ${result.message}`);
             console.log('');
-            results.success.push(schedule.id);
+            // Check if the schedule already existed or was created
+            if (result.message.includes('already exists')) {
+                results.existing.push(schedule.id);
+            }
+            else {
+                results.success.push(schedule.id);
+            }
             // Add small delay between schedules to avoid overwhelming the connection
             if (process.env.VERCEL) {
                 console.log('   ⏳ Waiting 1s before next schedule...');
@@ -190,17 +235,25 @@ async function createAllSchedules() {
     console.log('=== SCHEDULE CREATION SUMMARY ===');
     console.log(`✅ Successfully created: ${results.success.length} schedules`);
     if (results.success.length > 0) {
-        results.success.forEach(id => console.log(`   - ${id}`));
+        results.success.forEach(id => console.log(`   - ${id} (newly created)`));
+    }
+    console.log(`🔄 Already existing: ${results.existing.length} schedules`);
+    if (results.existing.length > 0) {
+        results.existing.forEach(id => console.log(`   - ${id} (already exists)`));
     }
     console.log(`❌ Failed to create: ${results.failed.length} schedules`);
     if (results.failed.length > 0) {
         results.failed.forEach(({ id, error }) => console.log(`   - ${id}: ${error}`));
     }
     console.log('');
+    const totalSuccessful = results.success.length + results.existing.length;
+    console.log(`📊 Total successful: ${totalSuccessful}/${exports.defaultSchedules.length} schedules`);
     console.log('🔍 Check Temporal UI to see your schedules');
     console.log('=== SCHEDULE CREATION COMPLETED ===');
     return {
-        success: results.success,
+        success: [...results.success, ...results.existing], // Combine new and existing as successes
+        newlyCreated: results.success,
+        existing: results.existing,
         failed: results.failed,
         total: exports.defaultSchedules.length
     };
