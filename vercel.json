@@ -1,8 +1,11 @@
 {
   "version": 2,
   "functions": {
-    "api/worker.js": {
-      "maxDuration": 300
+    "api/trigger-workflow.js": {
+      "maxDuration": 30
+    },
+    "api/execute-workflow.js": {
+      "maxDuration": 60
     },
     "api/status.js": {
       "maxDuration": 30
@@ -38,8 +41,8 @@
   ],
   "crons": [
     {
-      "path": "/api/worker",
-      "schedule": "*/5 * * * *"
+      "path": "/api/trigger-workflow",
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/auto-init",

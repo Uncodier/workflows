@@ -30,13 +30,19 @@ async function run() {
         await scheduleClient.create({
           scheduleId: scheduleName,
           spec: {
-            intervals: [{ every: cronExpression }],
+            cron: cronExpression
           },
           action: {
             type: 'startWorkflow',
             workflowType,
             taskQueue: temporalConfig.taskQueue,
             args: workflowArgs,
+          },
+          timeZone: 'UTC',
+          policies: {
+            catchupWindow: '5m',
+            overlap: 'SKIP' as any,
+            pauseOnFailure: false,
           },
         });
         

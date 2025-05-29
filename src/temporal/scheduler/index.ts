@@ -19,13 +19,19 @@ export async function createCronSchedule(
     await scheduleClient.create({
       scheduleId: scheduleName,
       spec: {
-        intervals: [{ every: cronExpression }],
+        cron: cronExpression
       },
       action: {
         type: 'startWorkflow',
         workflowType,
         taskQueue: options?.taskQueue ?? temporalConfig.taskQueue,
         args,
+      },
+      timeZone: 'UTC',
+      policies: {
+        catchupWindow: '5m',
+        overlap: 'SKIP' as any,
+        pauseOnFailure: false,
       },
     });
 

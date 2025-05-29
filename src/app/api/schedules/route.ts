@@ -44,13 +44,19 @@ export async function POST(req: NextRequest) {
     await scheduleClient.create({
       scheduleId,
       spec: {
-        intervals: [{ every: cronExpression }],
+        cron: cronExpression
       },
       action: {
         type: 'startWorkflow',
         workflowType: workflowType as WorkflowType,
         taskQueue: temporalConfig.taskQueue,
         args: args || [],
+      },
+      timeZone: 'UTC',
+      policies: {
+        catchupWindow: '5m',
+        overlap: 'SKIP' as any,
+        pauseOnFailure: false,
       },
     });
 

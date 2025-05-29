@@ -146,10 +146,17 @@ export async function createSchedule(spec: ScheduleSpec) {
       policies: {
         catchupWindow: '5m',
         overlap: ScheduleOverlapPolicy.SKIP,
+        pauseOnFailure: false,
       },
+      timeZone: 'UTC',
     } as any;
 
     console.log(`🚀 Creating schedule ${spec.id} in Temporal...`);
+    console.log(`   - Cron: ${spec.cronSchedule}`);
+    console.log(`   - Workflow: ${workflows[spec.workflowType]}`);
+    console.log(`   - Task Queue: ${temporalConfig.taskQueue}`);
+    console.log(`   - Time Zone: UTC`);
+    
     await withTimeout(
       client.create(scheduleOptions),
       20000, // 20 second timeout for schedule creation

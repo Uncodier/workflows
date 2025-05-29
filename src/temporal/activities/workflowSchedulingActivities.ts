@@ -300,13 +300,19 @@ export async function createRecurringEmailSyncScheduleActivity(
     await scheduleClient.create({
       scheduleId,
       spec: {
-        intervals: [{ every: cronExpression }],
+        cron: cronExpression
       },
       action: {
         type: 'startWorkflow',
         workflowType: 'syncEmailsWorkflow',
         taskQueue: temporalConfig.taskQueue,
         args: workflowArgs,
+      },
+      timeZone: 'UTC',
+      policies: {
+        catchupWindow: '5m',
+        overlap: 'SKIP' as any,
+        pauseOnFailure: false,
       },
     });
 
@@ -359,4 +365,4 @@ function getNextRunTime(cronExpression: string): Date {
   
   // Default to 1 hour from now for other patterns
   return new Date(Date.now() + 60 * 60 * 1000);
-} 
+}
