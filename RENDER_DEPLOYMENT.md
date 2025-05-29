@@ -64,25 +64,25 @@ SUPABASE_ANON_KEY=<tu-anon-key>
    Name: temporal-workflows-worker
    Environment: Node
    Build Command: npm run worker:build
-   Start Command: npm run worker:start
+   Start Command: npm run render:startup:compiled
    Plan: Starter (o superior)
    ```
 
 3. **Variables de entorno:** (Mismas que Web Service)
 
-### 3. Inicializar Schedules
+### 3. ✅ Inicialización Automática
 
-Una vez deployados ambos servicios:
+**IMPORTANTE:** Con la nueva configuración, el worker se inicia automáticamente y crea los schedules al arrancar. Ya **NO** es necesario ejecutar manualmente `npm run render:init` ni usar endpoints adicionales.
 
-1. **Ejecutar manualmente en Worker Service:**
-   ```bash
-   npm run render:init
-   ```
-
-2. **O usar el endpoint web:**
-   ```bash
-   curl https://tu-app.render.com/api/schedules -X POST
-   ```
+El proceso es completamente automático:
+1. Render inicia el Worker Service
+2. Se ejecuta `npm run render:startup:compiled`
+3. El script automáticamente:
+   - ✅ Valida variables de entorno
+   - ✅ Inicia el worker de Temporal
+   - ✅ Espera que el worker esté listo
+   - ✅ Crea todos los schedules automáticamente
+   - ✅ Mantiene el worker ejecutándose
 
 ## 🎯 Verificación del Deployment
 

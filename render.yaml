@@ -45,7 +45,7 @@ services:
     env: node
     plan: starter
     buildCommand: npm run worker:build
-    startCommand: npm run worker:start
+    startCommand: npm run render:startup:compiled
     envVars:
       - key: NODE_ENV
         value: production

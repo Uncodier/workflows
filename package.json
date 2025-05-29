@@ -27,7 +27,9 @@
     "render:init": "ts-node src/scripts/initialize-render.ts",
     "render:build": "npm run build:all",
     "render:worker": "npm run worker:start",
-    "render:setup": "npm run worker:build && npm run render:init"
+    "render:setup": "npm run worker:build && npm run render:init",
+    "render:startup": "ts-node src/scripts/render-startup.ts",
+    "render:startup:compiled": "node dist/scripts/render-startup.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",
