@@ -18,13 +18,25 @@ exports.workflows = void 0;
 const dataProcessingWorkflow_1 = require("./dataProcessingWorkflow");
 const cronWorkflow_1 = require("./cronWorkflow");
 const syncEmailsWorkflow_1 = require("./syncEmailsWorkflow");
+const syncEmailsScheduleWorkflow_1 = require("./syncEmailsScheduleWorkflow");
+const scheduleActivitiesWorkflow_1 = require("./scheduleActivitiesWorkflow");
+const activityPrioritizationEngineWorkflow_1 = require("./activityPrioritizationEngineWorkflow");
+const sendReportWorkflow_1 = require("./sendReportWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
 __exportStar(require("./syncEmailsWorkflow"), exports);
+__exportStar(require("./syncEmailsScheduleWorkflow"), exports);
+__exportStar(require("./scheduleActivitiesWorkflow"), exports);
+__exportStar(require("./activityPrioritizationEngineWorkflow"), exports);
+__exportStar(require("./sendReportWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
     scheduledApiPollingWorkflow: cronWorkflow_1.scheduledApiPollingWorkflow,
     syncEmailsWorkflow: syncEmailsWorkflow_1.syncEmailsWorkflow,
+    syncEmailsScheduleWorkflow: syncEmailsScheduleWorkflow_1.syncEmailsScheduleWorkflow,
+    scheduleActivitiesWorkflow: scheduleActivitiesWorkflow_1.scheduleActivitiesWorkflow,
+    activityPrioritizationEngineWorkflow: activityPrioritizationEngineWorkflow_1.activityPrioritizationEngineWorkflow,
+    sendReportWorkflow: sendReportWorkflow_1.sendReportWorkflow,
 };

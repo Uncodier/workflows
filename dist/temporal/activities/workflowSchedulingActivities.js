@@ -1,0 +1,283 @@
+"use strict";
+/**
+ * Workflow Scheduling Activities
+ * Activities for programmatically scheduling Temporal workflows
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.scheduleEmailSyncWorkflowActivity = scheduleEmailSyncWorkflowActivity;
+exports.scheduleMultipleEmailSyncWorkflowsActivity = scheduleMultipleEmailSyncWorkflowsActivity;
+exports.createRecurringEmailSyncScheduleActivity = createRecurringEmailSyncScheduleActivity;
+const client_1 = require("../client");
+const config_1 = require("../../config/config");
+const services_1 = require("../services");
+const cronActivities_1 = require("./cronActivities");
+/**
+ * Schedule a single email sync workflow for a specific site
+ * Uses Temporal client to create actual workflow schedules
+ */
+async function scheduleEmailSyncWorkflowActivity(site, options = {}) {
+    const { workflowId, scheduleId } = services_1.EmailSyncSchedulingService.generateWorkflowIds(site.id);
+    console.log(`🚀 Scheduling email sync workflow for ${site.name}`);
+    console.log(`   - Workflow ID: ${workflowId}`);
+    console.log(`   - Schedule ID: ${scheduleId}`);
+    try {
+        // If dry run, just simulate the scheduling
+        if (options.dryRun) {
+            console.log('🧪 DRY RUN MODE - Simulating workflow scheduling');
+            return {
+                workflowId,
+                scheduleId,
+                success: true
+            };
+        }
+        const client = await (0, client_1.getTemporalClient)();
+        // Prepare workflow arguments
+        const workflowArgs = [{
+                userId: site.user_id,
+                siteId: site.id,
+                provider: site.email?.incomingServer?.includes('gmail') ? 'gmail' :
+                    site.email?.incomingServer?.includes('outlook') ? 'outlook' : 'imap',
+                since: new Date(Date.now() - 24 * 60 * 60 * 1000), // Last 24 hours
+                batchSize: 50,
+                enableAnalysis: true, // Enable AI email analysis
+                analysisLimit: 15 // Analyze up to 15 emails
+            }];
+        // Create immediate workflow execution (ASAP scheduling)
+        console.log(`⚡ Starting immediate workflow execution for ${site.name}`);
+        const handle = await client.workflow.start('syncEmailsWorkflow', {
+            args: workflowArgs,
+            workflowId,
+            taskQueue: config_1.temporalConfig.taskQueue,
+            workflowRunTimeout: '1 hour', // Email sync timeout
+        });
+        console.log(`✅ Successfully started workflow for ${site.name}`);
+        console.log(`   - Workflow Handle: ${handle.workflowId}`);
+        // Update cron status to reflect the scheduled workflow
+        const nextRun = new Date(Date.now() + 60 * 60 * 1000); // Next run in 1 hour
+        const cronUpdate = {
+            siteId: site.id,
+            workflowId,
+            scheduleId,
+            activityName: 'syncEmailsWorkflow',
+            status: 'RUNNING',
+            nextRun: nextRun.toISOString()
+        };
+        await (0, cronActivities_1.saveCronStatusActivity)(cronUpdate);
+        return {
+            workflowId,
+            scheduleId,
+            success: true
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Failed to schedule workflow for ${site.name}:`, errorMessage);
+        // Save error status to cron table
+        try {
+            const cronUpdate = {
+                siteId: site.id,
+                workflowId,
+                scheduleId,
+                activityName: 'syncEmailsWorkflow',
+                status: 'FAILED',
+                errorMessage: errorMessage,
+                retryCount: 1
+            };
+            await (0, cronActivities_1.saveCronStatusActivity)(cronUpdate);
+        }
+        catch (statusError) {
+            console.error('❌ Failed to save error status:', statusError);
+        }
+        return {
+            workflowId,
+            scheduleId,
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Schedule email sync workflows for multiple sites
+ * Processes sites in parallel with optimal distribution
+ */
+async function scheduleMultipleEmailSyncWorkflowsActivity(sites, options = {}) {
+    console.log(`📅 Scheduling email sync workflows for ${sites.length} sites...`);
+    const sitesToSchedule = sites.filter(site => site.shouldSchedule);
+    const sitesToSkip = sites.filter(site => !site.shouldSchedule);
+    console.log(`   - Sites to schedule: ${sitesToSchedule.length}`);
+    console.log(`   - Sites to skip: ${sitesToSkip.length}`);
+    const results = [];
+    const errors = [];
+    let scheduled = 0;
+    let failed = 0;
+    // Log skipped sites
+    for (const site of sitesToSkip) {
+        console.log(`⏭️  Skipping ${site.name}: ${site.reason}`);
+    }
+    // If dry run, just simulate everything
+    if (options.dryRun) {
+        console.log('🧪 DRY RUN MODE - Simulating all workflow scheduling');
+        for (const site of sitesToSchedule) {
+            const { workflowId, scheduleId } = services_1.EmailSyncSchedulingService.generateWorkflowIds(site.id);
+            results.push({
+                workflowId,
+                scheduleId,
+                success: true
+            });
+            scheduled++;
+        }
+        return {
+            scheduled,
+            skipped: sitesToSkip.length,
+            failed: 0,
+            results,
+            errors: []
+        };
+    }
+    // Schedule workflows with staggered timing for optimal distribution
+    console.log('⚡ Starting staggered workflow scheduling...');
+    for (let i = 0; i < sitesToSchedule.length; i++) {
+        const site = sitesToSchedule[i];
+        try {
+            // Stagger workflow starts by 5 seconds to avoid overwhelming the system
+            if (i > 0) {
+                await new Promise(resolve => setTimeout(resolve, 5000));
+            }
+            const result = await scheduleEmailSyncWorkflowActivity(site, options);
+            results.push(result);
+            if (result.success) {
+                scheduled++;
+                console.log(`✅ [${i + 1}/${sitesToSchedule.length}] Successfully scheduled: ${site.name}`);
+            }
+            else {
+                failed++;
+                const errorMsg = `Failed to schedule ${site.name}: ${result.error}`;
+                errors.push(errorMsg);
+                console.error(`❌ [${i + 1}/${sitesToSchedule.length}] ${errorMsg}`);
+            }
+        }
+        catch (error) {
+            failed++;
+            const errorMsg = `Exception scheduling ${site.name}: ${error instanceof Error ? error.message : String(error)}`;
+            errors.push(errorMsg);
+            console.error(`❌ [${i + 1}/${sitesToSchedule.length}] ${errorMsg}`);
+            // Add failed result
+            const { workflowId, scheduleId } = services_1.EmailSyncSchedulingService.generateWorkflowIds(site.id);
+            results.push({
+                workflowId,
+                scheduleId,
+                success: false,
+                error: errorMsg
+            });
+        }
+    }
+    // Summary
+    console.log(`📊 Email sync workflow scheduling completed:`);
+    console.log(`   - Scheduled: ${scheduled}`);
+    console.log(`   - Skipped: ${sitesToSkip.length}`);
+    console.log(`   - Failed: ${failed}`);
+    console.log(`   - Total processed: ${sites.length}`);
+    if (errors.length > 0) {
+        console.log(`❌ Errors encountered:`);
+        errors.forEach((error, index) => {
+            console.log(`   ${index + 1}. ${error}`);
+        });
+    }
+    return {
+        scheduled,
+        skipped: sitesToSkip.length,
+        failed,
+        results,
+        errors
+    };
+}
+/**
+ * Create a recurring email sync schedule for a site
+ * This creates a Temporal schedule that runs periodically (e.g., every hour)
+ */
+async function createRecurringEmailSyncScheduleActivity(site, cronExpression = '0 * * * *', // Every hour
+options = {}) {
+    const { workflowId, scheduleId } = services_1.EmailSyncSchedulingService.generateWorkflowIds(site.id);
+    console.log(`🔄 Creating recurring email sync schedule for ${site.name}`);
+    console.log(`   - Schedule ID: ${scheduleId}`);
+    console.log(`   - Cron Expression: ${cronExpression}`);
+    try {
+        // If dry run, just simulate the scheduling
+        if (options.dryRun) {
+            console.log('🧪 DRY RUN MODE - Simulating recurring schedule creation');
+            return {
+                workflowId,
+                scheduleId,
+                success: true
+            };
+        }
+        const client = await (0, client_1.getTemporalClient)();
+        const scheduleClient = client.schedule;
+        // Prepare workflow arguments
+        const workflowArgs = [{
+                userId: site.user_id,
+                siteId: site.id,
+                provider: site.email?.incomingServer?.includes('gmail') ? 'gmail' :
+                    site.email?.incomingServer?.includes('outlook') ? 'outlook' : 'imap',
+                since: new Date(Date.now() - 24 * 60 * 60 * 1000), // Last 24 hours
+                batchSize: 50,
+                enableAnalysis: true, // Enable AI email analysis
+                analysisLimit: 15 // Analyze up to 15 emails
+            }];
+        // Create schedule
+        await scheduleClient.create({
+            scheduleId,
+            spec: {
+                intervals: [{ every: cronExpression }],
+            },
+            action: {
+                type: 'startWorkflow',
+                workflowType: 'syncEmailsWorkflow',
+                taskQueue: config_1.temporalConfig.taskQueue,
+                args: workflowArgs,
+            },
+        });
+        console.log(`✅ Successfully created recurring schedule for ${site.name}`);
+        // Update cron status to reflect the scheduled workflow
+        const nextRun = getNextRunTime(cronExpression);
+        const cronUpdate = {
+            siteId: site.id,
+            workflowId: `${scheduleId}-recurring`,
+            scheduleId,
+            activityName: 'syncEmailsWorkflow',
+            status: 'SCHEDULED',
+            nextRun: nextRun.toISOString()
+        };
+        await (0, cronActivities_1.saveCronStatusActivity)(cronUpdate);
+        return {
+            workflowId: `${scheduleId}-recurring`,
+            scheduleId,
+            success: true
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Failed to create recurring schedule for ${site.name}:`, errorMessage);
+        return {
+            workflowId: `${scheduleId}-recurring`,
+            scheduleId,
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Calculate next run time based on cron expression
+ * Simple implementation for common patterns
+ */
+function getNextRunTime(cronExpression) {
+    // For "0 * * * *" (every hour), next run is at the top of the next hour
+    if (cronExpression === '0 * * * *') {
+        const now = new Date();
+        const nextHour = new Date(now);
+        nextHour.setHours(now.getHours() + 1, 0, 0, 0);
+        return nextHour;
+    }
+    // Default to 1 hour from now for other patterns
+    return new Date(Date.now() + 60 * 60 * 1000);
+}

@@ -1,4 +1,8 @@
 "use strict";
+/**
+ * Services Index
+ * Centralized exports for all services
+ */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -14,11 +18,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-// This file is specifically for the worker to load workflows
-__exportStar(require("./dataProcessingWorkflow"), exports);
-__exportStar(require("./cronWorkflow"), exports);
-__exportStar(require("./syncEmailsWorkflow"), exports);
-__exportStar(require("./syncEmailsScheduleWorkflow"), exports);
-__exportStar(require("./scheduleActivitiesWorkflow"), exports);
-__exportStar(require("./activityPrioritizationEngineWorkflow"), exports);
-__exportStar(require("./sendReportWorkflow"), exports);
+__exportStar(require("./supabaseService"), exports);
+__exportStar(require("./emailConfigService"), exports);
+__exportStar(require("./mockDataService"), exports);
+__exportStar(require("./emailSyncSchedulingService"), exports);

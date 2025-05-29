@@ -44,20 +44,20 @@ export async function fetchDataActivity(resourceId: string): Promise<any> {
 /**
  * Activity to create a resource via the API
  */
-export async function createResourceActivity(data: any): Promise<any> {
+export async function createApiResourceActivity(data: any): Promise<any> {
   return callApi('/resources', 'POST', data);
 }
 
 /**
  * Activity to update a resource via the API
  */
-export async function updateResourceActivity(resourceId: string, data: any): Promise<any> {
+export async function updateApiResourceActivity(resourceId: string, data: any): Promise<any> {
   return callApi(`/resources/${resourceId}`, 'PUT', data);
 }
 
 /**
  * Activity to delete a resource via the API
  */
-export async function deleteResourceActivity(resourceId: string): Promise<any> {
+export async function deleteApiResourceActivity(resourceId: string): Promise<any> {
   return callApi(`/resources/${resourceId}`, 'DELETE');
 } 

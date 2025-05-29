@@ -3,15 +3,9 @@ import { WorkflowType, workflows } from '../workflows';
 
 // Define specific argument types for each workflow
 type WorkflowArgs = {
-  dataProcessingWorkflow: [string, { transform?: boolean }];
-  scheduledApiPollingWorkflow: [{ endpoint?: string; storeMetrics?: boolean }];
-  syncEmailsWorkflow: [{ 
-    userId: string;
-    provider: 'gmail' | 'outlook' | 'imap';
-    since?: Date;
-    folderIds?: string[];
-    batchSize?: number;
-  }];
+  scheduleActivitiesWorkflow: [];
+  syncEmailsWorkflow: [];
+  syncEmailsScheduleWorkflow: [];
 };
 
 export interface ScheduleSpec {
@@ -22,32 +16,28 @@ export interface ScheduleSpec {
   description?: string;
 }
 
-// Define your schedules here
+// Central schedule that manages all other workflows
 export const defaultSchedules: ScheduleSpec[] = [
   {
-    id: 'daily-data-processing',
-    workflowType: 'dataProcessingWorkflow',
+    id: 'central-schedule-activities',
+    workflowType: 'scheduleActivitiesWorkflow',
     cronSchedule: '0 0 * * *', // Every day at midnight
-    args: ['daily-batch', { transform: true }],
-    description: 'Daily data processing job'
+    args: [],
+    description: 'Central schedule that manages all workflow orchestration'
   },
   {
-    id: 'hourly-api-polling',
-    workflowType: 'scheduledApiPollingWorkflow',
-    cronSchedule: '0 * * * *', // Every hour
-    args: [{ endpoint: '/api/status', storeMetrics: true }],
-    description: 'Hourly API health check'
+    id: 'sync-emails-schedule-manager',
+    workflowType: 'syncEmailsScheduleWorkflow',
+    cronSchedule: '0 */2 * * *', // Every 2 hours
+    args: [],
+    description: 'Schedule email sync workflows for all sites every 2 hours'
   },
   {
-    id: 'email-sync-every-5min',
+    id: 'sync-emails-schedule',
     workflowType: 'syncEmailsWorkflow',
-    cronSchedule: '*/5 * * * *', // Every 5 minutes
-    args: [{ 
-      userId: 'system-sync',
-      provider: 'gmail',
-      batchSize: 100
-    }],
-    description: 'Email synchronization every 5 minutes'
+    cronSchedule: '0 */1 * * *', // Every 1 hour
+    args: [],
+    description: 'Synchronize emails from email providers every 1 hour'
   }
 ];
 

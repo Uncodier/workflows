@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build && npm run worker:build",
+    "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "worker:dev": "ts-node --transpile-only src/scripts/start-worker.ts",
@@ -17,15 +17,18 @@
     "schedule:email-sync": "ts-node src/scripts/create-email-sync-schedule.ts",
     "schedule:create-all": "ts-node src/scripts/create-all-schedules.ts",
     "schedule:delete-all": "ts-node src/scripts/delete-all-schedules.ts",
+    "test:email-sync-real": "node test-email-sync-real-scheduling.js",
+    "test:cron-activities": "node test-cron-activities.js",
+    "test:email-sync-dryrun": "ts-node src/scripts/execute-workflow.ts syncEmailsScheduleWorkflow '{\"dryRun\":true,\"minHoursBetweenSyncs\":1}'",
+    "test:diagnostic": "node diagnostic-script.js",
     "dev:all": "concurrently \"npm run dev\" \"npm run worker:dev\"",
     "build:all": "npm run build && npm run worker:build",
     "start:all": "concurrently \"npm run start\" \"npm run worker:start\"",
     "vercel:build": "npm run worker:build",
-    "vercel:start": "npm run worker:start",
-    "diagnose": "node scripts/diagnose.js"
+    "vercel:start": "npm run worker:start"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.4",
+    "@supabase/supabase-js": "^2.49.8",
     "@temporalio/activity": "^1.11.8",
     "@temporalio/client": "^1.11.8",
     "@temporalio/worker": "^1.11.8",

@@ -1,9 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.fetchDataActivity = fetchDataActivity;
-exports.createResourceActivity = createResourceActivity;
-exports.updateResourceActivity = updateResourceActivity;
-exports.deleteResourceActivity = deleteResourceActivity;
+exports.createApiResourceActivity = createApiResourceActivity;
+exports.updateApiResourceActivity = updateApiResourceActivity;
+exports.deleteApiResourceActivity = deleteApiResourceActivity;
 const config_1 = require("../../config/config");
 /**
  * Generic function to make API calls
@@ -44,18 +44,18 @@ async function fetchDataActivity(resourceId) {
 /**
  * Activity to create a resource via the API
  */
-async function createResourceActivity(data) {
+async function createApiResourceActivity(data) {
     return callApi('/resources', 'POST', data);
 }
 /**
  * Activity to update a resource via the API
  */
-async function updateResourceActivity(resourceId, data) {
+async function updateApiResourceActivity(resourceId, data) {
     return callApi(`/resources/${resourceId}`, 'PUT', data);
 }
 /**
  * Activity to delete a resource via the API
  */
-async function deleteResourceActivity(resourceId) {
+async function deleteApiResourceActivity(resourceId) {
     return callApi(`/resources/${resourceId}`, 'DELETE');
 }

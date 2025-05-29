@@ -8,32 +8,28 @@ exports.deleteSchedule = deleteSchedule;
 exports.toggleSchedule = toggleSchedule;
 const config_1 = require("../../config/config");
 const workflows_1 = require("../workflows");
-// Define your schedules here
+// Central schedule that manages all other workflows
 exports.defaultSchedules = [
     {
-        id: 'daily-data-processing',
-        workflowType: 'dataProcessingWorkflow',
+        id: 'central-schedule-activities',
+        workflowType: 'scheduleActivitiesWorkflow',
         cronSchedule: '0 0 * * *', // Every day at midnight
-        args: ['daily-batch', { transform: true }],
-        description: 'Daily data processing job'
+        args: [],
+        description: 'Central schedule that manages all workflow orchestration'
     },
     {
-        id: 'hourly-api-polling',
-        workflowType: 'scheduledApiPollingWorkflow',
-        cronSchedule: '0 * * * *', // Every hour
-        args: [{ endpoint: '/api/status', storeMetrics: true }],
-        description: 'Hourly API health check'
+        id: 'sync-emails-schedule-manager',
+        workflowType: 'syncEmailsScheduleWorkflow',
+        cronSchedule: '0 */2 * * *', // Every 2 hours
+        args: [],
+        description: 'Schedule email sync workflows for all sites every 2 hours'
     },
     {
-        id: 'email-sync-every-5min',
+        id: 'sync-emails-schedule',
         workflowType: 'syncEmailsWorkflow',
-        cronSchedule: '*/5 * * * *', // Every 5 minutes
-        args: [{
-                userId: 'system-sync',
-                provider: 'gmail',
-                batchSize: 100
-            }],
-        description: 'Email synchronization every 5 minutes'
+        cronSchedule: '0 */1 * * *', // Every 1 hour
+        args: [],
+        description: 'Synchronize emails from email providers every 1 hour'
     }
 ];
 // Connection timeout wrapper

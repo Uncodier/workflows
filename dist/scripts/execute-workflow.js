@@ -6,12 +6,12 @@ const workflows_1 = require("../temporal/workflows");
 async function run() {
     // Use the configured Temporal client
     const client = await (0, client_1.getTemporalClient)();
-    // Execute the data processing workflow
+    // Execute the central schedule activities workflow
     try {
-        const handle = await client.workflow.start(workflows_1.workflows.dataProcessingWorkflow, {
+        const handle = await client.workflow.start(workflows_1.workflows.scheduleActivitiesWorkflow, {
             taskQueue: 'default',
-            workflowId: 'data-processing-workflow-' + Date.now(),
-            args: ['test-resource', { transform: true }],
+            workflowId: 'schedule-activities-workflow-' + Date.now(),
+            args: [],
         });
         console.log('Started workflow:', handle.workflowId);
         // Wait for the result
