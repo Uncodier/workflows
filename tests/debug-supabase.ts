@@ -2,7 +2,7 @@
  * Debug script to test Supabase connection and view data
  */
 
-import { getSupabaseService } from './src/temporal/services/supabaseService';
+import { getSupabaseService } from '../src/temporal/services/supabaseService';
 
 async function debugSupabase() {
   console.log('🔍 Supabase Debug Script');

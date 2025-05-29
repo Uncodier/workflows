@@ -12,7 +12,7 @@ async function testStuckWorkflows() {
 
   try {
     // Import the client after dotenv is loaded
-    const { getTemporalClient } = require('./dist/temporal/client');
+    const { getTemporalClient } = require('../dist/temporal/client');
 
     console.log('📅 Starting syncEmailsScheduleWorkflow to detect stuck workflows...');
     

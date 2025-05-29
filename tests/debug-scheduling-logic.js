@@ -12,8 +12,8 @@ async function debugSchedulingLogic() {
 
   try {
     // Import the services
-    const { getSupabaseService } = require('./dist/temporal/services/supabaseService');
-    const { EmailSyncSchedulingService } = require('./dist/temporal/services/EmailSyncSchedulingService');
+    const { getSupabaseService } = require('../dist/temporal/services/supabaseService');
+    const { EmailSyncSchedulingService } = require('../dist/temporal/services/EmailSyncSchedulingService');
 
     console.log('📂 Step 1: Fetching sites and cron status...');
     

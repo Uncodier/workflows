@@ -7,7 +7,7 @@
 
 require('dotenv').config({ path: '.env.local' });
 
-const { executeWorkflow } = require('./src/temporal/client');
+const { executeWorkflow } = require('../src/temporal/client');
 
 async function testCronActivities() {
   console.log('🧪 Testing Modular Cron Activities...\n');

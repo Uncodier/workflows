@@ -7,7 +7,7 @@
 
 require('dotenv').config({ path: '.env.local' });
 
-const { executeWorkflow } = require('./dist/temporal/client');
+const { executeWorkflow } = require('../dist/temporal/client');
 
 async function testRealEmailSyncScheduling() {
   console.log('🧪 Testing Real Email Sync Scheduling...\n');

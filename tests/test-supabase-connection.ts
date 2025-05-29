@@ -6,7 +6,7 @@
 import * as dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
-import { getSupabaseService } from './src/temporal/services/supabaseService';
+import { getSupabaseService } from '../src/temporal/services/supabaseService';
 
 async function testSupabaseConnection() {
   console.log('🔍 Testing Supabase Connection for Email-Enabled Sites');

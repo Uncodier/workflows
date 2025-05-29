@@ -9,6 +9,7 @@ const emailConfigService_1 = require("./emailConfigService");
 class EmailSyncSchedulingService {
     static DEFAULT_MIN_HOURS_BETWEEN_SYNCS = 3;
     static DEFAULT_MAX_RETRY_COUNT = 3;
+    static RETRY_DELAY_MINUTES = 15; // Retry failed syncs after 15 minutes
     /**
      * Determine if a site should be scheduled for email sync
      */
@@ -44,15 +45,17 @@ class EmailSyncSchedulingService {
                         reason = `Previous sync failed with ${lastEmailSync.retry_count} retries (max: ${maxRetries}) - needs rescheduling`;
                     }
                     else {
-                        // Check if enough time has passed since last failure
+                        // For failed syncs, use a shorter retry delay (15 minutes) instead of full minHours
                         const lastRunTime = lastEmailSync.last_run ? new Date(lastEmailSync.last_run).getTime() : 0;
-                        const hoursSinceLastRun = (now - lastRunTime) / (1000 * 60 * 60);
-                        if (hoursSinceLastRun >= minHours) {
+                        const minutesSinceLastRun = (now - lastRunTime) / (1000 * 60);
+                        const hoursSinceLastRun = minutesSinceLastRun / 60;
+                        if (minutesSinceLastRun >= this.RETRY_DELAY_MINUTES) {
                             shouldSchedule = true;
                             reason = `Failed sync ${hoursSinceLastRun.toFixed(1)}h ago (retry ${lastEmailSync.retry_count}/${maxRetries}) - ready for retry`;
                         }
                         else {
-                            reason = `Failed sync ${hoursSinceLastRun.toFixed(1)}h ago (retry ${lastEmailSync.retry_count}/${maxRetries}) - waiting before retry`;
+                            const minutesUntilRetry = this.RETRY_DELAY_MINUTES - minutesSinceLastRun;
+                            reason = `Failed sync ${hoursSinceLastRun.toFixed(1)}h ago (retry ${lastEmailSync.retry_count}/${maxRetries}) - waiting ${minutesUntilRetry.toFixed(0)}min before retry`;
                         }
                     }
                     break;

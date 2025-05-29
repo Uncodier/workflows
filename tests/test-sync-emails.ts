@@ -6,8 +6,8 @@
 import * as dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
-import { getTemporalClient } from './src/temporal/client';
-import { workflows } from './src/temporal/workflows';
+import { getTemporalClient } from '../src/temporal/client';
+import { workflows } from '../src/temporal/workflows';
 
 async function testSyncEmailsScheduleWorkflow() {
   console.log('🚀 Testing syncEmailsScheduleWorkflow...');

@@ -1,4 +1,4 @@
-const { EmailSyncSchedulingService } = require('./dist/temporal/services/EmailSyncSchedulingService.js');
+const { EmailSyncSchedulingService } = require('../dist/temporal/services/EmailSyncSchedulingService.js');
 
 console.log('🔍 Checking compiled service...');
 console.log('Class exists:', !!EmailSyncSchedulingService);
