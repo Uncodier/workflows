@@ -104,7 +104,16 @@ async function createSchedule(spec) {
             console.log(`🔍 Checking if schedule ${spec.id} already exists...`);
             const handle = client.getHandle(spec.id);
             const description = await handle.describe();
-            console.log(`✅ Schedule ${spec.id} already exists and is ${description.schedule.state.paused ? 'paused' : 'running'}`);
+            // Safely check the schedule state with proper validation
+            let scheduleStatus = 'unknown';
+            if (description && description.schedule && description.schedule.state) {
+                scheduleStatus = description.schedule.state.paused ? 'paused' : 'running';
+            }
+            else {
+                console.log(`⚠️ Schedule ${spec.id} description has incomplete state information`);
+                scheduleStatus = 'exists (state unknown)';
+            }
+            console.log(`✅ Schedule ${spec.id} already exists and is ${scheduleStatus}`);
             console.log(`🔒 Closing connection for ${spec.id}...`);
             await connection.close();
             return { message: `Schedule ${spec.id} already exists (no action needed)` };
@@ -113,7 +122,10 @@ async function createSchedule(spec) {
             // If we get an error, it likely means the schedule doesn't exist
             const errorMessage = error instanceof Error ? error.message : String(error);
             // Check if it's a "not found" error (schedule doesn't exist)
-            if (errorMessage.includes('not found') || errorMessage.includes('NotFound') || errorMessage.includes('NOT_FOUND')) {
+            if (errorMessage.includes('not found') ||
+                errorMessage.includes('NotFound') ||
+                errorMessage.includes('NOT_FOUND') ||
+                errorMessage.includes('ScheduleNotFound')) {
                 console.log(`📝 Schedule ${spec.id} doesn't exist, proceeding with creation...`);
             }
             else {
