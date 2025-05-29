@@ -7,7 +7,6 @@
 
 import { startWorker } from '../temporal/workers/worker';
 import { createAllSchedules } from '../temporal/schedules';
-import { logger } from '../lib/logger';
 
 async function startupRender() {
   console.log('🚀 RENDER STARTUP SCRIPT');

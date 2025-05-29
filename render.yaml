@@ -44,7 +44,7 @@ services:
     name: temporal-workflows-worker
     env: node
     plan: starter
-    buildCommand: npm run worker:build
+    buildCommand: npm run build:all
     startCommand: npm run render:startup:compiled
     envVars:
       - key: NODE_ENV
