@@ -24,8 +24,10 @@
     "dev:all": "concurrently \"npm run dev\" \"npm run worker:dev\"",
     "build:all": "npm run build && npm run worker:build",
     "start:all": "concurrently \"npm run start\" \"npm run worker:start\"",
-    "vercel:build": "npm run worker:build",
-    "vercel:start": "npm run worker:start"
+    "render:init": "ts-node src/scripts/initialize-render.ts",
+    "render:build": "npm run build:all",
+    "render:worker": "npm run worker:start",
+    "render:setup": "npm run worker:build && npm run render:init"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",

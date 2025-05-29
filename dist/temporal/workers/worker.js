@@ -34,17 +34,18 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.startWorker = startWorker;
+exports.default = startWorker;
 const worker_1 = require("@temporalio/worker");
 const activities_1 = require("../activities");
 const logger_1 = require("../../lib/logger");
 const config_1 = require("../../config/config");
 const workflows = __importStar(require("../workflows/worker-workflows"));
 /**
- * Start a Temporal worker
+ * Start a Temporal worker for Render deployment
  */
 async function startWorker() {
     try {
-        logger_1.logger.info('Starting Temporal worker...');
+        logger_1.logger.info('🚀 Starting Temporal worker on Render...');
         // Validate required environment variables
         if (!config_1.temporalConfig.serverUrl) {
             throw new Error('TEMPORAL_SERVER_URL is required');
@@ -58,18 +59,25 @@ async function startWorker() {
             namespace: config_1.temporalConfig.namespace,
             taskQueue: config_1.temporalConfig.taskQueue,
             tls: config_1.temporalConfig.tls,
-            hasApiKey: !!config_1.temporalConfig.apiKey
+            hasApiKey: !!config_1.temporalConfig.apiKey,
+            environment: process.env.NODE_ENV
         });
         // Log available activities and workflows for debugging
         logger_1.logger.info('Available activities:', { activities: Object.keys(activities_1.activities) });
         logger_1.logger.info('Available workflows:', { workflows: Object.keys(workflows) });
-        // Connect to Temporal server
+        // Connect to Temporal server with optimized settings for persistent workers
         const connectionOptions = {
             address: config_1.temporalConfig.serverUrl,
+            // Optimized timeouts for persistent connections
+            connectTimeout: '30s',
+            rpcTimeout: '60s',
         };
         // Add TLS and API key for remote connections (Temporal Cloud)
         if (config_1.temporalConfig.tls) {
-            connectionOptions.tls = {};
+            connectionOptions.tls = {
+                // Longer handshake timeout for stable connection
+                handshakeTimeout: '30s',
+            };
         }
         if (config_1.temporalConfig.apiKey) {
             connectionOptions.metadata = {
@@ -77,43 +85,44 @@ async function startWorker() {
             };
             connectionOptions.apiKey = config_1.temporalConfig.apiKey;
         }
-        logger_1.logger.info('Attempting to connect to Temporal server...');
+        logger_1.logger.info('🔗 Connecting to Temporal server...');
         const connection = await worker_1.NativeConnection.connect(connectionOptions);
-        logger_1.logger.info('Successfully connected to Temporal server');
-        // Create worker with all activities
-        logger_1.logger.info('Creating Temporal worker...');
+        logger_1.logger.info('✅ Successfully connected to Temporal server');
+        // Create worker with all activities and workflows
+        logger_1.logger.info('🔧 Creating Temporal worker...');
         const worker = await worker_1.Worker.create({
             connection,
             namespace: config_1.temporalConfig.namespace,
             taskQueue: config_1.temporalConfig.taskQueue,
             workflowsPath: require.resolve('../workflows/worker-workflows'),
             activities: activities_1.activities,
+            // Optimize for persistent workers
+            maxConcurrentActivityTaskExecutions: 10,
+            maxConcurrentWorkflowTaskExecutions: 10,
+            // Enable graceful shutdown
+            shutdownGraceTime: '30s',
         });
-        logger_1.logger.info('Worker created successfully, starting to run...');
-        // In serverless environments, we need to handle the worker differently
-        if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
-            logger_1.logger.info('Running in serverless environment');
-            // Start worker but don't await indefinitely
-            const runPromise = worker.run();
-            // Set up graceful shutdown
-            const shutdown = async () => {
-                logger_1.logger.info('Shutting down worker...');
-                await worker.shutdown();
-            };
-            process.on('SIGINT', shutdown);
-            process.on('SIGTERM', shutdown);
-            // Return worker instance for management
-            return { worker, runPromise, shutdown };
-        }
-        else {
-            // In development, run normally
-            await worker.run();
-            logger_1.logger.info('Worker started successfully', { taskQueue: config_1.temporalConfig.taskQueue });
-            return worker;
-        }
+        logger_1.logger.info('✅ Worker created successfully');
+        // Set up graceful shutdown handlers
+        const shutdown = async (signal) => {
+            logger_1.logger.info(`📝 Received ${signal}, shutting down worker gracefully...`);
+            await worker.shutdown();
+            await connection.close();
+            logger_1.logger.info('✅ Worker shutdown completed');
+            process.exit(0);
+        };
+        process.on('SIGINT', () => shutdown('SIGINT'));
+        process.on('SIGTERM', () => shutdown('SIGTERM'));
+        // Start the worker
+        logger_1.logger.info('🎯 Starting worker execution...');
+        logger_1.logger.info(`📋 Task Queue: ${config_1.temporalConfig.taskQueue}`);
+        logger_1.logger.info(`🏢 Namespace: ${config_1.temporalConfig.namespace}`);
+        // In Render, we want the worker to run continuously
+        await worker.run();
+        logger_1.logger.info('⚠️ Worker execution ended unexpectedly');
     }
     catch (error) {
-        logger_1.logger.error('Failed to start worker', {
+        logger_1.logger.error('❌ Failed to start worker', {
             error: error.message,
             stack: error.stack,
             config: {
@@ -122,18 +131,15 @@ async function startWorker() {
                 taskQueue: config_1.temporalConfig.taskQueue
             }
         });
-        // In serverless environments, don't exit the process
-        if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
-            throw error;
-        }
-        else {
-            process.exit(1);
-        }
+        // In production, exit with error code
+        process.exit(1);
     }
 }
+// Auto-start when this module is executed directly
 if (require.main === module) {
+    logger_1.logger.info('🚀 Starting worker from command line...');
     startWorker().catch((err) => {
-        console.error('Worker startup failed:', err);
+        logger_1.logger.error('💥 Worker startup failed:', err);
         process.exit(1);
     });
 }

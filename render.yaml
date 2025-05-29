@@ -1,0 +1,98 @@
+services:
+  # Web Service - Next.js Application
+  - type: web
+    name: temporal-workflows-web
+    env: node
+    plan: starter
+    buildCommand: npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TEMPORAL_SERVER_URL
+        fromService:
+          type: envVarGroup
+          name: temporal-config
+          envVarKey: TEMPORAL_SERVER_URL
+      - key: TEMPORAL_NAMESPACE
+        fromService:
+          type: envVarGroup
+          name: temporal-config
+          envVarKey: TEMPORAL_NAMESPACE
+      - key: TEMPORAL_API_KEY
+        fromService:
+          type: envVarGroup
+          name: temporal-config
+          envVarKey: TEMPORAL_API_KEY
+      - key: TEMPORAL_TLS
+        value: "true"
+      - key: WORKFLOW_TASK_QUEUE
+        value: "default"
+      - key: SUPABASE_URL
+        fromService:
+          type: envVarGroup
+          name: database-config
+          envVarKey: SUPABASE_URL
+      - key: SUPABASE_ANON_KEY
+        fromService:
+          type: envVarGroup
+          name: database-config
+          envVarKey: SUPABASE_ANON_KEY
+
+  # Worker Service - Temporal Worker (Always Running)
+  - type: worker
+    name: temporal-workflows-worker
+    env: node
+    plan: starter
+    buildCommand: npm run worker:build
+    startCommand: npm run worker:start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TEMPORAL_SERVER_URL
+        fromService:
+          type: envVarGroup
+          name: temporal-config
+          envVarKey: TEMPORAL_SERVER_URL
+      - key: TEMPORAL_NAMESPACE
+        fromService:
+          type: envVarGroup
+          name: temporal-config
+          envVarKey: TEMPORAL_NAMESPACE
+      - key: TEMPORAL_API_KEY
+        fromService:
+          type: envVarGroup
+          name: temporal-config
+          envVarKey: TEMPORAL_API_KEY
+      - key: TEMPORAL_TLS
+        value: "true"
+      - key: WORKFLOW_TASK_QUEUE
+        value: "default"
+      - key: SUPABASE_URL
+        fromService:
+          type: envVarGroup
+          name: database-config
+          envVarKey: SUPABASE_URL
+      - key: SUPABASE_ANON_KEY
+        fromService:
+          type: envVarGroup
+          name: database-config
+          envVarKey: SUPABASE_ANON_KEY
+
+# Environment Variable Groups (Configure in Render Dashboard)
+envVarGroups:
+  - name: temporal-config
+    envVars:
+      - key: TEMPORAL_SERVER_URL
+        # Set this in Render Dashboard
+      - key: TEMPORAL_NAMESPACE  
+        # Set this in Render Dashboard
+      - key: TEMPORAL_API_KEY
+        # Set this in Render Dashboard (encrypted)
+        
+  - name: database-config
+    envVars:
+      - key: SUPABASE_URL
+        # Set this in Render Dashboard
+      - key: SUPABASE_ANON_KEY
+        # Set this in Render Dashboard (encrypted) 
