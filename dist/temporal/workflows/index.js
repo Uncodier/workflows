@@ -22,6 +22,8 @@ const syncEmailsScheduleWorkflow_1 = require("./syncEmailsScheduleWorkflow");
 const scheduleActivitiesWorkflow_1 = require("./scheduleActivitiesWorkflow");
 const activityPrioritizationEngineWorkflow_1 = require("./activityPrioritizationEngineWorkflow");
 const sendReportWorkflow_1 = require("./sendReportWorkflow");
+const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
+const sendEmailFromAgentWorkflow_1 = require("./sendEmailFromAgentWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -30,6 +32,8 @@ __exportStar(require("./syncEmailsScheduleWorkflow"), exports);
 __exportStar(require("./scheduleActivitiesWorkflow"), exports);
 __exportStar(require("./activityPrioritizationEngineWorkflow"), exports);
 __exportStar(require("./sendReportWorkflow"), exports);
+__exportStar(require("./scheduleCustomerSupportMessagesWorkflow"), exports);
+__exportStar(require("./sendEmailFromAgentWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -39,6 +43,9 @@ exports.workflows = {
     scheduleActivitiesWorkflow: scheduleActivitiesWorkflow_1.scheduleActivitiesWorkflow,
     activityPrioritizationEngineWorkflow: activityPrioritizationEngineWorkflow_1.activityPrioritizationEngineWorkflow,
     sendReportWorkflow: sendReportWorkflow_1.sendReportWorkflow,
+    scheduleCustomerSupportMessagesWorkflow: scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow,
+    customerSupportMessageWorkflow: scheduleCustomerSupportMessagesWorkflow_1.customerSupportMessageWorkflow,
+    sendEmailFromAgent: sendEmailFromAgentWorkflow_1.sendEmailFromAgent,
 };
 // Workflow names for Temporal Client (strings)
 exports.workflowNames = {
@@ -49,4 +56,7 @@ exports.workflowNames = {
     scheduleActivitiesWorkflow: 'scheduleActivitiesWorkflow',
     activityPrioritizationEngineWorkflow: 'activityPrioritizationEngineWorkflow',
     sendReportWorkflow: 'sendReportWorkflow',
+    scheduleCustomerSupportMessagesWorkflow: 'scheduleCustomerSupportMessagesWorkflow',
+    customerSupportMessageWorkflow: 'customerSupportMessageWorkflow',
+    sendEmailFromAgent: 'sendEmailFromAgent',
 };

@@ -22,3 +22,4 @@ __exportStar(require("./syncEmailsScheduleWorkflow"), exports);
 __exportStar(require("./scheduleActivitiesWorkflow"), exports);
 __exportStar(require("./activityPrioritizationEngineWorkflow"), exports);
 __exportStar(require("./sendReportWorkflow"), exports);
+__exportStar(require("./scheduleCustomerSupportMessagesWorkflow"), exports);

@@ -47,6 +47,8 @@ __exportStar(require("./emailSyncActivities"), exports);
 __exportStar(require("./cronActivities"), exports);
 __exportStar(require("./workflowSchedulingActivities"), exports);
 __exportStar(require("./emailAnalysisActivities"), exports);
+__exportStar(require("./customerSupportActivities"), exports);
+__exportStar(require("./emailActivities"), exports);
 // Bundle all activities for the worker
 const supabaseActivities = __importStar(require("./supabaseActivities"));
 const apiActivities = __importStar(require("./apiActivities"));
@@ -57,6 +59,8 @@ const emailSyncActivities = __importStar(require("./emailSyncActivities"));
 const cronActivities = __importStar(require("./cronActivities"));
 const workflowSchedulingActivities = __importStar(require("./workflowSchedulingActivities"));
 const emailAnalysisActivities = __importStar(require("./emailAnalysisActivities"));
+const customerSupportActivities = __importStar(require("./customerSupportActivities"));
+const emailActivities = __importStar(require("./emailActivities"));
 exports.activities = {
     ...supabaseActivities,
     ...apiActivities,
@@ -67,4 +71,6 @@ exports.activities = {
     ...cronActivities,
     ...workflowSchedulingActivities,
     ...emailAnalysisActivities,
+    ...customerSupportActivities,
+    ...emailActivities,
 };

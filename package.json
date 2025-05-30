@@ -22,6 +22,7 @@
     "test:cron-activities": "node test-cron-activities.js",
     "test:email-sync-dryrun": "ts-node src/scripts/execute-workflow.ts syncEmailsScheduleWorkflow '{\"dryRun\":true,\"minHoursBetweenSyncs\":1}'",
     "test:diagnostic": "node diagnostic-script.js",
+    "test:customer-support": "ts-node src/scripts/test-customer-support-workflow.ts",
     "dev:all": "concurrently \"npm run dev\" \"npm run worker:dev\"",
     "build:all": "npm run build && npm run worker:build",
     "start:all": "concurrently \"npm run start\" \"npm run worker:start\"",
