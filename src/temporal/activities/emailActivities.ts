@@ -8,6 +8,10 @@ export interface SendEmailParams {
   from: string;
   subject: string;
   message: string;
+  site_id: string;
+  agent_id?: string;
+  conversation_id?: string;
+  lead_id?: string;
 }
 
 export interface SendEmailResult {
@@ -25,7 +29,11 @@ export async function sendEmailFromAgentActivity(params: SendEmailParams): Promi
     recipient: params.email,
     from: params.from,
     subject: params.subject,
-    messageLength: params.message.length
+    messageLength: params.message.length,
+    site_id: params.site_id,
+    agent_id: params.agent_id,
+    conversation_id: params.conversation_id,
+    lead_id: params.lead_id
   });
 
   try {
@@ -33,7 +41,11 @@ export async function sendEmailFromAgentActivity(params: SendEmailParams): Promi
       email: params.email,
       from: params.from,
       subject: params.subject,
-      message: params.message
+      message: params.message,
+      site_id: params.site_id,
+      agent_id: params.agent_id,
+      conversation_id: params.conversation_id,
+      lead_id: params.lead_id
     });
 
     if (!response.success) {

@@ -14,6 +14,10 @@ export interface SendEmailFromAgentParams {
   from: string;
   subject: string;
   message: string;
+  site_id: string;
+  agent_id?: string;
+  conversation_id?: string;
+  lead_id?: string;
 }
 
 /**
@@ -37,15 +41,19 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
 
   try {
     // Validate required parameters
-    if (!params.email || !params.from || !params.subject || !params.message) {
-      throw new Error('Missing required email parameters: email, from, subject, and message are all required');
+    if (!params.email || !params.from || !params.subject || !params.message || !params.site_id) {
+      throw new Error('Missing required email parameters: email, from, subject, message and site_id are all required');
     }
 
     console.log('📤 Sending email via agent API:', {
       recipient: params.email,
       from: params.from,
       subject: params.subject,
-      messageLength: params.message.length
+      messageLength: params.message.length,
+      site_id: params.site_id,
+      agent_id: params.agent_id || 'not-provided',
+      conversation_id: params.conversation_id || 'not-provided',
+      lead_id: params.lead_id || 'not-provided'
     });
 
     // Send email using the agent API
@@ -53,7 +61,11 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
       email: params.email,
       from: params.from,
       subject: params.subject,
-      message: params.message
+      message: params.message,
+      site_id: params.site_id,
+      agent_id: params.agent_id,
+      conversation_id: params.conversation_id,
+      lead_id: params.lead_id
     });
 
     const endTime = new Date();

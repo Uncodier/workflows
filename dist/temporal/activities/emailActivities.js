@@ -10,14 +10,22 @@ async function sendEmailFromAgentActivity(params) {
         recipient: params.email,
         from: params.from,
         subject: params.subject,
-        messageLength: params.message.length
+        messageLength: params.message.length,
+        site_id: params.site_id,
+        agent_id: params.agent_id,
+        conversation_id: params.conversation_id,
+        lead_id: params.lead_id
     });
     try {
         const response = await apiService_1.apiService.post('/api/agents/tools/sendEmail', {
             email: params.email,
             from: params.from,
             subject: params.subject,
-            message: params.message
+            message: params.message,
+            site_id: params.site_id,
+            agent_id: params.agent_id,
+            conversation_id: params.conversation_id,
+            lead_id: params.lead_id
         });
         if (!response.success) {
             throw new Error(`Failed to send email: ${response.error?.message}`);
