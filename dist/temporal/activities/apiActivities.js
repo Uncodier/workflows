@@ -4,58 +4,44 @@ exports.fetchDataActivity = fetchDataActivity;
 exports.createApiResourceActivity = createApiResourceActivity;
 exports.updateApiResourceActivity = updateApiResourceActivity;
 exports.deleteApiResourceActivity = deleteApiResourceActivity;
-const config_1 = require("../../config/config");
-/**
- * Generic function to make API calls
- * @param endpoint API endpoint path
- * @param method HTTP method
- * @param data Request data
- * @returns API response
- */
-async function callApi(endpoint, method = 'GET', data) {
-    const url = `${config_1.apiConfig.baseUrl}${endpoint}`;
-    const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config_1.apiConfig.apiKey}`,
-    };
-    const options = {
-        method,
-        headers,
-        body: data ? JSON.stringify(data) : undefined,
-    };
-    try {
-        const response = await fetch(url, options);
-        if (!response.ok) {
-            throw new Error(`API call failed: ${response.status} ${response.statusText}`);
-        }
-        return await response.json();
-    }
-    catch (error) {
-        console.error('API call error:', error);
-        throw error;
-    }
-}
+const apiService_1 = require("../services/apiService");
 /**
  * Activity to fetch data from the API
  */
 async function fetchDataActivity(resourceId) {
-    return callApi(`/resources/${resourceId}`);
+    const response = await apiService_1.apiService.get(`/resources/${resourceId}`);
+    if (!response.success) {
+        throw new Error(`Failed to fetch resource ${resourceId}: ${response.error?.message}`);
+    }
+    return response.data;
 }
 /**
  * Activity to create a resource via the API
  */
 async function createApiResourceActivity(data) {
-    return callApi('/resources', 'POST', data);
+    const response = await apiService_1.apiService.post('/resources', data);
+    if (!response.success) {
+        throw new Error(`Failed to create resource: ${response.error?.message}`);
+    }
+    return response.data;
 }
 /**
  * Activity to update a resource via the API
  */
 async function updateApiResourceActivity(resourceId, data) {
-    return callApi(`/resources/${resourceId}`, 'PUT', data);
+    const response = await apiService_1.apiService.put(`/resources/${resourceId}`, data);
+    if (!response.success) {
+        throw new Error(`Failed to update resource ${resourceId}: ${response.error?.message}`);
+    }
+    return response.data;
 }
 /**
  * Activity to delete a resource via the API
  */
 async function deleteApiResourceActivity(resourceId) {
-    return callApi(`/resources/${resourceId}`, 'DELETE');
+    const response = await apiService_1.apiService.delete(`/resources/${resourceId}`);
+    if (!response.success) {
+        throw new Error(`Failed to delete resource ${resourceId}: ${response.error?.message}`);
+    }
+    return response.data;
 }

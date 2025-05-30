@@ -22,3 +22,4 @@ __exportStar(require("./supabaseService"), exports);
 __exportStar(require("./emailConfigService"), exports);
 __exportStar(require("./mockDataService"), exports);
 __exportStar(require("./emailSyncSchedulingService"), exports);
+__exportStar(require("./apiService"), exports);

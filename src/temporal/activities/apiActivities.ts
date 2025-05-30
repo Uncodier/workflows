@@ -1,63 +1,53 @@
-import { apiConfig } from '../../config/config';
-
-/**
- * Generic function to make API calls
- * @param endpoint API endpoint path
- * @param method HTTP method
- * @param data Request data
- * @returns API response
- */
-async function callApi(endpoint: string, method: string = 'GET', data?: any) {
-  const url = `${apiConfig.baseUrl}${endpoint}`;
-  const headers = {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${apiConfig.apiKey}`,
-  };
-
-  const options: RequestInit = {
-    method,
-    headers,
-    body: data ? JSON.stringify(data) : undefined,
-  };
-
-  try {
-    const response = await fetch(url, options);
-    
-    if (!response.ok) {
-      throw new Error(`API call failed: ${response.status} ${response.statusText}`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('API call error:', error);
-    throw error;
-  }
-}
+import { apiService } from '../services/apiService';
 
 /**
  * Activity to fetch data from the API
  */
 export async function fetchDataActivity(resourceId: string): Promise<any> {
-  return callApi(`/resources/${resourceId}`);
+  const response = await apiService.get(`/resources/${resourceId}`);
+  
+  if (!response.success) {
+    throw new Error(`Failed to fetch resource ${resourceId}: ${response.error?.message}`);
+  }
+  
+  return response.data;
 }
 
 /**
  * Activity to create a resource via the API
  */
 export async function createApiResourceActivity(data: any): Promise<any> {
-  return callApi('/resources', 'POST', data);
+  const response = await apiService.post('/resources', data);
+  
+  if (!response.success) {
+    throw new Error(`Failed to create resource: ${response.error?.message}`);
+  }
+  
+  return response.data;
 }
 
 /**
  * Activity to update a resource via the API
  */
 export async function updateApiResourceActivity(resourceId: string, data: any): Promise<any> {
-  return callApi(`/resources/${resourceId}`, 'PUT', data);
+  const response = await apiService.put(`/resources/${resourceId}`, data);
+  
+  if (!response.success) {
+    throw new Error(`Failed to update resource ${resourceId}: ${response.error?.message}`);
+  }
+  
+  return response.data;
 }
 
 /**
  * Activity to delete a resource via the API
  */
 export async function deleteApiResourceActivity(resourceId: string): Promise<any> {
-  return callApi(`/resources/${resourceId}`, 'DELETE');
+  const response = await apiService.delete(`/resources/${resourceId}`);
+  
+  if (!response.success) {
+    throw new Error(`Failed to delete resource ${resourceId}: ${response.error?.message}`);
+  }
+  
+  return response.data;
 } 
