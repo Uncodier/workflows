@@ -8,6 +8,8 @@ export * from './emailSyncActivities';
 export * from './cronActivities';
 export * from './workflowSchedulingActivities';
 export * from './emailAnalysisActivities';
+export * from './customerSupportActivities';
+export * from './emailActivities';
 
 // Bundle all activities for the worker
 import * as supabaseActivities from './supabaseActivities';
@@ -19,6 +21,8 @@ import * as emailSyncActivities from './emailSyncActivities';
 import * as cronActivities from './cronActivities';
 import * as workflowSchedulingActivities from './workflowSchedulingActivities';
 import * as emailAnalysisActivities from './emailAnalysisActivities';
+import * as customerSupportActivities from './customerSupportActivities';
+import * as emailActivities from './emailActivities';
 
 export const activities = {
   ...supabaseActivities,
@@ -30,6 +34,8 @@ export const activities = {
   ...cronActivities,
   ...workflowSchedulingActivities,
   ...emailAnalysisActivities,
+  ...customerSupportActivities,
+  ...emailActivities,
 };
 
 export type Activities = typeof activities; 
