@@ -6,4 +6,5 @@ export * from './syncEmailsScheduleWorkflow';
 export * from './scheduleActivitiesWorkflow';
 export * from './activityPrioritizationEngineWorkflow';
 export * from './sendReportWorkflow';
-export * from './scheduleCustomerSupportMessagesWorkflow'; 
+export * from './scheduleCustomerSupportMessagesWorkflow';
+export * from './sendEmailFromAgentWorkflow'; 
