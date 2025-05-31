@@ -20,9 +20,7 @@ const {
 export async function customerSupportMessageWorkflow(
   analysisData: AnalysisData,
   baseParams: {
-    site_id: string;
     agentId?: string;
-    userId?: string;
   }
 ): Promise<{
   success: boolean;
@@ -32,6 +30,7 @@ export async function customerSupportMessageWorkflow(
   error?: string;
 }> {
   console.log('🎯 Starting single customer support message workflow...');
+  console.log(`📋 Processing analysis ID: ${analysisData.analysis_id}`);
   
   try {
     // First, process the analysis to determine if action is needed
@@ -48,8 +47,12 @@ export async function customerSupportMessageWorkflow(
     
     console.log('📞 Processing analysis - sending customer support message');
     
-    // Send the customer support message
-    const response = await sendCustomerSupportMessageActivity(analysisData, baseParams);
+    // Send the customer support message using data from analysisData
+    const response = await sendCustomerSupportMessageActivity(analysisData, {
+      site_id: analysisData.site_id,
+      agentId: baseParams.agentId,
+      userId: analysisData.user_id,
+    });
     
     console.log('✅ Customer support message workflow completed successfully');
     return {
@@ -90,21 +93,20 @@ export async function scheduleCustomerSupportMessagesWorkflow(
     processed: boolean;
     reason: string;
     error?: string;
+    analysisId: string;
   }>;
   executionTime: string;
 }> {
   console.log('🚀 Starting schedule customer support messages workflow...');
   const startTime = new Date();
   
-  const { analysisArray, site_id, agentId, userId } = params;
+  const { analysisArray, agentId } = params;
   const totalAnalysis = analysisArray.length;
   
   console.log(`📊 Processing ${totalAnalysis} analysis items for customer support...`);
   
   const baseParams = {
-    site_id,
-    agentId,
-    userId
+    agentId
   };
   
   const results: Array<{
@@ -114,6 +116,7 @@ export async function scheduleCustomerSupportMessagesWorkflow(
     processed: boolean;
     reason: string;
     error?: string;
+    analysisId: string;
   }> = [];
   
   let scheduled = 0;
@@ -125,9 +128,10 @@ export async function scheduleCustomerSupportMessagesWorkflow(
     // Process each analysis with 1-minute intervals
     for (let i = 0; i < analysisArray.length; i++) {
       const analysisData = analysisArray[i];
-      const workflowId = `customer-support-message-${Date.now()}-${i}`;
+      const workflowId = `customer-support-message-${analysisData.analysis_id}`;
       
       console.log(`📋 Processing analysis ${i + 1}/${totalAnalysis} (ID: ${workflowId})`);
+      console.log(`🏢 Site: ${analysisData.site_id}, User: ${analysisData.user_id}`);
       
       try {
         // Start child workflow for this specific analysis
@@ -161,7 +165,8 @@ export async function scheduleCustomerSupportMessagesWorkflow(
           success: result.success,
           processed: result.processed,
           reason: result.reason,
-          error: result.error
+          error: result.error,
+          analysisId: analysisData.analysis_id
         });
         
         // Sleep for 1 minute before processing the next analysis (except for the last one)
@@ -181,7 +186,8 @@ export async function scheduleCustomerSupportMessagesWorkflow(
           success: false,
           processed: false,
           reason: 'Failed to start workflow',
-          error: errorMessage
+          error: errorMessage,
+          analysisId: analysisData.analysis_id
         });
       }
     }

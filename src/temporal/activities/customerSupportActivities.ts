@@ -6,36 +6,25 @@ import { apiService } from '../services/apiService';
  */
 
 export interface AnalysisData {
-  analysis: {
+  email: {
     summary: string;
-    insights: string[];
-    sentiment: 'positive' | 'negative' | 'neutral';
-    priority: 'high' | 'medium' | 'low';
-    action_items: string[];
-    response: string[];
-    lead_extraction: {
-      contact_info: {
-        name: string | null;
-        email: string | null;
-        phone: string | null;
-        company: string | null;
-      };
-      intent: 'inquiry' | 'complaint' | 'purchase' | 'support' | 'partnership' | 'demo_request';
-      requirements: string[];
-      budget_indication: string | null;
-      timeline: string | null;
-      decision_maker: 'yes' | 'no' | 'unknown';
-      source: 'website' | 'referral' | 'social_media' | 'advertising' | 'cold_outreach';
-    };
-    commercial_opportunity: {
-      requires_response: boolean;
-      response_type: 'commercial' | 'support' | 'informational' | 'follow_up';
-      priority_level: 'high' | 'medium' | 'low';
-      suggested_actions: string[];
-      potential_value: 'high' | 'medium' | 'low' | 'unknown';
-      next_steps: string[];
+    contact_info: {
+      name: string | null;
+      email: string | null;
+      phone: string | null;
+      company: string | null;
     };
   };
+  // Campos requeridos del API
+  site_id: string;
+  user_id: string;
+  lead_notification: boolean;
+  priority: 'high' | 'medium' | 'low';
+  response_type: 'commercial' | 'support' | 'informational' | 'follow_up';
+  potential_value: 'high' | 'medium' | 'low' | 'unknown';
+  intent: 'inquiry' | 'complaint' | 'purchase' | 'support' | 'partnership' | 'demo_request';
+  // ID único para tracking
+  analysis_id: string;
 }
 
 export interface CustomerSupportMessageRequest {
@@ -54,9 +43,7 @@ export interface CustomerSupportMessageRequest {
 
 export interface ScheduleCustomerSupportParams {
   analysisArray: AnalysisData[];
-  site_id: string;
   agentId?: string;
-  userId?: string;
 }
 
 /**
@@ -72,36 +59,35 @@ export async function sendCustomerSupportMessageActivity(
 ): Promise<any> {
   console.log('📞 Sending customer support message...');
   
-  const { analysis } = analysisData;
-  const { lead_extraction, commercial_opportunity } = analysis;
+  const { email, site_id, user_id, lead_notification, response_type } = analysisData;
   
-  // Build the message request payload
+  // Build the message request payload usando los campos directos
   const messageRequest: CustomerSupportMessageRequest = {
-    message: analysis.summary || 'Customer support interaction from analysis',
-    site_id: baseParams.site_id,
+    message: email.summary || 'Customer support interaction from analysis',
+    site_id: site_id, // Usar el site_id del analysisData
     agentId: baseParams.agentId,
-    userId: baseParams.userId,
-    lead_notification: commercial_opportunity.response_type,
+    userId: user_id, // Usar el user_id del analysisData
+    lead_notification: lead_notification ? response_type : undefined,
   };
 
   // Add contact information if available
-  if (lead_extraction.contact_info.name) {
-    messageRequest.name = lead_extraction.contact_info.name;
+  if (email.contact_info.name) {
+    messageRequest.name = email.contact_info.name;
   }
   
-  if (lead_extraction.contact_info.email) {
-    messageRequest.email = lead_extraction.contact_info.email;
+  if (email.contact_info.email) {
+    messageRequest.email = email.contact_info.email;
   }
   
-  if (lead_extraction.contact_info.phone) {
-    messageRequest.phone = lead_extraction.contact_info.phone;
+  if (email.contact_info.phone) {
+    messageRequest.phone = email.contact_info.phone;
   }
 
   console.log('📤 Sending customer support message with payload:', {
-    hasContactInfo: !!(lead_extraction.contact_info.name || lead_extraction.contact_info.email),
-    intent: lead_extraction.intent,
-    priority: analysis.priority,
-    sentiment: analysis.sentiment
+    hasContactInfo: !!(email.contact_info.name || email.contact_info.email),
+    intent: analysisData.intent,
+    priority: analysisData.priority,
+    analysisId: analysisData.analysis_id
   });
 
   try {
@@ -130,27 +116,26 @@ export async function processAnalysisDataActivity(
   priority: string;
   reason: string;
 }> {
-  const { analysis } = analysisData;
-  const { commercial_opportunity, priority, sentiment } = analysis;
+  const { lead_notification, priority, intent, potential_value } = analysisData;
   
   console.log('🔍 Processing analysis data for customer support...');
   
   // Determine if this analysis requires customer support action
   const shouldProcess = 
-    commercial_opportunity.requires_response ||
+    lead_notification ||
     priority === 'high' ||
-    sentiment === 'negative' ||
-    commercial_opportunity.priority_level === 'high';
+    intent === 'complaint' ||
+    potential_value === 'high';
     
   let reason = '';
-  if (commercial_opportunity.requires_response) {
-    reason = 'Requires response based on commercial opportunity';
+  if (lead_notification) {
+    reason = 'Lead notification required based on analysis';
   } else if (priority === 'high') {
     reason = 'High priority analysis';
-  } else if (sentiment === 'negative') {
-    reason = 'Negative sentiment detected';
-  } else if (commercial_opportunity.priority_level === 'high') {
-    reason = 'High commercial priority';
+  } else if (intent === 'complaint') {
+    reason = 'Complaint detected - requires immediate attention';
+  } else if (potential_value === 'high') {
+    reason = 'High commercial potential detected';
   } else {
     reason = 'No immediate action required';
   }

@@ -16,6 +16,7 @@ const { sendCustomerSupportMessageActivity, processAnalysisDataActivity } = (0, 
  */
 async function customerSupportMessageWorkflow(analysisData, baseParams) {
     console.log('🎯 Starting single customer support message workflow...');
+    console.log(`📋 Processing analysis ID: ${analysisData.analysis_id}`);
     try {
         // First, process the analysis to determine if action is needed
         const processResult = await processAnalysisDataActivity(analysisData);
@@ -28,8 +29,12 @@ async function customerSupportMessageWorkflow(analysisData, baseParams) {
             };
         }
         console.log('📞 Processing analysis - sending customer support message');
-        // Send the customer support message
-        const response = await sendCustomerSupportMessageActivity(analysisData, baseParams);
+        // Send the customer support message using data from analysisData
+        const response = await sendCustomerSupportMessageActivity(analysisData, {
+            site_id: analysisData.site_id,
+            agentId: baseParams.agentId,
+            userId: analysisData.user_id,
+        });
         console.log('✅ Customer support message workflow completed successfully');
         return {
             success: true,
@@ -56,13 +61,11 @@ async function customerSupportMessageWorkflow(analysisData, baseParams) {
 async function scheduleCustomerSupportMessagesWorkflow(params) {
     console.log('🚀 Starting schedule customer support messages workflow...');
     const startTime = new Date();
-    const { analysisArray, site_id, agentId, userId } = params;
+    const { analysisArray, agentId } = params;
     const totalAnalysis = analysisArray.length;
     console.log(`📊 Processing ${totalAnalysis} analysis items for customer support...`);
     const baseParams = {
-        site_id,
-        agentId,
-        userId
+        agentId
     };
     const results = [];
     let scheduled = 0;
@@ -73,8 +76,9 @@ async function scheduleCustomerSupportMessagesWorkflow(params) {
         // Process each analysis with 1-minute intervals
         for (let i = 0; i < analysisArray.length; i++) {
             const analysisData = analysisArray[i];
-            const workflowId = `customer-support-message-${Date.now()}-${i}`;
+            const workflowId = `customer-support-message-${analysisData.analysis_id}`;
             console.log(`📋 Processing analysis ${i + 1}/${totalAnalysis} (ID: ${workflowId})`);
+            console.log(`🏢 Site: ${analysisData.site_id}, User: ${analysisData.user_id}`);
             try {
                 // Start child workflow for this specific analysis
                 const handle = await (0, workflow_1.startChild)(customerSupportMessageWorkflow, {
@@ -105,7 +109,8 @@ async function scheduleCustomerSupportMessagesWorkflow(params) {
                     success: result.success,
                     processed: result.processed,
                     reason: result.reason,
-                    error: result.error
+                    error: result.error,
+                    analysisId: analysisData.analysis_id
                 });
                 // Sleep for 1 minute before processing the next analysis (except for the last one)
                 if (i < analysisArray.length - 1) {
@@ -123,7 +128,8 @@ async function scheduleCustomerSupportMessagesWorkflow(params) {
                     success: false,
                     processed: false,
                     reason: 'Failed to start workflow',
-                    error: errorMessage
+                    error: errorMessage,
+                    analysisId: analysisData.analysis_id
                 });
             }
         }

@@ -8,31 +8,30 @@ const apiService_1 = require("../services/apiService");
  */
 async function sendCustomerSupportMessageActivity(analysisData, baseParams) {
     console.log('📞 Sending customer support message...');
-    const { analysis } = analysisData;
-    const { lead_extraction, commercial_opportunity } = analysis;
-    // Build the message request payload
+    const { email, site_id, user_id, lead_notification, response_type } = analysisData;
+    // Build the message request payload usando los campos directos
     const messageRequest = {
-        message: analysis.summary || 'Customer support interaction from analysis',
-        site_id: baseParams.site_id,
+        message: email.summary || 'Customer support interaction from analysis',
+        site_id: site_id, // Usar el site_id del analysisData
         agentId: baseParams.agentId,
-        userId: baseParams.userId,
-        lead_notification: commercial_opportunity.response_type,
+        userId: user_id, // Usar el user_id del analysisData
+        lead_notification: lead_notification ? response_type : undefined,
     };
     // Add contact information if available
-    if (lead_extraction.contact_info.name) {
-        messageRequest.name = lead_extraction.contact_info.name;
+    if (email.contact_info.name) {
+        messageRequest.name = email.contact_info.name;
     }
-    if (lead_extraction.contact_info.email) {
-        messageRequest.email = lead_extraction.contact_info.email;
+    if (email.contact_info.email) {
+        messageRequest.email = email.contact_info.email;
     }
-    if (lead_extraction.contact_info.phone) {
-        messageRequest.phone = lead_extraction.contact_info.phone;
+    if (email.contact_info.phone) {
+        messageRequest.phone = email.contact_info.phone;
     }
     console.log('📤 Sending customer support message with payload:', {
-        hasContactInfo: !!(lead_extraction.contact_info.name || lead_extraction.contact_info.email),
-        intent: lead_extraction.intent,
-        priority: analysis.priority,
-        sentiment: analysis.sentiment
+        hasContactInfo: !!(email.contact_info.name || email.contact_info.email),
+        intent: analysisData.intent,
+        priority: analysisData.priority,
+        analysisId: analysisData.analysis_id
     });
     try {
         const response = await apiService_1.apiService.post('/api/agents/customerSupport/message', messageRequest);
@@ -51,26 +50,25 @@ async function sendCustomerSupportMessageActivity(analysisData, baseParams) {
  * Process analysis data and prepare for customer support interaction
  */
 async function processAnalysisDataActivity(analysisData) {
-    const { analysis } = analysisData;
-    const { commercial_opportunity, priority, sentiment } = analysis;
+    const { lead_notification, priority, intent, potential_value } = analysisData;
     console.log('🔍 Processing analysis data for customer support...');
     // Determine if this analysis requires customer support action
-    const shouldProcess = commercial_opportunity.requires_response ||
+    const shouldProcess = lead_notification ||
         priority === 'high' ||
-        sentiment === 'negative' ||
-        commercial_opportunity.priority_level === 'high';
+        intent === 'complaint' ||
+        potential_value === 'high';
     let reason = '';
-    if (commercial_opportunity.requires_response) {
-        reason = 'Requires response based on commercial opportunity';
+    if (lead_notification) {
+        reason = 'Lead notification required based on analysis';
     }
     else if (priority === 'high') {
         reason = 'High priority analysis';
     }
-    else if (sentiment === 'negative') {
-        reason = 'Negative sentiment detected';
+    else if (intent === 'complaint') {
+        reason = 'Complaint detected - requires immediate attention';
     }
-    else if (commercial_opportunity.priority_level === 'high') {
-        reason = 'High commercial priority';
+    else if (potential_value === 'high') {
+        reason = 'High commercial potential detected';
     }
     else {
         reason = 'No immediate action required';

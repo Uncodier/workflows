@@ -9,196 +9,122 @@ import type { AnalysisData, ScheduleCustomerSupportParams } from '../temporal/ac
 // Sample analysis data for testing
 const mockAnalysisData: AnalysisData[] = [
   {
-    analysis: {
+    email: {
       summary: "Customer inquiry about pricing for enterprise features",
-      insights: ["Interested in premium features", "Budget-conscious", "Enterprise focused"],
-      sentiment: "positive",
-      priority: "high",
-      action_items: ["Send pricing information", "Schedule demo", "Provide trial access"],
-      response: ["Thank you for your interest in our enterprise solution"],
-      lead_extraction: {
-        contact_info: {
-          name: "John Doe",
-          email: "john.doe@example.com",
-          phone: "+1234567890",
-          company: "Example Corp"
-        },
-        intent: "inquiry",
-        requirements: ["Enterprise features", "API access", "Custom integrations"],
-        budget_indication: "$5000-10000",
-        timeline: "Q1 2024",
-        decision_maker: "yes",
-        source: "website"
-      },
-      commercial_opportunity: {
-        requires_response: true,
-        response_type: "commercial",
-        priority_level: "high",
-        suggested_actions: ["Send proposal", "Schedule call", "Provide demo"],
-        potential_value: "high",
-        next_steps: ["Follow up within 24h", "Send custom pricing"]
+      contact_info: {
+        name: "John Doe",
+        email: "john.doe@example.com",
+        phone: "+1234567890",
+        company: "Example Corp"
       }
-    }
+    },
+    site_id: "site_123",
+    user_id: "user_456",
+    lead_notification: true,
+    priority: "high",
+    response_type: "commercial",
+    potential_value: "high",
+    intent: "inquiry",
+    analysis_id: `analysis_${Date.now()}_0`
   },
   {
-    analysis: {
+    email: {
       summary: "Support request for integration help",
-      insights: ["Existing customer", "Technical support needed"],
-      sentiment: "neutral",
-      priority: "medium",
-      action_items: ["Provide documentation", "Schedule technical call"],
-      response: ["We'll help you with the integration"],
-      lead_extraction: {
-        contact_info: {
-          name: "Jane Smith",
-          email: "jane.smith@customer.com",
-          phone: null,
-          company: "Customer Inc"
-        },
-        intent: "support",
-        requirements: ["Integration support", "Documentation"],
-        budget_indication: null,
-        timeline: "ASAP",
-        decision_maker: "unknown",
-        source: "website"
-      },
-      commercial_opportunity: {
-        requires_response: true,
-        response_type: "support",
-        priority_level: "medium",
-        suggested_actions: ["Provide technical documentation", "Schedule support call"],
-        potential_value: "medium",
-        next_steps: ["Send integration guide", "Follow up in 2 days"]
+      contact_info: {
+        name: "Jane Smith",
+        email: "jane.smith@customer.com",
+        phone: null,
+        company: "Customer Inc"
       }
-    }
+    },
+    site_id: "site_123",
+    user_id: "user_789",
+    lead_notification: true,
+    priority: "medium",
+    response_type: "support",
+    potential_value: "medium",
+    intent: "support",
+    analysis_id: `analysis_${Date.now()}_1`
   },
   {
-    analysis: {
+    email: {
       summary: "General inquiry about product features",
-      insights: ["Potential lead", "Early stage"],
-      sentiment: "positive",
-      priority: "low",
-      action_items: ["Send product information"],
-      response: ["Thanks for your interest"],
-      lead_extraction: {
-        contact_info: {
-          name: "Bob Wilson",
-          email: "bob@startup.com",
-          phone: null,
-          company: "Startup LLC"
-        },
-        intent: "inquiry",
-        requirements: ["Basic features", "Pricing information"],
-        budget_indication: "Under $1000",
-        timeline: "Q2 2024",
-        decision_maker: "no",
-        source: "social_media"
-      },
-      commercial_opportunity: {
-        requires_response: false,
-        response_type: "informational",
-        priority_level: "low",
-        suggested_actions: ["Send product brochure"],
-        potential_value: "low",
-        next_steps: ["Add to newsletter list"]
+      contact_info: {
+        name: "Bob Wilson",
+        email: "bob@startup.com",
+        phone: null,
+        company: "Startup LLC"
       }
-    }
+    },
+    site_id: "site_456",
+    user_id: "user_123",
+    lead_notification: false,
+    priority: "low",
+    response_type: "informational",
+    potential_value: "low",
+    intent: "inquiry",
+    analysis_id: `analysis_${Date.now()}_2`
   }
 ];
 
-async function testCustomerSupportWorkflow() {
-  console.log('🚀 Testing Customer Support Messages Workflow...');
-  
+/**
+ * Test the full schedule customer support messages workflow
+ */
+export async function testCustomerSupportWorkflow() {
   try {
+    console.log('🧪 Starting Customer Support Messages Workflow Test...');
+    
     const client = await getTemporalClient();
     
-    // Test parameters
     const params: ScheduleCustomerSupportParams = {
       analysisArray: mockAnalysisData,
-      site_id: "test-site-12345",
-      agentId: "agent-67890",
-      userId: "user-54321"
+      agentId: 'test-agent-123'
     };
     
-    console.log('📋 Test parameters:', {
-      analysisCount: params.analysisArray.length,
-      site_id: params.site_id,
-      agentId: params.agentId,
-      userId: params.userId
-    });
+    console.log(`📊 Testing workflow with ${params.analysisArray.length} analysis items`);
     
-    console.log('🎯 Starting workflow execution...');
-    
-    // Execute the workflow
-    const workflowId = `test-customer-support-${Date.now()}`;
-    const handle = await client.workflow.start('scheduleCustomerSupportMessagesWorkflow', {
+    const result = await client.workflow.execute('scheduleCustomerSupportMessagesWorkflow', {
       args: [params],
-      workflowId,
-      taskQueue: process.env.WORKFLOW_TASK_QUEUE || 'default',
-      workflowRunTimeout: '30m', // 30 minutes timeout for the entire workflow
+      taskQueue: 'customer-support-queue',
+      workflowId: `test-customer-support-workflow-${Date.now()}`,
     });
     
-    console.log(`✅ Workflow started successfully with ID: ${handle.workflowId}`);
-    console.log('⏳ Waiting for workflow completion...');
-    console.log('   Note: This may take several minutes due to 1-minute intervals between messages');
-    
-    // Wait for the workflow to complete
-    const result = await handle.result();
-    
-    console.log('🎉 Workflow completed successfully!');
-    console.log('📊 Results:', JSON.stringify(result, null, 2));
-    
-    return result;
+    console.log('✅ Workflow completed successfully!');
+    console.log(`📊 Results:`, JSON.stringify(result, null, 2));
     
   } catch (error) {
-    console.error('❌ Test failed:', error);
-    throw error;
+    console.error('❌ Workflow test failed:', error);
   }
 }
 
-async function testSingleCustomerSupportMessage() {
-  console.log('🎯 Testing Single Customer Support Message Workflow...');
-  
+/**
+ * Test a single customer support message workflow
+ */
+export async function testSingleCustomerSupportMessage() {
   try {
-    const client = await getTemporalClient();
+    console.log('🧪 Testing Single Customer Support Message...');
     
-    // Test with first analysis item
-    const analysisData = mockAnalysisData[0];
-    const baseParams = {
-      site_id: "test-site-12345",
-      agentId: "agent-67890",
-      userId: "user-54321"
-    };
+    const client = await getTemporalClient();
+    const analysisData = mockAnalysisData[0]; // Use first analysis item
     
     console.log('📋 Testing single message with analysis:', {
-      summary: analysisData.analysis.summary,
-      priority: analysisData.analysis.priority,
-      sentiment: analysisData.analysis.sentiment,
-      requires_response: analysisData.analysis.commercial_opportunity.requires_response
+      summary: analysisData.email.summary,
+      priority: analysisData.priority,
+      leadNotification: analysisData.lead_notification,
+      intent: analysisData.intent
     });
     
-    // Execute single message workflow
-    const workflowId = `test-single-message-${Date.now()}`;
-    const handle = await client.workflow.start('customerSupportMessageWorkflow', {
-      args: [analysisData, baseParams],
-      workflowId,
-      taskQueue: process.env.WORKFLOW_TASK_QUEUE || 'default',
-      workflowRunTimeout: '5m',
+    const result = await client.workflow.execute('customerSupportMessageWorkflow', {
+      args: [analysisData, { agentId: 'test-agent-456' }],
+      taskQueue: 'customer-support-queue',
+      workflowId: `test-single-customer-support-${Date.now()}`,
     });
     
-    console.log(`✅ Single message workflow started: ${handle.workflowId}`);
-    console.log('⏳ Waiting for completion...');
-    
-    const result = await handle.result();
-    
-    console.log('🎉 Single message workflow completed!');
-    console.log('📊 Result:', JSON.stringify(result, null, 2));
-    
-    return result;
+    console.log('✅ Single workflow completed!');
+    console.log(`📊 Result:`, JSON.stringify(result, null, 2));
     
   } catch (error) {
-    console.error('❌ Single message test failed:', error);
-    throw error;
+    console.error('❌ Single workflow test failed:', error);
   }
 }
 
@@ -228,6 +154,4 @@ async function main() {
 // Run tests if this file is executed directly
 if (require.main === module) {
   main().catch(console.error);
-}
-
-export { testCustomerSupportWorkflow, testSingleCustomerSupportMessage }; 
+} 
