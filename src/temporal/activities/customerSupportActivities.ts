@@ -5,7 +5,7 @@ import { apiService } from '../services/apiService';
  * Activities for handling customer support interactions
  */
 
-export interface AnalysisData {
+export interface EmailData {
   email: {
     summary: string;
     contact_info: {
@@ -15,17 +15,25 @@ export interface AnalysisData {
       company: string | null;
     };
   };
-  // Campos requeridos del API
+  // Campos adicionales que pueden venir del análisis
+  priority?: 'high' | 'medium' | 'low';
+  response_type?: 'commercial' | 'support' | 'informational' | 'follow_up';
+  potential_value?: 'high' | 'medium' | 'low' | 'unknown';
+  intent?: 'inquiry' | 'complaint' | 'purchase' | 'support' | 'partnership' | 'demo_request';
+  lead_notification?: boolean;
+  analysis_id?: string;
+}
+
+export interface ScheduleCustomerSupportParams {
+  emails: EmailData[];
   site_id: string;
   user_id: string;
-  lead_notification: boolean;
-  priority: 'high' | 'medium' | 'low';
-  response_type: 'commercial' | 'support' | 'informational' | 'follow_up';
-  potential_value: 'high' | 'medium' | 'low' | 'unknown';
-  intent: 'inquiry' | 'complaint' | 'purchase' | 'support' | 'partnership' | 'demo_request';
-  // ID único para tracking
-  analysis_id: string;
+  total_emails: number;
+  agentId?: string;
 }
+
+// Mantener AnalysisData como alias para compatibilidad
+export type AnalysisData = EmailData;
 
 export interface CustomerSupportMessageRequest {
   message: string;
@@ -41,33 +49,29 @@ export interface CustomerSupportMessageRequest {
   lead_notification?: string;
 }
 
-export interface ScheduleCustomerSupportParams {
-  analysisArray: AnalysisData[];
-  agentId?: string;
-}
-
 /**
- * Send customer support message based on analysis data
+ * Send customer support message based on email data
  */
 export async function sendCustomerSupportMessageActivity(
-  analysisData: AnalysisData,
+  emailData: EmailData,
   baseParams: {
     site_id: string;
+    user_id: string;
     agentId?: string;
-    userId?: string;
   }
 ): Promise<any> {
   console.log('📞 Sending customer support message...');
   
-  const { email, site_id, user_id, lead_notification, response_type } = analysisData;
+  const { email, lead_notification, response_type } = emailData;
+  const { site_id, user_id, agentId } = baseParams;
   
   // Build the message request payload usando los campos directos
   const messageRequest: CustomerSupportMessageRequest = {
     message: email.summary || 'Customer support interaction from analysis',
-    site_id: site_id, // Usar el site_id del analysisData
-    agentId: baseParams.agentId,
-    userId: user_id, // Usar el user_id del analysisData
-    lead_notification: lead_notification ? response_type : undefined,
+    site_id: site_id,
+    agentId: agentId,
+    userId: user_id,
+    lead_notification: lead_notification && response_type ? response_type : undefined,
   };
 
   // Add contact information if available
@@ -85,9 +89,9 @@ export async function sendCustomerSupportMessageActivity(
 
   console.log('📤 Sending customer support message with payload:', {
     hasContactInfo: !!(email.contact_info.name || email.contact_info.email),
-    intent: analysisData.intent,
-    priority: analysisData.priority,
-    analysisId: analysisData.analysis_id
+    intent: emailData.intent || 'unknown',
+    priority: emailData.priority || 'medium',
+    analysisId: emailData.analysis_id || 'no-id'
   });
 
   try {
@@ -107,20 +111,20 @@ export async function sendCustomerSupportMessageActivity(
 }
 
 /**
- * Process analysis data and prepare for customer support interaction
+ * Process email data and prepare for customer support interaction
  */
 export async function processAnalysisDataActivity(
-  analysisData: AnalysisData
+  emailData: EmailData
 ): Promise<{
   shouldProcess: boolean;
   priority: string;
   reason: string;
 }> {
-  const { lead_notification, priority, intent, potential_value } = analysisData;
+  const { lead_notification, priority, intent, potential_value } = emailData;
   
-  console.log('🔍 Processing analysis data for customer support...');
+  console.log('🔍 Processing email data for customer support...');
   
-  // Determine if this analysis requires customer support action
+  // Determine if this email requires customer support action
   const shouldProcess = 
     lead_notification ||
     priority === 'high' ||
@@ -137,14 +141,14 @@ export async function processAnalysisDataActivity(
   } else if (potential_value === 'high') {
     reason = 'High commercial potential detected';
   } else {
-    reason = 'No immediate action required';
+    reason = 'No immediate action required - processing for completeness';
   }
   
-  console.log(`📊 Analysis processing result: ${shouldProcess ? 'PROCESS' : 'SKIP'} - ${reason}`);
+  console.log(`📊 Email processing result: ${shouldProcess ? 'PROCESS' : 'SKIP'} - ${reason}`);
   
   return {
-    shouldProcess,
-    priority,
+    shouldProcess: true, // Por ahora procesar todos los emails
+    priority: priority || 'medium',
     reason
   };
 } 

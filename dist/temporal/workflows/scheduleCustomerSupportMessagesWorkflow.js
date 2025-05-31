@@ -12,29 +12,25 @@ const { sendCustomerSupportMessageActivity, processAnalysisDataActivity } = (0, 
 });
 /**
  * Single Customer Support Message Workflow
- * Processes one analysis and sends a customer support message
+ * Processes one email and sends a customer support message
  */
-async function customerSupportMessageWorkflow(analysisData, baseParams) {
+async function customerSupportMessageWorkflow(emailData, baseParams) {
     console.log('🎯 Starting single customer support message workflow...');
-    console.log(`📋 Processing analysis ID: ${analysisData.analysis_id}`);
+    console.log(`📋 Processing email ID: ${emailData.analysis_id || 'no-id'}`);
     try {
-        // First, process the analysis to determine if action is needed
-        const processResult = await processAnalysisDataActivity(analysisData);
+        // First, process the email to determine if action is needed
+        const processResult = await processAnalysisDataActivity(emailData);
         if (!processResult.shouldProcess) {
-            console.log('⏭️ Skipping analysis - not requiring immediate action');
+            console.log('⏭️ Skipping email - not requiring immediate action');
             return {
                 success: true,
                 processed: false,
                 reason: processResult.reason
             };
         }
-        console.log('📞 Processing analysis - sending customer support message');
-        // Send the customer support message using data from analysisData
-        const response = await sendCustomerSupportMessageActivity(analysisData, {
-            site_id: analysisData.site_id,
-            agentId: baseParams.agentId,
-            userId: analysisData.user_id,
-        });
+        console.log('📞 Processing email - sending customer support message');
+        // Send the customer support message using data from emailData and baseParams
+        const response = await sendCustomerSupportMessageActivity(emailData, baseParams);
         console.log('✅ Customer support message workflow completed successfully');
         return {
             success: true,
@@ -55,16 +51,19 @@ async function customerSupportMessageWorkflow(analysisData, baseParams) {
 }
 /**
  * Schedule Customer Support Messages Workflow
- * Takes an array of analysis data and schedules customer support messages
+ * Takes an array of email data and schedules customer support messages
  * with 1-minute intervals between each message
  */
 async function scheduleCustomerSupportMessagesWorkflow(params) {
     console.log('🚀 Starting schedule customer support messages workflow...');
     const startTime = new Date();
-    const { analysisArray, agentId } = params;
-    const totalAnalysis = analysisArray.length;
-    console.log(`📊 Processing ${totalAnalysis} analysis items for customer support...`);
+    const { emails, site_id, user_id, total_emails, agentId } = params;
+    const totalEmails = emails.length;
+    console.log(`📊 Processing ${totalEmails} emails for customer support...`);
+    console.log(`🏢 Site: ${site_id}, User: ${user_id}`);
     const baseParams = {
+        site_id,
+        user_id,
         agentId
     };
     const results = [];
@@ -73,17 +72,17 @@ async function scheduleCustomerSupportMessagesWorkflow(params) {
     let completed = 0;
     let failed = 0;
     try {
-        // Process each analysis with 1-minute intervals
-        for (let i = 0; i < analysisArray.length; i++) {
-            const analysisData = analysisArray[i];
-            const workflowId = `customer-support-message-${analysisData.analysis_id}`;
-            console.log(`📋 Processing analysis ${i + 1}/${totalAnalysis} (ID: ${workflowId})`);
-            console.log(`🏢 Site: ${analysisData.site_id}, User: ${analysisData.user_id}`);
+        // Process each email with 1-minute intervals
+        for (let i = 0; i < emails.length; i++) {
+            const emailData = emails[i];
+            const emailId = emailData.analysis_id || `email_${Date.now()}_${i}`;
+            const workflowId = `customer-support-message-${emailId}`;
+            console.log(`📋 Processing email ${i + 1}/${totalEmails} (ID: ${workflowId})`);
             try {
-                // Start child workflow for this specific analysis
+                // Start child workflow for this specific email
                 const handle = await (0, workflow_1.startChild)(customerSupportMessageWorkflow, {
                     workflowId,
-                    args: [analysisData, baseParams],
+                    args: [emailData, baseParams],
                 });
                 scheduled++;
                 console.log(`✅ Scheduled customer support message workflow: ${workflowId}`);
@@ -92,16 +91,16 @@ async function scheduleCustomerSupportMessagesWorkflow(params) {
                 if (result.success) {
                     if (result.processed) {
                         completed++;
-                        console.log(`✅ Completed processing analysis ${i + 1}: ${result.reason}`);
+                        console.log(`✅ Completed processing email ${i + 1}: ${result.reason}`);
                     }
                     else {
                         skipped++;
-                        console.log(`⏭️ Skipped analysis ${i + 1}: ${result.reason}`);
+                        console.log(`⏭️ Skipped email ${i + 1}: ${result.reason}`);
                     }
                 }
                 else {
                     failed++;
-                    console.error(`❌ Failed analysis ${i + 1}: ${result.error}`);
+                    console.error(`❌ Failed email ${i + 1}: ${result.error}`);
                 }
                 results.push({
                     index: i,
@@ -110,18 +109,18 @@ async function scheduleCustomerSupportMessagesWorkflow(params) {
                     processed: result.processed,
                     reason: result.reason,
                     error: result.error,
-                    analysisId: analysisData.analysis_id
+                    emailId: emailId
                 });
-                // Sleep for 1 minute before processing the next analysis (except for the last one)
-                if (i < analysisArray.length - 1) {
-                    console.log('⏰ Waiting 1 minute before processing next analysis...');
+                // Sleep for 1 minute before processing the next email (except for the last one)
+                if (i < emails.length - 1) {
+                    console.log('⏰ Waiting 1 minute before processing next email...');
                     await (0, workflow_1.sleep)('1m');
                 }
             }
             catch (error) {
                 failed++;
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                console.error(`❌ Failed to start workflow for analysis ${i + 1}:`, errorMessage);
+                console.error(`❌ Failed to start workflow for email ${i + 1}:`, errorMessage);
                 results.push({
                     index: i,
                     workflowId,
@@ -129,7 +128,7 @@ async function scheduleCustomerSupportMessagesWorkflow(params) {
                     processed: false,
                     reason: 'Failed to start workflow',
                     error: errorMessage,
-                    analysisId: analysisData.analysis_id
+                    emailId: emailId
                 });
             }
         }
@@ -138,7 +137,7 @@ async function scheduleCustomerSupportMessagesWorkflow(params) {
         console.log('🎉 Schedule customer support messages workflow completed');
         console.log(`📊 Summary: ${completed} completed, ${skipped} skipped, ${failed} failed`);
         return {
-            totalAnalysis,
+            totalEmails,
             scheduled,
             skipped,
             completed,

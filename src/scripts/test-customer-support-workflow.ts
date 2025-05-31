@@ -4,10 +4,10 @@
  */
 
 import { getTemporalClient } from '../temporal/client';
-import type { AnalysisData, ScheduleCustomerSupportParams } from '../temporal/activities/customerSupportActivities';
+import type { EmailData, ScheduleCustomerSupportParams } from '../temporal/activities/customerSupportActivities';
 
-// Sample analysis data for testing
-const mockAnalysisData: AnalysisData[] = [
+// Sample email data for testing
+const mockEmailData: EmailData[] = [
   {
     email: {
       summary: "Customer inquiry about pricing for enterprise features",
@@ -18,8 +18,6 @@ const mockAnalysisData: AnalysisData[] = [
         company: "Example Corp"
       }
     },
-    site_id: "site_123",
-    user_id: "user_456",
     lead_notification: true,
     priority: "high",
     response_type: "commercial",
@@ -37,8 +35,6 @@ const mockAnalysisData: AnalysisData[] = [
         company: "Customer Inc"
       }
     },
-    site_id: "site_123",
-    user_id: "user_789",
     lead_notification: true,
     priority: "medium",
     response_type: "support",
@@ -56,8 +52,6 @@ const mockAnalysisData: AnalysisData[] = [
         company: "Startup LLC"
       }
     },
-    site_id: "site_456",
-    user_id: "user_123",
     lead_notification: false,
     priority: "low",
     response_type: "informational",
@@ -77,11 +71,15 @@ export async function testCustomerSupportWorkflow() {
     const client = await getTemporalClient();
     
     const params: ScheduleCustomerSupportParams = {
-      analysisArray: mockAnalysisData,
+      emails: mockEmailData,
+      site_id: 'test-site-123',
+      user_id: 'test-user-456',
+      total_emails: mockEmailData.length,
       agentId: 'test-agent-123'
     };
     
-    console.log(`📊 Testing workflow with ${params.analysisArray.length} analysis items`);
+    console.log(`📊 Testing workflow with ${params.emails.length} emails`);
+    console.log(`🏢 Site: ${params.site_id}, User: ${params.user_id}`);
     
     const result = await client.workflow.execute('scheduleCustomerSupportMessagesWorkflow', {
       args: [params],
@@ -105,17 +103,23 @@ export async function testSingleCustomerSupportMessage() {
     console.log('🧪 Testing Single Customer Support Message...');
     
     const client = await getTemporalClient();
-    const analysisData = mockAnalysisData[0]; // Use first analysis item
+    const emailData = mockEmailData[0]; // Use first email item
     
-    console.log('📋 Testing single message with analysis:', {
-      summary: analysisData.email.summary,
-      priority: analysisData.priority,
-      leadNotification: analysisData.lead_notification,
-      intent: analysisData.intent
+    console.log('📋 Testing single message with email:', {
+      summary: emailData.email.summary,
+      priority: emailData.priority,
+      leadNotification: emailData.lead_notification,
+      intent: emailData.intent
     });
     
+    const baseParams = {
+      site_id: 'test-site-123',
+      user_id: 'test-user-456',
+      agentId: 'test-agent-456'
+    };
+    
     const result = await client.workflow.execute('customerSupportMessageWorkflow', {
-      args: [analysisData, { agentId: 'test-agent-456' }],
+      args: [emailData, baseParams],
       taskQueue: 'customer-support-queue',
       workflowId: `test-single-customer-support-${Date.now()}`,
     });

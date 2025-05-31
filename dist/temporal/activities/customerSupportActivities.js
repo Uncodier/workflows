@@ -4,18 +4,19 @@ exports.sendCustomerSupportMessageActivity = sendCustomerSupportMessageActivity;
 exports.processAnalysisDataActivity = processAnalysisDataActivity;
 const apiService_1 = require("../services/apiService");
 /**
- * Send customer support message based on analysis data
+ * Send customer support message based on email data
  */
-async function sendCustomerSupportMessageActivity(analysisData, baseParams) {
+async function sendCustomerSupportMessageActivity(emailData, baseParams) {
     console.log('📞 Sending customer support message...');
-    const { email, site_id, user_id, lead_notification, response_type } = analysisData;
+    const { email, lead_notification, response_type } = emailData;
+    const { site_id, user_id, agentId } = baseParams;
     // Build the message request payload usando los campos directos
     const messageRequest = {
         message: email.summary || 'Customer support interaction from analysis',
-        site_id: site_id, // Usar el site_id del analysisData
-        agentId: baseParams.agentId,
-        userId: user_id, // Usar el user_id del analysisData
-        lead_notification: lead_notification ? response_type : undefined,
+        site_id: site_id,
+        agentId: agentId,
+        userId: user_id,
+        lead_notification: lead_notification && response_type ? response_type : undefined,
     };
     // Add contact information if available
     if (email.contact_info.name) {
@@ -29,9 +30,9 @@ async function sendCustomerSupportMessageActivity(analysisData, baseParams) {
     }
     console.log('📤 Sending customer support message with payload:', {
         hasContactInfo: !!(email.contact_info.name || email.contact_info.email),
-        intent: analysisData.intent,
-        priority: analysisData.priority,
-        analysisId: analysisData.analysis_id
+        intent: emailData.intent || 'unknown',
+        priority: emailData.priority || 'medium',
+        analysisId: emailData.analysis_id || 'no-id'
     });
     try {
         const response = await apiService_1.apiService.post('/api/agents/customerSupport/message', messageRequest);
@@ -47,12 +48,12 @@ async function sendCustomerSupportMessageActivity(analysisData, baseParams) {
     }
 }
 /**
- * Process analysis data and prepare for customer support interaction
+ * Process email data and prepare for customer support interaction
  */
-async function processAnalysisDataActivity(analysisData) {
-    const { lead_notification, priority, intent, potential_value } = analysisData;
-    console.log('🔍 Processing analysis data for customer support...');
-    // Determine if this analysis requires customer support action
+async function processAnalysisDataActivity(emailData) {
+    const { lead_notification, priority, intent, potential_value } = emailData;
+    console.log('🔍 Processing email data for customer support...');
+    // Determine if this email requires customer support action
     const shouldProcess = lead_notification ||
         priority === 'high' ||
         intent === 'complaint' ||
@@ -71,12 +72,12 @@ async function processAnalysisDataActivity(analysisData) {
         reason = 'High commercial potential detected';
     }
     else {
-        reason = 'No immediate action required';
+        reason = 'No immediate action required - processing for completeness';
     }
-    console.log(`📊 Analysis processing result: ${shouldProcess ? 'PROCESS' : 'SKIP'} - ${reason}`);
+    console.log(`📊 Email processing result: ${shouldProcess ? 'PROCESS' : 'SKIP'} - ${reason}`);
     return {
-        shouldProcess,
-        priority,
+        shouldProcess: true, // Por ahora procesar todos los emails
+        priority: priority || 'medium',
         reason
     };
 }

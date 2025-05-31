@@ -7,8 +7,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.testCustomerSupportWorkflow = testCustomerSupportWorkflow;
 exports.testSingleCustomerSupportMessage = testSingleCustomerSupportMessage;
 const client_1 = require("../temporal/client");
-// Sample analysis data for testing
-const mockAnalysisData = [
+// Sample email data for testing
+const mockEmailData = [
     {
         email: {
             summary: "Customer inquiry about pricing for enterprise features",
@@ -19,8 +19,6 @@ const mockAnalysisData = [
                 company: "Example Corp"
             }
         },
-        site_id: "site_123",
-        user_id: "user_456",
         lead_notification: true,
         priority: "high",
         response_type: "commercial",
@@ -38,8 +36,6 @@ const mockAnalysisData = [
                 company: "Customer Inc"
             }
         },
-        site_id: "site_123",
-        user_id: "user_789",
         lead_notification: true,
         priority: "medium",
         response_type: "support",
@@ -57,8 +53,6 @@ const mockAnalysisData = [
                 company: "Startup LLC"
             }
         },
-        site_id: "site_456",
-        user_id: "user_123",
         lead_notification: false,
         priority: "low",
         response_type: "informational",
@@ -75,10 +69,14 @@ async function testCustomerSupportWorkflow() {
         console.log('🧪 Starting Customer Support Messages Workflow Test...');
         const client = await (0, client_1.getTemporalClient)();
         const params = {
-            analysisArray: mockAnalysisData,
+            emails: mockEmailData,
+            site_id: 'test-site-123',
+            user_id: 'test-user-456',
+            total_emails: mockEmailData.length,
             agentId: 'test-agent-123'
         };
-        console.log(`📊 Testing workflow with ${params.analysisArray.length} analysis items`);
+        console.log(`📊 Testing workflow with ${params.emails.length} emails`);
+        console.log(`🏢 Site: ${params.site_id}, User: ${params.user_id}`);
         const result = await client.workflow.execute('scheduleCustomerSupportMessagesWorkflow', {
             args: [params],
             taskQueue: 'customer-support-queue',
@@ -98,15 +96,20 @@ async function testSingleCustomerSupportMessage() {
     try {
         console.log('🧪 Testing Single Customer Support Message...');
         const client = await (0, client_1.getTemporalClient)();
-        const analysisData = mockAnalysisData[0]; // Use first analysis item
-        console.log('📋 Testing single message with analysis:', {
-            summary: analysisData.email.summary,
-            priority: analysisData.priority,
-            leadNotification: analysisData.lead_notification,
-            intent: analysisData.intent
+        const emailData = mockEmailData[0]; // Use first email item
+        console.log('📋 Testing single message with email:', {
+            summary: emailData.email.summary,
+            priority: emailData.priority,
+            leadNotification: emailData.lead_notification,
+            intent: emailData.intent
         });
+        const baseParams = {
+            site_id: 'test-site-123',
+            user_id: 'test-user-456',
+            agentId: 'test-agent-456'
+        };
         const result = await client.workflow.execute('customerSupportMessageWorkflow', {
-            args: [analysisData, { agentId: 'test-agent-456' }],
+            args: [emailData, baseParams],
             taskQueue: 'customer-support-queue',
             workflowId: `test-single-customer-support-${Date.now()}`,
         });
