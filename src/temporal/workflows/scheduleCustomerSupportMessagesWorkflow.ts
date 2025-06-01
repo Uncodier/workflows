@@ -81,7 +81,9 @@ export async function customerSupportMessageWorkflow(
         console.log('📧 Starting sendEmailFromAgent workflow - customer support was successful...');
         console.log(`🔄 Original lead_notification: ${emailData.lead_notification} - proceeding with follow-up email`);
         
-        emailWorkflowId = `send-email-agent-${emailData.analysis_id}`;
+        // ✅ FIXED: Manejar analysis_id opcional para el workflowId
+        const emailWorkflowSuffix = emailData.analysis_id || `temp-${Date.now()}`;
+        emailWorkflowId = `send-email-agent-${emailWorkflowSuffix}`;
         
         // Prepare email parameters
         const emailParams = {
@@ -91,7 +93,8 @@ export async function customerSupportMessageWorkflow(
           message: `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
           site_id: emailData.site_id,
           agent_id: baseParams.agentId,
-          lead_id: emailData.analysis_id
+          // ✅ FIXED: Solo enviar lead_id si hay un analysis_id real
+          lead_id: emailData.analysis_id || undefined
         };
         
         // Start sendEmailFromAgent as child workflow
@@ -208,21 +211,26 @@ export async function scheduleCustomerSupportMessagesWorkflow(
     // Process each email with 1-minute intervals
     for (let i = 0; i < emails.length; i++) {
       const emailData = emails[i];
-      const emailId = emailData.analysis_id || `email-${i}`;
-      const workflowId = `customer-support-message-${emailId}`;
+      
+      // ✅ IMPROVED: Usar un ID más claro para tracking interno, pero preservar analysis_id real
+      const trackingId = emailData.analysis_id || `workflow-${i}-${Date.now()}`;
+      const workflowId = `customer-support-message-${trackingId}`;
       
       // Enriquecer emailData con campos necesarios si no están presentes
-      const enrichedEmailData = {
+      // ✅ FIXED: No sobrescribir analysis_id con un valor generado si ya existe
+      const enrichedEmailData: EmailData = {
         ...emailData,
         site_id: emailData.site_id || site_id,
         user_id: emailData.user_id || user_id,
-        analysis_id: emailData.analysis_id || emailId,
+        // Solo preservar analysis_id si existe y es válido
+        analysis_id: emailData.analysis_id,
         lead_notification: emailData.lead_notification || 'email', // Default para procesamiento
       };
       
       console.log(`📋 Processing email ${i + 1}/${totalEmails} (ID: ${workflowId})`);
       console.log(`📧 Subject: ${emailData.original_subject || 'No subject'}`);
       console.log(`👤 Contact: ${emailData.contact_info.name || 'Unknown'} (${emailData.contact_info.email || 'No email'})`);
+      console.log(`🆔 Analysis ID: ${emailData.analysis_id ? emailData.analysis_id + ' (real)' : 'none (will not send lead_id to API)'}`);
       
       try {
         // Start child workflow for this specific email
@@ -263,7 +271,7 @@ export async function scheduleCustomerSupportMessagesWorkflow(
           processed: result.processed,
           reason: result.reason,
           error: result.error,
-          emailId: emailId,
+          emailId: trackingId,
           emailSent: result.emailSent,
           emailWorkflowId: result.emailWorkflowId
         });
@@ -286,7 +294,7 @@ export async function scheduleCustomerSupportMessagesWorkflow(
           processed: false,
           reason: 'Failed to start workflow',
           error: errorMessage,
-          emailId: emailId,
+          emailId: trackingId,
           emailSent: false,
           emailWorkflowId: undefined
         });
@@ -316,4 +324,4 @@ export async function scheduleCustomerSupportMessagesWorkflow(
     console.error('❌ Schedule customer support messages workflow failed:', error);
     throw error;
   }
-}
+} 

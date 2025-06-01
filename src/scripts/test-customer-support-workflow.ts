@@ -20,7 +20,7 @@ const testEmailData: EmailData[] = [
     site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
     user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
     lead_notification: "email",
-    analysis_id: "analysis-1",
+    analysis_id: "real-analysis-001",
     priority: "high",
     intent: "inquiry",
     potential_value: "high"
@@ -37,7 +37,6 @@ const testEmailData: EmailData[] = [
     site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
     user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
     lead_notification: "email",
-    analysis_id: "analysis-2",
     priority: "medium",
     intent: "support",
     potential_value: "medium"
@@ -60,8 +59,8 @@ const mockApiResponse: ApiEmailResponse = {
       total_emails: testEmailData.length,
       timestamp: "2025-06-01T01:55:22.564Z",
       agentId: "test-agent-123"
+      }
     }
-  }
 };
 
 /**
@@ -98,7 +97,7 @@ export async function testApiEmailProcessingWorkflow() {
 export async function testCustomerSupportWorkflow() {
   try {
     console.log('🧪 Starting Direct Customer Support Messages Workflow Test...');
-    
+  
     const client = await getTemporalClient();
     
     const params: ScheduleCustomerSupportParams = {
@@ -133,7 +132,7 @@ export async function testCustomerSupportWorkflow() {
 export async function testSingleCustomerSupportMessage() {
   try {
     console.log('🧪 Testing Single Customer Support Message...');
-    
+  
     const client = await getTemporalClient();
     const emailData = testEmailData[0]; // Use first email item
     
@@ -193,4 +192,4 @@ async function main() {
 // Run tests if this file is executed directly
 if (require.main === module) {
   main().catch(console.error);
-} 
+}

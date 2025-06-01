@@ -6,19 +6,19 @@ import { apiService } from '../services/apiService';
  */
 
 export interface EmailData {
-  summary: string;
+    summary: string;
   original_subject?: string;
-  contact_info: {
-    name: string | null;
-    email: string | null;
-    phone: string | null;
-    company: string | null;
-  };
+      contact_info: {
+        name: string | null;
+        email: string | null;
+        phone: string | null;
+        company: string | null;
+      };
   // Campos que vienen del análisis individual
   site_id: string;
   user_id: string;
   lead_notification: string; // "email" u otros valores
-  analysis_id: string;
+  analysis_id?: string; // ✅ FIXED: Hacer opcional para evitar problemas con IDs generados automáticamente
   // Campos opcionales adicionales
   priority?: 'high' | 'medium' | 'low';
   response_type?: 'commercial' | 'support' | 'informational' | 'follow_up';
@@ -100,9 +100,13 @@ export async function sendCustomerSupportMessageActivity(
     messageRequest.phone = emailData.contact_info.phone;
   }
 
-  // Optional: usar analysis_id como lead_id si está disponible
-  if (analysis_id) {
+  // ✅ FIXED: Solo enviar lead_id si hay un analysis_id real y válido
+  // No enviar si está undefined, es null, o es del patrón generado automáticamente
+  if (analysis_id && typeof analysis_id === 'string' && !analysis_id.startsWith('email-') && !analysis_id.startsWith('workflow-')) {
     messageRequest.lead_id = analysis_id;
+    console.log(`📋 Using real analysis_id as lead_id: ${analysis_id}`);
+  } else {
+    console.log(`⚠️ Skipping lead_id - analysis_id is auto-generated, missing, or invalid: ${analysis_id || 'undefined'}`);
   }
 
   console.log('📤 Sending customer support message with payload:', {
