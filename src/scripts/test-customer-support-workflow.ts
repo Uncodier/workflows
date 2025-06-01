@@ -7,63 +7,57 @@ import { getTemporalClient } from '../temporal/client';
 import type { EmailData, ScheduleCustomerSupportParams, ApiEmailResponse } from '../temporal/activities/customerSupportActivities';
 
 // Sample email data for testing with real API structure
-const mockEmailData: EmailData[] = [
+const testEmailData: EmailData[] = [
   {
-    email: {
-      summary: "The emails include notifications about a webinar on zero-click search strategies, product updates, verification codes, build failures, and event reminders. The correspondence is mainly promotional and informational, with some technical support alerts.",
-      original_subject: "QQ: is your Google traffic dropping?",
-      contact_info: {
-        name: "Neil Patel",
-        email: "neil@advanced.npdigital.com",
-        phone: null,
-        company: "NP Digital"
-      }
+    summary: "The emails include event notifications, support alerts, verification codes, and promotional updates from various services like Vercel, Stripe, TikTok, Twilio, and support platforms.",
+    original_subject: "QQ: is your Google traffic dropping?",
+    contact_info: {
+      name: "Neil Patel",
+      email: "neil@advanced.npdigital.com",
+      phone: "",
+      company: "NP Digital"
     },
     site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
     user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
-    lead_notification: "email", // Del flujo syncEmails - enviará follow-up email
-    analysis_id: "email_1748742922564_0",
+    lead_notification: "email",
+    analysis_id: "analysis-1",
     priority: "high",
-    response_type: "commercial",
-    potential_value: "high",
-    intent: "inquiry"
+    intent: "inquiry",
+    potential_value: "high"
   },
   {
-    email: {
-      summary: "Support request for integration help with our API",
-      original_subject: "Need help with API integration",
-      contact_info: {
-        name: "Jane Smith",
-        email: "jane.smith@customer.com",
-        phone: "+1555123456",
-        company: "Customer Inc"
-      }
+    summary: "Customer inquiry about API integration assistance and technical support for implementation.",
+    original_subject: "Need help with API integration",
+    contact_info: {
+      name: "Jane Smith",
+      email: "jane.smith@techcorp.com",
+      phone: "+1-555-0123",
+      company: "TechCorp"
     },
     site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
     user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
-    lead_notification: "none",
-    analysis_id: "email_1748742922564_1",
+    lead_notification: "email",
+    analysis_id: "analysis-2",
     priority: "medium",
-    response_type: "support",
-    potential_value: "medium",
-    intent: "support"
+    intent: "support",
+    potential_value: "medium"
   }
 ];
 
 // Mock API response structure
 const mockApiResponse: ApiEmailResponse = {
-  emails: mockEmailData,
+  emails: testEmailData,
   site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
   user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
-  total_emails: mockEmailData.length,
+  total_emails: testEmailData.length,
   timestamp: "2025-06-01T01:55:22.564Z",
   childWorkflow: {
     type: "scheduleCustomerSupportMessagesWorkflow",
     args: {
-      emails: mockEmailData,
+      emails: testEmailData,
       site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
       user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
-      total_emails: mockEmailData.length,
+      total_emails: testEmailData.length,
       timestamp: "2025-06-01T01:55:22.564Z",
       agentId: "test-agent-123"
     }
@@ -108,10 +102,10 @@ export async function testCustomerSupportWorkflow() {
     const client = await getTemporalClient();
     
     const params: ScheduleCustomerSupportParams = {
-      emails: mockEmailData,
+      emails: testEmailData,
       site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
       user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
-      total_emails: mockEmailData.length,
+      total_emails: testEmailData.length,
       timestamp: "2025-06-01T01:55:22.564Z",
       agentId: 'test-agent-123'
     };
@@ -141,15 +135,15 @@ export async function testSingleCustomerSupportMessage() {
     console.log('🧪 Testing Single Customer Support Message...');
     
     const client = await getTemporalClient();
-    const emailData = mockEmailData[0]; // Use first email item
+    const emailData = testEmailData[0]; // Use first email item
     
     console.log('📋 Testing single message with email:', {
-      summary: emailData.email.summary.substring(0, 100) + '...',
-      subject: emailData.email.original_subject,
+      summary: emailData.summary.substring(0, 100) + '...',
+      subject: emailData.original_subject,
       priority: emailData.priority,
       leadNotification: emailData.lead_notification,
       intent: emailData.intent,
-      contact: emailData.email.contact_info.name
+      contact: emailData.contact_info.name
     });
     
     const baseParams = {

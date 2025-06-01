@@ -77,7 +77,7 @@ export async function customerSupportMessageWorkflow(
     
     try {
       // Check if we have contact email and original lead_notification indicates email should be sent
-      if (emailData.email.contact_info.email && emailData.lead_notification === 'email') {
+      if (emailData.contact_info.email && emailData.lead_notification === 'email') {
         console.log('📧 Starting sendEmailFromAgent workflow - customer support was successful...');
         console.log(`🔄 Original lead_notification: ${emailData.lead_notification} - proceeding with follow-up email`);
         
@@ -85,9 +85,9 @@ export async function customerSupportMessageWorkflow(
         
         // Prepare email parameters
         const emailParams = {
-          email: emailData.email.contact_info.email,
+          email: emailData.contact_info.email,
           from: `support@${emailData.site_id}.com`, // Dynamic from based on site
-          subject: `Re: ${emailData.email.original_subject || 'Your inquiry'}`,
+          subject: `Re: ${emailData.original_subject || 'Your inquiry'}`,
           message: `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
           site_id: emailData.site_id,
           agent_id: baseParams.agentId,
@@ -112,7 +112,7 @@ export async function customerSupportMessageWorkflow(
           console.log('⚠️ Follow-up email failed, but customer support was successful');
         }
         
-      } else if (!emailData.email.contact_info.email) {
+      } else if (!emailData.contact_info.email) {
         console.log('📭 No email address available for follow-up');
       } else if (emailData.lead_notification !== 'email') {
         console.log(`📋 lead_notification = "${emailData.lead_notification}" - skipping follow-up email`);
@@ -208,18 +208,27 @@ export async function scheduleCustomerSupportMessagesWorkflow(
     // Process each email with 1-minute intervals
     for (let i = 0; i < emails.length; i++) {
       const emailData = emails[i];
-      const emailId = emailData.analysis_id;
+      const emailId = emailData.analysis_id || `email-${i}`;
       const workflowId = `customer-support-message-${emailId}`;
       
+      // Enriquecer emailData con campos necesarios si no están presentes
+      const enrichedEmailData = {
+        ...emailData,
+        site_id: emailData.site_id || site_id,
+        user_id: emailData.user_id || user_id,
+        analysis_id: emailData.analysis_id || emailId,
+        lead_notification: emailData.lead_notification || 'email', // Default para procesamiento
+      };
+      
       console.log(`📋 Processing email ${i + 1}/${totalEmails} (ID: ${workflowId})`);
-      console.log(`📧 Subject: ${emailData.email.original_subject || 'No subject'}`);
-      console.log(`👤 Contact: ${emailData.email.contact_info.name || 'Unknown'} (${emailData.email.contact_info.email || 'No email'})`);
+      console.log(`📧 Subject: ${emailData.original_subject || 'No subject'}`);
+      console.log(`👤 Contact: ${emailData.contact_info.name || 'Unknown'} (${emailData.contact_info.email || 'No email'})`);
       
       try {
         // Start child workflow for this specific email
         const handle = await startChild(customerSupportMessageWorkflow, {
           workflowId,
-          args: [emailData, baseParams],
+          args: [enrichedEmailData, baseParams],
         });
         
         scheduled++;
@@ -308,68 +317,3 @@ export async function scheduleCustomerSupportMessagesWorkflow(
     throw error;
   }
 }
-
-/**
- * Main API Email Processing Workflow
- * Processes API email response and calls scheduleCustomerSupportMessagesWorkflow
- */
-export async function processApiEmailsWorkflow(
-  apiResponse: any // ApiEmailResponse but using any to avoid import issues
-): Promise<{
-  success: boolean;
-  scheduledWorkflowId?: string;
-  totalEmails: number;
-  emailsSent?: number;
-  error?: string;
-  results?: any;
-}> {
-  console.log('🌟 Starting API emails processing workflow...');
-  
-  try {
-    const { site_id, user_id, total_emails, timestamp, childWorkflow } = apiResponse;
-    
-    console.log(`📨 Received ${total_emails} emails from API`);
-    console.log(`🏢 Site: ${site_id}, User: ${user_id}`);
-    console.log(`⏰ Timestamp: ${timestamp}`);
-    
-    if (!childWorkflow || childWorkflow.type !== 'scheduleCustomerSupportMessagesWorkflow') {
-      throw new Error('Invalid or missing childWorkflow configuration');
-    }
-    
-    // Prepare parameters for the customer support workflow
-    const scheduleParams = childWorkflow.args;
-    
-    // Start the customer support scheduling workflow
-    const workflowId = `schedule-customer-support-${timestamp?.replace(/[:.]/g, '-') || Date.now()}`;
-    
-    console.log(`🚀 Starting scheduleCustomerSupportMessagesWorkflow with ID: ${workflowId}`);
-    
-    const handle = await startChild(scheduleCustomerSupportMessagesWorkflow, {
-      workflowId,
-      args: [scheduleParams],
-    });
-    
-    console.log(`✅ Scheduled customer support messages workflow: ${workflowId}`);
-    
-    // Wait for the workflow to complete
-    const result = await handle.result();
-    
-    console.log('🎉 API emails processing workflow completed successfully');
-    
-    return {
-      success: true,
-      scheduledWorkflowId: workflowId,
-      totalEmails: result.totalEmails,
-      emailsSent: result.emailsSent,
-      results: result
-    };
-    
-  } catch (error) {
-    console.error('❌ API emails processing workflow failed:', error);
-    return {
-      success: false,
-      totalEmails: 0,
-      error: error instanceof Error ? error.message : String(error)
-    };
-  }
-} 

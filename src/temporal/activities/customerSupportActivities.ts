@@ -6,15 +6,13 @@ import { apiService } from '../services/apiService';
  */
 
 export interface EmailData {
-  email: {
-    summary: string;
-    original_subject?: string;
-    contact_info: {
-      name: string | null;
-      email: string | null;
-      phone: string | null;
-      company: string | null;
-    };
+  summary: string;
+  original_subject?: string;
+  contact_info: {
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+    company: string | null;
   };
   // Campos que vienen del análisis individual
   site_id: string;
@@ -77,39 +75,46 @@ export async function sendCustomerSupportMessageActivity(
 ): Promise<any> {
   console.log('📞 Sending customer support message...');
   
-  const { email, site_id, user_id, analysis_id } = emailData;
+  const { summary, site_id, user_id, analysis_id } = emailData;
   const { agentId } = baseParams;
   
-  // Build the message request payload usando los campos del emailData
-  // Usar lead_notification = "none" para mejor trazabilidad
+  // Build the message request payload con SOLO los parámetros requeridos por el API
   const messageRequest: CustomerSupportMessageRequest = {
-    message: email.summary || 'Customer support interaction from analysis',
+    message: summary || 'Customer support interaction from analysis',
     site_id: site_id,
-    agentId: agentId,
     userId: user_id,
+    agentId: agentId,
     lead_notification: "none", // Para mejor trazabilidad - no duplicar notificaciones
   };
 
   // Add contact information if available
-  if (email.contact_info.name) {
-    messageRequest.name = email.contact_info.name;
+  if (emailData.contact_info.name) {
+    messageRequest.name = emailData.contact_info.name;
   }
   
-  if (email.contact_info.email) {
-    messageRequest.email = email.contact_info.email;
+  if (emailData.contact_info.email) {
+    messageRequest.email = emailData.contact_info.email;
   }
   
-  if (email.contact_info.phone) {
-    messageRequest.phone = email.contact_info.phone;
+  if (emailData.contact_info.phone) {
+    messageRequest.phone = emailData.contact_info.phone;
+  }
+
+  // Optional: usar analysis_id como lead_id si está disponible
+  if (analysis_id) {
+    messageRequest.lead_id = analysis_id;
   }
 
   console.log('📤 Sending customer support message with payload:', {
-    hasContactInfo: !!(email.contact_info.name || email.contact_info.email),
-    intent: emailData.intent || 'unknown',
-    priority: emailData.priority || 'medium',
-    analysisId: analysis_id,
-    leadNotification: "none", // Mejorar trazabilidad
-    originalLeadNotification: emailData.lead_notification
+    message: messageRequest.message?.substring(0, 50) + '...',
+    hasName: !!messageRequest.name,
+    hasEmail: !!messageRequest.email,
+    hasPhone: !!messageRequest.phone,
+    site_id: messageRequest.site_id,
+    userId: messageRequest.userId,
+    agentId: messageRequest.agentId,
+    lead_id: messageRequest.lead_id,
+    lead_notification: messageRequest.lead_notification
   });
 
   try {
