@@ -22,7 +22,8 @@ export interface EmailAnalysisResponse {
     status: string;
     message: string;
     emailCount: number;
-    emails?: any[];
+    analysisCount: number;
+    emails: any[];
     childWorkflow?: {
       type: string;
       args: any;
