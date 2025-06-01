@@ -72,7 +72,11 @@ export async function sendCustomerSupportMessageActivity(
   baseParams: {
     agentId?: string;
   }
-): Promise<any> {
+): Promise<{
+  success: boolean;
+  data?: any;
+  error?: string;
+}> {
   console.log('📞 Sending customer support message...');
   
   const { summary, site_id, user_id, analysis_id } = emailData;
@@ -127,15 +131,28 @@ export async function sendCustomerSupportMessageActivity(
     const response = await apiService.post('/api/agents/customerSupport/message', messageRequest);
     
     if (!response.success) {
-      throw new Error(`Failed to send customer support message: ${response.error?.message}`);
+      console.error('❌ API call failed:', response.error);
+      return {
+        success: false,
+        error: response.error?.message || 'Failed to send customer support message'
+      };
     }
     
     console.log('✅ Customer support message sent successfully');
-    return response.data;
+    console.log('📊 API Response data:', JSON.stringify(response.data, null, 2));
+    
+    // ✅ FIXED: Return consistent structure that workflow expects
+    return {
+      success: true,
+      data: response.data
+    };
     
   } catch (error) {
     console.error('❌ Failed to send customer support message:', error);
-    throw error;
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
   }
 }
 

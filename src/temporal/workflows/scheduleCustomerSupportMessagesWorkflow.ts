@@ -69,7 +69,7 @@ export async function customerSupportMessageWorkflow(
     }
     
     console.log('✅ Customer support message sent successfully');
-    console.log(`📋 Customer support response:`, JSON.stringify(response, null, 2));
+    console.log(`📋 Customer support response:`, JSON.stringify(response.data, null, 2));
     
     // 🌟 NEW: Call sendEmailFromAgent workflow ONLY if customer support was successful
     let emailWorkflowId: string | undefined;
