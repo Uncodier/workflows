@@ -8,6 +8,7 @@ import { apiService } from '../services/apiService';
 export interface EmailData {
   email: {
     summary: string;
+    original_subject?: string;
     contact_info: {
       name: string | null;
       email: string | null;
@@ -15,13 +16,16 @@ export interface EmailData {
       company: string | null;
     };
   };
-  // Campos adicionales que pueden venir del análisis
+  // Campos que vienen del análisis individual
+  site_id: string;
+  user_id: string;
+  lead_notification: string; // "email" u otros valores
+  analysis_id: string;
+  // Campos opcionales adicionales
   priority?: 'high' | 'medium' | 'low';
   response_type?: 'commercial' | 'support' | 'informational' | 'follow_up';
   potential_value?: 'high' | 'medium' | 'low' | 'unknown';
   intent?: 'inquiry' | 'complaint' | 'purchase' | 'support' | 'partnership' | 'demo_request';
-  lead_notification?: boolean;
-  analysis_id?: string;
 }
 
 export interface ScheduleCustomerSupportParams {
@@ -29,7 +33,20 @@ export interface ScheduleCustomerSupportParams {
   site_id: string;
   user_id: string;
   total_emails: number;
+  timestamp?: string;
   agentId?: string;
+}
+
+export interface ApiEmailResponse {
+  emails: EmailData[];
+  site_id: string;
+  user_id: string;
+  total_emails: number;
+  timestamp: string;
+  childWorkflow: {
+    type: "scheduleCustomerSupportMessagesWorkflow";
+    args: ScheduleCustomerSupportParams;
+  };
 }
 
 // Mantener AnalysisData como alias para compatibilidad
@@ -55,23 +72,22 @@ export interface CustomerSupportMessageRequest {
 export async function sendCustomerSupportMessageActivity(
   emailData: EmailData,
   baseParams: {
-    site_id: string;
-    user_id: string;
     agentId?: string;
   }
 ): Promise<any> {
   console.log('📞 Sending customer support message...');
   
-  const { email, lead_notification, response_type } = emailData;
-  const { site_id, user_id, agentId } = baseParams;
+  const { email, site_id, user_id, analysis_id } = emailData;
+  const { agentId } = baseParams;
   
-  // Build the message request payload usando los campos directos
+  // Build the message request payload usando los campos del emailData
+  // Usar lead_notification = "none" para mejor trazabilidad
   const messageRequest: CustomerSupportMessageRequest = {
     message: email.summary || 'Customer support interaction from analysis',
     site_id: site_id,
     agentId: agentId,
     userId: user_id,
-    lead_notification: lead_notification && response_type ? response_type : undefined,
+    lead_notification: "none", // Para mejor trazabilidad - no duplicar notificaciones
   };
 
   // Add contact information if available
@@ -91,7 +107,9 @@ export async function sendCustomerSupportMessageActivity(
     hasContactInfo: !!(email.contact_info.name || email.contact_info.email),
     intent: emailData.intent || 'unknown',
     priority: emailData.priority || 'medium',
-    analysisId: emailData.analysis_id || 'no-id'
+    analysisId: analysis_id,
+    leadNotification: "none", // Mejorar trazabilidad
+    originalLeadNotification: emailData.lead_notification
   });
 
   try {
@@ -123,17 +141,19 @@ export async function processAnalysisDataActivity(
   const { lead_notification, priority, intent, potential_value } = emailData;
   
   console.log('🔍 Processing email data for customer support...');
+  console.log(`📨 Original lead_notification: ${lead_notification}`);
   
   // Determine if this email requires customer support action
+  // IMPORTANTE: Manejar lead_notification = "email" del flujo syncEmails
   const shouldProcess = 
-    lead_notification ||
+    lead_notification === 'email' ||  // Viene del análisis de syncEmails
     priority === 'high' ||
     intent === 'complaint' ||
     potential_value === 'high';
     
   let reason = '';
-  if (lead_notification) {
-    reason = 'Lead notification required based on analysis';
+  if (lead_notification === 'email') {
+    reason = 'Email lead notification detected from syncEmails analysis';
   } else if (priority === 'high') {
     reason = 'High priority analysis';
   } else if (intent === 'complaint') {
@@ -141,14 +161,52 @@ export async function processAnalysisDataActivity(
   } else if (potential_value === 'high') {
     reason = 'High commercial potential detected';
   } else {
-    reason = 'No immediate action required - processing for completeness';
+    reason = 'Processing for completeness - email detected';
   }
   
   console.log(`📊 Email processing result: ${shouldProcess ? 'PROCESS' : 'SKIP'} - ${reason}`);
+  console.log(`🔄 Will send lead_notification="none" to customer support for traceability`);
   
   return {
-    shouldProcess: true, // Por ahora procesar todos los emails
+    shouldProcess,
     priority: priority || 'medium',
     reason
   };
+}
+
+/**
+ * Process API email response and execute customer support workflow
+ */
+export async function processApiEmailResponseActivity(
+  apiResponse: ApiEmailResponse
+): Promise<{
+  success: boolean;
+  workflowId?: string;
+  error?: string;
+}> {
+  console.log('🔄 Processing API email response for customer support workflow...');
+  
+  try {
+    const { childWorkflow } = apiResponse;
+    
+    if (childWorkflow.type !== 'scheduleCustomerSupportMessagesWorkflow') {
+      throw new Error(`Unexpected workflow type: ${childWorkflow.type}`);
+    }
+    
+    console.log(`📊 Processing ${childWorkflow.args.emails.length} emails from API response`);
+    console.log(`🏢 Site: ${childWorkflow.args.site_id}, User: ${childWorkflow.args.user_id}`);
+    
+    // Return the args to be used by the calling workflow
+    return {
+      success: true,
+      workflowId: `schedule-customer-support-${Date.now()}`
+    };
+    
+  } catch (error) {
+    console.error('❌ Failed to process API email response:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
 } 

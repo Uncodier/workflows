@@ -1,5 +1,6 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, startChild } from '@temporalio/workflow';
 import type { Activities } from '../activities';
+import { processApiEmailsWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
 
 // Define the activity interface and options
 const { 
@@ -188,6 +189,45 @@ export async function syncEmailsWorkflow(
             status: analysisResponse.data?.status,
             message: analysisResponse.data?.message
           };
+
+          // 🚀 Activación del flujo completo: cuando el análisis devuelve childWorkflow, iniciamos el workflow de customer support
+          if (analysisResponse.data?.childWorkflow) {
+            console.log(`🚀 Analysis returned childWorkflow configuration - starting customer support workflow`);
+            const customerSupportWorkflowId = `process-api-emails-${siteId}-${Date.now()}`;
+            const apiResponse = {
+              emails: analysisResponse.data.emails || [],
+              site_id: siteId,
+              user_id: options.userId,
+              total_emails: analysisResponse.data?.emailCount || 0,
+              timestamp: new Date().toISOString(),
+              childWorkflow: analysisResponse.data.childWorkflow
+            };
+            
+            try {
+              // Iniciar workflow en paralelo sin esperar resultado
+              void startChild(processApiEmailsWorkflow, {
+                workflowId: customerSupportWorkflowId,
+                args: [apiResponse],
+              });
+              
+              console.log(`✅ Started processApiEmailsWorkflow: ${customerSupportWorkflowId}`);
+              console.log(`🔄 This will trigger scheduleCustomerSupportMessagesWorkflow for complete traceability`);
+              
+              // Si quisiéramos esperar el resultado, haríamos:
+              // const handle = await startChild(...);
+              // const customerSupportResult = await handle.result();
+              
+            } catch (workflowError) {
+              console.error(`❌ Failed to start customer support workflow: ${workflowError}`);
+              // No fallar todo el sync por esto
+            }
+          } else {
+            console.log(`📋 No childWorkflow configuration returned - customer support workflow not triggered`);
+          }
+          
+          console.log(`📋 Email analysis completed. Command ID: ${analysisResponse.data?.commandId}`);
+          console.log(`🔄 Customer support workflow will be triggered if API returns childWorkflow configuration`);
+          
         } else {
           console.log(`⚠️ Email analysis failed: ${analysisResponse.error?.message}`);
           result.analysisResult = {
@@ -267,4 +307,4 @@ export async function syncEmailsWorkflow(
 
     throw error;
   }
-} 
+}

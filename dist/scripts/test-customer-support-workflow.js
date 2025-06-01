@@ -4,75 +4,108 @@
  * This script can be run to test the scheduleCustomerSupportMessagesWorkflow functionality
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.testApiEmailProcessingWorkflow = testApiEmailProcessingWorkflow;
 exports.testCustomerSupportWorkflow = testCustomerSupportWorkflow;
 exports.testSingleCustomerSupportMessage = testSingleCustomerSupportMessage;
 const client_1 = require("../temporal/client");
-// Sample email data for testing
+// Sample email data for testing with real API structure
 const mockEmailData = [
     {
         email: {
-            summary: "Customer inquiry about pricing for enterprise features",
+            summary: "The emails include notifications about a webinar on zero-click search strategies, product updates, verification codes, build failures, and event reminders. The correspondence is mainly promotional and informational, with some technical support alerts.",
+            original_subject: "QQ: is your Google traffic dropping?",
             contact_info: {
-                name: "John Doe",
-                email: "john.doe@example.com",
-                phone: "+1234567890",
-                company: "Example Corp"
+                name: "Neil Patel",
+                email: "neil@advanced.npdigital.com",
+                phone: null,
+                company: "NP Digital"
             }
         },
-        lead_notification: true,
+        site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
+        user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
+        lead_notification: "email", // Del flujo syncEmails - enviará follow-up email
+        analysis_id: "email_1748742922564_0",
         priority: "high",
         response_type: "commercial",
         potential_value: "high",
-        intent: "inquiry",
-        analysis_id: `analysis_${Date.now()}_0`
+        intent: "inquiry"
     },
     {
         email: {
-            summary: "Support request for integration help",
+            summary: "Support request for integration help with our API",
+            original_subject: "Need help with API integration",
             contact_info: {
                 name: "Jane Smith",
                 email: "jane.smith@customer.com",
-                phone: null,
+                phone: "+1555123456",
                 company: "Customer Inc"
             }
         },
-        lead_notification: true,
+        site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
+        user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
+        lead_notification: "none",
+        analysis_id: "email_1748742922564_1",
         priority: "medium",
         response_type: "support",
         potential_value: "medium",
-        intent: "support",
-        analysis_id: `analysis_${Date.now()}_1`
-    },
-    {
-        email: {
-            summary: "General inquiry about product features",
-            contact_info: {
-                name: "Bob Wilson",
-                email: "bob@startup.com",
-                phone: null,
-                company: "Startup LLC"
-            }
-        },
-        lead_notification: false,
-        priority: "low",
-        response_type: "informational",
-        potential_value: "low",
-        intent: "inquiry",
-        analysis_id: `analysis_${Date.now()}_2`
+        intent: "support"
     }
 ];
+// Mock API response structure
+const mockApiResponse = {
+    emails: mockEmailData,
+    site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
+    user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
+    total_emails: mockEmailData.length,
+    timestamp: "2025-06-01T01:55:22.564Z",
+    childWorkflow: {
+        type: "scheduleCustomerSupportMessagesWorkflow",
+        args: {
+            emails: mockEmailData,
+            site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
+            user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
+            total_emails: mockEmailData.length,
+            timestamp: "2025-06-01T01:55:22.564Z",
+            agentId: "test-agent-123"
+        }
+    }
+};
 /**
- * Test the full schedule customer support messages workflow
+ * Test the main API email processing workflow
+ */
+async function testApiEmailProcessingWorkflow() {
+    try {
+        console.log('🧪 Starting API Email Processing Workflow Test...');
+        const client = await (0, client_1.getTemporalClient)();
+        console.log(`📨 Testing with ${mockApiResponse.total_emails} emails from API response`);
+        console.log(`🏢 Site: ${mockApiResponse.site_id}`);
+        console.log(`👤 User: ${mockApiResponse.user_id}`);
+        console.log(`⏰ Timestamp: ${mockApiResponse.timestamp}`);
+        const result = await client.workflow.execute('processApiEmailsWorkflow', {
+            args: [mockApiResponse],
+            taskQueue: 'customer-support-queue',
+            workflowId: `test-api-emails-workflow-${Date.now()}`,
+        });
+        console.log('✅ API Email Processing Workflow completed successfully!');
+        console.log(`📊 Results:`, JSON.stringify(result, null, 2));
+    }
+    catch (error) {
+        console.error('❌ API Email Processing Workflow test failed:', error);
+    }
+}
+/**
+ * Test the direct schedule customer support messages workflow
  */
 async function testCustomerSupportWorkflow() {
     try {
-        console.log('🧪 Starting Customer Support Messages Workflow Test...');
+        console.log('🧪 Starting Direct Customer Support Messages Workflow Test...');
         const client = await (0, client_1.getTemporalClient)();
         const params = {
             emails: mockEmailData,
-            site_id: 'test-site-123',
-            user_id: 'test-user-456',
+            site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
+            user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
             total_emails: mockEmailData.length,
+            timestamp: "2025-06-01T01:55:22.564Z",
             agentId: 'test-agent-123'
         };
         console.log(`📊 Testing workflow with ${params.emails.length} emails`);
@@ -82,11 +115,11 @@ async function testCustomerSupportWorkflow() {
             taskQueue: 'customer-support-queue',
             workflowId: `test-customer-support-workflow-${Date.now()}`,
         });
-        console.log('✅ Workflow completed successfully!');
+        console.log('✅ Direct Workflow completed successfully!');
         console.log(`📊 Results:`, JSON.stringify(result, null, 2));
     }
     catch (error) {
-        console.error('❌ Workflow test failed:', error);
+        console.error('❌ Direct Workflow test failed:', error);
     }
 }
 /**
@@ -98,14 +131,14 @@ async function testSingleCustomerSupportMessage() {
         const client = await (0, client_1.getTemporalClient)();
         const emailData = mockEmailData[0]; // Use first email item
         console.log('📋 Testing single message with email:', {
-            summary: emailData.email.summary,
+            summary: emailData.email.summary.substring(0, 100) + '...',
+            subject: emailData.email.original_subject,
             priority: emailData.priority,
             leadNotification: emailData.lead_notification,
-            intent: emailData.intent
+            intent: emailData.intent,
+            contact: emailData.email.contact_info.name
         });
         const baseParams = {
-            site_id: 'test-site-123',
-            user_id: 'test-user-456',
             agentId: 'test-agent-456'
         };
         const result = await client.workflow.execute('customerSupportMessageWorkflow', {
@@ -128,10 +161,12 @@ async function main() {
         console.log('📝 Test 1: Single Customer Support Message');
         console.log('─'.repeat(50));
         await testSingleCustomerSupportMessage();
-        console.log('\n\n📝 Test 2: Full Schedule Customer Support Messages');
+        console.log('\n\n📝 Test 2: Direct Schedule Customer Support Messages');
         console.log('─'.repeat(50));
-        // Test 2: Full scheduling workflow
         await testCustomerSupportWorkflow();
+        console.log('\n\n📝 Test 3: API Email Processing Workflow (Main Entry Point)');
+        console.log('─'.repeat(50));
+        await testApiEmailProcessingWorkflow();
         console.log('\n✅ All tests completed successfully!');
     }
     catch (error) {
