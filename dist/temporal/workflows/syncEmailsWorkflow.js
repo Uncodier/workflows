@@ -129,37 +129,24 @@ async function syncEmailsWorkflow(options) {
                     if (analysisResponse.data?.emails && analysisResponse.data.emails.length > 0) {
                         console.log(`🚀 Found ${analysisResponse.data.emails.length} analyzed emails - starting customer support workflow`);
                         console.log(`📊 Starting customer support workflow for ${analysisResponse.data.analysisCount} analyzed emails`);
-                        const customerSupportWorkflowId = `process-api-emails-${siteId}-${Date.now()}`;
-                        // Generar configuración de childWorkflow localmente
-                        const childWorkflowConfig = {
-                            type: 'scheduleCustomerSupportMessagesWorkflow',
-                            args: {
-                                emails: analysisResponse.data.emails,
-                                site_id: siteId,
-                                user_id: options.userId,
-                                agentId: undefined, // Se puede configurar si es necesario
-                                timestamp: new Date().toISOString()
-                            }
-                        };
-                        const apiResponse = {
+                        const customerSupportWorkflowId = `schedule-customer-support-${siteId}-${Date.now()}`;
+                        // Preparar parámetros para scheduleCustomerSupportMessagesWorkflow
+                        const scheduleParams = {
                             emails: analysisResponse.data.emails,
                             site_id: siteId,
                             user_id: options.userId,
-                            total_emails: analysisResponse.data.analysisCount, // Usar analysisCount para emails realmente analizados
+                            total_emails: analysisResponse.data.analysisCount,
                             timestamp: new Date().toISOString(),
-                            childWorkflow: childWorkflowConfig
+                            agentId: undefined // Se puede configurar si es necesario
                         };
                         try {
                             // Iniciar workflow en paralelo sin esperar resultado
-                            void (0, workflow_1.startChild)(scheduleCustomerSupportMessagesWorkflow_1.processApiEmailsWorkflow, {
+                            void (0, workflow_1.startChild)(scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow, {
                                 workflowId: customerSupportWorkflowId,
-                                args: [apiResponse],
+                                args: [scheduleParams],
                             });
-                            console.log(`✅ Started processApiEmailsWorkflow: ${customerSupportWorkflowId}`);
-                            console.log(`🔄 This will trigger scheduleCustomerSupportMessagesWorkflow for complete traceability`);
-                            // Si quisiéramos esperar el resultado, haríamos:
-                            // const handle = await startChild(...);
-                            // const customerSupportResult = await handle.result();
+                            console.log(`✅ Started scheduleCustomerSupportMessagesWorkflow: ${customerSupportWorkflowId}`);
+                            console.log(`🔄 This will process customer support messages with 1-minute intervals`);
                         }
                         catch (workflowError) {
                             console.error(`❌ Failed to start customer support workflow: ${workflowError}`);
