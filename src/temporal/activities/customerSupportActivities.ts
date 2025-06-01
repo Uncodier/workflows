@@ -117,6 +117,8 @@ export async function sendCustomerSupportMessageActivity(
     lead_notification: messageRequest.lead_notification
   });
 
+  console.log('📋 Full payload being sent:', JSON.stringify(messageRequest, null, 2));
+
   try {
     const response = await apiService.post('/api/agents/customerSupport/message', messageRequest);
     

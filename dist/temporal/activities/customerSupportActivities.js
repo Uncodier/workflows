@@ -44,6 +44,7 @@ async function sendCustomerSupportMessageActivity(emailData, baseParams) {
         lead_id: messageRequest.lead_id,
         lead_notification: messageRequest.lead_notification
     });
+    console.log('📋 Full payload being sent:', JSON.stringify(messageRequest, null, 2));
     try {
         const response = await apiService_1.apiService.post('/api/agents/customerSupport/message', messageRequest);
         if (!response.success) {
