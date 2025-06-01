@@ -125,18 +125,29 @@ async function syncEmailsWorkflow(options) {
                         status: analysisResponse.data?.status,
                         message: analysisResponse.data?.message
                     };
-                    // 🚀 Activación del flujo completo: cuando el análisis devuelve emails analizados y childWorkflow
-                    if (analysisResponse.data?.emails && analysisResponse.data.emails.length > 0 && analysisResponse.data?.childWorkflow) {
-                        console.log(`🚀 Analysis returned ${analysisResponse.data.emails.length} analyzed emails with childWorkflow configuration`);
+                    // 🚀 Activación automática: cuando hay emails analizados, ejecutar customer support
+                    if (analysisResponse.data?.emails && analysisResponse.data.emails.length > 0) {
+                        console.log(`🚀 Found ${analysisResponse.data.emails.length} analyzed emails - starting customer support workflow`);
                         console.log(`📊 Starting customer support workflow for ${analysisResponse.data.analysisCount} analyzed emails`);
                         const customerSupportWorkflowId = `process-api-emails-${siteId}-${Date.now()}`;
+                        // Generar configuración de childWorkflow localmente
+                        const childWorkflowConfig = {
+                            type: 'scheduleCustomerSupportMessagesWorkflow',
+                            args: {
+                                emails: analysisResponse.data.emails,
+                                site_id: siteId,
+                                user_id: options.userId,
+                                agentId: undefined, // Se puede configurar si es necesario
+                                timestamp: new Date().toISOString()
+                            }
+                        };
                         const apiResponse = {
                             emails: analysisResponse.data.emails,
                             site_id: siteId,
                             user_id: options.userId,
                             total_emails: analysisResponse.data.analysisCount, // Usar analysisCount para emails realmente analizados
                             timestamp: new Date().toISOString(),
-                            childWorkflow: analysisResponse.data.childWorkflow
+                            childWorkflow: childWorkflowConfig
                         };
                         try {
                             // Iniciar workflow en paralelo sin esperar resultado
@@ -155,14 +166,11 @@ async function syncEmailsWorkflow(options) {
                             // No fallar todo el sync por esto
                         }
                     }
-                    else if (!analysisResponse.data?.emails || analysisResponse.data.emails.length === 0) {
+                    else {
                         console.log(`📋 No analyzed emails returned - customer support workflow not triggered`);
                     }
-                    else if (!analysisResponse.data?.childWorkflow) {
-                        console.log(`📋 No childWorkflow configuration returned - customer support workflow not triggered`);
-                    }
                     console.log(`📋 Email analysis completed. Command ID: ${analysisResponse.data?.commandId}`);
-                    console.log(`🔄 Customer support workflow will be triggered if API returns analyzed emails with childWorkflow configuration`);
+                    console.log(`🔄 Customer support workflow will be triggered automatically when emails are analyzed`);
                 }
                 else {
                     console.log(`⚠️ Email analysis failed: ${analysisResponse.error?.message}`);
