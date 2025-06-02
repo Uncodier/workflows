@@ -63,9 +63,10 @@ async function customerSupportMessageWorkflow(emailData, baseParams) {
                 // Prepare email parameters
                 const emailParams = {
                     email: emailData.contact_info.email,
-                    from: `support@${emailData.site_id}.com`, // Dynamic from based on site
-                    subject: `Re: ${emailData.original_subject || 'Your inquiry'}`,
-                    message: `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
+                    subject: response.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`, // ✅ FIXED: Usar conversation_title para el subject
+                    // ✅ FIXED: Usar la respuesta real del agente desde messages.assistant.content
+                    message: response.data?.messages?.assistant?.content ||
+                        `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
                     site_id: emailData.site_id,
                     agent_id: baseParams.agentId,
                     // ✅ FIXED: Solo enviar lead_id si hay un analysis_id real

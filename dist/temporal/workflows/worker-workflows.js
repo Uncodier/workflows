@@ -25,3 +25,5 @@ __exportStar(require("./sendReportWorkflow"), exports);
 __exportStar(require("./scheduleCustomerSupportMessagesWorkflow"), exports);
 __exportStar(require("./sendEmailFromAgentWorkflow"), exports);
 __exportStar(require("./sendWhatsappFromAgentWorkflow"), exports);
+__exportStar(require("./answerWhatsappMessageWorkflow"), exports);
+__exportStar(require("./siteSetupWorkflow"), exports);

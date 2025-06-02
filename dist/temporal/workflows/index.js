@@ -26,6 +26,7 @@ const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSup
 const sendEmailFromAgentWorkflow_1 = require("./sendEmailFromAgentWorkflow");
 const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow");
 const answerWhatsappMessageWorkflow_1 = require("./answerWhatsappMessageWorkflow");
+const siteSetupWorkflow_1 = require("./siteSetupWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -38,6 +39,7 @@ __exportStar(require("./scheduleCustomerSupportMessagesWorkflow"), exports);
 __exportStar(require("./sendEmailFromAgentWorkflow"), exports);
 __exportStar(require("./sendWhatsappFromAgentWorkflow"), exports);
 __exportStar(require("./answerWhatsappMessageWorkflow"), exports);
+__exportStar(require("./siteSetupWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -53,6 +55,7 @@ exports.workflows = {
     sendWhatsappFromAgent: sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent,
     answerWhatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
     processWhatsAppMessagesWorkflow: answerWhatsappMessageWorkflow_1.processWhatsAppMessagesWorkflow,
+    siteSetupWorkflow: siteSetupWorkflow_1.siteSetupWorkflow,
 };
 // Workflow names for Temporal Client (strings)
 exports.workflowNames = {
@@ -69,4 +72,5 @@ exports.workflowNames = {
     sendWhatsappFromAgent: 'sendWhatsappFromAgent',
     answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
     processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
+    siteSetupWorkflow: 'siteSetupWorkflow',
 };
