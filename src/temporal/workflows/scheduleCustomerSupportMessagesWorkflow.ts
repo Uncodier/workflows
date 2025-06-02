@@ -1,4 +1,4 @@
-import { proxyActivities, sleep, startChild } from '@temporalio/workflow';
+import { proxyActivities, sleep, startChild, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { EmailData, ScheduleCustomerSupportParams } from '../activities/customerSupportActivities';
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
@@ -101,9 +101,11 @@ export async function customerSupportMessageWorkflow(
         const emailHandle = await startChild(sendEmailFromAgent, {
           workflowId: emailWorkflowId,
           args: [emailParams],
+          parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
         });
         
         console.log(`📨 Started sendEmailFromAgent workflow: ${emailWorkflowId}`);
+        console.log(`🚀 Parent close policy: ABANDON - email workflow will continue independently`);
         
         // Wait for email workflow to complete
         const emailResult = await emailHandle.result();
@@ -237,10 +239,12 @@ export async function scheduleCustomerSupportMessagesWorkflow(
         const handle = await startChild(customerSupportMessageWorkflow, {
           workflowId,
           args: [enrichedEmailData, baseParams],
+          parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
         });
         
         scheduled++;
         console.log(`✅ Scheduled customer support message workflow: ${workflowId}`);
+        console.log(`🚀 Parent close policy: ABANDON - customer support workflow will continue independently`);
         
         // Wait for the child workflow to complete
         const result = await handle.result();

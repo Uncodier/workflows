@@ -1,4 +1,4 @@
-import { proxyActivities, startChild } from '@temporalio/workflow';
+import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { scheduleCustomerSupportMessagesWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
 
@@ -211,14 +211,17 @@ export async function syncEmailsWorkflow(
             };
             
             try {
-              // Iniciar workflow en paralelo sin esperar resultado
+              // ✅ FIXED: Configurar parentClosePolicy para que el child workflow continúe ejecutándose 
+              // incluso cuando el parent workflow (syncEmails) termine
               void startChild(scheduleCustomerSupportMessagesWorkflow, {
                 workflowId: customerSupportWorkflowId,
                 args: [scheduleParams],
+                parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
               });
               
               console.log(`✅ Started scheduleCustomerSupportMessagesWorkflow: ${customerSupportWorkflowId}`);
               console.log(`🔄 This will process customer support messages with 1-minute intervals`);
+              console.log(`🚀 Parent close policy: ABANDON - child workflow will continue running independently`);
               
             } catch (workflowError) {
               console.error(`❌ Failed to start customer support workflow: ${workflowError}`);
