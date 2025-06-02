@@ -1,18 +1,7 @@
-import { proxyActivities, sleep, startChild, ParentClosePolicy } from '@temporalio/workflow';
-import type { Activities } from '../activities';
+import { sleep, startChild, ParentClosePolicy } from '@temporalio/workflow';
 import type { EmailData, ScheduleCustomerSupportParams } from '../activities/customerSupportActivities';
 import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
 import type { WhatsAppMessageData, WhatsAppAnalysisResponse } from '../activities/whatsappActivities';
-
-// Configure activity options (solo para scheduling activities si las necesitamos)
-const { 
-  processAnalysisDataActivity 
-} = proxyActivities<Activities>({
-  startToCloseTimeout: '2 minutes',
-  retry: {
-    maximumAttempts: 3,
-  },
-});
 
 /**
  * Schedule Customer Support Messages Workflow
