@@ -6,38 +6,38 @@
 import { getTemporalClient } from '../temporal/client';
 import type { WhatsAppMessageData } from '../temporal/activities/whatsappActivities';
 
-// Sample WhatsApp messages that should trigger customer support
+// Sample WhatsApp message data for testing
 const testWhatsAppMessages: WhatsAppMessageData[] = [
   {
-    message: "Tengo un problema urgente con mi pedido. El producto llegó dañado y necesito una solución inmediata.",
-    phone: "+573001234567",
-    contact_name: "María González",
-    message_id: "whatsapp_urgent_001",
-    conversation_id: "conv_urgent_001",
-    site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
-    user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
+    messageContent: "Tengo un problema urgente con mi pedido. El producto llegó dañado y necesito una solución inmediata.",
+    phoneNumber: "+573001234567", 
+    senderName: "María González",
+    messageId: "whatsapp_msg_001",
+    conversationId: "conv_001",
+    siteId: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
+    userId: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
     message_type: "text",
     timestamp: new Date().toISOString()
   },
   {
-    message: "Hola, me interesa conocer más sobre sus servicios premium. ¿Pueden contactarme para una demo?",
-    phone: "+573009876543",
-    contact_name: "Carlos Rodríguez",
-    message_id: "whatsapp_inquiry_002",
-    conversation_id: "conv_inquiry_002",
-    site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
-    user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
+    messageContent: "Hola, me interesa conocer más sobre sus servicios premium. ¿Pueden contactarme para una demo?",
+    phoneNumber: "+573009876543",
+    senderName: "Carlos Rodríguez", 
+    messageId: "whatsapp_msg_002",
+    conversationId: "conv_002",
+    siteId: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
+    userId: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
     message_type: "text",
     timestamp: new Date().toISOString()
   },
   {
-    message: "Gracias por la respuesta anterior. Todo está perfecto.",
-    phone: "+573005554321",
-    contact_name: "Ana Martínez",
-    message_id: "whatsapp_thanks_003",
-    conversation_id: "conv_thanks_003",
-    site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
-    user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
+    messageContent: "Gracias por la respuesta anterior. Todo está perfecto.",
+    phoneNumber: "+573005554321",
+    senderName: "Ana Martínez",
+    messageId: "whatsapp_msg_003", 
+    conversationId: "conv_003",
+    siteId: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
+    userId: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
     message_type: "text",
     timestamp: new Date().toISOString()
   }
@@ -54,11 +54,11 @@ export async function testWhatsAppWithCustomerSupport() {
     const messageData = testWhatsAppMessages[0]; // Use urgent message
     
     console.log('📋 Testing urgent message with customer support:', {
-      from: messageData.contact_name,
-      phone: messageData.phone,
-      messagePreview: messageData.message.substring(0, 50) + '...',
-      site_id: messageData.site_id,
-      user_id: messageData.user_id,
+      from: messageData.senderName,
+      phone: messageData.phoneNumber,
+      messagePreview: messageData.messageContent.substring(0, 50) + '...',
+      site_id: messageData.siteId,
+      user_id: messageData.userId,
       messageType: messageData.message_type
     });
     
@@ -101,11 +101,11 @@ export async function testWhatsAppWithoutCustomerSupport() {
     const messageData = testWhatsAppMessages[2]; // Use simple thanks message
     
     console.log('📋 Testing simple message without customer support:', {
-      from: messageData.contact_name,
-      phone: messageData.phone,
-      messagePreview: messageData.message.substring(0, 50) + '...',
-      site_id: messageData.site_id,
-      user_id: messageData.user_id,
+      from: messageData.senderName,
+      phone: messageData.phoneNumber,
+      messagePreview: messageData.messageContent.substring(0, 50) + '...',
+      site_id: messageData.siteId,
+      user_id: messageData.userId,
       messageType: messageData.message_type
     });
     
@@ -146,9 +146,9 @@ export async function testOriginParameterIntegration() {
     const messageData = testWhatsAppMessages[1]; // Use inquiry message
     
     console.log('📋 Testing origin parameter with inquiry message:', {
-      from: messageData.contact_name,
-      phone: messageData.phone,
-      messagePreview: messageData.message.substring(0, 50) + '...',
+      from: messageData.senderName,
+      phone: messageData.phoneNumber,
+      messagePreview: messageData.messageContent.substring(0, 50) + '...',
       expectedOrigin: 'whatsapp'
     });
     

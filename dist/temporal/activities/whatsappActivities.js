@@ -9,18 +9,18 @@ const apiService_1 = require("../services/apiService");
  */
 async function analyzeWhatsAppMessageActivity(messageData) {
     console.log('📱 Analyzing WhatsApp message...');
-    console.log(`📞 From: ${messageData.contact_name || messageData.phone}`);
-    console.log(`💬 Message: ${messageData.message.substring(0, 100)}...`);
+    console.log(`📞 From: ${messageData.senderName || messageData.phoneNumber}`);
+    console.log(`💬 Message: ${messageData.messageContent?.substring(0, 100) || 'No message content'}...`);
     try {
         // Prepare request payload
         const analysisRequest = {
-            message: messageData.message,
-            phone: messageData.phone,
-            site_id: messageData.site_id,
-            user_id: messageData.user_id,
-            contact_name: messageData.contact_name,
-            message_id: messageData.message_id,
-            conversation_id: messageData.conversation_id,
+            message: messageData.messageContent,
+            phone: messageData.phoneNumber,
+            site_id: messageData.siteId,
+            user_id: messageData.userId,
+            contact_name: messageData.senderName,
+            message_id: messageData.messageId,
+            conversation_id: messageData.conversationId,
             timestamp: messageData.timestamp || new Date().toISOString(),
             message_type: messageData.message_type || 'text',
             media_url: messageData.media_url,
@@ -71,7 +71,7 @@ async function analyzeWhatsAppMessageActivity(messageData) {
 async function sendWhatsAppResponseActivity(responseData) {
     console.log('📱 Sending WhatsApp response...');
     console.log(`📞 To: ${responseData.phone}`);
-    console.log(`💬 Message: ${responseData.message.substring(0, 100)}...`);
+    console.log(`💬 Message: ${responseData.message?.substring(0, 100) || 'No message content'}...`);
     try {
         const response = await apiService_1.apiService.post('/api/agents/whatsapp/send', {
             phone: responseData.phone,

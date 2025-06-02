@@ -37,12 +37,12 @@ const { analyzeWhatsAppMessageActivity, sendWhatsAppResponseActivity } = (0, wor
  * Analyzes incoming WhatsApp messages and optionally sends automated responses
  */
 async function answerWhatsappMessageWorkflow(messageData, options) {
-    const workflowId = `whatsapp-message-${messageData.message_id || Date.now()}`;
+    const workflowId = `whatsapp-message-${messageData.messageId || Date.now()}`;
     console.log('📱 Starting WhatsApp message workflow...');
     console.log(`🆔 Workflow ID: ${workflowId}`);
-    console.log(`📞 From: ${messageData.contact_name || messageData.phone}`);
-    console.log(`💬 Message: ${messageData.message.substring(0, 100)}...`);
-    console.log(`🏢 Site: ${messageData.site_id}, User: ${messageData.user_id}`);
+    console.log(`📞 From: ${messageData.senderName || messageData.phoneNumber}`);
+    console.log(`💬 Message: ${messageData.messageContent?.substring(0, 100) || 'No message content'}...`);
+    console.log(`🏢 Site: ${messageData.siteId}, User: ${messageData.userId}`);
     let analyzed = false;
     let responded = false;
     let customerSupportTriggered = false;
@@ -77,14 +77,14 @@ async function answerWhatsappMessageWorkflow(messageData, options) {
         // Step 2: Send automated response if enabled and suggested
         if (options?.autoRespond && analysis?.suggested_response && analysis?.response_type === 'automated') {
             console.log('📤 Step 2: Sending automated WhatsApp response...');
-            console.log(`🤖 Suggested response: ${analysis.suggested_response.substring(0, 100)}...`);
+            console.log(`🤖 Suggested response: ${analysis.suggested_response?.substring(0, 100) || 'No response content'}...`);
             try {
                 const sendResult = await sendWhatsAppResponseActivity({
-                    phone: messageData.phone,
+                    phone: messageData.phoneNumber,
                     message: analysis.suggested_response,
-                    conversation_id: messageData.conversation_id,
-                    site_id: messageData.site_id,
-                    user_id: messageData.user_id,
+                    conversation_id: messageData.conversationId,
+                    site_id: messageData.siteId,
+                    user_id: messageData.userId,
                     agent_id: options.agentId,
                     message_type: 'text'
                 });
@@ -125,23 +125,23 @@ async function answerWhatsappMessageWorkflow(messageData, options) {
             try {
                 // Map WhatsApp analysis data to EmailData format for customer support
                 const emailDataForCS = {
-                    summary: analysis.summary || `WhatsApp message from ${messageData.contact_name || messageData.phone}: ${messageData.message}`,
-                    original_subject: `WhatsApp: ${analysis.intent || 'Message'} from ${messageData.contact_name || messageData.phone}`,
+                    summary: analysis.summary || `WhatsApp message from ${messageData.senderName || messageData.phoneNumber}: ${messageData.messageContent || 'No message content'}`,
+                    original_subject: `WhatsApp: ${analysis.intent || 'Message'} from ${messageData.senderName || messageData.phoneNumber}`,
                     contact_info: {
-                        name: analysis.contact_info?.name || messageData.contact_name || 'WhatsApp Contact',
+                        name: analysis.contact_info?.name || messageData.senderName || 'WhatsApp Contact',
                         email: analysis.contact_info?.email || '', // WhatsApp might not have email
-                        phone: analysis.contact_info?.phone || messageData.phone,
+                        phone: analysis.contact_info?.phone || messageData.phoneNumber,
                         company: analysis.contact_info?.company || ''
                     },
-                    site_id: messageData.site_id,
-                    user_id: messageData.user_id,
+                    site_id: messageData.siteId,
+                    user_id: messageData.userId,
                     lead_notification: "none", // Evitar duplicar notificaciones
-                    analysis_id: analysis.analysis_id || `whatsapp-${messageData.message_id || Date.now()}`,
+                    analysis_id: analysis.analysis_id || `whatsapp-${messageData.messageId || Date.now()}`,
                     priority: analysis.priority || 'medium',
                     intent: mapWhatsAppIntentToEmailIntent(analysis.intent),
                     potential_value: analysis.priority === 'high' ? 'high' : 'medium'
                 };
-                const customerSupportWorkflowId = `customer-support-whatsapp-${messageData.message_id || Date.now()}`;
+                const customerSupportWorkflowId = `customer-support-whatsapp-${messageData.messageId || Date.now()}`;
                 // Start customer support workflow as child workflow
                 const customerSupportHandle = await (0, workflow_1.startChild)(scheduleCustomerSupportMessagesWorkflow_1.customerSupportMessageWorkflow, {
                     workflowId: customerSupportWorkflowId,
@@ -182,7 +182,7 @@ async function answerWhatsappMessageWorkflow(messageData, options) {
                 customerSupportResult = {
                     success: false,
                     processed: false,
-                    workflowId: `customer-support-whatsapp-${messageData.message_id || Date.now()}`
+                    workflowId: `customer-support-whatsapp-${messageData.messageId || Date.now()}`
                 };
                 // Don't fail the entire WhatsApp workflow if customer support fails
             }
@@ -237,8 +237,8 @@ async function processWhatsAppMessagesWorkflow(messages, options) {
             const messageData = messages[i];
             const workflowId = `batch-whatsapp-${i}-${Date.now()}`;
             console.log(`📱 Processing WhatsApp message ${i + 1}/${totalMessages}`);
-            console.log(`📞 From: ${messageData.contact_name || messageData.phone}`);
-            console.log(`💬 Message preview: ${messageData.message.substring(0, 50)}...`);
+            console.log(`📞 From: ${messageData.senderName || messageData.phoneNumber}`);
+            console.log(`💬 Message preview: ${messageData.messageContent?.substring(0, 50) || 'No message content'}...`);
             try {
                 const result = await answerWhatsappMessageWorkflow(messageData, options);
                 processed++;
@@ -251,7 +251,7 @@ async function processWhatsAppMessagesWorkflow(messages, options) {
                 }
                 results.push({
                     index: i,
-                    phone: messageData.phone,
+                    phone: messageData.phoneNumber,
                     success: result.success,
                     analyzed: result.analyzed,
                     responded: result.responded,
@@ -271,7 +271,7 @@ async function processWhatsAppMessagesWorkflow(messages, options) {
                 console.error(`❌ Failed to process message ${i + 1}:`, errorMessage);
                 results.push({
                     index: i,
-                    phone: messageData.phone,
+                    phone: messageData.phoneNumber,
                     success: false,
                     analyzed: false,
                     responded: false,

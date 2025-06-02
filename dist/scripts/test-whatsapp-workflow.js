@@ -11,35 +11,35 @@ const client_1 = require("../temporal/client");
 // Sample WhatsApp message data for testing
 const testWhatsAppMessages = [
     {
-        message: "Hola, me interesa conocer más sobre sus servicios. ¿Podrían proporcionarme información sobre precios y planes?",
-        phone: "+573001234567",
-        contact_name: "María González",
-        message_id: "whatsapp_msg_001",
-        conversation_id: "conv_001",
-        site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
-        user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
+        messageContent: "Hola, me interesa conocer más sobre sus servicios. ¿Podrían proporcionarme información sobre precios y planes?",
+        phoneNumber: "+573001234567",
+        senderName: "María González",
+        messageId: "whatsapp_msg_001",
+        conversationId: "conv_001",
+        siteId: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
+        userId: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
         message_type: "text",
         timestamp: new Date().toISOString()
     },
     {
-        message: "Tengo un problema con mi pedido. El producto llegó dañado y necesito hacer una devolución urgente.",
-        phone: "+573009876543",
-        contact_name: "Carlos Rodríguez",
-        message_id: "whatsapp_msg_002",
-        conversation_id: "conv_002",
-        site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
-        user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
+        messageContent: "Tengo un problema con mi pedido. El producto llegó dañado y necesito hacer una devolución urgente.",
+        phoneNumber: "+573009876543",
+        senderName: "Carlos Rodríguez",
+        messageId: "whatsapp_msg_002",
+        conversationId: "conv_002",
+        siteId: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
+        userId: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
         message_type: "text",
         timestamp: new Date().toISOString()
     },
     {
-        message: "Buen día! Quería saber si tienen disponibilidad para una cita esta semana.",
-        phone: "+573005554321",
-        contact_name: "Ana Martínez",
-        message_id: "whatsapp_msg_003",
-        conversation_id: "conv_003",
-        site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
-        user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
+        messageContent: "Buen día! Quería saber si tienen disponibilidad para una cita esta semana.",
+        phoneNumber: "+573005554321",
+        senderName: "Ana Martínez",
+        messageId: "whatsapp_msg_003",
+        conversationId: "conv_003",
+        siteId: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
+        userId: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
         message_type: "text",
         timestamp: new Date().toISOString()
     }
@@ -53,11 +53,11 @@ async function testSingleWhatsAppMessage() {
         const client = await (0, client_1.getTemporalClient)();
         const messageData = testWhatsAppMessages[0]; // Use first message
         console.log('📋 Testing message analysis with:', {
-            from: messageData.contact_name,
-            phone: messageData.phone,
-            messagePreview: messageData.message.substring(0, 50) + '...',
-            site_id: messageData.site_id,
-            user_id: messageData.user_id,
+            from: messageData.senderName,
+            phone: messageData.phoneNumber,
+            messagePreview: messageData.messageContent.substring(0, 50) + '...',
+            site_id: messageData.siteId,
+            user_id: messageData.userId,
             messageType: messageData.message_type
         });
         const options = {
@@ -85,9 +85,9 @@ async function testWhatsAppAnalysisOnly() {
         const client = await (0, client_1.getTemporalClient)();
         const messageData = testWhatsAppMessages[1]; // Use second message (complaint)
         console.log('📋 Testing analysis-only with:', {
-            from: messageData.contact_name,
-            phone: messageData.phone,
-            messagePreview: messageData.message.substring(0, 50) + '...',
+            from: messageData.senderName,
+            phone: messageData.phoneNumber,
+            messagePreview: messageData.messageContent.substring(0, 50) + '...',
             expectedIntent: 'complaint (high priority)'
         });
         const options = {
@@ -124,9 +124,9 @@ async function testBatchWhatsAppMessages() {
         console.log(`📨 Testing with ${testWhatsAppMessages.length} WhatsApp messages`);
         console.log('📋 Messages overview:', testWhatsAppMessages.map((msg, i) => ({
             index: i + 1,
-            from: msg.contact_name,
-            phone: msg.phone,
-            preview: msg.message.substring(0, 30) + '...'
+            from: msg.senderName,
+            phone: msg.phoneNumber,
+            preview: msg.messageContent.substring(0, 30) + '...'
         })));
         const options = {
             autoRespond: true,
