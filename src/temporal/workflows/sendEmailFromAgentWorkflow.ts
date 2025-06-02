@@ -11,7 +11,7 @@ const { sendEmailFromAgentActivity } = proxyActivities<typeof activities>({
  */
 export interface SendEmailFromAgentParams {
   email: string;
-  from: string;
+  from?: string;
   subject: string;
   message: string;
   site_id: string;
@@ -41,13 +41,13 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
 
   try {
     // Validate required parameters
-    if (!params.email || !params.from || !params.subject || !params.message || !params.site_id) {
-      throw new Error('Missing required email parameters: email, from, subject, message and site_id are all required');
+    if (!params.email || !params.subject || !params.message || !params.site_id) {
+      throw new Error('Missing required email parameters: email, subject, message and site_id are all required');
     }
 
     console.log('📤 Sending email via agent API:', {
       recipient: params.email,
-      from: params.from,
+      from: params.from || 'not-provided',
       subject: params.subject,
       messageLength: params.message.length,
       site_id: params.site_id,

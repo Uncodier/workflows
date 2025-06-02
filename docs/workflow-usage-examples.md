@@ -9,7 +9,7 @@ This workflow sends an email via the agent API endpoint.
 ```typescript
 {
   email: string;           // Dirección de correo electrónico del destinatario (requerido)
-  from: string;            // Dirección de correo electrónico del remitente (requerido)
+  from?: string;           // Dirección de correo electrónico del remitente (opcional)
   subject: string;         // Asunto del correo electrónico (requerido)
   message: string;         // Contenido del mensaje - se convierte automáticamente a HTML (requerido)
   site_id: string;         // ID del sitio para obtener la configuración SMTP (requerido)
@@ -62,8 +62,7 @@ This workflow sends an email via the agent API endpoint.
 {
   "workflowType": "sendEmailFromAgent",
   "args": [{
-    "email": "no-email@example.com",
-    "from": "agent@company.com",
+    "email": "customer@example.com",
     "subject": "Important Update",
     "message": "This is an important update about your account.",
     "site_id": "site_123456"
@@ -91,13 +90,14 @@ This workflow sends an email via the agent API endpoint.
 
 ### Features
 
-- ✅ Validates all required parameters (email, from, subject, message, site_id)
+- ✅ Validates all required parameters (email, subject, message, site_id)
 - ✅ Calls the `/api/agents/tools/sendEmail` endpoint
 - ✅ Includes proper error handling
 - ✅ Returns detailed execution results
 - ✅ Supports timeout configuration
 - ✅ Automatic retries on transient failures
 - ✅ Optional logging parameters for tracking (agent_id, conversation_id, lead_id)
+- ✅ Optional sender email (from parameter)
 - ✅ Message content automatically converted to HTML by the API
 
 ## sendWhatsappFromAgent Workflow

@@ -5,7 +5,7 @@ import { apiService } from '../services/apiService';
  */
 export interface SendEmailParams {
   email: string;
-  from: string;
+  from?: string;
   subject: string;
   message: string;
   site_id: string;

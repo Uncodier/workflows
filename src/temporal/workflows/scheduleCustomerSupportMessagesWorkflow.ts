@@ -90,7 +90,6 @@ export async function customerSupportMessageWorkflow(
         // Prepare email parameters
         const emailParams = {
           email: emailData.contact_info.email,
-          from: '', // ✅ FIXED: Dejar from vacío como solicitado
           subject: response.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`, // ✅ FIXED: Usar conversation_title para el subject
           // ✅ FIXED: Usar la respuesta real del agente desde messages.assistant.content
           message: response.data?.messages?.assistant?.content || 
