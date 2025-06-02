@@ -1,6 +1,7 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { SiteSetupParams } from '../activities/siteSetupActivities';
+import { defaultAgentsConfig, getAgentTypes } from '../config/agentsConfig';
 
 // Configure activity options
 const { 
@@ -87,14 +88,17 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
   };
 
   try {
-    // Step 1: Create agents for the site
-    console.log('🤖 Step 1: Creating agents...');
+    // Step 1: Create agents for the site using detailed configuration
+    console.log('🤖 Step 1: Creating agents with detailed configuration...');
     const agentsResult = await createAgentsActivity({
       site_id: params.site_id,
       user_id: params.user_id,
       company_name: params.company_name,
-      agent_types: ['customer_support', 'sales', 'general'],
-      custom_config: {}
+      agent_types: getAgentTypes(),
+      custom_config: {
+        agents_config: defaultAgentsConfig.agents,
+        use_detailed_config: true
+      }
     });
 
     if (!agentsResult.success) {
@@ -108,6 +112,7 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
     };
 
     console.log(`✅ Step 1 completed: ${agentsResult.total_created} agents created`);
+    console.log(`   • Agent types: ${getAgentTypes().join(', ')}`);
 
     // Step 2: Assign account manager
     console.log('👤 Step 2: Assigning account manager...');

@@ -1,4 +1,5 @@
 import { apiService } from '../services/apiService';
+import type { AgentConfig } from '../config/agentsConfig';
 
 /**
  * Site Setup Activity interfaces
@@ -18,7 +19,11 @@ export interface CreateAgentsParams {
   user_id: string;
   company_name: string;
   agent_types?: string[];
-  custom_config?: Record<string, any>;
+  custom_config?: {
+    agents_config?: AgentConfig[];
+    use_detailed_config?: boolean;
+    [key: string]: any;
+  };
 }
 
 export interface CreateAgentsResult {
@@ -28,6 +33,15 @@ export interface CreateAgentsResult {
     type: string;
     name: string;
     status: string;
+    description?: string;
+    icon?: string;
+    activities?: Array<{
+      id: string;
+      name: string;
+      description: string;
+      estimatedTime: string;
+      successRate: number;
+    }>;
   }>;
   total_created: number;
 }
@@ -84,17 +98,45 @@ export async function createAgentsActivity(params: CreateAgentsParams): Promise<
     site_id: params.site_id,
     user_id: params.user_id,
     company_name: params.company_name,
-    agent_types: params.agent_types
+    agent_types: params.agent_types,
+    use_detailed_config: params.custom_config?.use_detailed_config
   });
 
   try {
-    const response = await apiService.post('/api/sites/setup/agents', {
+    const requestPayload = {
       site_id: params.site_id,
       user_id: params.user_id,
       company_name: params.company_name,
       agent_types: params.agent_types || ['customer_support', 'sales', 'general'],
       custom_config: params.custom_config || {}
-    });
+    };
+
+    // Si se proporciona configuración detallada, incluir los agentes específicos
+    if (params.custom_config?.use_detailed_config && params.custom_config?.agents_config) {
+      console.log('📋 Using detailed agents configuration...');
+      requestPayload.custom_config.detailed_agents = params.custom_config.agents_config.map((agent: AgentConfig) => ({
+        id: agent.id,
+        name: agent.name,
+        description: agent.description,
+        type: agent.type,
+        status: agent.status,
+        icon: agent.icon,
+        activities: agent.activities.map(activity => ({
+          id: activity.id,
+          name: activity.name,
+          description: activity.description,
+          estimatedTime: activity.estimatedTime,
+          successRate: activity.successRate,
+          executions: activity.executions,
+          status: activity.status
+        }))
+      }));
+      
+      console.log(`   • Total agents to create: ${params.custom_config.agents_config.length}`);
+      console.log(`   • Agent names: ${params.custom_config.agents_config.map(a => a.name).join(', ')}`);
+    }
+
+    const response = await apiService.post('/api/sites/setup/agents', requestPayload);
 
     if (!response.success) {
       throw new Error(`Failed to create agents: ${response.error?.message}`);

@@ -1,0 +1,87 @@
+{
+  "configuration_summary": {
+    "total_agents": 7,
+    "agent_types": ["marketing", "product", "sales"],
+    "agents_by_type": {
+      "marketing": 3,
+      "product": 2, 
+      "sales": 2
+    },
+    "total_activities": 29
+  },
+  "agents_roles_mapping": [
+    {
+      "id": "1",
+      "role": "Growth Lead/Manager",
+      "type": "marketing",
+      "activities_count": 5,
+      "description": "Strategy integration, team coordination, budget management, KPI tracking",
+      "icon": "BarChart"
+    },
+    {
+      "id": "4", 
+      "role": "Data Analyst",
+      "type": "product",
+      "activities_count": 5,
+      "description": "Data analysis, lead qualification, segmentation, performance metrics, optimization",
+      "icon": "PieChart"
+    },
+    {
+      "id": "2",
+      "role": "Growth Marketer", 
+      "type": "marketing",
+      "activities_count": 5,
+      "description": "Marketing strategy, omnichannel campaigns, A/B testing, SEO techniques",
+      "icon": "TrendingUp"
+    },
+    {
+      "id": "3",
+      "role": "UX Designer",
+      "type": "product", 
+      "activities_count": 3,
+      "description": "Conversion optimization, UX/UI design for funnel, onboarding experience",
+      "icon": "Smartphone"
+    },
+    {
+      "id": "5",
+      "role": "Sales/CRM Specialist",
+      "type": "sales",
+      "activities_count": 5,
+      "description": "Lead management, demos, systematic follow-up, sales cycle",
+      "icon": "ShoppingCart"
+    },
+    {
+      "id": "7",
+      "role": "Customer Support",
+      "type": "sales",
+      "activities_count": 3,
+      "description": "Knowledge base management, FAQ development, customer issue escalation",
+      "icon": "HelpCircle"
+    },
+    {
+      "id": "6",
+      "role": "Content Creator & Copywriter",
+      "type": "marketing",
+      "activities_count": 3,
+      "description": "Persuasive copywriting, site content, blog posts, email sequences",
+      "icon": "FileText"
+    }
+  ],
+  "usage_in_workflow": {
+    "workflow_file": "src/temporal/workflows/siteSetupWorkflow.ts",
+    "activity_file": "src/temporal/activities/siteSetupActivities.ts",
+    "config_files": [
+      "src/temporal/config/agentsConfig.ts",
+      "src/temporal/config/agentRolesConfig.ts"
+    ],
+    "api_endpoint": "/api/sites/setup/agents",
+    "configuration_flag": "use_detailed_config: true",
+    "payload_field": "detailed_agents"
+  },
+  "performance_metrics": {
+    "total_conversations": 1911,
+    "average_success_rate": 88.4,
+    "highest_success_rate": 94,
+    "lowest_success_rate": 83
+  }
+} 
