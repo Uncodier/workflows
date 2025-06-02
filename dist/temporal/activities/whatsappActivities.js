@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.analyzeWhatsAppMessageActivity = analyzeWhatsAppMessageActivity;
 exports.sendWhatsAppResponseActivity = sendWhatsAppResponseActivity;
+exports.sendWhatsAppFromAgentActivity = sendWhatsAppFromAgentActivity;
 const apiService_1 = require("../services/apiService");
 /**
  * Analyze WhatsApp message using AI
@@ -97,5 +98,44 @@ async function sendWhatsAppResponseActivity(responseData) {
             success: false,
             error: error instanceof Error ? error.message : String(error)
         };
+    }
+}
+/**
+ * Activity to send WhatsApp message via agent API
+ */
+async function sendWhatsAppFromAgentActivity(params) {
+    console.log('📱 Sending WhatsApp from agent:', {
+        recipient: params.phone_number,
+        from: params.from || 'AI Assistant',
+        messageLength: params.message.length,
+        site_id: params.site_id,
+        agent_id: params.agent_id,
+        conversation_id: params.conversation_id,
+        lead_id: params.lead_id
+    });
+    try {
+        const response = await apiService_1.apiService.post('/api/agents/tools/sendWhatsApp', {
+            phone_number: params.phone_number,
+            message: params.message,
+            site_id: params.site_id,
+            from: params.from || 'AI Assistant',
+            agent_id: params.agent_id,
+            conversation_id: params.conversation_id,
+            lead_id: params.lead_id
+        });
+        if (!response.success) {
+            throw new Error(`Failed to send WhatsApp message: ${response.error?.message}`);
+        }
+        console.log('✅ WhatsApp sent successfully via agent API:', response.data);
+        return {
+            success: true,
+            messageId: response.data.messageId || 'unknown',
+            recipient: params.phone_number,
+            timestamp: new Date().toISOString()
+        };
+    }
+    catch (error) {
+        console.error('❌ WhatsApp sending failed:', error);
+        throw new Error(`WhatsApp sending failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }

@@ -181,4 +181,68 @@ export async function sendWhatsAppResponseActivity(
       error: error instanceof Error ? error.message : String(error)
     };
   }
+}
+
+/**
+ * WhatsApp From Agent Activity interfaces
+ */
+export interface SendWhatsAppFromAgentParams {
+  phone_number: string;
+  message: string;
+  site_id: string;
+  from?: string;
+  agent_id?: string;
+  conversation_id?: string;
+  lead_id?: string;
+}
+
+export interface SendWhatsAppFromAgentResult {
+  success: boolean;
+  messageId: string;
+  recipient: string;
+  timestamp: string;
+}
+
+/**
+ * Activity to send WhatsApp message via agent API
+ */
+export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgentParams): Promise<SendWhatsAppFromAgentResult> {
+  console.log('📱 Sending WhatsApp from agent:', {
+    recipient: params.phone_number,
+    from: params.from || 'AI Assistant',
+    messageLength: params.message.length,
+    site_id: params.site_id,
+    agent_id: params.agent_id,
+    conversation_id: params.conversation_id,
+    lead_id: params.lead_id
+  });
+
+  try {
+    const response = await apiService.post('/api/agents/tools/sendWhatsApp', {
+      phone_number: params.phone_number,
+      message: params.message,
+      site_id: params.site_id,
+      from: params.from || 'AI Assistant',
+      agent_id: params.agent_id,
+      conversation_id: params.conversation_id,
+      lead_id: params.lead_id
+    });
+
+    if (!response.success) {
+      throw new Error(`Failed to send WhatsApp message: ${response.error?.message}`);
+    }
+
+    console.log('✅ WhatsApp sent successfully via agent API:', response.data);
+
+    return {
+      success: true,
+      messageId: response.data.messageId || 'unknown',
+      recipient: params.phone_number,
+      timestamp: new Date().toISOString()
+    };
+
+  } catch (error) {
+    console.error('❌ WhatsApp sending failed:', error);
+    throw new Error(`WhatsApp sending failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 } 

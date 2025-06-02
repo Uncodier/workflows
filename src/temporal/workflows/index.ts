@@ -7,6 +7,7 @@ import { activityPrioritizationEngineWorkflow } from './activityPrioritizationEn
 import { sendReportWorkflow } from './sendReportWorkflow';
 import { scheduleCustomerSupportMessagesWorkflow, customerSupportMessageWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
+import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 import { answerWhatsappMessageWorkflow, processWhatsAppMessagesWorkflow } from './answerWhatsappMessageWorkflow';
 
 // Export workflows individually
@@ -19,6 +20,7 @@ export * from './activityPrioritizationEngineWorkflow';
 export * from './sendReportWorkflow';
 export * from './scheduleCustomerSupportMessagesWorkflow';
 export * from './sendEmailFromAgentWorkflow';
+export * from './sendWhatsappFromAgentWorkflow';
 export * from './answerWhatsappMessageWorkflow';
 
 // Also export as a bundle for the client
@@ -33,6 +35,7 @@ export const workflows = {
   scheduleCustomerSupportMessagesWorkflow,
   customerSupportMessageWorkflow,
   sendEmailFromAgent,
+  sendWhatsappFromAgent,
   answerWhatsappMessageWorkflow,
   processWhatsAppMessagesWorkflow,
 };
@@ -49,6 +52,7 @@ export const workflowNames = {
   scheduleCustomerSupportMessagesWorkflow: 'scheduleCustomerSupportMessagesWorkflow',
   customerSupportMessageWorkflow: 'customerSupportMessageWorkflow',
   sendEmailFromAgent: 'sendEmailFromAgent',
+  sendWhatsappFromAgent: 'sendWhatsappFromAgent',
   answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
   processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
 };

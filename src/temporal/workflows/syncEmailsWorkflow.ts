@@ -207,7 +207,8 @@ export async function syncEmailsWorkflow(
               user_id: options.userId,
               total_emails: analysisResponse.data.analysisCount,
               timestamp: new Date().toISOString(),
-              agentId: undefined // Se puede configurar si es necesario
+              agentId: undefined, // Se puede configurar si es necesario
+              origin: "email" // Indicar que el origen es email (syncMails)
             };
             
             try {

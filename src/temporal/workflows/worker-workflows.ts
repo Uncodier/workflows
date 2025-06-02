@@ -7,4 +7,5 @@ export * from './scheduleActivitiesWorkflow';
 export * from './activityPrioritizationEngineWorkflow';
 export * from './sendReportWorkflow';
 export * from './scheduleCustomerSupportMessagesWorkflow';
-export * from './sendEmailFromAgentWorkflow'; 
+export * from './sendEmailFromAgentWorkflow';
+export * from './sendWhatsappFromAgentWorkflow'; 

@@ -62,6 +62,7 @@ export interface CustomerSupportMessageRequest {
   agentId?: string;
   site_id?: string;
   lead_notification?: string;
+  origin?: string; // Nuevo parámetro opcional: "whatsapp" | "email"
 }
 
 /**
@@ -71,6 +72,7 @@ export async function sendCustomerSupportMessageActivity(
   emailData: EmailData,
   baseParams: {
     agentId?: string;
+    origin?: string; // Parámetro opcional para identificar el origen
   }
 ): Promise<{
   success: boolean;
@@ -80,7 +82,7 @@ export async function sendCustomerSupportMessageActivity(
   console.log('📞 Sending customer support message...');
   
   const { summary, site_id, user_id, analysis_id } = emailData;
-  const { agentId } = baseParams;
+  const { agentId, origin } = baseParams;
   
   // Build the message request payload con SOLO los parámetros requeridos por el API
   const messageRequest: CustomerSupportMessageRequest = {
@@ -89,6 +91,7 @@ export async function sendCustomerSupportMessageActivity(
     userId: user_id,
     agentId: agentId,
     lead_notification: "none", // Para mejor trazabilidad - no duplicar notificaciones
+    origin: origin, // Enviar el origen (whatsapp, email, etc.)
   };
 
   // Add contact information if available

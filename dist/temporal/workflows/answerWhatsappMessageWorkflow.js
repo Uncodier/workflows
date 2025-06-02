@@ -3,6 +3,28 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.answerWhatsappMessageWorkflow = answerWhatsappMessageWorkflow;
 exports.processWhatsAppMessagesWorkflow = processWhatsAppMessagesWorkflow;
 const workflow_1 = require("@temporalio/workflow");
+const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
+/**
+ * Helper function to map WhatsApp intents to EmailData intents
+ */
+function mapWhatsAppIntentToEmailIntent(whatsappIntent) {
+    switch (whatsappIntent) {
+        case 'inquiry':
+            return 'inquiry';
+        case 'complaint':
+            return 'complaint';
+        case 'purchase':
+            return 'purchase';
+        case 'support':
+            return 'support';
+        case 'greeting':
+        case 'follow_up':
+            return 'inquiry'; // Map greeting and follow_up to inquiry
+        case 'unknown':
+        default:
+            return 'inquiry'; // Default to inquiry for unknown or undefined
+    }
+}
 // Configure activity options
 const { analyzeWhatsAppMessageActivity, sendWhatsAppResponseActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '2 minutes',
@@ -23,8 +45,10 @@ async function answerWhatsappMessageWorkflow(messageData, options) {
     console.log(`🏢 Site: ${messageData.site_id}, User: ${messageData.user_id}`);
     let analyzed = false;
     let responded = false;
+    let customerSupportTriggered = false;
     let analysis;
     let responseData;
+    let customerSupportResult;
     try {
         // Step 1: Analyze the WhatsApp message
         console.log('🔍 Step 1: Analyzing WhatsApp message...');
@@ -94,13 +118,88 @@ async function answerWhatsappMessageWorkflow(messageData, options) {
         else {
             console.log(`📋 Response type "${analysis?.response_type}" - skipping automated response`);
         }
+        // Step 3: Trigger Customer Support workflow
+        console.log('🎯 Step 3: Triggering Customer Support workflow...');
+        if (analysis && (analysis.requires_action || analysis.priority === 'high' || analysis.intent === 'complaint')) {
+            console.log('📞 Triggering customer support - message requires attention');
+            try {
+                // Map WhatsApp analysis data to EmailData format for customer support
+                const emailDataForCS = {
+                    summary: analysis.summary || `WhatsApp message from ${messageData.contact_name || messageData.phone}: ${messageData.message}`,
+                    original_subject: `WhatsApp: ${analysis.intent || 'Message'} from ${messageData.contact_name || messageData.phone}`,
+                    contact_info: {
+                        name: analysis.contact_info?.name || messageData.contact_name || 'WhatsApp Contact',
+                        email: analysis.contact_info?.email || '', // WhatsApp might not have email
+                        phone: analysis.contact_info?.phone || messageData.phone,
+                        company: analysis.contact_info?.company || ''
+                    },
+                    site_id: messageData.site_id,
+                    user_id: messageData.user_id,
+                    lead_notification: "none", // Evitar duplicar notificaciones
+                    analysis_id: analysis.analysis_id || `whatsapp-${messageData.message_id || Date.now()}`,
+                    priority: analysis.priority || 'medium',
+                    intent: mapWhatsAppIntentToEmailIntent(analysis.intent),
+                    potential_value: analysis.priority === 'high' ? 'high' : 'medium'
+                };
+                const customerSupportWorkflowId = `customer-support-whatsapp-${messageData.message_id || Date.now()}`;
+                // Start customer support workflow as child workflow
+                const customerSupportHandle = await (0, workflow_1.startChild)(scheduleCustomerSupportMessagesWorkflow_1.customerSupportMessageWorkflow, {
+                    workflowId: customerSupportWorkflowId,
+                    args: [
+                        emailDataForCS,
+                        {
+                            agentId: options?.agentId,
+                            origin: "whatsapp" // Indicar que el origen es WhatsApp
+                        }
+                    ],
+                    parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+                });
+                customerSupportTriggered = true;
+                console.log(`✅ Customer support workflow started: ${customerSupportWorkflowId}`);
+                console.log(`🚀 Parent close policy: ABANDON - customer support workflow will continue independently`);
+                // Wait for customer support workflow to complete
+                const csResult = await customerSupportHandle.result();
+                customerSupportResult = {
+                    success: csResult.success,
+                    processed: csResult.processed,
+                    workflowId: customerSupportWorkflowId
+                };
+                if (csResult.success) {
+                    console.log('✅ Customer support workflow completed successfully');
+                    if (csResult.processed) {
+                        console.log(`📋 Customer support processed: ${csResult.reason}`);
+                    }
+                    else {
+                        console.log(`⏭️ Customer support skipped: ${csResult.reason}`);
+                    }
+                }
+                else {
+                    console.log('⚠️ Customer support workflow failed, but WhatsApp workflow continues');
+                }
+            }
+            catch (customerSupportError) {
+                console.error('❌ Customer support workflow failed:', customerSupportError);
+                customerSupportResult = {
+                    success: false,
+                    processed: false,
+                    workflowId: `customer-support-whatsapp-${messageData.message_id || Date.now()}`
+                };
+                // Don't fail the entire WhatsApp workflow if customer support fails
+            }
+        }
+        else {
+            console.log('⏭️ Skipping customer support - message does not require immediate attention');
+            console.log(`📊 Analysis: requires_action=${analysis?.requires_action}, priority=${analysis?.priority}, intent=${analysis?.intent}`);
+        }
         console.log('✅ WhatsApp message workflow completed successfully');
         return {
             success: true,
             analyzed,
             responded,
+            customerSupportTriggered,
             analysis,
             response: responseData,
+            customerSupportResult,
             workflow_id: workflowId
         };
     }

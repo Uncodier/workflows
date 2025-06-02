@@ -23,6 +23,7 @@ export async function customerSupportMessageWorkflow(
   emailData: EmailData,
   baseParams: {
     agentId?: string;
+    origin?: string; // Parámetro opcional para identificar el origen
   }
 ): Promise<{
   success: boolean;
@@ -36,6 +37,7 @@ export async function customerSupportMessageWorkflow(
   console.log('🎯 Starting single customer support message workflow...');
   console.log(`📋 Processing email ID: ${emailData.analysis_id}`);
   console.log(`🏢 Site: ${emailData.site_id}, User: ${emailData.user_id}`);
+  console.log(`🔄 Origin: ${baseParams.origin || 'not specified'}`);
   
   try {
     // First, process the email to determine if action is needed
@@ -88,9 +90,11 @@ export async function customerSupportMessageWorkflow(
         // Prepare email parameters
         const emailParams = {
           email: emailData.contact_info.email,
-          from: `support@${emailData.site_id}.com`, // Dynamic from based on site
-          subject: `Re: ${emailData.original_subject || 'Your inquiry'}`,
-          message: `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
+          from: '', // ✅ FIXED: Dejar from vacío como solicitado
+          subject: response.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`, // ✅ FIXED: Usar conversation_title para el subject
+          // ✅ FIXED: Usar la respuesta real del agente desde messages.assistant.content
+          message: response.data?.messages?.assistant?.content || 
+                   `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
           site_id: emailData.site_id,
           agent_id: baseParams.agentId,
           // ✅ FIXED: Solo enviar lead_id si hay un analysis_id real
@@ -156,7 +160,9 @@ export async function customerSupportMessageWorkflow(
  * with 1-minute intervals between each message
  */
 export async function scheduleCustomerSupportMessagesWorkflow(
-  params: ScheduleCustomerSupportParams
+  params: ScheduleCustomerSupportParams & {
+    origin?: string; // Parámetro opcional para identificar el origen
+  }
 ): Promise<{
   totalEmails: number;
   scheduled: number;
@@ -180,15 +186,17 @@ export async function scheduleCustomerSupportMessagesWorkflow(
   console.log('🚀 Starting schedule customer support messages workflow...');
   const startTime = new Date();
   
-  const { emails, site_id, user_id, agentId, timestamp } = params;
+  const { emails, site_id, user_id, agentId, timestamp, origin } = params;
   const totalEmails = emails.length;
   
   console.log(`📊 Processing ${totalEmails} emails for customer support...`);
   console.log(`🏢 Global Site: ${site_id}, User: ${user_id}`);
   console.log(`⏰ Timestamp: ${timestamp}`);
+  console.log(`🔄 Origin: ${origin || 'not specified'}`);
   
   const baseParams = {
-    agentId
+    agentId,
+    origin // Pasar el origen a los workflows hijos
   };
   
   const results: Array<{

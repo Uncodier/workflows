@@ -10,7 +10,7 @@ const apiService_1 = require("../services/apiService");
 async function sendCustomerSupportMessageActivity(emailData, baseParams) {
     console.log('📞 Sending customer support message...');
     const { summary, site_id, user_id, analysis_id } = emailData;
-    const { agentId } = baseParams;
+    const { agentId, origin } = baseParams;
     // Build the message request payload con SOLO los parámetros requeridos por el API
     const messageRequest = {
         message: summary || 'Customer support interaction from analysis',
@@ -18,6 +18,7 @@ async function sendCustomerSupportMessageActivity(emailData, baseParams) {
         userId: user_id,
         agentId: agentId,
         lead_notification: "none", // Para mejor trazabilidad - no duplicar notificaciones
+        origin: origin, // Enviar el origen (whatsapp, email, etc.)
     };
     // Add contact information if available
     if (emailData.contact_info.name) {

@@ -20,6 +20,7 @@ async function customerSupportMessageWorkflow(emailData, baseParams) {
     console.log('🎯 Starting single customer support message workflow...');
     console.log(`📋 Processing email ID: ${emailData.analysis_id}`);
     console.log(`🏢 Site: ${emailData.site_id}, User: ${emailData.user_id}`);
+    console.log(`🔄 Origin: ${baseParams.origin || 'not specified'}`);
     try {
         // First, process the email to determine if action is needed
         const processResult = await processAnalysisDataActivity(emailData);
@@ -128,13 +129,15 @@ async function customerSupportMessageWorkflow(emailData, baseParams) {
 async function scheduleCustomerSupportMessagesWorkflow(params) {
     console.log('🚀 Starting schedule customer support messages workflow...');
     const startTime = new Date();
-    const { emails, site_id, user_id, agentId, timestamp } = params;
+    const { emails, site_id, user_id, agentId, timestamp, origin } = params;
     const totalEmails = emails.length;
     console.log(`📊 Processing ${totalEmails} emails for customer support...`);
     console.log(`🏢 Global Site: ${site_id}, User: ${user_id}`);
     console.log(`⏰ Timestamp: ${timestamp}`);
+    console.log(`🔄 Origin: ${origin || 'not specified'}`);
     const baseParams = {
-        agentId
+        agentId,
+        origin // Pasar el origen a los workflows hijos
     };
     const results = [];
     let scheduled = 0;

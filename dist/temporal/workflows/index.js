@@ -24,6 +24,7 @@ const activityPrioritizationEngineWorkflow_1 = require("./activityPrioritization
 const sendReportWorkflow_1 = require("./sendReportWorkflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
 const sendEmailFromAgentWorkflow_1 = require("./sendEmailFromAgentWorkflow");
+const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow");
 const answerWhatsappMessageWorkflow_1 = require("./answerWhatsappMessageWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
@@ -35,6 +36,7 @@ __exportStar(require("./activityPrioritizationEngineWorkflow"), exports);
 __exportStar(require("./sendReportWorkflow"), exports);
 __exportStar(require("./scheduleCustomerSupportMessagesWorkflow"), exports);
 __exportStar(require("./sendEmailFromAgentWorkflow"), exports);
+__exportStar(require("./sendWhatsappFromAgentWorkflow"), exports);
 __exportStar(require("./answerWhatsappMessageWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
@@ -48,6 +50,7 @@ exports.workflows = {
     scheduleCustomerSupportMessagesWorkflow: scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow,
     customerSupportMessageWorkflow: scheduleCustomerSupportMessagesWorkflow_1.customerSupportMessageWorkflow,
     sendEmailFromAgent: sendEmailFromAgentWorkflow_1.sendEmailFromAgent,
+    sendWhatsappFromAgent: sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent,
     answerWhatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
     processWhatsAppMessagesWorkflow: answerWhatsappMessageWorkflow_1.processWhatsAppMessagesWorkflow,
 };
@@ -63,6 +66,7 @@ exports.workflowNames = {
     scheduleCustomerSupportMessagesWorkflow: 'scheduleCustomerSupportMessagesWorkflow',
     customerSupportMessageWorkflow: 'customerSupportMessageWorkflow',
     sendEmailFromAgent: 'sendEmailFromAgent',
+    sendWhatsappFromAgent: 'sendWhatsappFromAgent',
     answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
     processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
 };
