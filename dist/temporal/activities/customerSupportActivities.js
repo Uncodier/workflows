@@ -29,9 +29,14 @@ async function sendCustomerSupportMessageActivity(emailData, baseParams) {
     if (emailData.contact_info.phone) {
         messageRequest.phone = emailData.contact_info.phone;
     }
-    // Optional: usar analysis_id como lead_id si está disponible
-    if (analysis_id) {
+    // ✅ FIXED: Solo enviar lead_id si hay un analysis_id real y válido
+    // No enviar si está undefined, es null, o es del patrón generado automáticamente
+    if (analysis_id && typeof analysis_id === 'string' && !analysis_id.startsWith('email-') && !analysis_id.startsWith('workflow-')) {
         messageRequest.lead_id = analysis_id;
+        console.log(`📋 Using real analysis_id as lead_id: ${analysis_id}`);
+    }
+    else {
+        console.log(`⚠️ Skipping lead_id - analysis_id is auto-generated, missing, or invalid: ${analysis_id || 'undefined'}`);
     }
     console.log('📤 Sending customer support message with payload:', {
         message: messageRequest.message?.substring(0, 50) + '...',
@@ -48,14 +53,26 @@ async function sendCustomerSupportMessageActivity(emailData, baseParams) {
     try {
         const response = await apiService_1.apiService.post('/api/agents/customerSupport/message', messageRequest);
         if (!response.success) {
-            throw new Error(`Failed to send customer support message: ${response.error?.message}`);
+            console.error('❌ API call failed:', response.error);
+            return {
+                success: false,
+                error: response.error?.message || 'Failed to send customer support message'
+            };
         }
         console.log('✅ Customer support message sent successfully');
-        return response.data;
+        console.log('📊 API Response data:', JSON.stringify(response.data, null, 2));
+        // ✅ FIXED: Return consistent structure that workflow expects
+        return {
+            success: true,
+            data: response.data
+        };
     }
     catch (error) {
         console.error('❌ Failed to send customer support message:', error);
-        throw error;
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
+        };
     }
 }
 /**

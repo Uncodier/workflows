@@ -47,7 +47,7 @@ async function customerSupportMessageWorkflow(emailData, baseParams) {
             };
         }
         console.log('✅ Customer support message sent successfully');
-        console.log(`📋 Customer support response:`, JSON.stringify(response, null, 2));
+        console.log(`📋 Customer support response:`, JSON.stringify(response.data, null, 2));
         // 🌟 NEW: Call sendEmailFromAgent workflow ONLY if customer support was successful
         let emailWorkflowId;
         let emailSent = false;
@@ -56,7 +56,9 @@ async function customerSupportMessageWorkflow(emailData, baseParams) {
             if (emailData.contact_info.email && emailData.lead_notification === 'email') {
                 console.log('📧 Starting sendEmailFromAgent workflow - customer support was successful...');
                 console.log(`🔄 Original lead_notification: ${emailData.lead_notification} - proceeding with follow-up email`);
-                emailWorkflowId = `send-email-agent-${emailData.analysis_id}`;
+                // ✅ FIXED: Manejar analysis_id opcional para el workflowId
+                const emailWorkflowSuffix = emailData.analysis_id || `temp-${Date.now()}`;
+                emailWorkflowId = `send-email-agent-${emailWorkflowSuffix}`;
                 // Prepare email parameters
                 const emailParams = {
                     email: emailData.contact_info.email,
@@ -65,14 +67,17 @@ async function customerSupportMessageWorkflow(emailData, baseParams) {
                     message: `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
                     site_id: emailData.site_id,
                     agent_id: baseParams.agentId,
-                    lead_id: emailData.analysis_id
+                    // ✅ FIXED: Solo enviar lead_id si hay un analysis_id real
+                    lead_id: emailData.analysis_id || undefined
                 };
                 // Start sendEmailFromAgent as child workflow
                 const emailHandle = await (0, workflow_1.startChild)(sendEmailFromAgentWorkflow_1.sendEmailFromAgent, {
                     workflowId: emailWorkflowId,
                     args: [emailParams],
+                    parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
                 });
                 console.log(`📨 Started sendEmailFromAgent workflow: ${emailWorkflowId}`);
+                console.log(`🚀 Parent close policy: ABANDON - email workflow will continue independently`);
                 // Wait for email workflow to complete
                 const emailResult = await emailHandle.result();
                 if (emailResult.success) {
@@ -141,27 +146,33 @@ async function scheduleCustomerSupportMessagesWorkflow(params) {
         // Process each email with 1-minute intervals
         for (let i = 0; i < emails.length; i++) {
             const emailData = emails[i];
-            const emailId = emailData.analysis_id || `email-${i}`;
-            const workflowId = `customer-support-message-${emailId}`;
+            // ✅ IMPROVED: Usar un ID más claro para tracking interno, pero preservar analysis_id real
+            const trackingId = emailData.analysis_id || `workflow-${i}-${Date.now()}`;
+            const workflowId = `customer-support-message-${trackingId}`;
             // Enriquecer emailData con campos necesarios si no están presentes
+            // ✅ FIXED: No sobrescribir analysis_id con un valor generado si ya existe
             const enrichedEmailData = {
                 ...emailData,
                 site_id: emailData.site_id || site_id,
                 user_id: emailData.user_id || user_id,
-                analysis_id: emailData.analysis_id || emailId,
+                // Solo preservar analysis_id si existe y es válido
+                analysis_id: emailData.analysis_id,
                 lead_notification: emailData.lead_notification || 'email', // Default para procesamiento
             };
             console.log(`📋 Processing email ${i + 1}/${totalEmails} (ID: ${workflowId})`);
             console.log(`📧 Subject: ${emailData.original_subject || 'No subject'}`);
             console.log(`👤 Contact: ${emailData.contact_info.name || 'Unknown'} (${emailData.contact_info.email || 'No email'})`);
+            console.log(`🆔 Analysis ID: ${emailData.analysis_id ? emailData.analysis_id + ' (real)' : 'none (will not send lead_id to API)'}`);
             try {
                 // Start child workflow for this specific email
                 const handle = await (0, workflow_1.startChild)(customerSupportMessageWorkflow, {
                     workflowId,
                     args: [enrichedEmailData, baseParams],
+                    parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
                 });
                 scheduled++;
                 console.log(`✅ Scheduled customer support message workflow: ${workflowId}`);
+                console.log(`🚀 Parent close policy: ABANDON - customer support workflow will continue independently`);
                 // Wait for the child workflow to complete
                 const result = await handle.result();
                 if (result.success) {
@@ -190,7 +201,7 @@ async function scheduleCustomerSupportMessagesWorkflow(params) {
                     processed: result.processed,
                     reason: result.reason,
                     error: result.error,
-                    emailId: emailId,
+                    emailId: trackingId,
                     emailSent: result.emailSent,
                     emailWorkflowId: result.emailWorkflowId
                 });
@@ -211,7 +222,7 @@ async function scheduleCustomerSupportMessagesWorkflow(params) {
                     processed: false,
                     reason: 'Failed to start workflow',
                     error: errorMessage,
-                    emailId: emailId,
+                    emailId: trackingId,
                     emailSent: false,
                     emailWorkflowId: undefined
                 });

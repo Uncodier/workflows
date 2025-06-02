@@ -24,6 +24,7 @@ const activityPrioritizationEngineWorkflow_1 = require("./activityPrioritization
 const sendReportWorkflow_1 = require("./sendReportWorkflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
 const sendEmailFromAgentWorkflow_1 = require("./sendEmailFromAgentWorkflow");
+const answerWhatsappMessageWorkflow_1 = require("./answerWhatsappMessageWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -34,6 +35,7 @@ __exportStar(require("./activityPrioritizationEngineWorkflow"), exports);
 __exportStar(require("./sendReportWorkflow"), exports);
 __exportStar(require("./scheduleCustomerSupportMessagesWorkflow"), exports);
 __exportStar(require("./sendEmailFromAgentWorkflow"), exports);
+__exportStar(require("./answerWhatsappMessageWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -46,6 +48,8 @@ exports.workflows = {
     scheduleCustomerSupportMessagesWorkflow: scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow,
     customerSupportMessageWorkflow: scheduleCustomerSupportMessagesWorkflow_1.customerSupportMessageWorkflow,
     sendEmailFromAgent: sendEmailFromAgentWorkflow_1.sendEmailFromAgent,
+    answerWhatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
+    processWhatsAppMessagesWorkflow: answerWhatsappMessageWorkflow_1.processWhatsAppMessagesWorkflow,
 };
 // Workflow names for Temporal Client (strings)
 exports.workflowNames = {
@@ -59,4 +63,6 @@ exports.workflowNames = {
     scheduleCustomerSupportMessagesWorkflow: 'scheduleCustomerSupportMessagesWorkflow',
     customerSupportMessageWorkflow: 'customerSupportMessageWorkflow',
     sendEmailFromAgent: 'sendEmailFromAgent',
+    answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
+    processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
 };

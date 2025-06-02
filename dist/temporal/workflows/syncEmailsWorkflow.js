@@ -140,13 +140,16 @@ async function syncEmailsWorkflow(options) {
                             agentId: undefined // Se puede configurar si es necesario
                         };
                         try {
-                            // Iniciar workflow en paralelo sin esperar resultado
+                            // ✅ FIXED: Configurar parentClosePolicy para que el child workflow continúe ejecutándose 
+                            // incluso cuando el parent workflow (syncEmails) termine
                             void (0, workflow_1.startChild)(scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow, {
                                 workflowId: customerSupportWorkflowId,
                                 args: [scheduleParams],
+                                parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
                             });
                             console.log(`✅ Started scheduleCustomerSupportMessagesWorkflow: ${customerSupportWorkflowId}`);
                             console.log(`🔄 This will process customer support messages with 1-minute intervals`);
+                            console.log(`🚀 Parent close policy: ABANDON - child workflow will continue running independently`);
                         }
                         catch (workflowError) {
                             console.error(`❌ Failed to start customer support workflow: ${workflowError}`);

@@ -22,7 +22,7 @@ const testEmailData = [
         site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
         user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
         lead_notification: "email",
-        analysis_id: "analysis-1",
+        analysis_id: "real-analysis-001",
         priority: "high",
         intent: "inquiry",
         potential_value: "high"
@@ -39,7 +39,6 @@ const testEmailData = [
         site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
         user_id: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
         lead_notification: "email",
-        analysis_id: "analysis-2",
         priority: "medium",
         intent: "support",
         potential_value: "medium"
