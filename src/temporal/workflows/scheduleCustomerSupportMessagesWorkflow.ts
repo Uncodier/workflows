@@ -1,11 +1,11 @@
 import { proxyActivities, sleep, startChild, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { EmailData, ScheduleCustomerSupportParams } from '../activities/customerSupportActivities';
-import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
+import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
+import type { WhatsAppMessageData, WhatsAppAnalysisResponse } from '../activities/whatsappActivities';
 
-// Configure activity options
+// Configure activity options (solo para scheduling activities si las necesitamos)
 const { 
-  sendCustomerSupportMessageActivity,
   processAnalysisDataActivity 
 } = proxyActivities<Activities>({
   startToCloseTimeout: '2 minutes',
@@ -13,145 +13,6 @@ const {
     maximumAttempts: 3,
   },
 });
-
-/**
- * Single Customer Support Message Workflow
- * Processes one email and sends a customer support message
- * If successful, triggers sendEmailFromAgent for better traceability
- */
-export async function customerSupportMessageWorkflow(
-  emailData: EmailData,
-  baseParams: {
-    agentId?: string;
-    origin?: string; // Parámetro opcional para identificar el origen
-  }
-): Promise<{
-  success: boolean;
-  processed: boolean;
-  reason: string;
-  response?: any;
-  emailSent?: boolean;
-  emailWorkflowId?: string;
-  error?: string;
-}> {
-  console.log('🎯 Starting single customer support message workflow...');
-  console.log(`📋 Processing email ID: ${emailData.analysis_id}`);
-  console.log(`🏢 Site: ${emailData.site_id}, User: ${emailData.user_id}`);
-  console.log(`🔄 Origin: ${baseParams.origin || 'not specified'}`);
-  
-  try {
-    // First, process the email to determine if action is needed
-    const processResult = await processAnalysisDataActivity(emailData);
-    
-    if (!processResult.shouldProcess) {
-      console.log('⏭️ Skipping email - not requiring immediate action');
-      return {
-        success: true,
-        processed: false,
-        reason: processResult.reason,
-        emailSent: false
-      };
-    }
-    
-    console.log('📞 Processing email - sending customer support message');
-    
-    // Send the customer support message using data from emailData
-    const response = await sendCustomerSupportMessageActivity(emailData, baseParams);
-    
-    // ✅ Verificar que la llamada a customer support fue exitosa antes de continuar
-    if (!response || !response.success) {
-      console.error('❌ Customer support message failed:', response?.error || 'Unknown error');
-      return {
-        success: false,
-        processed: true,
-        reason: 'Customer support message failed',
-        error: response?.error || 'Customer support call was not successful',
-        emailSent: false
-      };
-    }
-    
-    console.log('✅ Customer support message sent successfully');
-    console.log(`📋 Customer support response:`, JSON.stringify(response.data, null, 2));
-    
-    // 🌟 NEW: Call sendEmailFromAgent workflow ONLY if customer support was successful
-    let emailWorkflowId: string | undefined;
-    let emailSent = false;
-    
-    try {
-      // Check if we have contact email and original lead_notification indicates email should be sent
-      if (emailData.contact_info.email && emailData.lead_notification === 'email') {
-        console.log('📧 Starting sendEmailFromAgent workflow - customer support was successful...');
-        console.log(`🔄 Original lead_notification: ${emailData.lead_notification} - proceeding with follow-up email`);
-        
-        // ✅ FIXED: Manejar analysis_id opcional para el workflowId
-        const emailWorkflowSuffix = emailData.analysis_id || `temp-${Date.now()}`;
-        emailWorkflowId = `send-email-agent-${emailWorkflowSuffix}`;
-        
-        // Prepare email parameters
-        const emailParams = {
-          email: emailData.contact_info.email,
-          subject: response.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`, // ✅ FIXED: Usar conversation_title para el subject
-          // ✅ FIXED: Usar la respuesta real del agente desde messages.assistant.content
-          message: response.data?.messages?.assistant?.content || 
-                   `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
-          site_id: emailData.site_id,
-          agent_id: baseParams.agentId,
-          // ✅ FIXED: Solo enviar lead_id si hay un analysis_id real
-          lead_id: emailData.analysis_id || undefined
-        };
-        
-        // Start sendEmailFromAgent as child workflow
-        const emailHandle = await startChild(sendEmailFromAgent, {
-          workflowId: emailWorkflowId,
-          args: [emailParams],
-          parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
-        });
-        
-        console.log(`📨 Started sendEmailFromAgent workflow: ${emailWorkflowId}`);
-        console.log(`🚀 Parent close policy: ABANDON - email workflow will continue independently`);
-        
-        // Wait for email workflow to complete
-        const emailResult = await emailHandle.result();
-        
-        if (emailResult.success) {
-          emailSent = true;
-          console.log('✅ Follow-up email sent successfully');
-        } else {
-          console.log('⚠️ Follow-up email failed, but customer support was successful');
-        }
-        
-      } else if (!emailData.contact_info.email) {
-        console.log('📭 No email address available for follow-up');
-      } else if (emailData.lead_notification !== 'email') {
-        console.log(`📋 lead_notification = "${emailData.lead_notification}" - skipping follow-up email`);
-      }
-      
-    } catch (emailError) {
-      console.error('❌ Email workflow failed, but customer support was successful:', emailError);
-      // Don't fail the entire workflow if email fails
-    }
-    
-    console.log('✅ Customer support message workflow completed successfully');
-    return {
-      success: true,
-      processed: true,
-      reason: processResult.reason,
-      response,
-      emailSent,
-      emailWorkflowId
-    };
-    
-  } catch (error) {
-    console.error('❌ Customer support message workflow failed:', error);
-    return {
-      success: false,
-      processed: false,
-      reason: 'Workflow execution failed',
-      error: error instanceof Error ? error.message : String(error),
-      emailSent: false
-    };
-  }
-}
 
 /**
  * Schedule Customer Support Messages Workflow
@@ -242,15 +103,29 @@ export async function scheduleCustomerSupportMessagesWorkflow(
       console.log(`🆔 Analysis ID: ${emailData.analysis_id ? emailData.analysis_id + ' (real)' : 'none (will not send lead_id to API)'}`);
       
       try {
-        // Start child workflow for this specific email
+        // Preparar datos según el origen
+        let messageDataForWorkflow: EmailData | { whatsappData: WhatsAppMessageData; analysis: WhatsAppAnalysisResponse['analysis'] };
+        
+        if (baseParams.origin === 'whatsapp') {
+          // Para WhatsApp, necesitamos reestructurar los datos
+          // Esto requiere que el caller pase los datos correctamente estructurados
+          console.log('📱 Processing as WhatsApp message');
+          messageDataForWorkflow = enrichedEmailData as any; // Por ahora, tratarlo como EmailData regular
+        } else {
+          // Para emails, usar como siempre
+          console.log('📧 Processing as email message');
+          messageDataForWorkflow = enrichedEmailData;
+        }
+        
+        // Start child workflow for this specific email/message
         const handle = await startChild(customerSupportMessageWorkflow, {
           workflowId,
-          args: [enrichedEmailData, baseParams],
+          args: [messageDataForWorkflow, baseParams],
           parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
         });
         
         scheduled++;
-        console.log(`✅ Scheduled customer support message workflow: ${workflowId}`);
+        console.log(`✅ Scheduled customer support workflow: ${workflowId}`);
         console.log(`🚀 Parent close policy: ABANDON - customer support workflow will continue independently`);
         
         // Wait for the child workflow to complete

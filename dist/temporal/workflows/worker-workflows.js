@@ -23,6 +23,7 @@ __exportStar(require("./scheduleActivitiesWorkflow"), exports);
 __exportStar(require("./activityPrioritizationEngineWorkflow"), exports);
 __exportStar(require("./sendReportWorkflow"), exports);
 __exportStar(require("./scheduleCustomerSupportMessagesWorkflow"), exports);
+__exportStar(require("./customerSupportWorkflow"), exports);
 __exportStar(require("./sendEmailFromAgentWorkflow"), exports);
 __exportStar(require("./sendWhatsappFromAgentWorkflow"), exports);
 __exportStar(require("./answerWhatsappMessageWorkflow"), exports);

@@ -23,6 +23,7 @@ const scheduleActivitiesWorkflow_1 = require("./scheduleActivitiesWorkflow");
 const activityPrioritizationEngineWorkflow_1 = require("./activityPrioritizationEngineWorkflow");
 const sendReportWorkflow_1 = require("./sendReportWorkflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
+const customerSupportWorkflow_1 = require("./customerSupportWorkflow");
 const sendEmailFromAgentWorkflow_1 = require("./sendEmailFromAgentWorkflow");
 const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow");
 const answerWhatsappMessageWorkflow_1 = require("./answerWhatsappMessageWorkflow");
@@ -50,11 +51,13 @@ exports.workflows = {
     activityPrioritizationEngineWorkflow: activityPrioritizationEngineWorkflow_1.activityPrioritizationEngineWorkflow,
     sendReportWorkflow: sendReportWorkflow_1.sendReportWorkflow,
     scheduleCustomerSupportMessagesWorkflow: scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow,
-    customerSupportMessageWorkflow: scheduleCustomerSupportMessagesWorkflow_1.customerSupportMessageWorkflow,
+    customerSupportMessageWorkflow: customerSupportWorkflow_1.customerSupportMessageWorkflow,
+    emailCustomerSupportMessageWorkflow: customerSupportWorkflow_1.emailCustomerSupportMessageWorkflow,
     sendEmailFromAgent: sendEmailFromAgentWorkflow_1.sendEmailFromAgent,
     sendWhatsappFromAgent: sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent,
     answerWhatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
     processWhatsAppMessagesWorkflow: answerWhatsappMessageWorkflow_1.processWhatsAppMessagesWorkflow,
+    whatsappCustomerSupportWorkflow: answerWhatsappMessageWorkflow_1.whatsappCustomerSupportWorkflow,
     siteSetupWorkflow: siteSetupWorkflow_1.siteSetupWorkflow,
 };
 // Workflow names for Temporal Client (strings)
@@ -68,9 +71,11 @@ exports.workflowNames = {
     sendReportWorkflow: 'sendReportWorkflow',
     scheduleCustomerSupportMessagesWorkflow: 'scheduleCustomerSupportMessagesWorkflow',
     customerSupportMessageWorkflow: 'customerSupportMessageWorkflow',
+    emailCustomerSupportMessageWorkflow: 'emailCustomerSupportMessageWorkflow',
     sendEmailFromAgent: 'sendEmailFromAgent',
     sendWhatsappFromAgent: 'sendWhatsappFromAgent',
     answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
     processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
+    whatsappCustomerSupportWorkflow: 'whatsappCustomerSupportWorkflow',
     siteSetupWorkflow: 'siteSetupWorkflow',
 };

@@ -5,10 +5,11 @@ import { syncEmailsScheduleWorkflow } from './syncEmailsScheduleWorkflow';
 import { scheduleActivitiesWorkflow } from './scheduleActivitiesWorkflow';
 import { activityPrioritizationEngineWorkflow } from './activityPrioritizationEngineWorkflow';
 import { sendReportWorkflow } from './sendReportWorkflow';
-import { scheduleCustomerSupportMessagesWorkflow, customerSupportMessageWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
+import { scheduleCustomerSupportMessagesWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
+import { customerSupportMessageWorkflow, emailCustomerSupportMessageWorkflow } from './customerSupportWorkflow';
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
-import { answerWhatsappMessageWorkflow, processWhatsAppMessagesWorkflow } from './answerWhatsappMessageWorkflow';
+import { answerWhatsappMessageWorkflow, processWhatsAppMessagesWorkflow, whatsappCustomerSupportWorkflow } from './answerWhatsappMessageWorkflow';
 import { siteSetupWorkflow } from './siteSetupWorkflow';
 
 // Export workflows individually
@@ -36,10 +37,12 @@ export const workflows = {
   sendReportWorkflow,
   scheduleCustomerSupportMessagesWorkflow,
   customerSupportMessageWorkflow,
+  emailCustomerSupportMessageWorkflow,
   sendEmailFromAgent,
   sendWhatsappFromAgent,
   answerWhatsappMessageWorkflow,
   processWhatsAppMessagesWorkflow,
+  whatsappCustomerSupportWorkflow,
   siteSetupWorkflow,
 };
 
@@ -54,10 +57,12 @@ export const workflowNames = {
   sendReportWorkflow: 'sendReportWorkflow',
   scheduleCustomerSupportMessagesWorkflow: 'scheduleCustomerSupportMessagesWorkflow',
   customerSupportMessageWorkflow: 'customerSupportMessageWorkflow',
+  emailCustomerSupportMessageWorkflow: 'emailCustomerSupportMessageWorkflow',
   sendEmailFromAgent: 'sendEmailFromAgent',
   sendWhatsappFromAgent: 'sendWhatsappFromAgent',
   answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
   processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
+  whatsappCustomerSupportWorkflow: 'whatsappCustomerSupportWorkflow',
   siteSetupWorkflow: 'siteSetupWorkflow',
 };
 

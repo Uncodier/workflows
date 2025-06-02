@@ -4,7 +4,6 @@ import type {
   WhatsAppMessageData, 
   WhatsAppAnalysisResponse 
 } from '../activities/whatsappActivities';
-import { customerSupportMessageWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
 import type { EmailData } from '../activities/customerSupportActivities';
 
 /**
@@ -34,7 +33,8 @@ function mapWhatsAppIntentToEmailIntent(
 // Configure activity options
 const { 
   analyzeWhatsAppMessageActivity,
-  sendWhatsAppResponseActivity 
+  sendWhatsAppResponseActivity,
+  sendCustomerSupportMessageActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '2 minutes',
   retry: {
@@ -165,42 +165,23 @@ export async function answerWhatsappMessageWorkflow(
       console.log('📞 Triggering customer support - message requires attention');
       
       try {
-        // Map WhatsApp analysis data to EmailData format for customer support
-        const emailDataForCS: EmailData = {
-          summary: analysis.summary || `WhatsApp message from ${messageData.senderName || messageData.phoneNumber}: ${messageData.messageContent || 'No message content'}`,
-          original_subject: `WhatsApp: ${analysis.intent || 'Message'} from ${messageData.senderName || messageData.phoneNumber}`,
-          contact_info: {
-            name: analysis.contact_info?.name || messageData.senderName || 'WhatsApp Contact',
-            email: analysis.contact_info?.email || '', // WhatsApp might not have email
-            phone: analysis.contact_info?.phone || messageData.phoneNumber,
-            company: analysis.contact_info?.company || ''
-          },
-          site_id: messageData.siteId,
-          user_id: messageData.userId,
-          lead_notification: "none", // Evitar duplicar notificaciones
-          analysis_id: analysis.analysis_id || `whatsapp-${messageData.messageId || Date.now()}`,
-          priority: analysis.priority || 'medium',
-          intent: mapWhatsAppIntentToEmailIntent(analysis.intent),
-          potential_value: analysis.priority === 'high' ? 'high' : 'medium'
-        };
+        const customerSupportWorkflowId = `whatsapp-customer-support-${messageData.messageId || Date.now()}`;
         
-        const customerSupportWorkflowId = `customer-support-whatsapp-${messageData.messageId || Date.now()}`;
-        
-        // Start customer support workflow as child workflow
-        const customerSupportHandle = await startChild(customerSupportMessageWorkflow, {
+        // Start WhatsApp-specific customer support workflow as child workflow
+        const customerSupportHandle = await startChild(whatsappCustomerSupportWorkflow, {
           workflowId: customerSupportWorkflowId,
           args: [
-            emailDataForCS,
+            messageData,
+            analysis,
             {
-              agentId: options?.agentId,
-              origin: "whatsapp" // Indicar que el origen es WhatsApp
+              agentId: options?.agentId
             }
           ],
           parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
         });
         
         customerSupportTriggered = true;
-        console.log(`✅ Customer support workflow started: ${customerSupportWorkflowId}`);
+        console.log(`✅ WhatsApp customer support workflow started: ${customerSupportWorkflowId}`);
         console.log(`🚀 Parent close policy: ABANDON - customer support workflow will continue independently`);
         
         // Wait for customer support workflow to complete
@@ -213,22 +194,22 @@ export async function answerWhatsappMessageWorkflow(
         };
         
         if (csResult.success) {
-          console.log('✅ Customer support workflow completed successfully');
+          console.log('✅ WhatsApp customer support workflow completed successfully');
           if (csResult.processed) {
             console.log(`📋 Customer support processed: ${csResult.reason}`);
           } else {
             console.log(`⏭️ Customer support skipped: ${csResult.reason}`);
           }
         } else {
-          console.log('⚠️ Customer support workflow failed, but WhatsApp workflow continues');
+          console.log('⚠️ WhatsApp customer support workflow failed, but WhatsApp workflow continues');
         }
         
       } catch (customerSupportError) {
-        console.error('❌ Customer support workflow failed:', customerSupportError);
+        console.error('❌ WhatsApp customer support workflow failed:', customerSupportError);
         customerSupportResult = {
           success: false,
           processed: false,
-          workflowId: `customer-support-whatsapp-${messageData.messageId || Date.now()}`
+          workflowId: `whatsapp-customer-support-${messageData.messageId || Date.now()}`
         };
         // Don't fail the entire WhatsApp workflow if customer support fails
       }
@@ -390,5 +371,110 @@ export async function processWhatsAppMessagesWorkflow(
   } catch (error) {
     console.error('❌ Batch WhatsApp messages workflow failed:', error);
     throw error;
+  }
+}
+
+/**
+ * WhatsApp Customer Support Workflow
+ * Workflow específico para manejar el customer support de mensajes de WhatsApp
+ */
+export async function whatsappCustomerSupportWorkflow(
+  messageData: WhatsAppMessageData,
+  analysis: WhatsAppAnalysisResponse['analysis'],
+  options?: {
+    agentId?: string;
+  }
+): Promise<{
+  success: boolean;
+  processed: boolean;
+  workflowId: string;
+  reason?: string;
+  error?: string;
+}> {
+  const workflowId = `whatsapp-customer-support-${messageData.messageId || Date.now()}`;
+  
+  console.log('🎯 Starting WhatsApp Customer Support workflow...');
+  console.log(`🆔 Workflow ID: ${workflowId}`);
+  console.log(`📞 From: ${messageData.senderName || messageData.phoneNumber}`);
+  console.log(`🏢 Site: ${messageData.siteId}, User: ${messageData.userId}`);
+  
+  try {
+    // Prepare customer support message request specifically for WhatsApp
+    const customerSupportRequest = {
+      message: analysis?.summary || `WhatsApp message from ${messageData.senderName || messageData.phoneNumber}: ${messageData.messageContent || 'No message content'}`,
+      messageIds: [messageData.messageId || `whatsapp-${Date.now()}`], // Array of message IDs as required
+      agentId: options?.agentId || 'whatsapp-agent',
+      conversation_id: messageData.conversationId || 'whatsapp-conversation', // Provide default if null
+      site_id: messageData.siteId,
+      user_id: messageData.userId,
+      name: messageData.senderName,
+      phone: messageData.phoneNumber,
+      lead_notification: "none", // Evitar duplicar notificaciones
+      origin: "whatsapp"
+    };
+    
+    console.log('📤 Sending WhatsApp customer support request:', {
+      messageIds: customerSupportRequest.messageIds,
+      agentId: customerSupportRequest.agentId,
+      conversation_id: customerSupportRequest.conversation_id,
+      hasName: !!customerSupportRequest.name,
+      hasPhone: !!customerSupportRequest.phone,
+      site_id: customerSupportRequest.site_id,
+      user_id: customerSupportRequest.user_id,
+      origin: customerSupportRequest.origin
+    });
+    
+    // Crear un EmailData compatible para la activity existente
+    const emailDataForCS: EmailData = {
+      summary: customerSupportRequest.message,
+      original_subject: `WhatsApp: ${analysis?.intent || 'Message'} from ${messageData.senderName || messageData.phoneNumber}`,
+      contact_info: {
+        name: messageData.senderName || 'WhatsApp Contact',
+        email: '', // WhatsApp no tiene email
+        phone: messageData.phoneNumber,
+        company: ''
+      },
+      site_id: messageData.siteId,
+      user_id: messageData.userId,
+      lead_notification: "none",
+      analysis_id: `whatsapp-${messageData.messageId || Date.now()}`,
+      priority: analysis?.priority || 'medium',
+      intent: mapWhatsAppIntentToEmailIntent(analysis?.intent),
+      potential_value: analysis?.priority === 'high' ? 'high' : 'medium'
+    };
+    
+    const baseParams = {
+      agentId: options?.agentId,
+      origin: "whatsapp"
+    };
+    
+    const result = await sendCustomerSupportMessageActivity(emailDataForCS, baseParams);
+    
+    if (!result.success) {
+      console.error('❌ WhatsApp customer support failed:', result.error);
+      return {
+        success: false,
+        processed: false,
+        workflowId,
+        error: result.error
+      };
+    }
+    
+    console.log('✅ WhatsApp customer support completed successfully');
+    return {
+      success: true,
+      processed: true,
+      workflowId,
+      reason: 'WhatsApp message processed for customer support'
+    };
+    
+  } catch (error) {
+    console.error('❌ WhatsApp customer support workflow failed:', error);
+    return {
+      success: false,
+      processed: false,
+      workflowId,
+      error: error instanceof Error ? error.message : String(error)
+    };
   }
 } 
