@@ -9,6 +9,7 @@ import { scheduleCustomerSupportMessagesWorkflow, customerSupportMessageWorkflow
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 import { answerWhatsappMessageWorkflow, processWhatsAppMessagesWorkflow } from './answerWhatsappMessageWorkflow';
+import { siteSetupWorkflow } from './siteSetupWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -22,6 +23,7 @@ export * from './scheduleCustomerSupportMessagesWorkflow';
 export * from './sendEmailFromAgentWorkflow';
 export * from './sendWhatsappFromAgentWorkflow';
 export * from './answerWhatsappMessageWorkflow';
+export * from './siteSetupWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -38,6 +40,7 @@ export const workflows = {
   sendWhatsappFromAgent,
   answerWhatsappMessageWorkflow,
   processWhatsAppMessagesWorkflow,
+  siteSetupWorkflow,
 };
 
 // Workflow names for Temporal Client (strings)
@@ -55,6 +58,7 @@ export const workflowNames = {
   sendWhatsappFromAgent: 'sendWhatsappFromAgent',
   answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
   processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
+  siteSetupWorkflow: 'siteSetupWorkflow',
 };
 
 // Workflow types for type-safe execution
