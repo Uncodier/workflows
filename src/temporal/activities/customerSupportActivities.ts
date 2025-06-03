@@ -85,7 +85,7 @@ export async function sendCustomerSupportMessageActivity(
 }> {
   console.log('📞 Sending customer support message...');
   
-  const { summary, site_id, user_id, analysis_id, conversation_id, visitor_id, lead_id } = emailData;
+  const { summary, site_id, user_id, conversation_id, visitor_id, lead_id } = emailData;
   const { agentId, origin } = baseParams;
   
   // Build the message request payload con SOLO los parámetros requeridos por el API
