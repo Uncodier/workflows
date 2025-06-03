@@ -4,7 +4,7 @@ import { apiService } from '../services/apiService';
  */
 export async function sendCustomerSupportMessageActivity(emailData, baseParams) {
     console.log('📞 Sending customer support message...');
-    const { summary, site_id, user_id, analysis_id, conversation_id, visitor_id } = emailData;
+    const { summary, site_id, user_id, analysis_id, conversation_id, visitor_id, lead_id } = emailData;
     const { agentId, origin } = baseParams;
     // Build the message request payload con SOLO los parámetros requeridos por el API
     const messageRequest = {
@@ -37,14 +37,12 @@ export async function sendCustomerSupportMessageActivity(emailData, baseParams) 
     if (emailData.contact_info.phone) {
         messageRequest.phone = emailData.contact_info.phone;
     }
-    // ✅ FIXED: Solo enviar lead_id si hay un analysis_id real y válido
-    // No enviar si está undefined, es null, o es del patrón generado automáticamente
-    if (analysis_id && typeof analysis_id === 'string' && !analysis_id.startsWith('email-') && !analysis_id.startsWith('workflow-')) {
-        messageRequest.lead_id = analysis_id;
-        console.log(`📋 Using real analysis_id as lead_id: ${analysis_id}`);
-    }
-    else {
-        console.log(`⚠️ Skipping lead_id - analysis_id is auto-generated, missing, or invalid: ${analysis_id || 'undefined'}`);
+    // ✅ FIXED: Solo enviar lead_id si viene explícitamente, NUNCA generar o derivar automáticamente
+    if (lead_id) {
+        messageRequest.lead_id = lead_id;
+        console.log(`📋 Using explicitly provided lead_id: ${lead_id}`);
+    } else {
+        console.log(`⚠️ No lead_id provided - API will handle lead creation/matching if needed`);
     }
     console.log('📤 Sending customer support message with payload:', {
         message: messageRequest.message?.substring(0, 50) + '...',
