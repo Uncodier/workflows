@@ -1,6 +1,10 @@
-import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
-import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
-import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.emailCustomerSupportMessageWorkflow = emailCustomerSupportMessageWorkflow;
+exports.customerSupportMessageWorkflow = customerSupportMessageWorkflow;
+const workflow_1 = require("@temporalio/workflow");
+const sendEmailFromAgentWorkflow_1 = require("./sendEmailFromAgentWorkflow");
+const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow");
 /**
  * Helper function to map WhatsApp intents to EmailData intents
  * Currently not used but kept for future WhatsApp integration
@@ -26,7 +30,7 @@ import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 //   }
 // }
 // Configure activity options
-const { sendCustomerSupportMessageActivity, processAnalysisDataActivity } = proxyActivities({
+const { sendCustomerSupportMessageActivity, processAnalysisDataActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '2 minutes',
     retry: {
         maximumAttempts: 3,
@@ -39,7 +43,7 @@ const { sendCustomerSupportMessageActivity, processAnalysisDataActivity } = prox
  * Processes one email and sends a customer support message
  * If successful, triggers sendEmailFromAgent for better traceability
  */
-export async function emailCustomerSupportMessageWorkflow(emailData, baseParams) {
+async function emailCustomerSupportMessageWorkflow(emailData, baseParams) {
     console.log('🎯 Starting email customer support message workflow...');
     console.log(`📋 Processing email ID: ${emailData.analysis_id}`);
     console.log(`🏢 Site: ${emailData.site_id}, User: ${emailData.user_id}`);
@@ -86,9 +90,9 @@ export async function emailCustomerSupportMessageWorkflow(emailData, baseParams)
                 // Prepare email parameters
                 const emailParams = {
                     email: emailData.contact_info.email,
-                    subject: response.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`, // ✅ FIXED: Usar conversation_title para el subject
+                    subject: response.data?.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`, // ✅ FIXED: Usar conversation_title para el subject
                     // ✅ FIXED: Usar la respuesta real del agente desde messages.assistant.content
-                    message: response.data?.messages?.assistant?.content ||
+                    message: response.data?.data?.messages?.assistant?.content ||
                         `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
                     site_id: emailData.site_id,
                     agent_id: baseParams.agentId,
@@ -96,10 +100,10 @@ export async function emailCustomerSupportMessageWorkflow(emailData, baseParams)
                     lead_id: emailData.analysis_id || undefined
                 };
                 // Start sendEmailFromAgent as child workflow
-                const emailHandle = await startChild(sendEmailFromAgent, {
+                const emailHandle = await (0, workflow_1.startChild)(sendEmailFromAgentWorkflow_1.sendEmailFromAgent, {
                     workflowId: emailWorkflowId,
                     args: [emailParams],
-                    parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+                    parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
                 });
                 console.log(`📨 Started sendEmailFromAgent workflow: ${emailWorkflowId}`);
                 console.log(`🚀 Parent close policy: ABANDON - email workflow will continue independently`);
@@ -150,7 +154,7 @@ export async function emailCustomerSupportMessageWorkflow(emailData, baseParams)
  * Detecta el origen (email vs whatsapp) y delega al workflow específico
  * Este es el workflow principal que debe ser llamado desde el API
  */
-export async function customerSupportMessageWorkflow(messageData, baseParams) {
+async function customerSupportMessageWorkflow(messageData, baseParams) {
     console.log('🎯 Starting customer support message workflow...');
     console.log(`🔄 Origin: ${baseParams.origin || 'not specified'}`);
     try {
@@ -203,7 +207,7 @@ export async function customerSupportMessageWorkflow(messageData, baseParams) {
                 // Prepare WhatsApp parameters from customer support response
                 const whatsappParams = {
                     phone_number: whatsappData.phoneNumber,
-                    message: response.data?.messages?.assistant?.content ||
+                    message: response.data?.data?.messages?.assistant?.content ||
                         `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
                     site_id: whatsappData.siteId,
                     from: 'Customer Support',
@@ -212,10 +216,10 @@ export async function customerSupportMessageWorkflow(messageData, baseParams) {
                     // ✅ REMOVED: lead_id - API can obtain it from phone number
                 };
                 // Start sendWhatsappFromAgent as child workflow
-                const whatsappHandle = await startChild(sendWhatsappFromAgent, {
+                const whatsappHandle = await (0, workflow_1.startChild)(sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent, {
                     workflowId: whatsappWorkflowId,
                     args: [whatsappParams],
-                    parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+                    parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
                 });
                 console.log(`📨 Started sendWhatsappFromAgent workflow: ${whatsappWorkflowId}`);
                 console.log(`🚀 Parent close policy: ABANDON - WhatsApp workflow will continue independently`);

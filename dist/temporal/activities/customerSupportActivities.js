@@ -1,8 +1,13 @@
-import { apiService } from '../services/apiService';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.sendCustomerSupportMessageActivity = sendCustomerSupportMessageActivity;
+exports.processAnalysisDataActivity = processAnalysisDataActivity;
+exports.processApiEmailResponseActivity = processApiEmailResponseActivity;
+const apiService_1 = require("../services/apiService");
 /**
  * Send customer support message based on email data
  */
-export async function sendCustomerSupportMessageActivity(emailData, baseParams) {
+async function sendCustomerSupportMessageActivity(emailData, baseParams) {
     console.log('📞 Sending customer support message...');
     const { summary, site_id, user_id, conversation_id, visitor_id, lead_id } = emailData;
     const { agentId, origin } = baseParams;
@@ -41,7 +46,8 @@ export async function sendCustomerSupportMessageActivity(emailData, baseParams) 
     if (lead_id) {
         messageRequest.lead_id = lead_id;
         console.log(`📋 Using explicitly provided lead_id: ${lead_id}`);
-    } else {
+    }
+    else {
         console.log(`⚠️ No lead_id provided - API will handle lead creation/matching if needed`);
     }
     console.log('📤 Sending customer support message with payload:', {
@@ -60,7 +66,7 @@ export async function sendCustomerSupportMessageActivity(emailData, baseParams) 
     });
     console.log('📋 Full payload being sent:', JSON.stringify(messageRequest, null, 2));
     try {
-        const response = await apiService.post('/api/agents/customerSupport/message', messageRequest);
+        const response = await apiService_1.apiService.post('/api/agents/customerSupport/message', messageRequest);
         if (!response.success) {
             console.error('❌ API call failed:', response.error);
             return {
@@ -87,7 +93,7 @@ export async function sendCustomerSupportMessageActivity(emailData, baseParams) 
 /**
  * Process email data and prepare for customer support interaction
  */
-export async function processAnalysisDataActivity(emailData) {
+async function processAnalysisDataActivity(emailData) {
     const { lead_notification, priority, intent, potential_value } = emailData;
     console.log('🔍 Processing email data for customer support...');
     console.log(`📨 Original lead_notification: ${lead_notification}`);
@@ -125,7 +131,7 @@ export async function processAnalysisDataActivity(emailData) {
 /**
  * Process API email response and execute customer support workflow
  */
-export async function processApiEmailResponseActivity(apiResponse) {
+async function processApiEmailResponseActivity(apiResponse) {
     console.log('🔄 Processing API email response for customer support workflow...');
     try {
         const { childWorkflow } = apiResponse;

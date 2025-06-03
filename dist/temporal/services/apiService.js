@@ -1,8 +1,11 @@
-import { apiConfig } from '../../config/config';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.apiService = void 0;
+const config_1 = require("../../config/config");
 class ApiService {
     constructor() {
-        this.baseUrl = apiConfig.baseUrl;
-        this.apiKey = apiConfig.apiKey;
+        this.baseUrl = config_1.apiConfig.baseUrl;
+        this.apiKey = config_1.apiConfig.apiKey;
         if (!this.baseUrl) {
             throw new Error('API_BASE_URL environment variable is not configured');
         }
@@ -127,4 +130,4 @@ class ApiService {
     }
 }
 // Export singleton instance
-export const apiService = new ApiService();
+exports.apiService = new ApiService();

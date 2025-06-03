@@ -7,9 +7,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.EmailSyncSchedulingService = void 0;
 const emailConfigService_1 = require("./emailConfigService");
 class EmailSyncSchedulingService {
-    static DEFAULT_MIN_HOURS_BETWEEN_SYNCS = 3;
-    static DEFAULT_MAX_RETRY_COUNT = 3;
-    static RETRY_DELAY_MINUTES = 15; // Retry failed syncs after 15 minutes
     /**
      * Determine if a site should be scheduled for email sync
      */
@@ -282,3 +279,6 @@ class EmailSyncSchedulingService {
     }
 }
 exports.EmailSyncSchedulingService = EmailSyncSchedulingService;
+EmailSyncSchedulingService.DEFAULT_MIN_HOURS_BETWEEN_SYNCS = 3;
+EmailSyncSchedulingService.DEFAULT_MAX_RETRY_COUNT = 3;
+EmailSyncSchedulingService.RETRY_DELAY_MINUTES = 15; // Retry failed syncs after 15 minutes

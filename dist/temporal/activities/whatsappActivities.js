@@ -1,8 +1,13 @@
-import { apiService } from '../services/apiService';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.analyzeWhatsAppMessageActivity = analyzeWhatsAppMessageActivity;
+exports.sendWhatsAppResponseActivity = sendWhatsAppResponseActivity;
+exports.sendWhatsAppFromAgentActivity = sendWhatsAppFromAgentActivity;
+const apiService_1 = require("../services/apiService");
 /**
  * Analyze WhatsApp message using AI
  */
-export async function analyzeWhatsAppMessageActivity(messageData) {
+async function analyzeWhatsAppMessageActivity(messageData) {
     console.log('📱 Analyzing WhatsApp message...');
     console.log(`📞 From: ${messageData.senderName || messageData.phoneNumber}`);
     console.log(`💬 Message: ${messageData.messageContent?.substring(0, 100) || 'No message content'}...`);
@@ -31,7 +36,7 @@ export async function analyzeWhatsAppMessageActivity(messageData) {
             conversationId: analysisRequest.conversation_id
         });
         console.log('📋 Full analysis request:', JSON.stringify(analysisRequest, null, 2));
-        const response = await apiService.post('/api/agents/whatsapp/analyze', analysisRequest);
+        const response = await apiService_1.apiService.post('/api/agents/whatsapp/analyze', analysisRequest);
         if (!response.success) {
             console.error('❌ WhatsApp analysis failed:', response.error);
             return {
@@ -63,12 +68,12 @@ export async function analyzeWhatsAppMessageActivity(messageData) {
 /**
  * Send WhatsApp response message
  */
-export async function sendWhatsAppResponseActivity(responseData) {
+async function sendWhatsAppResponseActivity(responseData) {
     console.log('📱 Sending WhatsApp response...');
     console.log(`📞 To: ${responseData.phone}`);
     console.log(`💬 Message: ${responseData.message?.substring(0, 100) || 'No message content'}...`);
     try {
-        const response = await apiService.post('/api/agents/whatsapp/send', {
+        const response = await apiService_1.apiService.post('/api/agents/whatsapp/send', {
             phone: responseData.phone,
             message: responseData.message,
             conversation_id: responseData.conversation_id,
@@ -98,7 +103,7 @@ export async function sendWhatsAppResponseActivity(responseData) {
 /**
  * Activity to send WhatsApp message via agent API
  */
-export async function sendWhatsAppFromAgentActivity(params) {
+async function sendWhatsAppFromAgentActivity(params) {
     console.log('📱 Sending WhatsApp from agent:', {
         recipient: params.phone_number,
         from: params.from || 'AI Assistant',
@@ -127,7 +132,7 @@ export async function sendWhatsAppFromAgentActivity(params) {
         else {
             console.log(`⚠️ Skipping lead_id - API will obtain it from phone_number: ${params.phone_number}`);
         }
-        const response = await apiService.post('/api/agents/tools/sendWhatsApp', apiPayload);
+        const response = await apiService_1.apiService.post('/api/agents/tools/sendWhatsApp', apiPayload);
         if (!response.success) {
             throw new Error(`Failed to send WhatsApp message: ${response.error?.message}`);
         }

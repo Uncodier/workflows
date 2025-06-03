@@ -1,13 +1,16 @@
-import { proxyActivities } from '@temporalio/workflow';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.sendWhatsappFromAgent = sendWhatsappFromAgent;
+const workflow_1 = require("@temporalio/workflow");
 // Configure activity options
-const { sendWhatsAppFromAgentActivity } = proxyActivities({
+const { sendWhatsAppFromAgentActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '2 minutes',
 });
 /**
  * Send WhatsApp From Agent Workflow
  * Sends a WhatsApp message via the agent API endpoint
  */
-export async function sendWhatsappFromAgent(params) {
+async function sendWhatsappFromAgent(params) {
     console.log('📱 Starting send WhatsApp from agent workflow...');
     const startTime = new Date();
     try {

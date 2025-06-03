@@ -120,9 +120,9 @@ export async function emailCustomerSupportMessageWorkflow(
         // Prepare email parameters
         const emailParams = {
           email: emailData.contact_info.email,
-          subject: response.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`, // ✅ FIXED: Usar conversation_title para el subject
+          subject: response.data?.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`, // ✅ FIXED: Usar conversation_title para el subject
           // ✅ FIXED: Usar la respuesta real del agente desde messages.assistant.content
-          message: response.data?.messages?.assistant?.content || 
+          message: response.data?.data?.messages?.assistant?.content || 
                    `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
           site_id: emailData.site_id,
           agent_id: baseParams.agentId,
@@ -268,7 +268,7 @@ export async function customerSupportMessageWorkflow(
         // Prepare WhatsApp parameters from customer support response
         const whatsappParams = {
           phone_number: whatsappData.phoneNumber,
-          message: response.data?.messages?.assistant?.content || 
+          message: response.data?.data?.messages?.assistant?.content || 
                   `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
           site_id: whatsappData.siteId,
           from: 'Customer Support',
