@@ -237,21 +237,8 @@ export async function customerSupportMessageWorkflow(
         visitor_id: undefined // WhatsApp normalmente no tiene visitor_id, se maneja por phone
       };
       
-      // Procesar con customer support
-      console.log('📞 Processing WhatsApp message for customer support...');
-      
-      const processResult = await processAnalysisDataActivity(emailDataForCS);
-      
-      if (!processResult.shouldProcess) {
-        console.log('⏭️ Skipping WhatsApp message - not requiring immediate action');
-        return {
-          success: true,
-          processed: false,
-          reason: processResult.reason
-        };
-      }
-      
-      console.log('📞 Processing WhatsApp message - sending customer support message');
+      // ✅ FIXED: Para WhatsApp siempre procesar - eliminar filtro innecesario
+      console.log('📞 Processing WhatsApp message - sending customer support message directly');
       
       // Enviar mensaje de customer support
       const response = await sendCustomerSupportMessageActivity(emailDataForCS, baseParams);
