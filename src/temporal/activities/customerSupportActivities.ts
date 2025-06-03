@@ -109,15 +109,17 @@ export async function sendCustomerSupportMessageActivity(
     console.log(`👤 Using visitor ID: ${visitor_id}`);
   }
 
-  // Add contact information if available
+  // Add all available contact information - origin indicates response channel, not data restrictions
   if (emailData.contact_info.name) {
     messageRequest.name = emailData.contact_info.name;
   }
   
+  // Always send email if available (helps with lead creation/matching)
   if (emailData.contact_info.email) {
     messageRequest.email = emailData.contact_info.email;
   }
   
+  // Always send phone if available (helps with lead creation/matching)  
   if (emailData.contact_info.phone) {
     messageRequest.phone = emailData.contact_info.phone;
   }
@@ -192,25 +194,25 @@ export async function processAnalysisDataActivity(
   console.log('🔍 Processing email data for customer support...');
   console.log(`📨 Original lead_notification: ${lead_notification}`);
   
-  // Determine if this email requires customer support action
-  // IMPORTANTE: Manejar lead_notification = "email" del flujo syncEmails
-  const shouldProcess = 
-    lead_notification === 'email' ||  // Viene del análisis de syncEmails
-    priority === 'high' ||
-    intent === 'complaint' ||
-    potential_value === 'high';
-    
+  // Determine if this email requires customer support action and assign reason
+  let shouldProcess = false;
   let reason = '';
+  
   if (lead_notification === 'email') {
+    shouldProcess = true;
     reason = 'Email lead notification detected from syncEmails analysis';
   } else if (priority === 'high') {
+    shouldProcess = true;
     reason = 'High priority analysis';
   } else if (intent === 'complaint') {
+    shouldProcess = true;
     reason = 'Complaint detected - requires immediate attention';
   } else if (potential_value === 'high') {
+    shouldProcess = true;
     reason = 'High commercial potential detected';
   } else {
-    reason = 'Processing for completeness - email detected';
+    shouldProcess = false;
+    reason = 'No processing criteria met - skipping customer support';
   }
   
   console.log(`📊 Email processing result: ${shouldProcess ? 'PROCESS' : 'SKIP'} - ${reason}`);
