@@ -1,16 +1,13 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendEmailFromAgent = sendEmailFromAgent;
-const workflow_1 = require("@temporalio/workflow");
+import { proxyActivities } from '@temporalio/workflow';
 // Configure activity options
-const { sendEmailFromAgentActivity } = (0, workflow_1.proxyActivities)({
+const { sendEmailFromAgentActivity } = proxyActivities({
     startToCloseTimeout: '2 minutes',
 });
 /**
  * Send Email From Agent Workflow
  * Sends an email via the agent API endpoint
  */
-async function sendEmailFromAgent(params) {
+export async function sendEmailFromAgent(params) {
     console.log('📧 Starting send email from agent workflow...');
     const startTime = new Date();
     try {

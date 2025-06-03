@@ -220,15 +220,26 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
   });
 
   try {
-    const response = await apiService.post('/api/agents/tools/sendWhatsApp', {
+    // Prepare API payload - only include lead_id if it's a valid UUID
+    const apiPayload: any = {
       phone_number: params.phone_number,
       message: params.message,
       site_id: params.site_id,
       from: params.from || 'AI Assistant',
       agent_id: params.agent_id,
       conversation_id: params.conversation_id,
-      lead_id: params.lead_id
-    });
+    };
+
+    // Only include lead_id if it's present and looks like a valid UUID
+    // API can obtain lead_id from phone_number if not provided
+    if (params.lead_id && isValidUUID(params.lead_id)) {
+      apiPayload.lead_id = params.lead_id;
+      console.log(`📋 Including valid lead_id: ${params.lead_id}`);
+    } else {
+      console.log(`⚠️ Skipping lead_id - API will obtain it from phone_number: ${params.phone_number}`);
+    }
+
+    const response = await apiService.post('/api/agents/tools/sendWhatsApp', apiPayload);
 
     if (!response.success) {
       throw new Error(`Failed to send WhatsApp message: ${response.error?.message}`);
@@ -247,4 +258,12 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
     console.error('❌ WhatsApp sending failed:', error);
     throw new Error(`WhatsApp sending failed: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+/**
+ * Helper function to validate UUID format
+ */
+function isValidUUID(uuid: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(uuid);
 } 

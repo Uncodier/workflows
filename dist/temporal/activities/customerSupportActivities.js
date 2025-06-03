@@ -1,15 +1,10 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendCustomerSupportMessageActivity = sendCustomerSupportMessageActivity;
-exports.processAnalysisDataActivity = processAnalysisDataActivity;
-exports.processApiEmailResponseActivity = processApiEmailResponseActivity;
-const apiService_1 = require("../services/apiService");
+import { apiService } from '../services/apiService';
 /**
  * Send customer support message based on email data
  */
-async function sendCustomerSupportMessageActivity(emailData, baseParams) {
+export async function sendCustomerSupportMessageActivity(emailData, baseParams) {
     console.log('📞 Sending customer support message...');
-    const { summary, site_id, user_id, analysis_id } = emailData;
+    const { summary, site_id, user_id, analysis_id, conversation_id, visitor_id } = emailData;
     const { agentId, origin } = baseParams;
     // Build the message request payload con SOLO los parámetros requeridos por el API
     const messageRequest = {
@@ -20,13 +15,25 @@ async function sendCustomerSupportMessageActivity(emailData, baseParams) {
         lead_notification: "none", // Para mejor trazabilidad - no duplicar notificaciones
         origin: origin, // Enviar el origen (whatsapp, email, etc.)
     };
-    // Add contact information if available
+    // Add conversation ID if available (important for WhatsApp)
+    if (conversation_id) {
+        messageRequest.conversationId = conversation_id;
+        console.log(`💬 Using conversation ID: ${conversation_id}`);
+    }
+    // Add visitor ID if available (for non-authenticated users)
+    if (visitor_id) {
+        messageRequest.visitor_id = visitor_id;
+        console.log(`👤 Using visitor ID: ${visitor_id}`);
+    }
+    // Add all available contact information - origin indicates response channel, not data restrictions
     if (emailData.contact_info.name) {
         messageRequest.name = emailData.contact_info.name;
     }
+    // Always send email if available (helps with lead creation/matching)
     if (emailData.contact_info.email) {
         messageRequest.email = emailData.contact_info.email;
     }
+    // Always send phone if available (helps with lead creation/matching)  
     if (emailData.contact_info.phone) {
         messageRequest.phone = emailData.contact_info.phone;
     }
@@ -48,11 +55,14 @@ async function sendCustomerSupportMessageActivity(emailData, baseParams) {
         userId: messageRequest.userId,
         agentId: messageRequest.agentId,
         lead_id: messageRequest.lead_id,
-        lead_notification: messageRequest.lead_notification
+        conversationId: messageRequest.conversationId,
+        visitor_id: messageRequest.visitor_id,
+        lead_notification: messageRequest.lead_notification,
+        origin: messageRequest.origin
     });
     console.log('📋 Full payload being sent:', JSON.stringify(messageRequest, null, 2));
     try {
-        const response = await apiService_1.apiService.post('/api/agents/customerSupport/message', messageRequest);
+        const response = await apiService.post('/api/agents/customerSupport/message', messageRequest);
         if (!response.success) {
             console.error('❌ API call failed:', response.error);
             return {
@@ -79,31 +89,32 @@ async function sendCustomerSupportMessageActivity(emailData, baseParams) {
 /**
  * Process email data and prepare for customer support interaction
  */
-async function processAnalysisDataActivity(emailData) {
+export async function processAnalysisDataActivity(emailData) {
     const { lead_notification, priority, intent, potential_value } = emailData;
     console.log('🔍 Processing email data for customer support...');
     console.log(`📨 Original lead_notification: ${lead_notification}`);
-    // Determine if this email requires customer support action
-    // IMPORTANTE: Manejar lead_notification = "email" del flujo syncEmails
-    const shouldProcess = lead_notification === 'email' || // Viene del análisis de syncEmails
-        priority === 'high' ||
-        intent === 'complaint' ||
-        potential_value === 'high';
+    // Determine if this email requires customer support action and assign reason
+    let shouldProcess = false;
     let reason = '';
     if (lead_notification === 'email') {
+        shouldProcess = true;
         reason = 'Email lead notification detected from syncEmails analysis';
     }
     else if (priority === 'high') {
+        shouldProcess = true;
         reason = 'High priority analysis';
     }
     else if (intent === 'complaint') {
+        shouldProcess = true;
         reason = 'Complaint detected - requires immediate attention';
     }
     else if (potential_value === 'high') {
+        shouldProcess = true;
         reason = 'High commercial potential detected';
     }
     else {
-        reason = 'Processing for completeness - email detected';
+        shouldProcess = false;
+        reason = 'No processing criteria met - skipping customer support';
     }
     console.log(`📊 Email processing result: ${shouldProcess ? 'PROCESS' : 'SKIP'} - ${reason}`);
     console.log(`🔄 Will send lead_notification="none" to customer support for traceability`);
@@ -116,7 +127,7 @@ async function processAnalysisDataActivity(emailData) {
 /**
  * Process API email response and execute customer support workflow
  */
-async function processApiEmailResponseActivity(apiResponse) {
+export async function processApiEmailResponseActivity(apiResponse) {
     console.log('🔄 Processing API email response for customer support workflow...');
     try {
         const { childWorkflow } = apiResponse;

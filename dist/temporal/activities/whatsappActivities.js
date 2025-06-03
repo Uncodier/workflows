@@ -1,13 +1,8 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.analyzeWhatsAppMessageActivity = analyzeWhatsAppMessageActivity;
-exports.sendWhatsAppResponseActivity = sendWhatsAppResponseActivity;
-exports.sendWhatsAppFromAgentActivity = sendWhatsAppFromAgentActivity;
-const apiService_1 = require("../services/apiService");
+import { apiService } from '../services/apiService';
 /**
  * Analyze WhatsApp message using AI
  */
-async function analyzeWhatsAppMessageActivity(messageData) {
+export async function analyzeWhatsAppMessageActivity(messageData) {
     console.log('📱 Analyzing WhatsApp message...');
     console.log(`📞 From: ${messageData.senderName || messageData.phoneNumber}`);
     console.log(`💬 Message: ${messageData.messageContent?.substring(0, 100) || 'No message content'}...`);
@@ -36,7 +31,7 @@ async function analyzeWhatsAppMessageActivity(messageData) {
             conversationId: analysisRequest.conversation_id
         });
         console.log('📋 Full analysis request:', JSON.stringify(analysisRequest, null, 2));
-        const response = await apiService_1.apiService.post('/api/agents/whatsapp/analyze', analysisRequest);
+        const response = await apiService.post('/api/agents/whatsapp/analyze', analysisRequest);
         if (!response.success) {
             console.error('❌ WhatsApp analysis failed:', response.error);
             return {
@@ -68,12 +63,12 @@ async function analyzeWhatsAppMessageActivity(messageData) {
 /**
  * Send WhatsApp response message
  */
-async function sendWhatsAppResponseActivity(responseData) {
+export async function sendWhatsAppResponseActivity(responseData) {
     console.log('📱 Sending WhatsApp response...');
     console.log(`📞 To: ${responseData.phone}`);
     console.log(`💬 Message: ${responseData.message?.substring(0, 100) || 'No message content'}...`);
     try {
-        const response = await apiService_1.apiService.post('/api/agents/whatsapp/send', {
+        const response = await apiService.post('/api/agents/whatsapp/send', {
             phone: responseData.phone,
             message: responseData.message,
             conversation_id: responseData.conversation_id,
@@ -103,7 +98,7 @@ async function sendWhatsAppResponseActivity(responseData) {
 /**
  * Activity to send WhatsApp message via agent API
  */
-async function sendWhatsAppFromAgentActivity(params) {
+export async function sendWhatsAppFromAgentActivity(params) {
     console.log('📱 Sending WhatsApp from agent:', {
         recipient: params.phone_number,
         from: params.from || 'AI Assistant',
@@ -114,15 +109,25 @@ async function sendWhatsAppFromAgentActivity(params) {
         lead_id: params.lead_id
     });
     try {
-        const response = await apiService_1.apiService.post('/api/agents/tools/sendWhatsApp', {
+        // Prepare API payload - only include lead_id if it's a valid UUID
+        const apiPayload = {
             phone_number: params.phone_number,
             message: params.message,
             site_id: params.site_id,
             from: params.from || 'AI Assistant',
             agent_id: params.agent_id,
             conversation_id: params.conversation_id,
-            lead_id: params.lead_id
-        });
+        };
+        // Only include lead_id if it's present and looks like a valid UUID
+        // API can obtain lead_id from phone_number if not provided
+        if (params.lead_id && isValidUUID(params.lead_id)) {
+            apiPayload.lead_id = params.lead_id;
+            console.log(`📋 Including valid lead_id: ${params.lead_id}`);
+        }
+        else {
+            console.log(`⚠️ Skipping lead_id - API will obtain it from phone_number: ${params.phone_number}`);
+        }
+        const response = await apiService.post('/api/agents/tools/sendWhatsApp', apiPayload);
         if (!response.success) {
             throw new Error(`Failed to send WhatsApp message: ${response.error?.message}`);
         }
@@ -138,4 +143,11 @@ async function sendWhatsAppFromAgentActivity(params) {
         console.error('❌ WhatsApp sending failed:', error);
         throw new Error(`WhatsApp sending failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+}
+/**
+ * Helper function to validate UUID format
+ */
+function isValidUUID(uuid) {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(uuid);
 }

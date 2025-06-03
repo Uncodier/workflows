@@ -274,7 +274,7 @@ export async function customerSupportMessageWorkflow(
           from: 'Customer Support',
           agent_id: baseParams.agentId,
           conversation_id: whatsappData.conversationId,
-          lead_id: whatsappData.messageId
+          // ✅ REMOVED: lead_id - API can obtain it from phone number
         };
         
         // Start sendWhatsappFromAgent as child workflow
