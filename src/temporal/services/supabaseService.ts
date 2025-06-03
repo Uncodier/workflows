@@ -279,6 +279,55 @@ export class SupabaseService {
     }
     console.log(`✅ Successfully processed ${records.length} cron status records`);
   }
+
+  /**
+   * Create agents in the database
+   */
+  async createAgents(agents: any[]): Promise<any[]> {
+    const isConnected = await this.getConnectionStatus();
+    if (!isConnected) {
+      throw new Error('Database not connected');
+    }
+
+    console.log(`🔍 Creating ${agents.length} agents in Supabase...`);
+    const { data, error } = await this.client
+      .from('agents')
+      .insert(agents)
+      .select();
+
+    if (error) {
+      console.error('❌ Error creating agents:', error);
+      throw new Error(`Failed to create agents: ${error.message}`);
+    }
+
+    console.log(`✅ Successfully created ${data?.length || 0} agents in database`);
+    return data || [];
+  }
+
+  /**
+   * Create a single agent in the database
+   */
+  async createAgent(agentData: any): Promise<any> {
+    const isConnected = await this.getConnectionStatus();
+    if (!isConnected) {
+      throw new Error('Database not connected');
+    }
+
+    console.log(`🔍 Creating agent '${agentData.name}' in Supabase...`);
+    const { data, error } = await this.client
+      .from('agents')
+      .insert([agentData])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('❌ Error creating agent:', error);
+      throw new Error(`Failed to create agent: ${error.message}`);
+    }
+
+    console.log(`✅ Successfully created agent '${agentData.name}' with ID: ${data.id}`);
+    return data;
+  }
 }
 
 // Singleton instance

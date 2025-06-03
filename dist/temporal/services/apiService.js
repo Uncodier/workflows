@@ -3,8 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.apiService = void 0;
 const config_1 = require("../../config/config");
 class ApiService {
-    baseUrl;
-    apiKey;
     constructor() {
         this.baseUrl = config_1.apiConfig.baseUrl;
         this.apiKey = config_1.apiConfig.apiKey;

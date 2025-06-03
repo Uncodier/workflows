@@ -4,6 +4,8 @@ exports.createAgentsActivity = createAgentsActivity;
 exports.assignAccountManagerActivity = assignAccountManagerActivity;
 exports.sendSetupFollowUpEmailActivity = sendSetupFollowUpEmailActivity;
 const apiService_1 = require("../services/apiService");
+const supabaseService_1 = require("../services/supabaseService");
+const crypto_1 = require("crypto");
 /**
  * Activity to create agents for a new site
  */
@@ -16,45 +18,146 @@ async function createAgentsActivity(params) {
         use_detailed_config: params.custom_config?.use_detailed_config
     });
     try {
-        const requestPayload = {
-            site_id: params.site_id,
-            user_id: params.user_id,
-            company_name: params.company_name,
-            agent_types: params.agent_types || ['customer_support', 'sales', 'general'],
-            custom_config: params.custom_config || {}
-        };
-        // Si se proporciona configuración detallada, incluir los agentes específicos
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        const createdAgents = [];
+        // Si se proporciona configuración detallada, usar esos agentes
         if (params.custom_config?.use_detailed_config && params.custom_config?.agents_config) {
             console.log('📋 Using detailed agents configuration...');
-            requestPayload.custom_config.detailed_agents = params.custom_config.agents_config.map((agent) => ({
-                id: agent.id,
-                name: agent.name,
-                description: agent.description,
-                type: agent.type,
-                status: agent.status,
-                icon: agent.icon,
-                activities: agent.activities.map(activity => ({
-                    id: activity.id,
-                    name: activity.name,
-                    description: activity.description,
-                    estimatedTime: activity.estimatedTime,
-                    successRate: activity.successRate,
-                    executions: activity.executions,
-                    status: activity.status
-                }))
-            }));
-            console.log(`   • Total agents to create: ${params.custom_config.agents_config.length}`);
-            console.log(`   • Agent names: ${params.custom_config.agents_config.map(a => a.name).join(', ')}`);
+            for (const agentConfig of params.custom_config.agents_config) {
+                const agentId = (0, crypto_1.randomUUID)();
+                const now = new Date().toISOString();
+                // Preparar datos del agente para Supabase
+                const agentData = {
+                    id: agentId,
+                    name: agentConfig.name,
+                    description: agentConfig.description,
+                    type: agentConfig.type,
+                    status: agentConfig.status,
+                    site_id: params.site_id,
+                    user_id: params.user_id,
+                    conversations: agentConfig.conversations || 0,
+                    success_rate: agentConfig.successRate || 0,
+                    role: agentConfig.name, // El rol es el nombre del agente
+                    activities: agentConfig.activities, // Guardamos las actividades como JSON
+                    configuration: {
+                        icon: agentConfig.icon,
+                        company_name: params.company_name,
+                        agent_type: agentConfig.type
+                    },
+                    created_at: now,
+                    updated_at: now,
+                    last_active: agentConfig.lastActive || now,
+                    tools: [], // Inicializamos vacío, se puede configurar después
+                    integrations: {}, // Inicializamos vacío, se puede configurar después
+                    backstory: `AI agent specialized in ${agentConfig.description.toLowerCase()}`,
+                    prompt: `You are a ${agentConfig.name} specialized in ${agentConfig.description}. Help users with tasks related to your expertise.`
+                };
+                console.log(`   • Creating agent: ${agentConfig.name} (${agentConfig.type})`);
+                try {
+                    // Insertar agente en Supabase usando el método del servicio
+                    await supabaseService.createAgent(agentData);
+                    console.log(`   ✅ Agent ${agentConfig.name} created with ID: ${agentId}`);
+                    // Agregar a la lista de agentes creados
+                    createdAgents.push({
+                        agent_id: agentId,
+                        type: agentConfig.type,
+                        name: agentConfig.name,
+                        status: agentConfig.status,
+                        description: agentConfig.description,
+                        icon: agentConfig.icon,
+                        activities: agentConfig.activities.map(activity => ({
+                            id: activity.id,
+                            name: activity.name,
+                            description: activity.description,
+                            estimatedTime: activity.estimatedTime,
+                            successRate: activity.successRate
+                        }))
+                    });
+                }
+                catch (error) {
+                    console.error(`❌ Failed to create agent ${agentConfig.name}:`, error);
+                    throw new Error(`Failed to create agent ${agentConfig.name}: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
+            console.log(`✅ Successfully created ${createdAgents.length} agents with detailed configuration`);
         }
-        const response = await apiService_1.apiService.post('/api/sites/setup/agents', requestPayload);
-        if (!response.success) {
-            throw new Error(`Failed to create agents: ${response.error?.message}`);
+        else {
+            // Configuración básica - crear agentes simples basados en tipos
+            const agentTypes = params.agent_types || ['customer_support', 'sales', 'general'];
+            console.log('📋 Using basic agent types configuration:', agentTypes);
+            for (const agentType of agentTypes) {
+                const agentId = (0, crypto_1.randomUUID)();
+                const now = new Date().toISOString();
+                // Configuración básica por tipo
+                const typeConfigs = {
+                    customer_support: {
+                        name: 'Customer Support',
+                        description: 'Handles customer inquiries and support requests',
+                        icon: 'HelpCircle'
+                    },
+                    sales: {
+                        name: 'Sales Assistant',
+                        description: 'Assists with sales processes and lead management',
+                        icon: 'ShoppingCart'
+                    },
+                    general: {
+                        name: 'General Assistant',
+                        description: 'Provides general assistance and information',
+                        icon: 'MessageSquare'
+                    }
+                };
+                const config = typeConfigs[agentType] || typeConfigs.general;
+                const agentData = {
+                    id: agentId,
+                    name: config.name,
+                    description: config.description,
+                    type: agentType,
+                    status: 'active',
+                    site_id: params.site_id,
+                    user_id: params.user_id,
+                    conversations: 0,
+                    success_rate: 0,
+                    role: config.name,
+                    activities: [],
+                    configuration: {
+                        icon: config.icon,
+                        company_name: params.company_name,
+                        agent_type: agentType
+                    },
+                    created_at: now,
+                    updated_at: now,
+                    last_active: now,
+                    tools: [],
+                    integrations: {},
+                    backstory: `AI agent specialized in ${config.description.toLowerCase()}`,
+                    prompt: `You are a ${config.name} for ${params.company_name}. ${config.description}.`
+                };
+                console.log(`   • Creating basic agent: ${config.name} (${agentType})`);
+                try {
+                    // Insertar agente en Supabase usando el método del servicio
+                    await supabaseService.createAgent(agentData);
+                    console.log(`   ✅ Agent ${config.name} created with ID: ${agentId}`);
+                    // Agregar a la lista de agentes creados
+                    createdAgents.push({
+                        agent_id: agentId,
+                        type: agentType,
+                        name: config.name,
+                        status: 'active',
+                        description: config.description,
+                        icon: config.icon
+                    });
+                }
+                catch (error) {
+                    console.error(`❌ Failed to create agent ${config.name}:`, error);
+                    throw new Error(`Failed to create agent ${config.name}: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
+            console.log(`✅ Successfully created ${createdAgents.length} basic agents`);
         }
-        console.log('✅ Agents created successfully:', response.data);
         return {
             success: true,
-            agents: response.data.agents || [],
-            total_created: response.data.agents?.length || 0
+            agents: createdAgents,
+            total_created: createdAgents.length
         };
     }
     catch (error) {

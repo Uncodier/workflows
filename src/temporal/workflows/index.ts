@@ -9,7 +9,7 @@ import { scheduleCustomerSupportMessagesWorkflow } from './scheduleCustomerSuppo
 import { customerSupportMessageWorkflow, emailCustomerSupportMessageWorkflow } from './customerSupportWorkflow';
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
-import { answerWhatsappMessageWorkflow, processWhatsAppMessagesWorkflow, whatsappCustomerSupportWorkflow } from './answerWhatsappMessageWorkflow';
+import { answerWhatsappMessageWorkflow, processWhatsAppMessagesWorkflow } from './answerWhatsappMessageWorkflow';
 import { siteSetupWorkflow } from './siteSetupWorkflow';
 
 // Export workflows individually
@@ -42,7 +42,6 @@ export const workflows = {
   sendWhatsappFromAgent,
   answerWhatsappMessageWorkflow,
   processWhatsAppMessagesWorkflow,
-  whatsappCustomerSupportWorkflow,
   siteSetupWorkflow,
 };
 
@@ -62,7 +61,6 @@ export const workflowNames = {
   sendWhatsappFromAgent: 'sendWhatsappFromAgent',
   answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
   processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
-  whatsappCustomerSupportWorkflow: 'whatsappCustomerSupportWorkflow',
   siteSetupWorkflow: 'siteSetupWorkflow',
 };
 

@@ -2,151 +2,79 @@
 
 ## Descripción General
 
-El `answerWhatsappMessageWorkflow` es un workflow de Temporal diseñado para automatizar el análisis y respuesta de mensajes de WhatsApp. Este workflow llama al API `/api/agents/whatsapp/analyze` para analizar mensajes entrantes y opcionalmente envía respuestas automáticas.
+El `answerWhatsappMessageWorkflow` es un workflow de Temporal diseñado para procesar mensajes de WhatsApp entrantes a través de un flujo de customer support integrado. Este workflow delega todo el procesamiento al `customerSupportMessageWorkflow`, el cual automáticamente ejecuta el workflow de envío apropiado (`sendEmailFromAgent` o `sendWhatsappFromAgent`) según el origen del mensaje.
+
+> **📧 Nota sobre Emails**: Para el procesamiento de emails con análisis de IA, consulta la [Sync Mails Workflow Guide](./sync-mails-workflow-guide.md).
+
+## Arquitectura del Flujo
+
+### 🔄 Flujo Simplificado
+
+```
+WhatsApp Message
+       ↓
+answerWhatsappMessageWorkflow
+       ↓
+customerSupportMessageWorkflow
+   (customer support + envío automático)
+       ↓ (automático basado en origen)
+   ┌─ origin="email" → sendEmailFromAgent (ver sync-mails-workflow-guide.md)
+   └─ origin="whatsapp" → sendWhatsappFromAgent
+```
 
 ## Características Principales
 
 ### ✨ Funcionalidades
 
-1. **Análisis Inteligente**: Analiza mensajes de WhatsApp usando IA para determinar:
-   - **Intent**: `inquiry`, `complaint`, `purchase`, `support`, `greeting`, `follow_up`, `unknown`
-   - **Priority**: `high`, `medium`, `low`
-   - **Response Type**: `automated`, `human_required`, `information`, `commercial`
-   - **Sentiment**: `positive`, `neutral`, `negative`
+1. **Procesamiento Directo**: Los mensajes de WhatsApp se procesan directamente sin análisis previo
+2. **Envío Automático**: `customerSupportMessageWorkflow` detecta el origen y ejecuta el workflow de envío apropiado
+3. **Arquitectura Centralizada**: Lógica unificada para email y WhatsApp en un solo workflow
+4. **Trazabilidad Completa**: IDs únicos para cada workflow hijo y logs detallados
+5. **Procesamiento en Lotes**: Procesa múltiples mensajes con intervalos configurables
+6. **Manejo Robusto de Errores**: Cada workflow falla independientemente
 
-2. **Respuestas Automáticas**: Envía respuestas automáticas cuando es apropiado
-3. **Procesamiento en Lotes**: Procesa múltiples mensajes con intervalos configurables
-4. **Trazabilidad Completa**: Logs detallados y métricas de cada mensaje procesado
+### 🔄 Workflows Involucrados
 
-### 🔄 Workflows Disponibles
+#### 1. `answerWhatsappMessageWorkflow` (Principal)
+Orquesta todo el flujo de procesamiento de mensajes de WhatsApp.
 
-#### 1. `answerWhatsappMessageWorkflow`
-Procesa un mensaje individual de WhatsApp.
+#### 2. `customerSupportMessageWorkflow` (Centralizado)
+- Maneja el procesamiento de customer support
+- **Detecta automáticamente el origen** (email vs whatsapp)
+- **Ejecuta automáticamente** el workflow de envío apropiado:
+  - `origin="email"` → `sendEmailFromAgent`
+  - `origin="whatsapp"` → `sendWhatsappFromAgent`
 
-#### 2. `processWhatsAppMessagesWorkflow`
+#### 3. `processWhatsAppMessagesWorkflow` (Batch)
 Procesa múltiples mensajes de WhatsApp en lotes con intervalos.
 
-## API Endpoints Utilizados
+## Lógica de Ejecución Centralizada
 
-### 📥 Análisis de Mensajes
-- **Endpoint**: `POST /api/agents/whatsapp/analyze`
-- **Función**: Analiza el contenido del mensaje usando IA
+### Customer Support Workflow (Centralizado)
+1. **Detecta el origen** basado en `baseParams.origin`
+2. **Email Origin**: 
+   - Procesa como email (con análisis existente)
+   - Si exitoso → ejecuta `sendEmailFromAgent`
+3. **WhatsApp Origin**:
+   - Procesa directamente sin análisis
+   - Si exitoso → ejecuta `sendWhatsappFromAgent`
 
-### 📤 Envío de Respuestas
-- **Endpoint**: `POST /api/agents/whatsapp/send`
-- **Función**: Envía respuestas automáticas por WhatsApp
+### Beneficios de la Centralización
+- ✅ **Lógica unificada** para ambos canales
+- ✅ **Procesamiento directo** para WhatsApp (sin análisis innecesario)
+- ✅ **Análisis inteligente** para Emails (ver [sync-mails-workflow-guide.md](./sync-mails-workflow-guide.md))
+- ✅ **Mantenimiento simplificado** 
+- ✅ **Consistencia** en el comportamiento
+- ✅ **Trazabilidad centralizada**
 
-## Interfaces de Datos
+## Diferencias con Sistema de Emails
 
-### WhatsAppMessageData
-```typescript
-interface WhatsAppMessageData {
-  message: string;
-  phone: string;
-  contact_name?: string;
-  message_id?: string;
-  conversation_id?: string;
-  timestamp?: string;
-  site_id: string;
-  user_id: string;
-  message_type?: 'text' | 'image' | 'document' | 'audio' | 'video' | 'location';
-  media_url?: string;
-  is_from_business?: boolean;
-}
-```
-
-### WhatsAppAnalysisResponse
-```typescript
-interface WhatsAppAnalysisResponse {
-  success: boolean;
-  analysis?: {
-    intent: 'inquiry' | 'complaint' | 'purchase' | 'support' | 'greeting' | 'follow_up' | 'unknown';
-    priority: 'high' | 'medium' | 'low';
-    response_type: 'automated' | 'human_required' | 'information' | 'commercial';
-    sentiment: 'positive' | 'neutral' | 'negative';
-    suggested_response?: string;
-    requires_action: boolean;
-    contact_info?: {
-      name?: string;
-      phone: string;
-      email?: string;
-      company?: string;
-    };
-    summary: string;
-    keywords?: string[];
-    analysis_id?: string;
-  };
-  error?: {
-    code: string;
-    message: string;
-  };
-}
-```
-
-## Uso del Workflow
-
-### 1. Mensaje Individual con Auto-Respuesta
-
-```typescript
-import { getTemporalClient } from '../temporal/client';
-
-const client = await getTemporalClient();
-
-const messageData = {
-  message: "Hola, me interesa conocer más sobre sus servicios.",
-  phone: "+573001234567",
-  contact_name: "María González",
-  site_id: "your-site-id",
-  user_id: "your-user-id",
-  message_type: "text"
-};
-
-const options = {
-  autoRespond: true,
-  agentId: 'whatsapp-agent-001'
-};
-
-const result = await client.workflow.execute('answerWhatsappMessageWorkflow', {
-  args: [messageData, options],
-  taskQueue: 'whatsapp-queue',
-  workflowId: `whatsapp-message-${Date.now()}`,
-});
-```
-
-### 2. Solo Análisis (Sin Respuesta Automática)
-
-```typescript
-const options = {
-  autoRespond: false, // Solo analizar, no responder
-  agentId: 'whatsapp-agent-002'
-};
-
-const result = await client.workflow.execute('answerWhatsappMessageWorkflow', {
-  args: [messageData, options],
-  taskQueue: 'whatsapp-queue',
-  workflowId: `analysis-only-${Date.now()}`,
-});
-```
-
-### 3. Procesamiento en Lotes
-
-```typescript
-const messages = [
-  // Array de WhatsAppMessageData
-];
-
-const options = {
-  autoRespond: true,
-  agentId: 'batch-whatsapp-agent',
-  intervalMinutes: 1 // 1 minuto entre mensajes
-};
-
-const result = await client.workflow.execute('processWhatsAppMessagesWorkflow', {
-  args: [messages, options],
-  taskQueue: 'whatsapp-queue',
-  workflowId: `batch-whatsapp-${Date.now()}`,
-});
-```
+| Aspecto | WhatsApp | Emails (syncMails) |
+|---------|----------|-------------------|
+| **Procesamiento** | Directo | Con análisis de IA |
+| **Documentación** | Esta guía | [sync-mails-workflow-guide.md](./sync-mails-workflow-guide.md) |
+| **APIs** | sendWhatsApp | sendEmail + análisis |
+| **Priorización** | Tratamiento uniforme | Por sentiment/priority |
 
 ## Estructura de Respuesta
 
@@ -154,21 +82,17 @@ const result = await client.workflow.execute('processWhatsAppMessagesWorkflow', 
 ```typescript
 {
   success: boolean;
-  analyzed: boolean;
-  responded: boolean;
-  analysis?: {
-    intent: string;
-    priority: string;
-    response_type: string;
-    sentiment: string;
-    suggested_response?: string;
-    requires_action: boolean;
-    summary: string;
-    // ... más campos
-  };
-  response?: {
-    message_id?: string;
-    sent_message?: string;
+  customerSupportTriggered?: boolean;
+  customerSupportResult?: {
+    success: boolean;
+    processed: boolean;
+    workflowId: string;
+    reason: string;
+    // Campos específicos según el origen
+    emailSent?: boolean;        // Para origin="email"
+    emailWorkflowId?: string;   // Para origin="email"
+    whatsappSent?: boolean;     // Para origin="whatsapp"
+    whatsappWorkflowId?: string; // Para origin="whatsapp"
   };
   error?: string;
   workflow_id: string;
@@ -180,15 +104,15 @@ const result = await client.workflow.execute('processWhatsAppMessagesWorkflow', 
 {
   totalMessages: number;
   processed: number;
-  analyzed: number;
-  responded: number;
+  customerSupportTriggered: number;
+  whatsappSent: number;  // Solo para WhatsApp workflows
   failed: number;
   results: Array<{
     index: number;
     phone: string;
     success: boolean;
-    analyzed: boolean;
-    responded: boolean;
+    customerSupportTriggered: boolean;
+    whatsappSent: boolean;
     error?: string;
     workflowId: string;
   }>;
@@ -196,115 +120,139 @@ const result = await client.workflow.execute('processWhatsAppMessagesWorkflow', 
 }
 ```
 
-## Lógica de Auto-Respuesta
+## Configuración Automática de Envío
 
-El workflow envía respuestas automáticas **SOLO** cuando:
-
-1. `autoRespond: true` está habilitado
-2. El análisis fue exitoso
-3. `analysis.response_type === 'automated'`
-4. Existe una `suggested_response` del análisis
-5. El mensaje tiene un número de teléfono válido
-
-### Casos que NO generan respuesta automática:
-- `response_type === 'human_required'` → Requiere intervención humana
-- `autoRespond: false` → Auto-respuesta deshabilitada
-- No hay `suggested_response` → IA no sugirió respuesta
-- Error en el análisis → Fallo en el procesamiento
-
-## Casos de Uso Típicos
-
-### 1. **Consultas Comerciales**
-- **Intent**: `inquiry`
-- **Response Type**: `automated`
-- **Acción**: Respuesta automática con información básica
-
-### 2. **Quejas o Problemas**
-- **Intent**: `complaint`
-- **Priority**: `high`
-- **Response Type**: `human_required`
-- **Acción**: Solo análisis, escalado a humano
-
-### 3. **Saludos**
-- **Intent**: `greeting`
-- **Response Type**: `automated`
-- **Acción**: Respuesta de bienvenida automática
-
-### 4. **Solicitudes de Soporte**
-- **Intent**: `support`
-- **Response Type**: `information` o `human_required`
-- **Acción**: Información básica o escalado
-
-## Testing
-
-### Ejecutar Pruebas
-```bash
-# Ejecutar pruebas del workflow
-npm run test:whatsapp
-
-# O ejecutar el script directamente
-npx ts-node src/scripts/test-whatsapp-workflow.ts
+### Para WhatsApp (origin="whatsapp")
+```typescript
+// Automáticamente ejecutado por customerSupportMessageWorkflow
+const whatsappParams = {
+  phone_number: whatsappData.phoneNumber,
+  message: response.data?.messages?.assistant?.content || 'Mensaje por defecto',
+  site_id: whatsappData.siteId,
+  from: 'Customer Support',
+  agent_id: baseParams.agentId,
+  conversation_id: whatsappData.conversationId,
+  lead_id: whatsappData.messageId
+};
 ```
 
-### Tipos de Pruebas Incluidas
-1. **Mensaje Individual con Auto-Respuesta**
-2. **Solo Análisis (sin respuesta)**
-3. **Procesamiento en Lotes**
-
-## Configuración de Colas
-
-### Queue: `whatsapp-queue`
+### Para Email (origin="email")
 ```typescript
-// Worker configuration
-const worker = Worker.create({
-  workflowsPath: require.resolve('./workflows'),
-  activitiesPath: require.resolve('./activities'),
-  taskQueue: 'whatsapp-queue',
-});
+// Automáticamente ejecutado por customerSupportMessageWorkflow
+const emailParams = {
+  email: emailData.contact_info.email,
+  subject: response.data?.conversation_title || 'Re: Your inquiry',
+  message: response.data?.messages?.assistant?.content || 'Mensaje por defecto',
+  site_id: emailData.site_id,
+  agent_id: baseParams.agentId,
+  lead_id: emailData.analysis_id
+};
+```
+
+## Casos de Uso
+
+### 1. **Flujo WhatsApp Completo**
+```
+Entrada: "Hola, quisiera información sobre sus productos"
+↓
+answerWhatsappMessageWorkflow
+↓
+customerSupportMessageWorkflow (origin="whatsapp")
+  ├─ Procesamiento directo (sin análisis)
+  ├─ Customer support
+  └─ sendWhatsappFromAgent (automático)
+↓
+Resultado: WhatsApp de seguimiento enviado
+```
+
+### 2. **Flujo Email Completo**
+```
+Entrada: Email de consulta
+↓
+scheduleCustomerSupportMessagesWorkflow
+↓
+customerSupportMessageWorkflow (origin="email")
+  ├─ Procesamiento con análisis existente
+  ├─ Customer support
+  └─ sendEmailFromAgent (automático)
+↓
+Resultado: Email de seguimiento enviado
+```
+
+## Integración con Otros Workflows
+
+### Flujos de Entrada
+1. **WhatsApp**: `answerWhatsappMessageWorkflow` → `customerSupportMessageWorkflow`
+2. **Email**: `scheduleCustomerSupportMessagesWorkflow` → `customerSupportMessageWorkflow`
+3. **API Directo**: Llamada directa a `customerSupportMessageWorkflow`
+
+### Flujos de Salida (Automáticos)
+1. **origin="whatsapp"** → `sendWhatsappFromAgent`
+2. **origin="email"** → `sendEmailFromAgent`
+
+### Data Flow Unificado
+```
+[WhatsApp | Email | API] → customerSupportMessageWorkflow → [sendWhatsappFromAgent | sendEmailFromAgent] → Analytics
 ```
 
 ## Monitoreo y Logs
 
-### Logs Importantes
-
+### Logs del Workflow Principal
 ```
 📱 Starting WhatsApp message workflow...
-🔍 Step 1: Analyzing WhatsApp message...
-📊 Analysis summary: { intent, priority, response_type, sentiment }
-📤 Step 2: Sending automated WhatsApp response...
+🎯 Triggering Customer Support workflow directly...
+✅ Customer support workflow started: whatsapp-customer-support-{id}
+📱 Starting sendWhatsappFromAgent workflow - customer support was successful...
+✅ Follow-up WhatsApp sent via workflow: send-whatsapp-agent-{id}
 ✅ WhatsApp message workflow completed successfully
 ```
 
-### Métricas Clave
-- **Mensajes Analizados**: Cantidad de mensajes procesados
-- **Respuestas Enviadas**: Cantidad de respuestas automáticas
-- **Tasa de Éxito**: Porcentaje de mensajes procesados exitosamente
-- **Tiempo de Ejecución**: Duración total del procesamiento
+### Logs del Customer Support (WhatsApp)
+```
+🎯 Starting customer support message workflow...
+📱 Detected WhatsApp message - processing directly
+🔍 No analysis provided - analyzing WhatsApp message...
+📞 Processing WhatsApp message for customer support...
+📱 Starting sendWhatsappFromAgent workflow - customer support was successful...
+✅ WhatsApp customer support message workflow completed successfully
+```
 
-## Integración con Otros Workflows
+### Métricas Unificadas
+- **Customer Support Triggered**: Workflows de customer support iniciados
+- **WhatsApp Sent**: Respuestas de WhatsApp enviadas (para workflows de WhatsApp)
+- **Email Sent**: Emails enviados (para workflows de email)
+- **Success Rate**: Porcentaje de mensajes procesados exitosamente
+- **End-to-End Time**: Tiempo total desde entrada hasta envío
 
-El workflow de WhatsApp puede integrarse con:
+## Ventajas de la Arquitectura Simplificada
 
-1. **Customer Support Workflows**: Para escalado de casos complejos
-2. **Email Workflows**: Para seguimiento por email
-3. **CRM Workflows**: Para actualización de contactos
-4. **Analytics Workflows**: Para reporte de métricas
+### 🚀 Beneficios Operacionales
+- **Menos Complejidad**: Un solo punto de entrada para customer support
+- **Mantenimiento Reducido**: Lógica centralizada para ambos canales
+- **Consistencia**: Comportamiento uniforme entre email y WhatsApp
+- **Escalabilidad**: Fácil agregar nuevos canales (SMS, etc.)
 
-## Consideraciones de Rendimiento
+### 🔧 Beneficios Técnicos
+- **Reducción de Código**: Eliminación de lógica duplicada
+- **Trazabilidad Mejorada**: Flujo lineal más fácil de seguir
+- **Testing Simplificado**: Menos paths de código para probar
+- **Debugging Facilitado**: Un solo workflow para depurar
 
-- **Intervalos entre mensajes**: Configurable para evitar límites de rate
-- **Timeouts**: 2 minutos por actividad con 3 reintentos
-- **Procesamiento asíncrono**: Cada mensaje se procesa independientemente
-- **Escalabilidad**: Soporta procesamiento en paralelo de múltiples conversaciones
+### 📊 Beneficios de Negocio
+- **Respuestas Consistentes**: Misma calidad en ambos canales
+- **Tiempo de Respuesta**: Procesamiento automático más rápido
+- **Experiencia Unificada**: Comportamiento predecible para usuarios
 
-## Troubleshooting
+## Migración desde Arquitectura Anterior
 
-### Errores Comunes
+### Cambios en answerWhatsappMessageWorkflow
+- ❌ **Eliminado**: Manejo directo de `sendWhatsappFromAgent`
+- ✅ **Simplificado**: Delega todo a `customerSupportMessageWorkflow`
+- ✅ **Mejorado**: Métricas más claras y consistentes
 
-1. **"Analysis failed"**: Verificar conectividad con API de análisis
-2. **"Response sending failed"**: Verificar configuración de WhatsApp API
-3. **"Invalid phone number"**: Validar formato de números telefónicos
-4. **"Timeout"**: Aumentar timeout si el análisis toma más tiempo
+### Compatibilidad
+- ✅ **API Compatible**: Misma interface externa
+- ✅ **Métricas Compatible**: Acceso a través de `customerSupportResult`
+- ✅ **Logs Compatible**: Información detallada mantenida
 
-### Debug Mode
-Para debugging, revisar logs con formato estructurado que incluyen todos los parámetros y respuestas del API. 
+La nueva arquitectura mantiene toda la funcionalidad mientras simplifica significativamente el código y mejora la mantenibilidad. 🎉 

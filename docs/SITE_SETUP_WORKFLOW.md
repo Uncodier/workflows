@@ -6,7 +6,7 @@ Workflow automatizado para la configuración inicial de nuevos sitios en Uncodie
 
 El `siteSetupWorkflow` orquesta el proceso completo de configuración de un nuevo sitio, incluyendo:
 
-1. **Creación de agentes** - Configura los agentes de IA necesarios para el sitio
+1. **Creación de agentes** - Configura los agentes de IA necesarios para el sitio directamente en Supabase
 2. **Asignación de account manager** - Asigna un gestor de cuenta dedicado
 3. **Envío de correo de seguimiento** - Notifica al cliente sobre la configuración completada y próximos pasos
 
@@ -33,9 +33,11 @@ graph TD
 ## Activities
 
 ### createAgentsActivity
-- **Endpoint**: `/api/sites/setup/agents`
-- **Función**: Crea los agentes de IA necesarios para el sitio
+- **Implementación**: Conexión directa a Supabase
+- **Función**: Crea los agentes de IA necesarios para el sitio directamente en la base de datos
 - **Agentes por defecto**: customer_support, sales, general
+- **Configuración avanzada**: Soporte para configuración detallada con agentes predefinidos
+- **Base de datos**: Tabla `agents` en Supabase
 
 ### assignAccountManagerActivity  
 - **Endpoint**: `/api/sites/setup/account-manager`

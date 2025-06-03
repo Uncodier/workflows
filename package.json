@@ -25,6 +25,7 @@
     "test:customer-support": "ts-node src/scripts/test-customer-support-workflow.ts",
     "test:whatsapp-cs": "ts-node src/scripts/test-whatsapp-customer-support.ts",
     "test:send-whatsapp": "ts-node src/scripts/test-send-whatsapp-from-agent.ts",
+    "test:create-agents": "ts-node src/scripts/test-create-agents.ts",
     "dev:all": "concurrently \"npm run dev\" \"npm run worker:dev\"",
     "build:all": "npm run build && npm run worker:build",
     "start:all": "concurrently \"npm run start\" \"npm run worker:start\"",

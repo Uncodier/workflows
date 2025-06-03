@@ -24,6 +24,9 @@ export interface EmailData {
   response_type?: 'commercial' | 'support' | 'informational' | 'follow_up';
   potential_value?: 'high' | 'medium' | 'low' | 'unknown';
   intent?: 'inquiry' | 'complaint' | 'purchase' | 'support' | 'partnership' | 'demo_request';
+  // Nuevos campos para WhatsApp y otros canales
+  conversation_id?: string; // ID de conversación para WhatsApp
+  visitor_id?: string; // ID de visitante para usuarios no autenticados
 }
 
 export interface ScheduleCustomerSupportParams {
@@ -81,7 +84,7 @@ export async function sendCustomerSupportMessageActivity(
 }> {
   console.log('📞 Sending customer support message...');
   
-  const { summary, site_id, user_id, analysis_id } = emailData;
+  const { summary, site_id, user_id, analysis_id, conversation_id, visitor_id } = emailData;
   const { agentId, origin } = baseParams;
   
   // Build the message request payload con SOLO los parámetros requeridos por el API
@@ -93,6 +96,18 @@ export async function sendCustomerSupportMessageActivity(
     lead_notification: "none", // Para mejor trazabilidad - no duplicar notificaciones
     origin: origin, // Enviar el origen (whatsapp, email, etc.)
   };
+
+  // Add conversation ID if available (important for WhatsApp)
+  if (conversation_id) {
+    messageRequest.conversationId = conversation_id;
+    console.log(`💬 Using conversation ID: ${conversation_id}`);
+  }
+
+  // Add visitor ID if available (for non-authenticated users)
+  if (visitor_id) {
+    messageRequest.visitor_id = visitor_id;
+    console.log(`👤 Using visitor ID: ${visitor_id}`);
+  }
 
   // Add contact information if available
   if (emailData.contact_info.name) {
@@ -125,7 +140,10 @@ export async function sendCustomerSupportMessageActivity(
     userId: messageRequest.userId,
     agentId: messageRequest.agentId,
     lead_id: messageRequest.lead_id,
-    lead_notification: messageRequest.lead_notification
+    conversationId: messageRequest.conversationId,
+    visitor_id: messageRequest.visitor_id,
+    lead_notification: messageRequest.lead_notification,
+    origin: messageRequest.origin
   });
 
   console.log('📋 Full payload being sent:', JSON.stringify(messageRequest, null, 2));
