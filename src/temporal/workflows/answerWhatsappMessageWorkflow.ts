@@ -1,20 +1,23 @@
-import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
-import type { Activities } from '../activities';
+import { startChild, ParentClosePolicy } from '@temporalio/workflow';
 import type { 
-  WhatsAppMessageData, 
-  WhatsAppAnalysisResponse 
+  WhatsAppMessageData 
 } from '../activities/whatsappActivities';
 import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
 
-// Configure activity options
-const { 
-  sendWhatsAppResponseActivity
-} = proxyActivities<Activities>({
-  startToCloseTimeout: '2 minutes',
-  retry: {
-    maximumAttempts: 3,
-  },
-});
+// Note: proxyActivities and Activities available for future use if needed
+// import { proxyActivities } from '@temporalio/workflow';
+// import type { Activities } from '../activities';
+
+// Configure activity options - keeping for potential future use
+// const activities = proxyActivities<Activities>({
+//   startToCloseTimeout: '2 minutes',
+//   retry: {
+//     maximumAttempts: 3,
+//   },
+// });
+
+// Note: sendWhatsAppResponseActivity available if needed in the future
+// const { sendWhatsAppResponseActivity } = activities;
 
 /**
  * Answer WhatsApp Message Workflow

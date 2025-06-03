@@ -7,39 +7,42 @@ import type { WhatsAppMessageData } from '../activities/whatsappActivities';
 
 /**
  * Helper function to map WhatsApp intents to EmailData intents
+ * Currently not used but kept for future WhatsApp integration
  */
-function mapWhatsAppIntentToEmailIntent(
-  whatsappIntent?: 'inquiry' | 'complaint' | 'purchase' | 'support' | 'greeting' | 'follow_up' | 'unknown'
-): 'inquiry' | 'complaint' | 'purchase' | 'support' | 'partnership' | 'demo_request' | undefined {
-  switch (whatsappIntent) {
-    case 'inquiry':
-      return 'inquiry';
-    case 'complaint':
-      return 'complaint';
-    case 'purchase':
-      return 'purchase';
-    case 'support':
-      return 'support';
-    case 'greeting':
-    case 'follow_up':
-      return 'inquiry'; // Map greeting and follow_up to inquiry
-    case 'unknown':
-    default:
-      return 'inquiry'; // Default to inquiry for unknown or undefined
-  }
-}
+// function mapWhatsAppIntentToEmailIntent(
+//   whatsappIntent?: 'inquiry' | 'complaint' | 'purchase' | 'support' | 'greeting' | 'follow_up' | 'unknown'
+// ): 'inquiry' | 'complaint' | 'purchase' | 'support' | 'partnership' | 'demo_request' | undefined {
+//   switch (whatsappIntent) {
+//     case 'inquiry':
+//       return 'inquiry';
+//     case 'complaint':
+//       return 'complaint';
+//     case 'purchase':
+//       return 'purchase';
+//     case 'support':
+//       return 'support';
+//     case 'greeting':
+//     case 'follow_up':
+//       return 'inquiry'; // Map greeting and follow_up to inquiry
+//     case 'unknown':
+//     default:
+//       return 'inquiry'; // Default to inquiry for unknown or undefined
+//   }
+// }
 
 // Configure activity options
 const { 
   sendCustomerSupportMessageActivity,
-  processAnalysisDataActivity,
-  sendWhatsAppResponseActivity
+  processAnalysisDataActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '2 minutes',
   retry: {
     maximumAttempts: 3,
   },
 });
+
+// Note: sendWhatsAppResponseActivity available if needed in the future
+// const { sendWhatsAppResponseActivity } = proxyActivities<Activities>({...});
 
 /**
  * Email Customer Support Message Workflow
