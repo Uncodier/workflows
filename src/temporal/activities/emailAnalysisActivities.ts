@@ -13,6 +13,7 @@ export interface EmailAnalysisRequest {
   user_id?: string;
   team_member_id?: string;
   analysis_type?: string;
+  since_date?: string; // Date in ISO format to fetch emails since this timestamp
 }
 
 export interface EmailAnalysisResponse {
