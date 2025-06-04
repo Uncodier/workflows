@@ -31,12 +31,13 @@ export async function executeApiCall(input: ExecuteToolInput): Promise<ExecuteTo
     
     // Manejar URLs locales
     if (url.startsWith('/')) {
-      if (environment.NODE_ENV === 'production' && environment.API_BASE_URL) {
+      if (environment.API_BASE_URL) {
         const baseUrl = environment.API_BASE_URL.endsWith('/')
           ? environment.API_BASE_URL.slice(0, -1)
           : environment.API_BASE_URL;
         url = `${baseUrl}${url}`;
       } else {
+        // Fallback si no hay API_BASE_URL configurada
         const port = environment.PORT || 3000;
         url = `http://127.0.0.1:${port}${url}`;
       }

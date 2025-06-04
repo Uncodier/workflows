@@ -232,7 +232,42 @@ describe('ExecuteTool Workflow Activities', () => {
         },
         environment: {
           NODE_ENV: 'development',
+          PORT: '3000',
+          API_BASE_URL: 'https://myapi.com'
+        }
+      };
+
+      const result = await executeApiCall(input);
+
+      expect(result.success).toBe(true);
+      expect(result.url).toBe('https://myapi.com/api/local');
+    });
+
+    it('should fallback to localhost when no API_BASE_URL is provided', async () => {
+      const mockResponse = {
+        local: true
+      };
+      
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as Response);
+
+      const input: ExecuteToolInput = {
+        toolName: 'local-api-fallback',
+        args: { test: 'value' },
+        apiConfig: {
+          endpoint: {
+            url: '/api/local',
+            method: 'GET',
+            headers: {}
+          }
+        },
+        environment: {
+          NODE_ENV: 'development',
           PORT: '3000'
+          // Sin API_BASE_URL
         }
       };
 
