@@ -52,8 +52,14 @@ export async function executeToolWorkflow(input: ExecuteToolInput): Promise<Exec
     // 2. Ejecutar la llamada API
     const result = await executeApiCall(input);
     
-    // 3. Procesar respuesta si hay mapeo
-    if (input.apiConfig.responseMapping && result.success) {
+    // Si la llamada falló, retornar inmediatamente
+    if (!result.success) {
+      console.error(`[Workflow] Tool ${input.toolName} failed: ${result.error}`);
+      return result;
+    }
+    
+    // 3. Procesar respuesta si hay mapeo (solo si fue exitoso)
+    if (input.apiConfig.responseMapping) {
       result.data = await processResponse(result.data, input.apiConfig.responseMapping);
     }
     

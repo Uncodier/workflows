@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
-import { ExecuteToolInput, ExecuteToolResult } from '../src/temporal/workflows/executeToolWorkflow';
+import { ExecuteToolInput, ExecuteToolResult, executeToolWorkflow } from '../src/temporal/workflows/executeToolWorkflow';
 import { validateParameters, executeApiCall, processResponse } from '../src/temporal/activities/executeToolActivities';
 
 // Mock fetch
@@ -391,5 +391,37 @@ describe('ExecuteTool Workflow Activities', () => {
         outOfBounds: undefined
       });
     });
+  });
+});
+
+describe('ExecuteTool Workflow Integration', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should handle failed API calls correctly', async () => {
+    // Mock a failed fetch request
+    mockFetch.mockRejectedValue(new Error('fetch failed'));
+
+    const input: ExecuteToolInput = {
+      toolName: 'failing-tool',
+      args: { test: 'value' },
+      apiConfig: {
+        endpoint: {
+          url: '/api/agents/tools/createTask',
+          method: 'POST',
+          headers: {}
+        }
+      },
+      environment: {
+        API_BASE_URL: 'http://127.0.0.1:3001'
+      }
+    };
+
+    const result = await executeApiCall(input);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('fetch failed');
+    expect(result.url).toBe('http://127.0.0.1:3001/api/agents/tools/createTask');
   });
 }); 
