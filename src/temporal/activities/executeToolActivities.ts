@@ -103,7 +103,7 @@ export async function executeApiCall(input: ExecuteToolInput): Promise<ExecuteTo
     console.error(`[Activity] Error in API call for ${toolName}:`, error);
     
     let errorMessage = error.message || 'Unknown error';
-    let statusCode = error.response?.status;
+    const statusCode = error.response?.status;
     
     // Manejar errores específicos basados en código de estado
     if (error.response && apiConfig.errors && apiConfig.errors[error.response.status]) {
@@ -144,7 +144,7 @@ async function executeHttpRequestWithRetry(
   method: string, 
   args: any, 
   headers: Record<string, string>,
-  environment: Record<string, any>
+  _environment: Record<string, any>
 ): Promise<any> {
   const makeRequest = async (requestUrl: string) => {
     switch (method) {
@@ -181,7 +181,7 @@ async function executeHttpRequestWithRetry(
       const alternativePorts = [3000, 3001, 8080];
       const alternativeHosts = ['127.0.0.1', 'localhost'];
       
-      let urlObj = new URL(url);
+      const urlObj = new URL(url);
       const originalPort = urlObj.port || '3000';
       const originalHostname = urlObj.hostname;
       
@@ -197,7 +197,7 @@ async function executeHttpRequestWithRetry(
             
             console.log(`[Activity] Trying alternative: ${altUrl}`);
             return await makeRequest(altUrl);
-          } catch (retryError) {
+          } catch {
             console.log(`[Activity] Failed with ${host}:${port}`);
           }
         }
