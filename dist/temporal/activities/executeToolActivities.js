@@ -1,12 +1,8 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateParameters = validateParameters;
 exports.executeApiCall = executeApiCall;
 exports.processResponse = processResponse;
-const axios_1 = __importDefault(require("axios"));
 async function validateParameters(toolName, args, apiConfig) {
     // Validación de parámetros si es necesaria
     console.log(`[Activity] Validating parameters for tool: ${toolName}`);
@@ -93,7 +89,7 @@ async function executeApiCall(input) {
     catch (error) {
         console.error(`[Activity] Error in API call for ${toolName}:`, error);
         let errorMessage = error.message || 'Unknown error';
-        const statusCode = error.response?.status;
+        const statusCode = error.response?.status || error.status;
         // Manejar errores específicos basados en código de estado
         if (error.response && apiConfig.errors && apiConfig.errors[error.response.status]) {
             const errorConfig = apiConfig.errors[error.response.status];
@@ -126,35 +122,56 @@ async function executeApiCall(input) {
 }
 async function executeHttpRequestWithRetry(url, method, args, headers, _environment) {
     const makeRequest = async (requestUrl) => {
-        switch (method) {
-            case 'GET':
-                const queryParams = new URLSearchParams();
-                Object.keys(args).forEach(key => {
-                    if (!requestUrl.includes(`{${key}}`)) {
-                        queryParams.append(key, String(args[key]));
-                    }
-                });
-                const queryString = queryParams.toString();
-                const finalUrl = queryString ? `${requestUrl}?${queryString}` : requestUrl;
-                return await axios_1.default.get(finalUrl, { headers });
-            case 'POST':
-                return await axios_1.default.post(requestUrl, args, { headers });
-            case 'PUT':
-                return await axios_1.default.put(requestUrl, args, { headers });
-            case 'DELETE':
-                return await axios_1.default.delete(requestUrl, { headers, data: args });
-            case 'PATCH':
-                return await axios_1.default.patch(requestUrl, args, { headers });
-            default:
-                throw new Error(`Unsupported HTTP method: ${method}`);
+        let finalUrl = requestUrl;
+        let body;
+        // Configurar body y URL según el método HTTP
+        if (method === 'GET') {
+            const queryParams = new URLSearchParams();
+            Object.keys(args).forEach(key => {
+                if (!requestUrl.includes(`{${key}}`)) {
+                    queryParams.append(key, String(args[key]));
+                }
+            });
+            const queryString = queryParams.toString();
+            finalUrl = queryString ? `${requestUrl}?${queryString}` : requestUrl;
         }
+        else {
+            body = JSON.stringify(args);
+            if (!headers['Content-Type']) {
+                headers['Content-Type'] = 'application/json';
+            }
+        }
+        const response = await fetch(finalUrl, {
+            method,
+            headers,
+            body
+        });
+        let data;
+        try {
+            data = await response.json();
+        }
+        catch {
+            data = await response.text();
+        }
+        if (!response.ok) {
+            const error = new Error(`HTTP ${response.status}: ${response.statusText}`);
+            error.response = {
+                status: response.status,
+                data
+            };
+            throw error;
+        }
+        return {
+            data,
+            status: response.status
+        };
     };
     try {
         return await makeRequest(url);
     }
     catch (error) {
         // Lógica de retry para conexiones locales
-        if ((error.code === 'ECONNREFUSED' || error.errno === -61) &&
+        if ((error.code === 'ECONNREFUSED' || error.errno === -61 || error.message?.includes('fetch failed')) &&
             (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('::1'))) {
             const alternativePorts = [3000, 3001, 8080];
             const alternativeHosts = ['127.0.0.1', 'localhost'];

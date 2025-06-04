@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { ExecuteToolInput, ExecuteToolResult } from '../workflows/executeToolWorkflow';
 
 export async function validateParameters(
@@ -103,7 +102,7 @@ export async function executeApiCall(input: ExecuteToolInput): Promise<ExecuteTo
     console.error(`[Activity] Error in API call for ${toolName}:`, error);
     
     let errorMessage = error.message || 'Unknown error';
-    const statusCode = error.response?.status;
+    const statusCode = error.response?.status || error.status;
     
     // Manejar errores específicos basados en código de estado
     if (error.response && apiConfig.errors && apiConfig.errors[error.response.status]) {
@@ -147,35 +146,59 @@ async function executeHttpRequestWithRetry(
   _environment: Record<string, any>
 ): Promise<any> {
   const makeRequest = async (requestUrl: string) => {
-    switch (method) {
-      case 'GET':
-        const queryParams = new URLSearchParams();
-        Object.keys(args).forEach(key => {
-          if (!requestUrl.includes(`{${key}}`)) {
-            queryParams.append(key, String(args[key]));
-          }
-        });
-        const queryString = queryParams.toString();
-        const finalUrl = queryString ? `${requestUrl}?${queryString}` : requestUrl;
-        return await axios.get(finalUrl, { headers });
-      case 'POST':
-        return await axios.post(requestUrl, args, { headers });
-      case 'PUT':
-        return await axios.put(requestUrl, args, { headers });
-      case 'DELETE':
-        return await axios.delete(requestUrl, { headers, data: args });
-      case 'PATCH':
-        return await axios.patch(requestUrl, args, { headers });
-      default:
-        throw new Error(`Unsupported HTTP method: ${method}`);
+    let finalUrl = requestUrl;
+    let body: string | undefined;
+    
+    // Configurar body y URL según el método HTTP
+    if (method === 'GET') {
+      const queryParams = new URLSearchParams();
+      Object.keys(args).forEach(key => {
+        if (!requestUrl.includes(`{${key}}`)) {
+          queryParams.append(key, String(args[key]));
+        }
+      });
+      const queryString = queryParams.toString();
+      finalUrl = queryString ? `${requestUrl}?${queryString}` : requestUrl;
+    } else {
+      body = JSON.stringify(args);
+      if (!headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json';
+      }
     }
+    
+    const response = await fetch(finalUrl, {
+      method,
+      headers,
+      body
+    });
+    
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      data = await response.text();
+    }
+    
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}: ${response.statusText}`);
+      (error as any).response = {
+        status: response.status,
+        data
+      };
+      throw error;
+    }
+    
+    return {
+      data,
+      status: response.status
+    };
   };
   
   try {
     return await makeRequest(url);
   } catch (error: any) {
     // Lógica de retry para conexiones locales
-    if ((error.code === 'ECONNREFUSED' || error.errno === -61) && 
+    if ((error.code === 'ECONNREFUSED' || error.errno === -61 || error.message?.includes('fetch failed')) && 
        (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('::1'))) {
       
       const alternativePorts = [3000, 3001, 8080];

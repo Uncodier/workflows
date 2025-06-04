@@ -2,10 +2,9 @@ import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { ExecuteToolInput, ExecuteToolResult } from '../src/temporal/workflows/executeToolWorkflow';
 import { validateParameters, executeApiCall, processResponse } from '../src/temporal/activities/executeToolActivities';
 
-// Mock axios
-jest.mock('axios');
-import axios from 'axios';
-const mockedAxios = jest.mocked(axios);
+// Mock fetch
+const mockFetch = jest.fn() as jest.MockedFunction<typeof fetch>;
+global.fetch = mockFetch;
 
 describe('ExecuteTool Workflow Activities', () => {
   beforeEach(() => {
@@ -51,11 +50,15 @@ describe('ExecuteTool Workflow Activities', () => {
   describe('executeApiCall', () => {
     it('should execute GET request successfully', async () => {
       const mockResponse = {
-        data: { message: 'success', value: 42 },
-        status: 200
+        message: 'success',
+        value: 42
       };
       
-      mockedAxios.get.mockResolvedValue(mockResponse);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as Response);
 
       const input: ExecuteToolInput = {
         toolName: 'test-get',
@@ -74,21 +77,29 @@ describe('ExecuteTool Workflow Activities', () => {
       const result = await executeApiCall(input);
 
       expect(result.success).toBe(true);
-      expect(result.data).toEqual(mockResponse.data);
+      expect(result.data).toEqual(mockResponse);
       expect(result.statusCode).toBe(200);
-      expect(mockedAxios.get).toHaveBeenCalledWith(
+      expect(mockFetch).toHaveBeenCalledWith(
         'https://api.example.com/data?query=test',
-        { headers: { 'Content-Type': 'application/json' } }
+        {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          body: undefined
+        }
       );
     });
 
     it('should execute POST request successfully', async () => {
       const mockResponse = {
-        data: { id: 123, created: true },
-        status: 201
+        id: 123,
+        created: true
       };
       
-      mockedAxios.post.mockResolvedValue(mockResponse);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 201,
+        json: async () => mockResponse,
+      } as Response);
 
       const input: ExecuteToolInput = {
         toolName: 'test-post',
@@ -107,22 +118,28 @@ describe('ExecuteTool Workflow Activities', () => {
       const result = await executeApiCall(input);
 
       expect(result.success).toBe(true);
-      expect(result.data).toEqual(mockResponse.data);
+      expect(result.data).toEqual(mockResponse);
       expect(result.statusCode).toBe(201);
-      expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect(mockFetch).toHaveBeenCalledWith(
         'https://api.example.com/posts',
-        { title: 'Test', content: 'Test content' },
-        { headers: { 'Content-Type': 'application/json' } }
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'Test', content: 'Test content' })
+        }
       );
     });
 
     it('should handle URL parameter replacement', async () => {
       const mockResponse = {
-        data: { user: 'john' },
-        status: 200
+        user: 'john'
       };
       
-      mockedAxios.get.mockResolvedValue(mockResponse);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as Response);
 
       const input: ExecuteToolInput = {
         toolName: 'get-user',
@@ -139,19 +156,26 @@ describe('ExecuteTool Workflow Activities', () => {
       const result = await executeApiCall(input);
 
       expect(result.success).toBe(true);
-      expect(mockedAxios.get).toHaveBeenCalledWith(
-        'https://api.example.com/users/123?extra=data',
-        { headers: {} }
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.example.com/users/123?userId=123&extra=data',
+        {
+          method: 'GET',
+          headers: {},
+          body: undefined
+        }
       );
     });
 
     it('should handle authentication with Bearer token', async () => {
       const mockResponse = {
-        data: { authenticated: true },
-        status: 200
+        authenticated: true
       };
       
-      mockedAxios.get.mockResolvedValue(mockResponse);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as Response);
 
       const input: ExecuteToolInput = {
         toolName: 'auth-test',
@@ -175,19 +199,26 @@ describe('ExecuteTool Workflow Activities', () => {
       const result = await executeApiCall(input);
 
       expect(result.success).toBe(true);
-      expect(mockedAxios.get).toHaveBeenCalledWith(
+      expect(mockFetch).toHaveBeenCalledWith(
         'https://api.example.com/secure',
-        { headers: { 'Authorization': 'Bearer test-token-123' } }
+        {
+          method: 'GET',
+          headers: { 'Authorization': 'Bearer test-token-123' },
+          body: undefined
+        }
       );
     });
 
     it('should handle local URLs in development', async () => {
       const mockResponse = {
-        data: { local: true },
-        status: 200
+        local: true
       };
       
-      mockedAxios.get.mockResolvedValue(mockResponse);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as Response);
 
       const input: ExecuteToolInput = {
         toolName: 'local-api',
@@ -213,17 +244,17 @@ describe('ExecuteTool Workflow Activities', () => {
 
     it('should handle API errors with custom error mapping', async () => {
       const errorResponse = {
-        response: {
-          status: 400,
-          data: {
-            error: {
-              message: 'Invalid request data'
-            }
-          }
+        error: {
+          message: 'Invalid request data'
         }
       };
       
-      mockedAxios.get.mockRejectedValue(errorResponse);
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: async () => errorResponse,
+      } as Response);
 
       const input: ExecuteToolInput = {
         toolName: 'error-test',
