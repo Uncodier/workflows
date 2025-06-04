@@ -306,11 +306,7 @@ describe('ExecuteTool Workflow Activities', () => {
         }
       };
 
-      const result = await executeApiCall(input);
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('HTTP 400: Bad Request');
-      expect(result.statusCode).toBe(400);
+      await expect(executeApiCall(input)).rejects.toThrow('Tool error-test failed: HTTP 400: Bad Request (Status: 400)');
     });
   });
 
@@ -418,11 +414,86 @@ describe('ExecuteTool Workflow Integration', () => {
       }
     };
 
+    // ✅ Ahora esperamos que lance una excepción
+    await expect(executeApiCall(input)).rejects.toThrow('Tool failing-tool failed: fetch failed (Status: undefined)');
+  });
+
+  it('should fail when error is present even if success is not explicitly false', async () => {
+    const errorResponse = {
+      success: true, // Inconsistencia: success true pero con error
+      error: 'Something went wrong',
+      data: null
+    };
+    
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => errorResponse,
+    } as Response);
+
+    const input: ExecuteToolInput = {
+      toolName: 'inconsistent-response',
+      args: {},
+      apiConfig: {
+        endpoint: {
+          url: 'https://api.example.com/inconsistent',
+          method: 'GET',
+          headers: {}
+        }
+      }
+    };
+
+    // ✅ Debe fallar porque hay error, aunque success sea true
+    await expect(executeApiCall(input)).rejects.toThrow('Tool inconsistent-response failed: Something went wrong');
+  });
+
+  it('should auto-correct date format by adding timezone', async () => {
+    const mockResponse = {
+      success: true,
+      task: {
+        id: 'task-123',
+        title: 'Test Task',
+        scheduled_date: '2025-07-07T18:00:00Z'
+      }
+    };
+    
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => mockResponse,
+    } as Response);
+
+    const input: ExecuteToolInput = {
+      toolName: 'create-task',
+      args: { 
+        title: 'Test Task',
+        scheduled_date: '2025-07-07T18:00:00' // Sin timezone
+      },
+      apiConfig: {
+        endpoint: {
+          url: 'https://api.example.com/tasks',
+          method: 'POST',
+          headers: {}
+        }
+      }
+    };
+
     const result = await executeApiCall(input);
 
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('fetch failed');
-    // La URL en el resultado es la local, apiService maneja internamente la construcción completa
-    expect(result.url).toBe('/api/agents/tools/createTask');
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual(mockResponse);
+    
+    // Verificar que se enviaron los datos con timezone corregido
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://api.example.com/tasks',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          title: 'Test Task', 
+          scheduled_date: '2025-07-07T18:00:00Z' // Corregido automáticamente
+        })
+      }
+    );
   });
 }); 

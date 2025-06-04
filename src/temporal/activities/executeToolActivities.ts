@@ -28,13 +28,27 @@ export async function executeApiCall(input: ExecuteToolInput): Promise<ExecuteTo
     
     const method = apiConfig.endpoint.method;
     
-    // Reemplazar variables en la URL
-    Object.keys(args).forEach(key => {
-      url = url.replace(`{${key}}`, encodeURIComponent(String(args[key])));
+    // ✅ IMPORTANTE: Auto-corregir fechas sin timezone para formato ISO 8601
+    const processedArgs = { ...args };
+    Object.keys(processedArgs).forEach(key => {
+      const value = processedArgs[key];
+      // Si el key contiene 'date' y el valor parece una fecha sin timezone
+      if (key.toLowerCase().includes('date') && 
+          typeof value === 'string' && 
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)) {
+        processedArgs[key] = `${value}Z`; // Agregar timezone UTC
+        console.log(`[Activity] Auto-corrected date format: ${key} = ${value} -> ${processedArgs[key]}`);
+      }
+    });
+    
+    // Reemplazar variables en la URL usando args procesados
+    Object.keys(processedArgs).forEach(key => {
+      url = url.replace(`{${key}}`, encodeURIComponent(String(processedArgs[key])));
     });
     
     console.log(`[Activity] Final URL: ${url}`);
     console.log(`[Activity] Method: ${method}`);
+    console.log(`[Activity] Processed args:`, processedArgs);
     
     // Preparar headers personalizados
     const customHeaders = { ...apiConfig.endpoint.headers };
@@ -69,32 +83,40 @@ export async function executeApiCall(input: ExecuteToolInput): Promise<ExecuteTo
       }
     }
     
+    let result: ExecuteToolResult;
+    
     // Si es una URL externa (completa), usar fetch directamente
     if (url.startsWith('http://') || url.startsWith('https://')) {
       console.log(`[Activity] External URL detected, using direct fetch`);
-      return await executeExternalApiCall(url, method, args, customHeaders);
+      result = await executeExternalApiCall(url, method, processedArgs, customHeaders);
+    } else {
+      // Si es una URL local (que empieza con /), usar apiService
+      console.log(`[Activity] Local URL detected, using apiService`);
+      const response = await executeLocalApiCall(url, method, processedArgs, customHeaders);
+      
+      result = {
+        success: response.success,
+        data: response.data,
+        error: response.error?.message,
+        statusCode: response.error?.status,
+        url: url
+      };
     }
     
-    // Si es una URL local (que empieza con /), usar apiService
-    console.log(`[Activity] Local URL detected, using apiService`);
-    const response = await executeLocalApiCall(url, method, args, customHeaders);
+    // ✅ IMPORTANTE: Si hay error o success es false, FALLAR el activity
+    if (!result.success || result.error) {
+      const errorMessage = `Tool ${toolName} failed: ${result.error || 'Unknown error'} (Status: ${result.statusCode})`;
+      console.error(`[Activity] ${errorMessage}`);
+      throw new Error(errorMessage);
+    }
     
-    return {
-      success: response.success,
-      data: response.data,
-      error: response.error?.message,
-      statusCode: response.error?.status,
-      url: url
-    };
+    console.log(`[Activity] Tool ${toolName} executed successfully`);
+    return result;
     
   } catch (error: any) {
     console.error(`[Activity] Error in API call for ${toolName}:`, error);
-    
-    return {
-      success: false,
-      error: error.message || 'Unknown error',
-      url: url
-    };
+    // ✅ IMPORTANTE: Re-lanzar el error para que falle el activity
+    throw error;
   }
 }
 
@@ -102,7 +124,7 @@ export async function executeApiCall(input: ExecuteToolInput): Promise<ExecuteTo
 async function executeExternalApiCall(
   url: string,
   method: string,
-  args: any,
+  processedArgs: any,
   headers: Record<string, string>
 ): Promise<ExecuteToolResult> {
   let finalUrl = url;
@@ -111,15 +133,15 @@ async function executeExternalApiCall(
   // Configurar body y URL según el método HTTP
   if (method === 'GET') {
     const queryParams = new URLSearchParams();
-    Object.keys(args).forEach(key => {
+    Object.keys(processedArgs).forEach(key => {
       if (!url.includes(`{${key}}`)) {
-        queryParams.append(key, String(args[key]));
+        queryParams.append(key, String(processedArgs[key]));
       }
     });
     const queryString = queryParams.toString();
     finalUrl = queryString ? `${url}?${queryString}` : url;
   } else {
-    body = JSON.stringify(args);
+    body = JSON.stringify(processedArgs);
     if (!headers['Content-Type']) {
       headers['Content-Type'] = 'application/json';
     }
@@ -148,6 +170,17 @@ async function executeExternalApiCall(
     };
   }
   
+  // ✅ IMPORTANTE: También verificar si la respuesta contiene un error en los datos
+  if (data && typeof data === 'object' && data.error) {
+    return {
+      success: false,
+      error: data.error,
+      statusCode: response.status,
+      url: finalUrl,
+      data
+    };
+  }
+  
   return {
     success: true,
     data,
@@ -160,7 +193,7 @@ async function executeExternalApiCall(
 async function executeLocalApiCall(
   endpoint: string,
   method: string,
-  args: any,
+  processedArgs: any,
   customHeaders: Record<string, string>
 ): Promise<{ success: boolean; data?: any; error?: { message: string; status?: number } }> {
   
@@ -170,12 +203,12 @@ async function executeLocalApiCall(
   
   switch (method.toUpperCase()) {
     case 'GET':
-      // Para GET, agregar args como query parameters si no están en la URL
-      if (Object.keys(args).length > 0) {
+      // Para GET, agregar processedArgs como query parameters si no están en la URL
+      if (Object.keys(processedArgs).length > 0) {
         const queryParams = new URLSearchParams();
-        Object.keys(args).forEach(key => {
+        Object.keys(processedArgs).forEach(key => {
           if (!endpoint.includes(`{${key}}`)) {
-            queryParams.append(key, String(args[key]));
+            queryParams.append(key, String(processedArgs[key]));
           }
         });
         const queryString = queryParams.toString();
@@ -186,16 +219,16 @@ async function executeLocalApiCall(
       return await apiService.get(endpoint, headers);
       
     case 'POST':
-      return await apiService.post(endpoint, args, headers);
+      return await apiService.post(endpoint, processedArgs, headers);
       
     case 'PUT':
-      return await apiService.put(endpoint, args, headers);
+      return await apiService.put(endpoint, processedArgs, headers);
       
     case 'DELETE':
       return await apiService.delete(endpoint, headers);
       
     case 'PATCH':
-      return await apiService.patch(endpoint, args, headers);
+      return await apiService.patch(endpoint, processedArgs, headers);
       
     default:
       throw new Error(`Unsupported method: ${method}`);
