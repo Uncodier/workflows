@@ -1,4 +1,5 @@
 import { ExecuteToolInput, ExecuteToolResult } from '../workflows/executeToolWorkflow';
+import { apiService } from '../services/apiService';
 
 export async function validateParameters(
   toolName: string, 
@@ -20,68 +21,47 @@ export async function validateParameters(
 
 export async function executeApiCall(input: ExecuteToolInput): Promise<ExecuteToolResult> {
   const { toolName, args, apiConfig, environment = {} } = input;
-  let currentUrl = '';
+  let url = apiConfig.endpoint.url;
   
   try {
     console.log(`[Activity] Executing API call for tool: ${toolName}`);
     
-    // Preparar la URL reemplazando variables en la ruta
-    let url = apiConfig.endpoint.url;
-    currentUrl = url;
-    
-    // Manejar URLs locales
-    if (url.startsWith('/')) {
-      if (environment.API_BASE_URL) {
-        const baseUrl = environment.API_BASE_URL.endsWith('/')
-          ? environment.API_BASE_URL.slice(0, -1)
-          : environment.API_BASE_URL;
-        url = `${baseUrl}${url}`;
-      } else {
-        // Fallback si no hay API_BASE_URL configurada
-        const port = environment.PORT || 3000;
-        url = `http://127.0.0.1:${port}${url}`;
-      }
-      currentUrl = url;
-    }
+    const method = apiConfig.endpoint.method;
     
     // Reemplazar variables en la URL
     Object.keys(args).forEach(key => {
       url = url.replace(`{${key}}`, encodeURIComponent(String(args[key])));
     });
-    currentUrl = url;
     
-    // Preparar headers
-    const headers = { ...apiConfig.endpoint.headers };
+    console.log(`[Activity] Final URL: ${url}`);
+    console.log(`[Activity] Method: ${method}`);
     
-    // Manejar autenticación para URLs locales
-    const isLocalUrl = url.startsWith('/') || url.includes('localhost') || url.includes('127.0.0.1');
-    if (isLocalUrl && environment.SERVICE_API_KEY) {
-      if (!headers['Authorization'] && !headers['x-api-key']) {
-        headers['x-api-key'] = environment.SERVICE_API_KEY;
-      }
-    }
+    // Preparar headers personalizados
+    const customHeaders = { ...apiConfig.endpoint.headers };
     
-    // Procesar autenticación
+    // Procesar autenticación en headers
     if (apiConfig.endpoint.requiresAuth) {
       switch (apiConfig.endpoint.authType) {
         case 'Bearer':
-          if (headers['Authorization'] && headers['Authorization'].includes('{{')) {
-            if (headers['Authorization'].includes('{{SUPPORT_API_TOKEN}}')) {
-              headers['Authorization'] = headers['Authorization'].replace('{{SUPPORT_API_TOKEN}}', environment.SUPPORT_API_TOKEN || '');
+          Object.keys(customHeaders).forEach(key => {
+            if (customHeaders[key] && typeof customHeaders[key] === 'string' && customHeaders[key].includes('{{')) {
+              if (customHeaders[key].includes('{{SUPPORT_API_TOKEN}}')) {
+                customHeaders[key] = customHeaders[key].replace('{{SUPPORT_API_TOKEN}}', environment.SUPPORT_API_TOKEN || '');
+              }
+              if (customHeaders[key].includes('{{SERVICE_API_KEY}}')) {
+                customHeaders[key] = customHeaders[key].replace('{{SERVICE_API_KEY}}', environment.SERVICE_API_KEY || '');
+              }
             }
-            if (headers['Authorization'].includes('{{SERVICE_API_KEY}}')) {
-              headers['Authorization'] = headers['Authorization'].replace('{{SERVICE_API_KEY}}', environment.SERVICE_API_KEY || '');
-            }
-          }
+          });
           break;
         case 'ApiKey':
-          Object.keys(headers).forEach(key => {
-            if (headers[key] && typeof headers[key] === 'string' && headers[key].includes('{{')) {
-              if (headers[key].includes('{{WEATHER_API_KEY}}')) {
-                headers[key] = headers[key].replace('{{WEATHER_API_KEY}}', environment.WEATHER_API_KEY || '');
+          Object.keys(customHeaders).forEach(key => {
+            if (customHeaders[key] && typeof customHeaders[key] === 'string' && customHeaders[key].includes('{{')) {
+              if (customHeaders[key].includes('{{WEATHER_API_KEY}}')) {
+                customHeaders[key] = customHeaders[key].replace('{{WEATHER_API_KEY}}', environment.WEATHER_API_KEY || '');
               }
-              if (headers[key].includes('{{SERVICE_API_KEY}}')) {
-                headers[key] = headers[key].replace('{{SERVICE_API_KEY}}', environment.SERVICE_API_KEY || '');
+              if (customHeaders[key].includes('{{SERVICE_API_KEY}}')) {
+                customHeaders[key] = customHeaders[key].replace('{{SERVICE_API_KEY}}', environment.SERVICE_API_KEY || '');
               }
             }
           });
@@ -89,146 +69,135 @@ export async function executeApiCall(input: ExecuteToolInput): Promise<ExecuteTo
       }
     }
     
-    // Ejecutar petición HTTP con lógica de retry para conexiones locales
-    const response = await executeHttpRequestWithRetry(url, apiConfig.endpoint.method, args, headers, environment);
+    // Si es una URL externa (completa), usar fetch directamente
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      console.log(`[Activity] External URL detected, using direct fetch`);
+      return await executeExternalApiCall(url, method, args, customHeaders);
+    }
+    
+    // Si es una URL local (que empieza con /), usar apiService
+    console.log(`[Activity] Local URL detected, using apiService`);
+    const response = await executeLocalApiCall(url, method, args, customHeaders);
     
     return {
-      success: true,
+      success: response.success,
       data: response.data,
-      statusCode: response.status,
-      url: currentUrl
+      error: response.error?.message,
+      statusCode: response.error?.status,
+      url: url
     };
     
   } catch (error: any) {
     console.error(`[Activity] Error in API call for ${toolName}:`, error);
     
-    let errorMessage = error.message || 'Unknown error';
-    const statusCode = error.response?.status || error.status;
-    
-    // Manejar errores específicos basados en código de estado
-    if (error.response && apiConfig.errors && apiConfig.errors[error.response.status]) {
-      const errorConfig = apiConfig.errors[error.response.status];
-      const responseData = error.response.data;
-      
-      // Extraer mensaje de error según mapeo
-      if (errorConfig.message) {
-        const messageParts = errorConfig.message.split('.');
-        let messageValue = responseData;
-        
-        for (const part of messageParts) {
-          if (messageValue && typeof messageValue === 'object' && part in messageValue) {
-            messageValue = messageValue[part];
-          } else {
-            messageValue = undefined;
-            break;
-          }
-        }
-        
-        if (messageValue && typeof messageValue === 'string') {
-          errorMessage = messageValue;
-        }
-      }
-    }
-    
     return {
       success: false,
-      error: errorMessage,
-      statusCode,
-      url: currentUrl
+      error: error.message || 'Unknown error',
+      url: url
     };
   }
 }
 
-async function executeHttpRequestWithRetry(
-  url: string, 
-  method: string, 
-  args: any, 
-  headers: Record<string, string>,
-  _environment: Record<string, any>
-): Promise<any> {
-  const makeRequest = async (requestUrl: string) => {
-    let finalUrl = requestUrl;
-    let body: string | undefined;
-    
-    // Configurar body y URL según el método HTTP
-    if (method === 'GET') {
-      const queryParams = new URLSearchParams();
-      Object.keys(args).forEach(key => {
-        if (!requestUrl.includes(`{${key}}`)) {
-          queryParams.append(key, String(args[key]));
-        }
-      });
-      const queryString = queryParams.toString();
-      finalUrl = queryString ? `${requestUrl}?${queryString}` : requestUrl;
-    } else {
-      body = JSON.stringify(args);
-      if (!headers['Content-Type']) {
-        headers['Content-Type'] = 'application/json';
-      }
-    }
-    
-    const response = await fetch(finalUrl, {
-      method,
-      headers,
-      body
-    });
-    
-    let data;
-    try {
-      data = await response.json();
-    } catch {
-      data = await response.text();
-    }
-    
-    if (!response.ok) {
-      const error = new Error(`HTTP ${response.status}: ${response.statusText}`);
-      (error as any).response = {
-        status: response.status,
-        data
-      };
-      throw error;
-    }
-    
-    return {
-      data,
-      status: response.status
-    };
-  };
+// Función para manejar APIs externas (URLs completas)
+async function executeExternalApiCall(
+  url: string,
+  method: string,
+  args: any,
+  headers: Record<string, string>
+): Promise<ExecuteToolResult> {
+  let finalUrl = url;
+  let body: string | undefined;
   
+  // Configurar body y URL según el método HTTP
+  if (method === 'GET') {
+    const queryParams = new URLSearchParams();
+    Object.keys(args).forEach(key => {
+      if (!url.includes(`{${key}}`)) {
+        queryParams.append(key, String(args[key]));
+      }
+    });
+    const queryString = queryParams.toString();
+    finalUrl = queryString ? `${url}?${queryString}` : url;
+  } else {
+    body = JSON.stringify(args);
+    if (!headers['Content-Type']) {
+      headers['Content-Type'] = 'application/json';
+    }
+  }
+  
+  const response = await fetch(finalUrl, {
+    method,
+    headers,
+    body
+  });
+  
+  let data;
   try {
-    return await makeRequest(url);
-  } catch (error: any) {
-    // Lógica de retry para conexiones locales
-    if ((error.code === 'ECONNREFUSED' || error.errno === -61 || error.message?.includes('fetch failed')) && 
-       (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('::1'))) {
-      
-      const alternativePorts = [3000, 3001, 8080];
-      const alternativeHosts = ['127.0.0.1', 'localhost'];
-      
-      const urlObj = new URL(url);
-      const originalPort = urlObj.port || '3000';
-      const originalHostname = urlObj.hostname;
-      
-      // Intentar combinaciones de host/puerto
-      for (const host of alternativeHosts) {
-        for (const port of alternativePorts) {
-          if (host === originalHostname && port.toString() === originalPort) continue;
-          
-          try {
-            urlObj.hostname = host;
-            urlObj.port = port.toString();
-            const altUrl = urlObj.toString();
-            
-            console.log(`[Activity] Trying alternative: ${altUrl}`);
-            return await makeRequest(altUrl);
-          } catch {
-            console.log(`[Activity] Failed with ${host}:${port}`);
+    data = await response.json();
+  } catch {
+    data = await response.text();
+  }
+  
+  if (!response.ok) {
+    return {
+      success: false,
+      error: `HTTP ${response.status}: ${response.statusText}`,
+      statusCode: response.status,
+      url: finalUrl,
+      data
+    };
+  }
+  
+  return {
+    success: true,
+    data,
+    statusCode: response.status,
+    url: finalUrl
+  };
+}
+
+// Función para manejar APIs locales usando apiService
+async function executeLocalApiCall(
+  endpoint: string,
+  method: string,
+  args: any,
+  customHeaders: Record<string, string>
+): Promise<{ success: boolean; data?: any; error?: { message: string; status?: number } }> {
+  
+  // Remover Content-Type del customHeaders si existe, apiService lo maneja automáticamente
+  const { 'Content-Type': _, ...headers } = customHeaders;
+  
+  switch (method.toUpperCase()) {
+    case 'GET':
+      // Para GET, agregar args como query parameters si no están en la URL
+      if (Object.keys(args).length > 0) {
+        const queryParams = new URLSearchParams();
+        Object.keys(args).forEach(key => {
+          if (!endpoint.includes(`{${key}}`)) {
+            queryParams.append(key, String(args[key]));
           }
+        });
+        const queryString = queryParams.toString();
+        if (queryString) {
+          endpoint = `${endpoint}?${queryString}`;
         }
       }
-    }
-    
-    throw error;
+      return await apiService.get(endpoint, headers);
+      
+    case 'POST':
+      return await apiService.post(endpoint, args, headers);
+      
+    case 'PUT':
+      return await apiService.put(endpoint, args, headers);
+      
+    case 'DELETE':
+      return await apiService.delete(endpoint, headers);
+      
+    case 'PATCH':
+      return await apiService.patch(endpoint, args, headers);
+      
+    default:
+      throw new Error(`Unsupported method: ${method}`);
   }
 }
 
