@@ -57,7 +57,6 @@ exports.workflows = {
     sendWhatsappFromAgent: sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent,
     answerWhatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
     processWhatsAppMessagesWorkflow: answerWhatsappMessageWorkflow_1.processWhatsAppMessagesWorkflow,
-    whatsappCustomerSupportWorkflow: answerWhatsappMessageWorkflow_1.whatsappCustomerSupportWorkflow,
     siteSetupWorkflow: siteSetupWorkflow_1.siteSetupWorkflow,
 };
 // Workflow names for Temporal Client (strings)
@@ -76,6 +75,5 @@ exports.workflowNames = {
     sendWhatsappFromAgent: 'sendWhatsappFromAgent',
     answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
     processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
-    whatsappCustomerSupportWorkflow: 'whatsappCustomerSupportWorkflow',
     siteSetupWorkflow: 'siteSetupWorkflow',
 };

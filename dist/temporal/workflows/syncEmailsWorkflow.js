@@ -109,7 +109,8 @@ async function syncEmailsWorkflow(options) {
                     site_id: siteId,
                     limit: validation.analysisLimit,
                     user_id: options.userId,
-                    analysis_type: 'commercial_opportunity'
+                    analysis_type: 'commercial_opportunity',
+                    since_date: validation.since.toISOString()
                 };
                 const analysisResponse = await analyzeEmailsActivity(analysisRequest);
                 if (analysisResponse.success) {

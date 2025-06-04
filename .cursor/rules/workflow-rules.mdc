@@ -3,4 +3,6 @@ description:
 globs: 
 alwaysApply: false
 ---
+siempre que hagas un workflow comienza por el md en la carpeta docs, explicando el flujo, actividades y parametros entre actividades, etc.
+
 nunca edites directo dist, siempre hay que trabajar sobre el código pre compilado

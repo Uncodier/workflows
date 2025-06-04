@@ -8,9 +8,10 @@ exports.SupabaseService = void 0;
 exports.getSupabaseService = getSupabaseService;
 const supabase_js_1 = require("@supabase/supabase-js");
 class SupabaseService {
+    client;
+    isConnected = false;
+    connectionTested = false;
     constructor(config) {
-        this.isConnected = false;
-        this.connectionTested = false;
         // Try different environment variable names
         const supabaseUrl = config?.url ||
             process.env.NEXT_PUBLIC_SUPABASE_URL ||

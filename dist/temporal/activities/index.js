@@ -51,6 +51,7 @@ __exportStar(require("./customerSupportActivities"), exports);
 __exportStar(require("./emailActivities"), exports);
 __exportStar(require("./whatsappActivities"), exports);
 __exportStar(require("./siteSetupActivities"), exports);
+__exportStar(require("./executeToolActivities"), exports);
 // Bundle all activities for the worker
 const supabaseActivities = __importStar(require("./supabaseActivities"));
 const apiActivities = __importStar(require("./apiActivities"));
@@ -65,6 +66,7 @@ const customerSupportActivities = __importStar(require("./customerSupportActivit
 const emailActivities = __importStar(require("./emailActivities"));
 const whatsappActivities = __importStar(require("./whatsappActivities"));
 const siteSetupActivities = __importStar(require("./siteSetupActivities"));
+const executeToolActivities = __importStar(require("./executeToolActivities"));
 exports.activities = {
     ...supabaseActivities,
     ...apiActivities,
@@ -79,4 +81,5 @@ exports.activities = {
     ...emailActivities,
     ...whatsappActivities,
     ...siteSetupActivities,
+    ...executeToolActivities,
 };

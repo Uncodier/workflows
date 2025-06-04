@@ -3,13 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.scheduleCustomerSupportMessagesWorkflow = scheduleCustomerSupportMessagesWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const customerSupportWorkflow_1 = require("./customerSupportWorkflow");
-// Configure activity options (solo para scheduling activities si las necesitamos)
-const { processAnalysisDataActivity } = (0, workflow_1.proxyActivities)({
-    startToCloseTimeout: '2 minutes',
-    retry: {
-        maximumAttempts: 3,
-    },
-});
 /**
  * Schedule Customer Support Messages Workflow
  * Takes an array of email data and schedules customer support messages
