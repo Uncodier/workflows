@@ -165,7 +165,8 @@ async function executeLocalApiCall(
 ): Promise<{ success: boolean; data?: any; error?: { message: string; status?: number } }> {
   
   // Remover Content-Type del customHeaders si existe, apiService lo maneja automáticamente
-  const { 'Content-Type': _, ...headers } = customHeaders;
+  const headers = { ...customHeaders };
+  delete headers['Content-Type'];
   
   switch (method.toUpperCase()) {
     case 'GET':
