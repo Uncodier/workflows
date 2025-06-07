@@ -12,4 +12,7 @@ export * from './sendEmailFromAgentWorkflow';
 export * from './sendWhatsappFromAgentWorkflow';
 export * from './answerWhatsappMessageWorkflow';
 export * from './siteSetupWorkflow';
-export * from './executeToolWorkflow'; 
+export * from './executeToolWorkflow';
+export * from './buildCampaignsWorkflow';
+export * from './buildSegmentsWorkflow';
+export * from './buildContentWorkflow'; 

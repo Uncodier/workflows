@@ -29,3 +29,6 @@ __exportStar(require("./sendWhatsappFromAgentWorkflow"), exports);
 __exportStar(require("./answerWhatsappMessageWorkflow"), exports);
 __exportStar(require("./siteSetupWorkflow"), exports);
 __exportStar(require("./executeToolWorkflow"), exports);
+__exportStar(require("./buildCampaignsWorkflow"), exports);
+__exportStar(require("./buildSegmentsWorkflow"), exports);
+__exportStar(require("./buildContentWorkflow"), exports);

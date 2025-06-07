@@ -21,12 +21,17 @@ interface ApiConfig {
   apiKey: string;
 }
 
+// Determine if we're using localhost (development) or remote server (production)
+const serverUrl = process.env.TEMPORAL_SERVER_URL || 'localhost:7233';
+const isLocalhost = serverUrl.includes('localhost') || serverUrl.includes('127.0.0.1');
+
 const temporalConfig: TemporalConfig = {
-  serverUrl: process.env.TEMPORAL_SERVER_URL || 'localhost:7233',
+  serverUrl,
   namespace: process.env.TEMPORAL_NAMESPACE || 'default',
   taskQueue: process.env.WORKFLOW_TASK_QUEUE || 'default',
-  apiKey: process.env.TEMPORAL_API_KEY,
-  tls: process.env.TEMPORAL_TLS === 'true' || !!process.env.TEMPORAL_API_KEY,
+  // Only use TLS and API key for remote servers, not localhost
+  apiKey: isLocalhost ? undefined : process.env.TEMPORAL_API_KEY,
+  tls: isLocalhost ? false : (process.env.TEMPORAL_TLS === 'true' || !!process.env.TEMPORAL_API_KEY),
 };
 
 const supabaseConfig: SupabaseConfig = {

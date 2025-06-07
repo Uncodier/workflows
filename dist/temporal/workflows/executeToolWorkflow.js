@@ -11,24 +11,16 @@ const { executeApiCall, validateParameters, processResponse } = (0, workflow_1.p
     },
 });
 async function executeToolWorkflow(input) {
-    try {
-        console.log(`[Workflow] Executing tool: ${input.toolName}`);
-        // 1. Validar parámetros
-        await validateParameters(input.toolName, input.args, input.apiConfig);
-        // 2. Ejecutar la llamada API
-        const result = await executeApiCall(input);
-        // 3. Procesar respuesta si hay mapeo
-        if (input.apiConfig.responseMapping && result.success) {
-            result.data = await processResponse(result.data, input.apiConfig.responseMapping);
-        }
-        console.log(`[Workflow] Tool ${input.toolName} executed successfully`);
-        return result;
+    console.log(`[Workflow] Executing tool: ${input.toolName}`);
+    // 1. Validar parámetros
+    await validateParameters(input.toolName, input.args, input.apiConfig);
+    // 2. Ejecutar la llamada API
+    // ✅ IMPORTANTE: No capturar errores aquí, dejar que el workflow falle
+    const result = await executeApiCall(input);
+    // 3. Procesar respuesta si hay mapeo (solo si fue exitoso)
+    if (input.apiConfig.responseMapping) {
+        result.data = await processResponse(result.data, input.apiConfig.responseMapping);
     }
-    catch (error) {
-        console.error(`[Workflow] Error executing tool ${input.toolName}:`, error);
-        return {
-            success: false,
-            error: error.message || 'Unknown workflow error',
-        };
-    }
+    console.log(`[Workflow] Tool ${input.toolName} executed successfully`);
+    return result;
 }

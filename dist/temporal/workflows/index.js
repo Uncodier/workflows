@@ -28,6 +28,9 @@ const sendEmailFromAgentWorkflow_1 = require("./sendEmailFromAgentWorkflow");
 const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow");
 const answerWhatsappMessageWorkflow_1 = require("./answerWhatsappMessageWorkflow");
 const siteSetupWorkflow_1 = require("./siteSetupWorkflow");
+const buildCampaignsWorkflow_1 = require("./buildCampaignsWorkflow");
+const buildSegmentsWorkflow_1 = require("./buildSegmentsWorkflow");
+const buildContentWorkflow_1 = require("./buildContentWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -41,6 +44,9 @@ __exportStar(require("./sendEmailFromAgentWorkflow"), exports);
 __exportStar(require("./sendWhatsappFromAgentWorkflow"), exports);
 __exportStar(require("./answerWhatsappMessageWorkflow"), exports);
 __exportStar(require("./siteSetupWorkflow"), exports);
+__exportStar(require("./buildCampaignsWorkflow"), exports);
+__exportStar(require("./buildSegmentsWorkflow"), exports);
+__exportStar(require("./buildContentWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -58,6 +64,9 @@ exports.workflows = {
     answerWhatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
     processWhatsAppMessagesWorkflow: answerWhatsappMessageWorkflow_1.processWhatsAppMessagesWorkflow,
     siteSetupWorkflow: siteSetupWorkflow_1.siteSetupWorkflow,
+    buildCampaignsWorkflow: buildCampaignsWorkflow_1.buildCampaignsWorkflow,
+    buildSegmentsWorkflow: buildSegmentsWorkflow_1.buildSegmentsWorkflow,
+    buildContentWorkflow: buildContentWorkflow_1.buildContentWorkflow,
 };
 // Workflow names for Temporal Client (strings)
 exports.workflowNames = {
@@ -76,4 +85,7 @@ exports.workflowNames = {
     answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
     processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
     siteSetupWorkflow: 'siteSetupWorkflow',
+    buildCampaignsWorkflow: 'buildCampaignsWorkflow',
+    buildSegmentsWorkflow: 'buildSegmentsWorkflow',
+    buildContentWorkflow: 'buildContentWorkflow',
 };

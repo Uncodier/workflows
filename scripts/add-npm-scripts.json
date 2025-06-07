@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "delete-command": "tsx scripts/deleteCommandCascade.ts",
+    "delete-command:help": "echo 'Uso: npm run delete-command <command-id>' && echo 'Requiere variables: SUPABASE_URL y SUPABASE_ANON_KEY'",
+    "cascade-functions": "psql -d $DATABASE_URL -f scripts/delete_command_cascade.sql",
+    "cascade-functions:help": "echo 'Crea funciones SQL para borrado en cascada' && echo 'Requiere variable: DATABASE_URL'"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "@supabase/supabase-js": "^2.38.5"
+  }
+} 

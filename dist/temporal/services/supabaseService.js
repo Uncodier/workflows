@@ -153,6 +153,27 @@ class SupabaseService {
         return sitesWithEmailConfig;
     }
     /**
+     * Fetch draft content for a specific site
+     */
+    async fetchDraftContent(siteId) {
+        const isConnected = await this.getConnectionStatus();
+        if (!isConnected) {
+            throw new Error('Database not connected');
+        }
+        console.log(`🔍 Fetching draft content for site: ${siteId}`);
+        const { data, error } = await this.client
+            .from('content')
+            .select('*')
+            .eq('site_id', siteId)
+            .eq('status', 'draft');
+        if (error) {
+            console.error('❌ Error fetching draft content:', error);
+            throw new Error(`Failed to fetch draft content: ${error.message}`);
+        }
+        console.log(`✅ Successfully fetched ${data?.length || 0} draft content records from database`);
+        return data || [];
+    }
+    /**
      * Fetch cron status records for specific activity and site IDs
      */
     async fetchCronStatus(activityName, siteIds) {

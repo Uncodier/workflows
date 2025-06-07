@@ -13,6 +13,7 @@ export * from './emailActivities';
 export * from './whatsappActivities';
 export * from './siteSetupActivities';
 export * from './executeToolActivities';
+export * from './campaignActivities';
 
 // Bundle all activities for the worker
 import * as supabaseActivities from './supabaseActivities';
@@ -29,6 +30,7 @@ import * as emailActivities from './emailActivities';
 import * as whatsappActivities from './whatsappActivities';
 import * as siteSetupActivities from './siteSetupActivities';
 import * as executeToolActivities from './executeToolActivities';
+import * as campaignActivities from './campaignActivities';
 
 export const activities = {
   ...supabaseActivities,
@@ -45,6 +47,7 @@ export const activities = {
   ...whatsappActivities,
   ...siteSetupActivities,
   ...executeToolActivities,
+  ...campaignActivities,
 };
 
 export type Activities = typeof activities; 

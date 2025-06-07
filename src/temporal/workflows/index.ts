@@ -11,6 +11,9 @@ import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 import { answerWhatsappMessageWorkflow, processWhatsAppMessagesWorkflow } from './answerWhatsappMessageWorkflow';
 import { siteSetupWorkflow } from './siteSetupWorkflow';
+import { buildCampaignsWorkflow } from './buildCampaignsWorkflow';
+import { buildSegmentsWorkflow } from './buildSegmentsWorkflow';
+import { buildContentWorkflow } from './buildContentWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -25,6 +28,9 @@ export * from './sendEmailFromAgentWorkflow';
 export * from './sendWhatsappFromAgentWorkflow';
 export * from './answerWhatsappMessageWorkflow';
 export * from './siteSetupWorkflow';
+export * from './buildCampaignsWorkflow';
+export * from './buildSegmentsWorkflow';
+export * from './buildContentWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -43,6 +49,9 @@ export const workflows = {
   answerWhatsappMessageWorkflow,
   processWhatsAppMessagesWorkflow,
   siteSetupWorkflow,
+  buildCampaignsWorkflow,
+  buildSegmentsWorkflow,
+  buildContentWorkflow,
 };
 
 // Workflow names for Temporal Client (strings)
@@ -62,6 +71,9 @@ export const workflowNames = {
   answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
   processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
   siteSetupWorkflow: 'siteSetupWorkflow',
+  buildCampaignsWorkflow: 'buildCampaignsWorkflow',
+  buildSegmentsWorkflow: 'buildSegmentsWorkflow',
+  buildContentWorkflow: 'buildContentWorkflow',
 };
 
 // Workflow types for type-safe execution

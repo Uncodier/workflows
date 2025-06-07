@@ -1,7 +1,8 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, startChild } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { SiteSetupParams } from '../activities/siteSetupActivities';
 import { defaultAgentsConfig, getAgentTypes } from '../config/agentsConfig';
+import { buildSegmentsWorkflow, type BuildSegmentsOptions, type BuildSegmentsResult } from './buildSegmentsWorkflow';
 
 // Configure activity options
 const { 
@@ -27,6 +28,14 @@ export interface SiteSetupResult {
       name: string;
       status: string;
     }>;
+  };
+  segments_created: {
+    success: boolean;
+    segments_built: number;
+    site_url?: string;
+    mode?: string;
+    execution_time?: string;
+    error?: string;
   };
   account_manager_assigned: {
     success: boolean;
@@ -68,6 +77,10 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
       success: false,
       total_created: 0,
       agents: []
+    },
+    segments_created: {
+      success: false,
+      segments_built: 0
     },
     account_manager_assigned: {
       success: false,
@@ -114,8 +127,61 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
     console.log(`✅ Step 1 completed: ${agentsResult.total_created} agents created`);
     console.log(`   • Agent types: ${getAgentTypes().join(', ')}`);
 
-    // Step 2: Assign account manager
-    console.log('👤 Step 2: Assigning account manager...');
+    // Step 2: Create segments for the site
+    console.log('🎯 Step 2: Creating initial segments for the site...');
+    try {
+      const segmentsOptions: BuildSegmentsOptions = {
+        siteId: params.site_id,
+        site_id: params.site_id, // Added required field
+        segmentCount: 5,
+        mode: 'create',
+        userId: params.user_id,
+        industryContext: 'ecommerce', // Default context, could be made configurable
+        aiProvider: 'openai',
+        aiModel: 'gpt-4o'
+      };
+
+      const segmentsHandle = await startChild(buildSegmentsWorkflow, {
+        args: [segmentsOptions],
+        workflowId: `setup-segments-${params.site_id}-${Date.now()}`,
+        workflowRunTimeout: '1 hour'
+      });
+      
+      const segmentsResult: BuildSegmentsResult = await segmentsHandle.result();
+
+      if (segmentsResult.success) {
+        result.segments_created = {
+          success: true,
+          segments_built: segmentsResult.segmentsBuilt || 0,
+          site_url: segmentsResult.siteUrl,
+          mode: segmentsResult.mode,
+          execution_time: segmentsResult.executionTime
+        };
+        console.log(`✅ Step 2 completed: ${segmentsResult.segmentsBuilt} segments created`);
+        console.log(`   • Site URL: ${segmentsResult.siteUrl}`);
+        console.log(`   • Execution time: ${segmentsResult.executionTime}`);
+      } else {
+        result.segments_created = {
+          success: false,
+          segments_built: 0,
+          error: segmentsResult.errors?.join(', ') || 'Unknown error creating segments'
+        };
+        console.warn(`⚠️  Step 2 warning: Failed to create segments - ${result.segments_created.error}`);
+        console.warn('   • Setup will continue without segments');
+      }
+    } catch (segmentsError) {
+      const errorMessage = segmentsError instanceof Error ? segmentsError.message : String(segmentsError);
+      result.segments_created = {
+        success: false,
+        segments_built: 0,
+        error: errorMessage
+      };
+      console.warn(`⚠️  Step 2 warning: Segments creation failed - ${errorMessage}`);
+      console.warn('   • Setup will continue without segments');
+    }
+
+    // Step 3: Assign account manager
+    console.log('👤 Step 3: Assigning account manager...');
     const accountManagerResult = await assignAccountManagerActivity({
       site_id: params.site_id,
       user_id: params.user_id,
@@ -134,10 +200,10 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
       assignment_date: accountManagerResult.assignment_date
     };
 
-    console.log(`✅ Step 2 completed: Account manager ${accountManagerResult.account_manager.name} assigned`);
+    console.log(`✅ Step 3 completed: Account manager ${accountManagerResult.account_manager.name} assigned`);
 
-    // Step 3: Send follow-up email with next steps
-    console.log('📧 Step 3: Sending follow-up email...');
+    // Step 4: Send follow-up email with next steps
+    console.log('📧 Step 4: Sending follow-up email...');
     const emailResult = await sendSetupFollowUpEmailActivity({
       contact_email: params.contact_email,
       contact_name: params.contact_name,
@@ -172,7 +238,7 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
       timestamp: emailResult.timestamp
     };
 
-    console.log(`✅ Step 3 completed: Follow-up email sent to ${emailResult.recipient}`);
+    console.log(`✅ Step 4 completed: Follow-up email sent to ${emailResult.recipient}`);
 
     // Mark overall success
     result.success = true;
@@ -181,6 +247,7 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
     console.log('🎉 Site setup workflow completed successfully');
     console.log(`📊 Summary:`);
     console.log(`   • Agents created: ${result.agents_created.total_created}`);
+    console.log(`   • Segments created: ${result.segments_created.segments_built} (${result.segments_created.success ? 'success' : 'failed'})`);
     console.log(`   • Account manager: ${result.account_manager_assigned.account_manager.name}`);
     console.log(`   • Follow-up email: sent to ${result.follow_up_email_sent.recipient}`);
 

@@ -7,6 +7,7 @@ import { getTemporalClient } from '../client';
 import { temporalConfig } from '../../config/config';
 import { EmailSyncSchedulingService, SiteWithCronStatus, SchedulingOptions } from '../services';
 import { saveCronStatusActivity, CronStatusUpdate } from './cronActivities';
+import { logWorkflowExecutionActivity } from './supabaseActivities';
 
 export interface ScheduleWorkflowResult {
   workflowId: string;
@@ -344,6 +345,380 @@ export async function createRecurringEmailSyncScheduleActivity(
     return {
       workflowId: `${scheduleId}-recurring`,
       scheduleId,
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * Execute a build campaigns workflow for a specific site (on-demand)
+ * Creates campaigns based on existing segments for the site
+ */
+export async function executeBuildCampaignsWorkflowActivity(
+  siteId: string,
+  options: {
+    userId?: string;
+    agentId?: string;
+    additionalCampaignData?: Record<string, any>;
+    dryRun?: boolean;
+  } = {}
+): Promise<{
+  workflowId: string;
+  success: boolean;
+  error?: string;
+}> {
+  const workflowId = `build-campaigns-${siteId}-${Date.now()}`;
+  
+  console.log(`🚀 Executing build campaigns workflow for site: ${siteId}`);
+  console.log(`   - Workflow ID: ${workflowId}`);
+  
+  try {
+    // If dry run, just simulate the execution
+    if (options.dryRun) {
+      console.log('🧪 DRY RUN MODE - Simulating build campaigns workflow execution');
+      return {
+        workflowId,
+        success: true
+      };
+    }
+
+    const client = await getTemporalClient();
+    
+    // Prepare workflow arguments
+    const workflowArgs = [{
+      siteId,
+      userId: options.userId,
+      agentId: options.agentId,
+      additionalCampaignData: options.additionalCampaignData || {}
+    }];
+
+    // Start immediate workflow execution
+    console.log(`⚡ Starting build campaigns workflow for site: ${siteId}`);
+    const handle = await client.workflow.start('buildCampaignsWorkflow', {
+      args: workflowArgs,
+      workflowId,
+      taskQueue: temporalConfig.taskQueue,
+      workflowRunTimeout: '30 minutes',
+    });
+
+    console.log(`✅ Successfully started build campaigns workflow for site: ${siteId}`);
+    console.log(`   - Workflow Handle: ${handle.workflowId}`);
+
+    // Log workflow execution (not cron status since this is on-demand)
+    await logWorkflowExecutionActivity({
+      workflowType: 'buildCampaignsWorkflow',
+      workflowId,
+      status: 'STARTED',
+      input: {
+        siteId,
+        userId: options.userId,
+        agentId: options.agentId,
+        additionalCampaignData: options.additionalCampaignData
+      }
+    });
+
+    return {
+      workflowId,
+      success: true
+    };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Failed to execute build campaigns workflow for site ${siteId}:`, errorMessage);
+
+    // Log execution error
+    try {
+      await logWorkflowExecutionActivity({
+        workflowType: 'buildCampaignsWorkflow',
+        workflowId,
+        status: 'FAILED',
+        error: errorMessage,
+        input: {
+          siteId,
+          userId: options.userId,
+          agentId: options.agentId,
+          additionalCampaignData: options.additionalCampaignData
+        }
+      });
+    } catch (logError) {
+      console.error('❌ Failed to log execution error:', logError);
+    }
+
+    return {
+      workflowId,
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * Execute a build segments workflow for a specific site (on-demand)
+ * Analyzes and creates segments for the site
+ */
+export async function executeBuildSegmentsWorkflowActivity(
+  siteId: string,
+  options: {
+    segmentCount?: number;
+    mode?: 'analyze' | 'create' | 'update';
+    timeout?: number;
+    userId?: string;
+    includeScreenshot?: boolean;
+    profitabilityMetrics?: string[];
+    minConfidenceScore?: number;
+    segmentAttributes?: string[];
+    industryContext?: string;
+    additionalInstructions?: string;
+    aiProvider?: 'openai' | 'anthropic' | 'gemini';
+    aiModel?: string;
+    dryRun?: boolean;
+  } = {}
+): Promise<{
+  workflowId: string;
+  success: boolean;
+  error?: string;
+}> {
+  const workflowId = `build-segments-${siteId}-${Date.now()}`;
+  
+  console.log(`🎯 Executing build segments workflow for site: ${siteId}`);
+  console.log(`   - Workflow ID: ${workflowId}`);
+  
+  try {
+    // If dry run, just simulate the execution
+    if (options.dryRun) {
+      console.log('🧪 DRY RUN MODE - Simulating build segments workflow execution');
+      return {
+        workflowId,
+        success: true
+      };
+    }
+
+    const client = await getTemporalClient();
+    
+    // Prepare workflow arguments
+    const workflowArgs = [{
+      siteId,
+      segmentCount: options.segmentCount,
+      mode: options.mode,
+      timeout: options.timeout,
+      userId: options.userId,
+      includeScreenshot: options.includeScreenshot,
+      profitabilityMetrics: options.profitabilityMetrics,
+      minConfidenceScore: options.minConfidenceScore,
+      segmentAttributes: options.segmentAttributes,
+      industryContext: options.industryContext,
+      additionalInstructions: options.additionalInstructions,
+      aiProvider: options.aiProvider,
+      aiModel: options.aiModel
+    }];
+
+    // Start immediate workflow execution
+    console.log(`⚡ Starting build segments workflow for site: ${siteId}`);
+    const handle = await client.workflow.start('buildSegmentsWorkflow', {
+      args: workflowArgs,
+      workflowId,
+      taskQueue: temporalConfig.taskQueue,
+      workflowRunTimeout: '1 hour',
+    });
+
+    console.log(`✅ Successfully started build segments workflow for site: ${siteId}`);
+    console.log(`   - Workflow Handle: ${handle.workflowId}`);
+
+    // Log workflow execution (not cron status since this is on-demand)
+    await logWorkflowExecutionActivity({
+      workflowType: 'buildSegmentsWorkflow',
+      workflowId,
+      status: 'STARTED',
+      input: {
+        siteId,
+        segmentCount: options.segmentCount,
+        mode: options.mode,
+        timeout: options.timeout,
+        userId: options.userId,
+        includeScreenshot: options.includeScreenshot,
+        profitabilityMetrics: options.profitabilityMetrics,
+        minConfidenceScore: options.minConfidenceScore,
+        segmentAttributes: options.segmentAttributes,
+        industryContext: options.industryContext,
+        additionalInstructions: options.additionalInstructions,
+        aiProvider: options.aiProvider,
+        aiModel: options.aiModel
+      }
+    });
+
+    return {
+      workflowId,
+      success: true
+    };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Failed to execute build segments workflow for site ${siteId}:`, errorMessage);
+
+    // Log execution error
+    try {
+      await logWorkflowExecutionActivity({
+        workflowType: 'buildSegmentsWorkflow',
+        workflowId,
+        status: 'FAILED',
+        error: errorMessage,
+        input: {
+          siteId,
+          segmentCount: options.segmentCount,
+          mode: options.mode,
+          timeout: options.timeout,
+          userId: options.userId,
+          includeScreenshot: options.includeScreenshot,
+          profitabilityMetrics: options.profitabilityMetrics,
+          minConfidenceScore: options.minConfidenceScore,
+          segmentAttributes: options.segmentAttributes,
+          industryContext: options.industryContext,
+          additionalInstructions: options.additionalInstructions,
+          aiProvider: options.aiProvider,
+          aiModel: options.aiModel
+        }
+      });
+    } catch (logError) {
+      console.error('❌ Failed to log execution error:', logError);
+    }
+
+    return {
+      workflowId,
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * Execute a build content workflow for a specific site (on-demand)
+ * Generates AI-powered content recommendations for the site
+ */
+export async function executeBuildContentWorkflowActivity(
+  siteId: string,
+  options: {
+    segmentId?: string;
+    contentTypes?: string[];
+    limit?: number;
+    userId?: string;
+    funnelStage?: 'all' | 'awareness' | 'consideration' | 'decision' | 'retention';
+    topics?: string[];
+    aiProvider?: 'openai' | 'anthropic' | 'gemini';
+    aiModel?: string;
+    timeout?: number;
+    includeMetadata?: boolean;
+    sortBy?: 'relevance' | 'date' | 'popularity';
+    dryRun?: boolean;
+  } = {}
+): Promise<{
+  workflowId: string;
+  success: boolean;
+  error?: string;
+}> {
+  const workflowId = `build-content-${siteId}-${Date.now()}`;
+  
+  console.log(`📝 Executing build content workflow for site: ${siteId}`);
+  console.log(`   - Workflow ID: ${workflowId}`);
+  
+  try {
+    // If dry run, just simulate the execution
+    if (options.dryRun) {
+      console.log('🧪 DRY RUN MODE - Simulating build content workflow execution');
+      return {
+        workflowId,
+        success: true
+      };
+    }
+
+    const client = await getTemporalClient();
+    
+    // Prepare workflow arguments
+    const workflowArgs = [{
+      siteId,
+      segmentId: options.segmentId,
+      contentTypes: options.contentTypes,
+      limit: options.limit,
+      userId: options.userId,
+      funnelStage: options.funnelStage,
+      topics: options.topics,
+      aiProvider: options.aiProvider,
+      aiModel: options.aiModel,
+      timeout: options.timeout,
+      includeMetadata: options.includeMetadata,
+      sortBy: options.sortBy
+    }];
+
+    // Start immediate workflow execution
+    console.log(`⚡ Starting build content workflow for site: ${siteId}`);
+    const handle = await client.workflow.start('buildContentWorkflow', {
+      args: workflowArgs,
+      workflowId,
+      taskQueue: temporalConfig.taskQueue,
+      workflowRunTimeout: '45 minutes',
+    });
+
+    console.log(`✅ Successfully started build content workflow for site: ${siteId}`);
+    console.log(`   - Workflow Handle: ${handle.workflowId}`);
+
+    // Log workflow execution (not cron status since this is on-demand)
+    await logWorkflowExecutionActivity({
+      workflowType: 'buildContentWorkflow',
+      workflowId,
+      status: 'STARTED',
+      input: {
+        siteId,
+        segmentId: options.segmentId,
+        contentTypes: options.contentTypes,
+        limit: options.limit,
+        userId: options.userId,
+        funnelStage: options.funnelStage,
+        topics: options.topics,
+        aiProvider: options.aiProvider,
+        aiModel: options.aiModel,
+        timeout: options.timeout,
+        includeMetadata: options.includeMetadata,
+        sortBy: options.sortBy
+      }
+    });
+
+    return {
+      workflowId,
+      success: true
+    };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Failed to execute build content workflow for site ${siteId}:`, errorMessage);
+
+    // Log execution error
+    try {
+      await logWorkflowExecutionActivity({
+        workflowType: 'buildContentWorkflow',
+        workflowId,
+        status: 'FAILED',
+        error: errorMessage,
+        input: {
+          siteId,
+          segmentId: options.segmentId,
+          contentTypes: options.contentTypes,
+          limit: options.limit,
+          userId: options.userId,
+          funnelStage: options.funnelStage,
+          topics: options.topics,
+          aiProvider: options.aiProvider,
+          aiModel: options.aiModel,
+          timeout: options.timeout,
+          includeMetadata: options.includeMetadata,
+          sortBy: options.sortBy
+        }
+      });
+    } catch (logError) {
+      console.error('❌ Failed to log execution error:', logError);
+    }
+
+    return {
+      workflowId,
       success: false,
       error: errorMessage
     };
