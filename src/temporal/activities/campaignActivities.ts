@@ -410,7 +410,12 @@ export async function createContentCalendarActivity(request: {
   console.log('📊 Request data:', JSON.stringify(request, null, 2));
   
   try {
-    const response = await apiService.post('/api/agents/copywriter/content-calendar', request);
+    // Use 2 minute timeout for content calendar operations since they can take up to 2 minutes
+    const response = await apiService.request('/api/agents/copywriter/content-calendar', {
+      method: 'POST',
+      body: request,
+      timeout: 120000 // 2 minutes timeout for content operations
+    });
     
     if (!response.success) {
       console.error(`❌ Failed to create content calendar for site ${request.siteId}:`, response.error);
@@ -442,7 +447,7 @@ export async function createContentCalendarActivity(request: {
 }
 
 /**
- * Activity to improve content using the new copywriter agent API
+ * Activity to improve existing draft content using the new copywriter agent API
  */
 export async function improveContentActivity(request: {
   siteId: string;
@@ -468,7 +473,12 @@ export async function improveContentActivity(request: {
   console.log('📊 Request data:', JSON.stringify(request, null, 2));
   
   try {
-    const response = await apiService.post('/api/agents/copywriter/content-improve', request);
+    // Use 2 minute timeout for content improvement operations since they can take up to 2 minutes
+    const response = await apiService.request('/api/agents/copywriter/content-improve', {
+      method: 'POST',
+      body: request,
+      timeout: 120000 // 2 minutes timeout for content operations
+    });
     
     if (!response.success) {
       console.error(`❌ Failed to improve content for site ${request.siteId}:`, response.error);
