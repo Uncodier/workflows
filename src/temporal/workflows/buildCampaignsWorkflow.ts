@@ -2,13 +2,14 @@ import { proxyActivities } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { CreateCampaignRequest } from '../activities/campaignActivities';
 
-// Configure activity options
+// Configure activity options - Each activity has 2 minutes to complete
 const {
   createCampaignsActivity,
+  createCampaignRequirementsActivity,
   getSiteActivity,
   getSegmentsActivity
 } = proxyActivities<Activities>({
-  startToCloseTimeout: '5 minutes',
+  startToCloseTimeout: '2 minutes', // Each activity has 2 minutes maximum execution time
   retry: {
     maximumAttempts: 3,
   },
@@ -27,6 +28,7 @@ export interface BuildCampaignsWorkflowParams {
 export interface BuildCampaignsWorkflowResult {
   success: boolean;
   campaign?: any;
+  requirements?: any;
   siteInfo?: any;
   segmentsUsed?: any[];
   error?: string;
@@ -154,11 +156,32 @@ export async function buildCampaignsWorkflow(
     console.log('✅ Campaigns created successfully');
     console.log(`📈 Campaign result:`, JSON.stringify(campaignResult.campaign, null, 2));
     
+    // 4. Create campaign requirements using the same parameters
+    console.log('📋 Creating campaign requirements...');
+    const requirementsResult = await createCampaignRequirementsActivity(campaignRequest);
+    
+    if (!requirementsResult.success) {
+      console.error('❌ Campaign requirements creation failed:', requirementsResult.error);
+      return {
+        success: false,
+        processed: true,
+        reason: 'Campaign requirements creation failed',
+        error: requirementsResult.error,
+        campaign: campaignResult.campaign,
+        siteInfo: siteResult.site,
+        segmentsUsed
+      };
+    }
+    
+    console.log('✅ Campaign requirements created successfully');
+    console.log(`📋 Requirements result:`, JSON.stringify(requirementsResult.requirements, null, 2));
+    
     return {
       success: true,
       processed: true,
-      reason: 'Campaigns created successfully',
+      reason: 'Campaigns and requirements created successfully',
       campaign: campaignResult.campaign,
+      requirements: requirementsResult.requirements,
       siteInfo: siteResult.site,
       segmentsUsed
     };

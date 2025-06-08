@@ -38,6 +38,12 @@ export interface CreateCampaignResult {
   error?: string;
 }
 
+export interface CreateCampaignRequirementsResult {
+  success: boolean;
+  requirements?: any;
+  error?: string;
+}
+
 export interface Site {
   id: string;
   name: string;
@@ -300,6 +306,50 @@ export async function createCampaignsActivity(request: CreateCampaignRequest): P
 }
 
 /**
+ * Activity to create campaign requirements for a site using segments
+ */
+export async function createCampaignRequirementsActivity(request: CreateCampaignRequest): Promise<CreateCampaignRequirementsResult> {
+  console.log(`📋 Creating campaign requirements for site: ${request.siteId}`);
+  console.log(`📊 Campaign data:`, JSON.stringify(request.campaignData, null, 2));
+  
+  try {
+    const requestBody = {
+      siteId: request.siteId,
+      ...(request.agent_id && { agent_id: request.agent_id }),
+      ...(request.userId && { userId: request.userId }),
+      campaignData: request.campaignData
+    };
+    
+    const response = await apiService.post('/api/agents/growth/campaigns/requirements', requestBody);
+    
+    if (!response.success) {
+      console.error(`❌ Failed to create campaign requirements for site ${request.siteId}:`, response.error);
+      return {
+        success: false,
+        error: response.error?.message || 'Failed to create campaign requirements'
+      };
+    }
+    
+    console.log(`✅ Successfully created campaign requirements for site ${request.siteId}`);
+    console.log(`📋 Requirements result:`, JSON.stringify(response.data, null, 2));
+    
+    return {
+      success: true,
+      requirements: response.data
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception creating campaign requirements for site ${request.siteId}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
  * Activity to get draft contents for a site
  */
 export async function getDraftContentActivity(siteId: string): Promise<GetDraftContentResult> {
@@ -507,4 +557,106 @@ export async function improveContentActivity(request: {
       error: errorMessage
     };
   }
-} 
+}
+
+/**
+ * Activity to build segments using the new segments API
+ */
+export async function buildNewSegmentsActivity(request: {
+  siteId: string;
+  userId?: string;
+  segmentData?: {
+    segmentCount?: number;
+    [key: string]: any;
+  };
+}): Promise<BuildSegmentsResult> {
+  console.log(`🎯 Building segments using new API for site: ${request.siteId}`);
+  console.log(`📊 Request data:`, JSON.stringify(request, null, 2));
+  
+  try {
+    const requestBody = {
+      siteId: request.siteId,
+      ...(request.userId && { userId: request.userId }),
+      ...(request.segmentData && { segmentData: request.segmentData })
+    };
+    
+    const response = await apiService.post('/api/agents/growth/segments', requestBody);
+    
+    if (!response.success) {
+      console.error(`❌ Failed to build segments for site ${request.siteId}:`, response.error);
+      return {
+        success: false,
+        error: response.error?.message || 'Failed to build segments'
+      };
+    }
+    
+    console.log(`✅ Successfully built segments for site ${request.siteId}`);
+    console.log(`📈 Segments result:`, JSON.stringify(response.data, null, 2));
+    
+    return {
+      success: true,
+      segments: response.data?.segments || response.data?.results || [],
+      analysis: response.data?.analysis || response.data
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception building segments for site ${request.siteId}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * Activity to build ICP segments using the new segments ICP API
+ */
+export async function buildICPSegmentsActivity(request: {
+  siteId: string;
+  userId?: string;
+  segmentData?: {
+    segmentCount?: number;
+    [key: string]: any;
+  };
+}): Promise<BuildSegmentsResult> {
+  console.log(`🎯 Building ICP segments for site: ${request.siteId}`);
+  console.log(`📊 Request data:`, JSON.stringify(request, null, 2));
+  
+  try {
+    const requestBody = {
+      siteId: request.siteId,
+      ...(request.userId && { userId: request.userId }),
+      ...(request.segmentData && { segmentData: request.segmentData })
+    };
+    
+    const response = await apiService.post('/api/agents/growth/segments/icp', requestBody);
+    
+    if (!response.success) {
+      console.error(`❌ Failed to build ICP segments for site ${request.siteId}:`, response.error);
+      return {
+        success: false,
+        error: response.error?.message || 'Failed to build ICP segments'
+      };
+    }
+    
+    console.log(`✅ Successfully built ICP segments for site ${request.siteId}`);
+    console.log(`📈 ICP Segments result:`, JSON.stringify(response.data, null, 2));
+    
+    return {
+      success: true,
+      segments: response.data?.segments || response.data?.results || [],
+      analysis: response.data?.analysis || response.data
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception building ICP segments for site ${request.siteId}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}

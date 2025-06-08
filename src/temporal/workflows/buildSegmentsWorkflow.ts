@@ -6,7 +6,8 @@ const {
   logWorkflowExecutionActivity,
   saveCronStatusActivity,
   getSiteActivity,
-  buildSegmentsActivity,
+  buildNewSegmentsActivity,
+  buildICPSegmentsActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '10 minutes', // Longer timeout for segment building
   retry: {
@@ -94,7 +95,6 @@ export async function buildSegmentsWorkflow(
   let segmentsBuilt = 0;
   let siteName = '';
   let siteUrl = '';
-  const mode = options.mode || 'create';
 
   try {
     console.log(`🏢 Step 1: Getting site information for ${siteId}...`);
@@ -124,34 +124,23 @@ export async function buildSegmentsWorkflow(
 
     console.log(`🎯 Step 2: Building segments for ${siteName}...`);
     
-    // Prepare segment building request with default values
+    // Prepare segment building request for new API
     const segmentRequest = {
-      url: siteUrl,
-      segmentCount: options.segmentCount || 5,
-      mode: mode,
-      timeout: options.timeout || 45000,
-      user_id: options.userId || site.user_id,
-      site_id: siteId,
-      includeScreenshot: options.includeScreenshot !== false, // Default to true
-      profitabilityMetrics: options.profitabilityMetrics || ['conversionRate', 'ltv', 'aov'],
-      minConfidenceScore: options.minConfidenceScore || 0.7,
-      segmentAttributes: options.segmentAttributes || ['demographic', 'behavioral', 'psychographic'],
-      industryContext: options.industryContext || 'ecommerce',
-      additionalInstructions: options.additionalInstructions || 
-        'Enfocarse en segmentos con alto potencial de compra recurrente y analizar patrones de uso en dispositivos móviles. Incluir información detallada sobre perfiles de audiencia para plataformas publicitarias como Google Ads, Facebook Ads, LinkedIn Ads y TikTok Ads.',
-      aiProvider: options.aiProvider || 'openai',
-      aiModel: options.aiModel || 'gpt-4o'
+      siteId: siteId,
+      userId: options.userId || site.user_id,
+      segmentData: {
+        segmentCount: options.segmentCount || 5
+      }
     };
     
     console.log(`🔧 Segment building configuration:`);
-    console.log(`   - Mode: ${segmentRequest.mode}`);
-    console.log(`   - Segment count: ${segmentRequest.segmentCount}`);
-    console.log(`   - AI Provider: ${segmentRequest.aiProvider}`);
-    console.log(`   - AI Model: ${segmentRequest.aiModel}`);
-    console.log(`   - Industry context: ${segmentRequest.industryContext}`);
+    console.log(`   - Site ID: ${segmentRequest.siteId}`);
+    console.log(`   - User ID: ${segmentRequest.userId}`);
+    console.log(`   - Segment count: ${segmentRequest.segmentData.segmentCount}`);
     
-    // Build segments using the API
-    const segmentResult = await buildSegmentsActivity(segmentRequest);
+    // Step 1: Build segments using the new segments API
+    console.log(`📊 Step 2a: Building general segments...`);
+    const segmentResult = await buildNewSegmentsActivity(segmentRequest);
     
     if (!segmentResult.success) {
       const errorMsg = `Failed to build segments: ${segmentResult.error}`;
@@ -164,8 +153,34 @@ export async function buildSegmentsWorkflow(
     analysis = segmentResult.analysis;
     segmentsBuilt = segments.length;
     
+    console.log(`✅ General segments built: ${segmentsBuilt}`);
+    
+    // Step 2: Build ICP segments using the ICP API
+    console.log(`🎯 Step 2b: Building ICP segments...`);
+    const icpResult = await buildICPSegmentsActivity(segmentRequest);
+    
+    if (icpResult.success) {
+      const icpSegments = icpResult.segments || [];
+      console.log(`✅ ICP segments built: ${icpSegments.length}`);
+      
+      // Combine both results
+      segments = [...segments, ...icpSegments];
+      segmentsBuilt = segments.length;
+      
+      // Merge analysis if available
+      if (icpResult.analysis) {
+        analysis = {
+          general: analysis,
+          icp: icpResult.analysis
+        };
+      }
+    } else {
+      console.log(`⚠️ ICP segments failed: ${icpResult.error || 'Unknown error'}`);
+      errors.push(`ICP segments failed: ${icpResult.error || 'Unknown error'}`);
+    }
+    
     console.log(`✅ Successfully built segments for ${siteName}`);
-    console.log(`📊 Results: ${segmentsBuilt} segments created in ${mode} mode`);
+    console.log(`📊 Results: ${segmentsBuilt} total segments created`);
     if (segments.length > 0) {
       console.log(`🎯 Segments overview:`);
       segments.forEach((segment, index) => {
@@ -180,7 +195,7 @@ export async function buildSegmentsWorkflow(
       siteName,
       siteUrl,
       segmentsBuilt,
-      mode,
+      mode: 'create', // Default mode for new API
       segments,
       analysis,
       errors,
@@ -189,7 +204,7 @@ export async function buildSegmentsWorkflow(
     };
 
     console.log(`🎉 Build segments workflow completed successfully!`);
-    console.log(`📊 Summary: ${segmentsBuilt} segments built for ${siteName} in ${executionTime}`);
+    console.log(`📊 Summary: ${segmentsBuilt} total segments built for ${siteName} in ${executionTime}`);
 
     // Update cron status to indicate successful completion
     await saveCronStatusActivity({
@@ -246,7 +261,7 @@ export async function buildSegmentsWorkflow(
       siteName,
       siteUrl,
       segmentsBuilt,
-      mode,
+      mode: 'create', // Default mode for new API
       segments,
       analysis,
       errors: [...errors, errorMessage],

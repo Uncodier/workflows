@@ -8,6 +8,7 @@ exports.getSegmentsActivity = getSegmentsActivity;
 exports.getSiteActivity = getSiteActivity;
 exports.buildSegmentsActivity = buildSegmentsActivity;
 exports.createCampaignsActivity = createCampaignsActivity;
+exports.createCampaignRequirementsActivity = createCampaignRequirementsActivity;
 exports.getDraftContentActivity = getDraftContentActivity;
 exports.buildContentActivity = buildContentActivity;
 exports.createContentCalendarActivity = createContentCalendarActivity;
@@ -164,6 +165,43 @@ async function createCampaignsActivity(request) {
     }
 }
 /**
+ * Activity to create campaign requirements for a site using segments
+ */
+async function createCampaignRequirementsActivity(request) {
+    console.log(`📋 Creating campaign requirements for site: ${request.siteId}`);
+    console.log(`📊 Campaign data:`, JSON.stringify(request.campaignData, null, 2));
+    try {
+        const requestBody = {
+            siteId: request.siteId,
+            ...(request.agent_id && { agent_id: request.agent_id }),
+            ...(request.userId && { userId: request.userId }),
+            campaignData: request.campaignData
+        };
+        const response = await apiService_1.apiService.post('/api/agents/growth/campaigns/requirements', requestBody);
+        if (!response.success) {
+            console.error(`❌ Failed to create campaign requirements for site ${request.siteId}:`, response.error);
+            return {
+                success: false,
+                error: response.error?.message || 'Failed to create campaign requirements'
+            };
+        }
+        console.log(`✅ Successfully created campaign requirements for site ${request.siteId}`);
+        console.log(`📋 Requirements result:`, JSON.stringify(response.data, null, 2));
+        return {
+            success: true,
+            requirements: response.data
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception creating campaign requirements for site ${request.siteId}:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
  * Activity to get draft contents for a site
  */
 async function getDraftContentActivity(siteId) {
@@ -241,7 +279,12 @@ async function createContentCalendarActivity(request) {
     console.log(`📅 Creating content calendar for site: ${request.siteId}`);
     console.log('📊 Request data:', JSON.stringify(request, null, 2));
     try {
-        const response = await apiService_1.apiService.post('/api/agents/copywriter/content-calendar', request);
+        // Use 2 minute timeout for content calendar operations since they can take up to 2 minutes
+        const response = await apiService_1.apiService.request('/api/agents/copywriter/content-calendar', {
+            method: 'POST',
+            body: request,
+            timeout: 120000 // 2 minutes timeout for content operations
+        });
         if (!response.success) {
             console.error(`❌ Failed to create content calendar for site ${request.siteId}:`, response.error);
             return {
@@ -268,13 +311,18 @@ async function createContentCalendarActivity(request) {
     }
 }
 /**
- * Activity to improve content using the new copywriter agent API
+ * Activity to improve existing draft content using the new copywriter agent API
  */
 async function improveContentActivity(request) {
     console.log(`🔧 Improving content for site: ${request.siteId}`);
     console.log('📊 Request data:', JSON.stringify(request, null, 2));
     try {
-        const response = await apiService_1.apiService.post('/api/agents/copywriter/content-improve', request);
+        // Use 2 minute timeout for content improvement operations since they can take up to 2 minutes
+        const response = await apiService_1.apiService.request('/api/agents/copywriter/content-improve', {
+            method: 'POST',
+            body: request,
+            timeout: 120000 // 2 minutes timeout for content operations
+        });
         if (!response.success) {
             console.error(`❌ Failed to improve content for site ${request.siteId}:`, response.error);
             return {

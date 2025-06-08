@@ -7,8 +7,10 @@ import {
 import { 
   getSegmentsActivity, 
   createCampaignsActivity,
+  createCampaignRequirementsActivity,
   GetSegmentsResult,
   CreateCampaignResult,
+  CreateCampaignRequirementsResult,
   Segment,
   CreateCampaignRequest
 } from '../src/temporal/activities/campaignActivities';
@@ -227,6 +229,82 @@ describe('Campaign Activities', () => {
       };
 
       const result: CreateCampaignResult = await createCampaignsActivity(request);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Connection timeout');
+    });
+  });
+
+  describe('createCampaignRequirementsActivity', () => {
+    it('should successfully create campaign requirements', async () => {
+      const mockRequirements = {
+        id: 'requirements_123',
+        campaignId: 'campaign_123',
+        requirements: [
+          { type: 'content', description: 'Create blog posts' },
+          { type: 'design', description: 'Design landing page' }
+        ]
+      };
+
+      mockApiService.post.mockResolvedValue({
+        success: true,
+        data: mockRequirements
+      });
+
+      const request: CreateCampaignRequest = {
+        siteId: 'site_456',
+        userId: 'user_789',
+        campaignData: {
+          segmentIds: ['seg_123', 'seg_456']
+        }
+      };
+
+      const result: CreateCampaignRequirementsResult = await createCampaignRequirementsActivity(request);
+
+      expect(result.success).toBe(true);
+      expect(result.requirements).toEqual(mockRequirements);
+      expect(mockApiService.post).toHaveBeenCalledWith('/api/agents/growth/campaigns/requirements', {
+        siteId: 'site_456',
+        userId: 'user_789',
+        campaignData: {
+          segmentIds: ['seg_123', 'seg_456']
+        }
+      });
+    });
+
+    it('should handle API error when creating campaign requirements', async () => {
+      mockApiService.post.mockResolvedValue({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid requirements data'
+        }
+      });
+
+      const request: CreateCampaignRequest = {
+        siteId: 'site_456',
+        campaignData: {
+          segmentIds: []
+        }
+      };
+
+      const result: CreateCampaignRequirementsResult = await createCampaignRequirementsActivity(request);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Invalid requirements data');
+    });
+
+    it('should handle network exception when creating campaign requirements', async () => {
+      mockApiService.post.mockRejectedValue(new Error('Connection timeout'));
+
+      const request: CreateCampaignRequest = {
+        siteId: 'site_456',
+        campaignData: {
+          segmentIds: ['seg_123']
+        }
+      };
+
+      const result: CreateCampaignRequirementsResult = await createCampaignRequirementsActivity(request);
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Connection timeout');

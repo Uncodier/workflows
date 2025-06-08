@@ -3,8 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildCampaignsWorkflow = buildCampaignsWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 // Configure activity options
-const { createCampaignsActivity, getSiteActivity, getSegmentsActivity } = (0, workflow_1.proxyActivities)({
-    startToCloseTimeout: '5 minutes',
+const { createCampaignsActivity, createCampaignRequirementsActivity, getSiteActivity, getSegmentsActivity } = (0, workflow_1.proxyActivities)({
+    startToCloseTimeout: '2 minutes',
     retry: {
         maximumAttempts: 3,
     },
@@ -107,11 +107,29 @@ async function buildCampaignsWorkflow(params) {
         }
         console.log('✅ Campaigns created successfully');
         console.log(`📈 Campaign result:`, JSON.stringify(campaignResult.campaign, null, 2));
+        // 4. Create campaign requirements using the same parameters
+        console.log('📋 Creating campaign requirements...');
+        const requirementsResult = await createCampaignRequirementsActivity(campaignRequest);
+        if (!requirementsResult.success) {
+            console.error('❌ Campaign requirements creation failed:', requirementsResult.error);
+            return {
+                success: false,
+                processed: true,
+                reason: 'Campaign requirements creation failed',
+                error: requirementsResult.error,
+                campaign: campaignResult.campaign,
+                siteInfo: siteResult.site,
+                segmentsUsed
+            };
+        }
+        console.log('✅ Campaign requirements created successfully');
+        console.log(`📋 Requirements result:`, JSON.stringify(requirementsResult.requirements, null, 2));
         return {
             success: true,
             processed: true,
-            reason: 'Campaigns created successfully',
+            reason: 'Campaigns and requirements created successfully',
             campaign: campaignResult.campaign,
+            requirements: requirementsResult.requirements,
             siteInfo: siteResult.site,
             segmentsUsed
         };
