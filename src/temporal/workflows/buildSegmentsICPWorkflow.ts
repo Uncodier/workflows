@@ -195,7 +195,7 @@ export async function buildSegmentsICPWorkflow(
   });
 
   const errors: string[] = [];
-  let icpSegments: any[] = [];
+  const icpSegments: any[] = [];
   let analysis: any = null;
   let icpSegmentsBuilt = 0;
   let siteName = '';

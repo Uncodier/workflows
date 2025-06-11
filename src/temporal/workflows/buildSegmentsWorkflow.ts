@@ -8,7 +8,6 @@ const {
   saveCronStatusActivity,
   getSiteActivity,
   buildNewSegmentsActivity,
-  buildICPSegmentsActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes', // Each activity has 5 minutes maximum execution time
   retry: {

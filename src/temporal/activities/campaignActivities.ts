@@ -730,12 +730,16 @@ export async function leadFollowUpActivity(request: LeadFollowUpRequest): Promis
   console.log(`📞 Executing lead follow-up for lead: ${request.lead_id}, site: ${request.site_id}`);
   
   try {
-    const response = await apiService.post('/api/agents/sales/leadFollowUP', {
+    const requestBody = {
       lead_id: request.lead_id,
       site_id: request.site_id,
-      user_id: request.userId,
+      userId: request.userId,
       ...request.additionalData,
-    });
+    };
+
+    console.log('📤 Sending lead follow-up request:', JSON.stringify(requestBody, null, 2));
+    
+    const response = await apiService.post('/api/agents/sales/leadFollowUp', requestBody);
     
     if (!response.success) {
       console.error(`❌ Failed to execute lead follow-up for lead ${request.lead_id}:`, response.error);
@@ -782,12 +786,16 @@ export async function leadResearchActivity(request: LeadResearchRequest): Promis
   console.log(`🔍 Executing lead research for lead: ${request.lead_id}, site: ${request.site_id}`);
   
   try {
-    const response = await apiService.post('/api/agents/sales/leadResearch', {
+    const requestBody = {
       lead_id: request.lead_id,
       site_id: request.site_id,
-      user_id: request.userId,
+      userId: request.userId,
       ...request.additionalData,
-    });
+    };
+
+    console.log('📤 Sending lead research request:', JSON.stringify(requestBody, null, 2));
+    
+    const response = await apiService.post('/api/agents/sales/leadResearch', requestBody);
     
     if (!response.success) {
       console.error(`❌ Failed to execute lead research for lead ${request.lead_id}:`, response.error);
