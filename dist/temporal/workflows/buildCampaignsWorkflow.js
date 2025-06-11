@@ -2,9 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildCampaignsWorkflow = buildCampaignsWorkflow;
 const workflow_1 = require("@temporalio/workflow");
-// Configure activity options
+// Configure activity options - Each activity has 2 minutes to complete
 const { createCampaignsActivity, createCampaignRequirementsActivity, getSiteActivity, getSegmentsActivity } = (0, workflow_1.proxyActivities)({
-    startToCloseTimeout: '2 minutes',
+    startToCloseTimeout: '2 minutes', // Each activity has 2 minutes maximum execution time
     retry: {
         maximumAttempts: 3,
     },

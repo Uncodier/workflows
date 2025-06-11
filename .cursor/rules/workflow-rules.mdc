@@ -8,3 +8,5 @@ siempre que hagas un workflow comienza por el md en la carpeta docs, explicando 
 nunca edites directo dist, siempre hay que trabajar sobre el código pre compilado
 
 en las actividades que consumane el api externa del proyecto, siempre verifica que las repuestas tengan un success (true o false) error (declarado o null) y normalmente un data (con la respuesta del api), así puedes fallar o pasar la actividad correctamente.
+
+Hay un archivo específico para el worker llamado worker-workflows.ts donde se exportan  nuestros workflows.

@@ -55,7 +55,7 @@ console.log(`   • Total de actividades: ${totalActivities}\n`);
 console.log('📈 Estadísticas de rendimiento:');
 const overallStats = defaultAgentsConfig.agents.reduce((stats, agent) => {
   stats.totalConversations += agent.conversations;
-  stats.totalSuccessRate += agent.successRate;
+  stats.totalSuccessRate += agent.success_rate;
   return stats;
 }, { totalConversations: 0, totalSuccessRate: 0 });
 
@@ -66,7 +66,7 @@ console.log(`   • Tasa de éxito promedio: ${avgSuccessRate.toFixed(1)}%`);
 // 7. Validar estructura de datos
 console.log('\n🔬 Validación de estructura:');
 let structureValid = true;
-const requiredFields = ['id', 'name', 'description', 'type', 'status', 'conversations', 'successRate', 'lastActive', 'icon', 'activities'];
+const requiredFields = ['id', 'name', 'description', 'type', 'status', 'conversations', 'success_rate', 'lastActive', 'icon', 'activities'];
 
 defaultAgentsConfig.agents.forEach((agent, index) => {
   requiredFields.forEach(field => {
@@ -78,7 +78,7 @@ defaultAgentsConfig.agents.forEach((agent, index) => {
   
   // Validar actividades
   agent.activities.forEach((activity, actIndex) => {
-    const requiredActivityFields = ['id', 'name', 'description', 'estimatedTime', 'successRate', 'executions', 'status'];
+    const requiredActivityFields = ['id', 'name', 'description', 'estimatedTime', 'success_rate', 'executions', 'status'];
     requiredActivityFields.forEach(field => {
       if (!(field in activity)) {
         console.log(`   • ❌ Agente ${agent.name}, actividad ${actIndex + 1} falta campo: ${field}`);

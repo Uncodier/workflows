@@ -36,9 +36,7 @@ export interface CreateAgentsResult {
     name: string;
     status: string;
     description?: string;
-    icon?: string;
     activities?: Array<{
-      id: string;
       name: string;
       description: string;
       estimatedTime: string;
@@ -112,9 +110,7 @@ export async function createAgentsActivity(params: CreateAgentsParams): Promise<
       name: string;
       status: string;
       description?: string;
-      icon?: string;
       activities?: Array<{
-        id: string;
         name: string;
         description: string;
         estimatedTime: string;
@@ -140,21 +136,20 @@ export async function createAgentsActivity(params: CreateAgentsParams): Promise<
           site_id: params.site_id,
           user_id: params.user_id,
           conversations: agentConfig.conversations || 0,
-          success_rate: agentConfig.successRate || 0,
-          role: agentConfig.name, // El rol es el nombre del agente
+          success_rate: agentConfig.success_rate || 0,
+          role: agentConfig.role || agentConfig.name, // Usar role si existe, sino el nombre
           activities: agentConfig.activities, // Guardamos las actividades como JSON
           configuration: {
-            icon: agentConfig.icon,
             company_name: params.company_name,
             agent_type: agentConfig.type
           },
           created_at: now,
           updated_at: now,
-          last_active: agentConfig.lastActive || now,
+          last_active: agentConfig.last_active || now,
           tools: [], // Inicializamos vacío, se puede configurar después
           integrations: {}, // Inicializamos vacío, se puede configurar después
-          backstory: `AI agent specialized in ${agentConfig.description.toLowerCase()}`,
-          prompt: `You are a ${agentConfig.name} specialized in ${agentConfig.description}. Help users with tasks related to your expertise.`
+          backstory: agentConfig.backstory || `AI agent specialized in ${agentConfig.description.toLowerCase()}`,
+          prompt: agentConfig.prompt || `You are a ${agentConfig.name} specialized in ${agentConfig.description}. Help users with tasks related to your expertise.`
         };
 
         console.log(`   • Creating agent: ${agentConfig.name} (${agentConfig.type})`);
@@ -172,9 +167,7 @@ export async function createAgentsActivity(params: CreateAgentsParams): Promise<
             name: agentConfig.name,
             status: agentConfig.status,
             description: agentConfig.description,
-            icon: agentConfig.icon,
             activities: agentConfig.activities.map(activity => ({
-              id: activity.id,
               name: activity.name,
               description: activity.description,
               estimatedTime: activity.estimatedTime,
@@ -258,8 +251,7 @@ export async function createAgentsActivity(params: CreateAgentsParams): Promise<
             type: agentType,
             name: config.name,
             status: 'active',
-            description: config.description,
-            icon: config.icon
+            description: config.description
           });
         } catch (error) {
           console.error(`❌ Failed to create agent ${config.name}:`, error);

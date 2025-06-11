@@ -257,6 +257,27 @@ class SupabaseService {
         console.log(`✅ Successfully processed ${records.length} cron status records`);
     }
     /**
+     * Fetch segments for a specific site
+     */
+    async fetchSegments(siteId) {
+        const isConnected = await this.getConnectionStatus();
+        if (!isConnected) {
+            throw new Error('Database not connected');
+        }
+        console.log(`🔍 Fetching segments for site: ${siteId}`);
+        const { data, error } = await this.client
+            .from('segments')
+            .select('*')
+            .eq('site_id', siteId)
+            .order('created_at', { ascending: false });
+        if (error) {
+            console.error('❌ Error fetching segments:', error);
+            throw new Error(`Failed to fetch segments: ${error.message}`);
+        }
+        console.log(`✅ Successfully fetched ${data?.length || 0} segments from database`);
+        return data || [];
+    }
+    /**
      * Create agents in the database
      */
     async createAgents(agents) {

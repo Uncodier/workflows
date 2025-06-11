@@ -14,6 +14,9 @@ import { siteSetupWorkflow } from './siteSetupWorkflow';
 import { buildCampaignsWorkflow } from './buildCampaignsWorkflow';
 import { buildSegmentsWorkflow } from './buildSegmentsWorkflow';
 import { buildContentWorkflow } from './buildContentWorkflow';
+import { leadFollowUpWorkflow } from './leadFollowUpWorkflow';
+import { leadResearchWorkflow } from './leadResearchWorkflow';
+import { buildSegmentsICPWorkflow, buildSingleSegmentICPWorkflow } from './buildSegmentsICPWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -31,6 +34,9 @@ export * from './siteSetupWorkflow';
 export * from './buildCampaignsWorkflow';
 export * from './buildSegmentsWorkflow';
 export * from './buildContentWorkflow';
+export * from './leadFollowUpWorkflow';
+export * from './leadResearchWorkflow';
+export * from './buildSegmentsICPWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -52,6 +58,10 @@ export const workflows = {
   buildCampaignsWorkflow,
   buildSegmentsWorkflow,
   buildContentWorkflow,
+  leadFollowUpWorkflow,
+  leadResearchWorkflow,
+  buildSegmentsICPWorkflow,
+  buildSingleSegmentICPWorkflow,
 };
 
 // Workflow names for Temporal Client (strings)
@@ -74,6 +84,10 @@ export const workflowNames = {
   buildCampaignsWorkflow: 'buildCampaignsWorkflow',
   buildSegmentsWorkflow: 'buildSegmentsWorkflow',
   buildContentWorkflow: 'buildContentWorkflow',
+  leadFollowUpWorkflow: 'leadFollowUpWorkflow',
+  leadResearchWorkflow: 'leadResearchWorkflow',
+  buildSegmentsICPWorkflow: 'buildSegmentsICPWorkflow',
+  buildSingleSegmentICPWorkflow: 'buildSingleSegmentICPWorkflow',
 };
 
 // Workflow types for type-safe execution

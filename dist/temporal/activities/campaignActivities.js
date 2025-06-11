@@ -13,6 +13,10 @@ exports.getDraftContentActivity = getDraftContentActivity;
 exports.buildContentActivity = buildContentActivity;
 exports.createContentCalendarActivity = createContentCalendarActivity;
 exports.improveContentActivity = improveContentActivity;
+exports.buildNewSegmentsActivity = buildNewSegmentsActivity;
+exports.buildICPSegmentsActivity = buildICPSegmentsActivity;
+exports.leadFollowUpActivity = leadFollowUpActivity;
+exports.leadResearchActivity = leadResearchActivity;
 const apiService_1 = require("../services/apiService");
 const supabaseService_1 = require("../services/supabaseService");
 /**
@@ -21,16 +25,35 @@ const supabaseService_1 = require("../services/supabaseService");
 async function getSegmentsActivity(siteId) {
     console.log(`🎯 Getting segments for site: ${siteId}`);
     try {
-        const response = await apiService_1.apiService.get(`/api/segments?siteId=${siteId}`);
-        if (!response.success) {
-            console.error(`❌ Failed to get segments for site ${siteId}:`, response.error);
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot fetch segments');
             return {
                 success: false,
-                error: response.error?.message || 'Failed to fetch segments'
+                error: 'Database not available'
             };
         }
-        const segments = response.data?.segments || response.data || [];
+        console.log('✅ Database connection confirmed, fetching segments...');
+        // Fetch segments for the specific site
+        const segmentsData = await supabaseService.fetchSegments(siteId);
+        const segments = segmentsData.map(segmentData => ({
+            id: segmentData.id,
+            name: segmentData.name || 'Unnamed Segment',
+            description: segmentData.description || '',
+            criteria: segmentData.analysis || {},
+            siteId: segmentData.site_id,
+            createdAt: segmentData.created_at,
+            updatedAt: segmentData.updated_at
+        }));
         console.log(`✅ Retrieved ${segments.length} segments for site ${siteId}`);
+        if (segments.length > 0) {
+            console.log(`📋 Segments found:`);
+            segments.forEach((segment, index) => {
+                console.log(`   ${index + 1}. ${segment.name} (${segment.id})`);
+            });
+        }
         return {
             success: true,
             segments
@@ -342,6 +365,177 @@ async function improveContentActivity(request) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Exception improving content for site ${request.siteId}:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to build segments using the new segments API
+ */
+async function buildNewSegmentsActivity(request) {
+    console.log(`🎯 Building segments using new API for site: ${request.siteId}`);
+    console.log(`📊 Request data:`, JSON.stringify(request, null, 2));
+    try {
+        const requestBody = {
+            siteId: request.siteId,
+            ...(request.userId && { userId: request.userId }),
+            ...(request.segmentData && { segmentData: request.segmentData })
+        };
+        const response = await apiService_1.apiService.request('/api/agents/growth/segments', {
+            method: 'POST',
+            body: requestBody,
+            timeout: 300000 // 5 minutes timeout for segment building operations
+        });
+        if (!response.success) {
+            const errorMessage = response.error?.message || 'Failed to build segments';
+            console.error(`❌ Failed to build segments for site ${request.siteId}:`, response.error);
+            throw new Error(errorMessage);
+        }
+        console.log(`✅ Successfully built segments for site ${request.siteId}`);
+        console.log(`📈 Segments result:`, JSON.stringify(response.data, null, 2));
+        return {
+            success: true,
+            segments: response.data?.segments || response.data?.results || [],
+            analysis: response.data?.analysis || response.data
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception building segments for site ${request.siteId}:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to build ICP segments using the new segments ICP API
+ */
+async function buildICPSegmentsActivity(request) {
+    console.log(`🎯 Building ICP segments for site: ${request.siteId}`);
+    console.log(`📊 Request data:`, JSON.stringify(request, null, 2));
+    try {
+        const requestBody = {
+            siteId: request.siteId,
+            ...(request.userId && { userId: request.userId }),
+            ...(request.segmentIds && { segmentIds: request.segmentIds }),
+            ...(request.segmentData && { segmentData: request.segmentData })
+        };
+        const response = await apiService_1.apiService.request('/api/agents/growth/segments/icp', {
+            method: 'POST',
+            body: requestBody,
+            timeout: 300000 // 5 minutes timeout for ICP segment building operations
+        });
+        if (!response.success) {
+            const errorMessage = response.error?.message || 'Failed to build ICP segments';
+            console.error(`❌ Failed to build ICP segments for site ${request.siteId}:`, response.error);
+            throw new Error(errorMessage);
+        }
+        console.log(`✅ Successfully built ICP segments for site ${request.siteId}`);
+        console.log(`📈 ICP Segments result:`, JSON.stringify(response.data, null, 2));
+        return {
+            success: true,
+            segments: response.data?.segments || response.data?.results || [],
+            analysis: response.data?.analysis || response.data
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception building ICP segments for site ${request.siteId}:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to execute lead follow-up via sales agent API
+ */
+async function leadFollowUpActivity(request) {
+    console.log(`📞 Executing lead follow-up for lead: ${request.lead_id}, site: ${request.site_id}`);
+    try {
+        const response = await apiService_1.apiService.post('/api/agents/sales/leadFollowUP', {
+            lead_id: request.lead_id,
+            site_id: request.site_id,
+            user_id: request.userId,
+            ...request.additionalData,
+        });
+        if (!response.success) {
+            console.error(`❌ Failed to execute lead follow-up for lead ${request.lead_id}:`, response.error);
+            return {
+                success: false,
+                error: response.error?.message || 'Failed to execute lead follow-up'
+            };
+        }
+        const data = response.data;
+        const followUpActions = data?.followUpActions || data?.actions || [];
+        const nextSteps = data?.nextSteps || data?.next_steps || [];
+        console.log(`✅ Lead follow-up executed successfully for lead ${request.lead_id}`);
+        if (followUpActions.length > 0) {
+            console.log(`📋 Follow-up actions generated: ${followUpActions.length}`);
+        }
+        if (nextSteps.length > 0) {
+            console.log(`🎯 Next steps identified: ${nextSteps.length}`);
+        }
+        return {
+            success: true,
+            data,
+            followUpActions,
+            nextSteps
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception executing lead follow-up for lead ${request.lead_id}:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to execute lead research via sales agent API
+ */
+async function leadResearchActivity(request) {
+    console.log(`🔍 Executing lead research for lead: ${request.lead_id}, site: ${request.site_id}`);
+    try {
+        const response = await apiService_1.apiService.post('/api/agents/sales/leadResearch', {
+            lead_id: request.lead_id,
+            site_id: request.site_id,
+            user_id: request.userId,
+            ...request.additionalData,
+        });
+        if (!response.success) {
+            console.error(`❌ Failed to execute lead research for lead ${request.lead_id}:`, response.error);
+            return {
+                success: false,
+                error: response.error?.message || 'Failed to execute lead research'
+            };
+        }
+        const data = response.data;
+        const researchData = data?.researchData || data?.research || data;
+        const insights = data?.insights || data?.findings || [];
+        const recommendations = data?.recommendations || data?.next_steps || [];
+        console.log(`✅ Lead research executed successfully for lead ${request.lead_id}`);
+        if (insights.length > 0) {
+            console.log(`🔍 Research insights generated: ${insights.length}`);
+        }
+        if (recommendations.length > 0) {
+            console.log(`💡 Recommendations identified: ${recommendations.length}`);
+        }
+        return {
+            success: true,
+            data,
+            researchData,
+            insights,
+            recommendations
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception executing lead research for lead ${request.lead_id}:`, errorMessage);
         return {
             success: false,
             error: errorMessage

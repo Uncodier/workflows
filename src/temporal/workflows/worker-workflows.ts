@@ -15,4 +15,7 @@ export * from './siteSetupWorkflow';
 export * from './executeToolWorkflow';
 export * from './buildCampaignsWorkflow';
 export * from './buildSegmentsWorkflow';
-export * from './buildContentWorkflow'; 
+export * from './buildSegmentsICPWorkflow';
+export * from './buildContentWorkflow';
+export * from './leadFollowUpWorkflow';
+export * from './leadResearchWorkflow'; 

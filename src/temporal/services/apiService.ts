@@ -65,7 +65,7 @@ class ApiService {
     endpoint: string, 
     options: ApiRequestOptions = {}
   ): Promise<ApiResponse<T>> {
-    const { method = 'GET', body, headers = {}, timeout = 30000 } = options;
+    const { method = 'GET', body, headers = {}, timeout = 60000 } = options;
     
     const url = this.buildUrl(endpoint);
     const requestHeaders = {
