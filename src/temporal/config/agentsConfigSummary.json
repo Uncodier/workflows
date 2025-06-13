@@ -1,10 +1,10 @@
 {
   "configuration_summary": {
     "total_agents": 7,
-    "agent_types": ["marketing", "product", "sales"],
+    "agent_types": ["marketing", "support", "sales"],
     "agents_by_type": {
-      "marketing": 3,
-      "product": 2, 
+      "marketing": 4,
+      "support": 1, 
       "sales": 2
     },
     "total_activities": 29
@@ -21,7 +21,7 @@
     {
       "id": "4", 
       "role": "Data Analyst",
-      "type": "product",
+      "type": "marketing",
       "activities_count": 5,
       "description": "Data analysis, lead qualification, segmentation, performance metrics, optimization",
       "icon": "PieChart"
@@ -37,7 +37,7 @@
     {
       "id": "3",
       "role": "UX Designer",
-      "type": "product", 
+      "type": "support", 
       "activities_count": 3,
       "description": "Conversion optimization, UX/UI design for funnel, onboarding experience",
       "icon": "Smartphone"

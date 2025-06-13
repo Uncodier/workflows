@@ -8,7 +8,8 @@ import { buildSegmentsWorkflow, type BuildSegmentsOptions, type BuildSegmentsRes
 const { 
   createAgentsActivity,
   assignAccountManagerActivity,
-  sendSetupFollowUpEmailActivity
+  sendSetupFollowUpEmailActivity,
+  getSiteActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -101,12 +102,30 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
   };
 
   try {
+    // Step 0: Get site information to ensure we have user_id and company details
+    console.log('🏢 Step 0: Getting site information...');
+    const siteInfo = await getSiteActivity(params.site_id);
+    
+    if (!siteInfo.success || !siteInfo.site) {
+      throw new Error(`Failed to get site information: ${siteInfo.error || 'Site not found'}`);
+    }
+
+    const actualUserId = params.user_id || siteInfo.site.user_id;
+    const actualCompanyName = params.company_name || siteInfo.site.name;
+
+    if (!actualUserId) {
+      throw new Error('Cannot proceed: user_id is required but not found in params or site data');
+    }
+
+    console.log(`✅ Site information retrieved: ${siteInfo.site.name} (${siteInfo.site.url})`);
+    console.log(`📋 Using user_id: ${actualUserId}, company: ${actualCompanyName}`);
+
     // Step 1: Create agents for the site using detailed configuration
     console.log('🤖 Step 1: Creating agents with detailed configuration...');
     const agentsResult = await createAgentsActivity({
       site_id: params.site_id,
-      user_id: params.user_id,
-      company_name: params.company_name,
+      user_id: actualUserId,
+      company_name: actualCompanyName,
       agent_types: getAgentTypes(),
       custom_config: {
         agents_config: defaultAgentsConfig.agents,
@@ -135,7 +154,7 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
         site_id: params.site_id, // Added required field
         segmentCount: 5,
         mode: 'create',
-        userId: params.user_id,
+        userId: actualUserId,
         industryContext: 'ecommerce', // Default context, could be made configurable
         aiProvider: 'openai',
         aiModel: 'gpt-4o'
@@ -185,10 +204,10 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
     try {
       const accountManagerResult = await assignAccountManagerActivity({
         site_id: params.site_id,
-        user_id: params.user_id,
+        user_id: actualUserId,
         contact_email: params.contact_email,
         contact_name: params.contact_name,
-        company_name: params.company_name
+        company_name: actualCompanyName
       });
 
       if (accountManagerResult.success) {
@@ -232,7 +251,7 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
       const emailResult = await sendSetupFollowUpEmailActivity({
         contact_email: params.contact_email,
         contact_name: params.contact_name,
-        company_name: params.company_name,
+        company_name: actualCompanyName,
         site_id: params.site_id,
         account_manager: result.account_manager_assigned.success ? {
           name: result.account_manager_assigned.account_manager.name,
