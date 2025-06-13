@@ -182,63 +182,108 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
 
     // Step 3: Assign account manager
     console.log('👤 Step 3: Assigning account manager...');
-    const accountManagerResult = await assignAccountManagerActivity({
-      site_id: params.site_id,
-      user_id: params.user_id,
-      contact_email: params.contact_email,
-      contact_name: params.contact_name,
-      company_name: params.company_name
-    });
+    try {
+      const accountManagerResult = await assignAccountManagerActivity({
+        site_id: params.site_id,
+        user_id: params.user_id,
+        contact_email: params.contact_email,
+        contact_name: params.contact_name,
+        company_name: params.company_name
+      });
 
-    if (!accountManagerResult.success) {
-      throw new Error('Failed to assign account manager');
+      if (accountManagerResult.success) {
+        result.account_manager_assigned = {
+          success: true,
+          account_manager: accountManagerResult.account_manager,
+          assignment_date: accountManagerResult.assignment_date
+        };
+        console.log(`✅ Step 3 completed: Account manager ${accountManagerResult.account_manager.name} assigned`);
+      } else {
+        result.account_manager_assigned = {
+          success: false,
+          account_manager: {
+            manager_id: '',
+            name: '',
+            email: ''
+          },
+          assignment_date: ''
+        };
+        console.warn('⚠️  Step 3 warning: Failed to assign account manager');
+        console.warn('   • Setup will continue without account manager assignment');
+      }
+    } catch (accountManagerError) {
+      const errorMessage = accountManagerError instanceof Error ? accountManagerError.message : String(accountManagerError);
+      result.account_manager_assigned = {
+        success: false,
+        account_manager: {
+          manager_id: '',
+          name: '',
+          email: ''
+        },
+        assignment_date: ''
+      };
+      console.warn(`⚠️  Step 3 warning: Account manager assignment failed - ${errorMessage}`);
+      console.warn('   • Setup will continue without account manager assignment');
     }
-
-    result.account_manager_assigned = {
-      success: true,
-      account_manager: accountManagerResult.account_manager,
-      assignment_date: accountManagerResult.assignment_date
-    };
-
-    console.log(`✅ Step 3 completed: Account manager ${accountManagerResult.account_manager.name} assigned`);
 
     // Step 4: Send follow-up email with next steps
     console.log('📧 Step 4: Sending follow-up email...');
-    const emailResult = await sendSetupFollowUpEmailActivity({
-      contact_email: params.contact_email,
-      contact_name: params.contact_name,
-      company_name: params.company_name,
-      site_id: params.site_id,
-      account_manager: {
-        name: accountManagerResult.account_manager.name,
-        email: accountManagerResult.account_manager.email,
-        phone: accountManagerResult.account_manager.phone
-      },
-      agents_created: agentsResult.agents.map((agent: { type: string; name: string }) => ({
-        type: agent.type,
-        name: agent.name
-      })),
-      next_steps: params.custom_requirements || [
-        'Configurar las integraciones necesarias',
-        'Personalizar las respuestas de los agentes',
-        'Realizar pruebas de funcionamiento',
-        'Programar sesión de entrenamiento del equipo',
-        'Activar el servicio en producción'
-      ]
-    });
+    try {
+      const emailResult = await sendSetupFollowUpEmailActivity({
+        contact_email: params.contact_email,
+        contact_name: params.contact_name,
+        company_name: params.company_name,
+        site_id: params.site_id,
+        account_manager: result.account_manager_assigned.success ? {
+          name: result.account_manager_assigned.account_manager.name,
+          email: result.account_manager_assigned.account_manager.email,
+          phone: result.account_manager_assigned.account_manager.phone
+        } : {
+          name: '',
+          email: ''
+        },
+        agents_created: agentsResult.agents.map((agent: { type: string; name: string }) => ({
+          type: agent.type,
+          name: agent.name
+        })),
+        next_steps: params.custom_requirements || [
+          'Configurar las integraciones necesarias',
+          'Personalizar las respuestas de los agentes',
+          'Realizar pruebas de funcionamiento',
+          'Programar sesión de entrenamiento del equipo',
+          'Activar el servicio en producción'
+        ]
+      });
 
-    if (!emailResult.success) {
-      throw new Error('Failed to send follow-up email');
+      if (emailResult.success) {
+        result.follow_up_email_sent = {
+          success: true,
+          messageId: emailResult.messageId,
+          recipient: emailResult.recipient,
+          timestamp: emailResult.timestamp
+        };
+        console.log(`✅ Step 4 completed: Follow-up email sent to ${emailResult.recipient}`);
+      } else {
+        result.follow_up_email_sent = {
+          success: false,
+          messageId: '',
+          recipient: '',
+          timestamp: ''
+        };
+        console.warn('⚠️  Step 4 warning: Failed to send follow-up email');
+        console.warn('   • Setup completed without follow-up email');
+      }
+    } catch (emailError) {
+      const errorMessage = emailError instanceof Error ? emailError.message : String(emailError);
+      result.follow_up_email_sent = {
+        success: false,
+        messageId: '',
+        recipient: '',
+        timestamp: ''
+      };
+      console.warn(`⚠️  Step 4 warning: Follow-up email failed - ${errorMessage}`);
+      console.warn('   • Setup completed without follow-up email');
     }
-
-    result.follow_up_email_sent = {
-      success: true,
-      messageId: emailResult.messageId,
-      recipient: emailResult.recipient,
-      timestamp: emailResult.timestamp
-    };
-
-    console.log(`✅ Step 4 completed: Follow-up email sent to ${emailResult.recipient}`);
 
     // Mark overall success
     result.success = true;
