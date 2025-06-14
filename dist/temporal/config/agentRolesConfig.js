@@ -31,7 +31,7 @@ exports.agentRolesConfig = {
     },
     'Data Analyst': {
         name: 'Data Analyst',
-        type: 'product',
+        type: 'marketing',
         description: 'Data analysis, lead qualification, segmentation, performance metrics, optimization',
         primaryResponsibilities: [
             'User Behavior Analysis',
@@ -71,7 +71,7 @@ exports.agentRolesConfig = {
     },
     'UX Designer': {
         name: 'UX Designer',
-        type: 'product',
+        type: 'support',
         description: 'Conversion optimization, UX/UI design for funnel, onboarding experience',
         primaryResponsibilities: [
             'Website Analysis',

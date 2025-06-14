@@ -121,7 +121,7 @@ async function buildSegmentsICPWorkflow(options) {
         lastRun: new Date().toISOString()
     });
     const errors = [];
-    let icpSegments = [];
+    const icpSegments = [];
     let analysis = null;
     let icpSegmentsBuilt = 0;
     let siteName = '';

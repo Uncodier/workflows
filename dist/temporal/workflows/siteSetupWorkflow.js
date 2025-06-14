@@ -5,7 +5,7 @@ const workflow_1 = require("@temporalio/workflow");
 const agentsConfig_1 = require("../config/agentsConfig");
 const buildSegmentsWorkflow_1 = require("./buildSegmentsWorkflow");
 // Configure activity options
-const { createAgentsActivity, assignAccountManagerActivity, sendSetupFollowUpEmailActivity } = (0, workflow_1.proxyActivities)({
+const { createAgentsActivity, assignAccountManagerActivity, sendSetupFollowUpEmailActivity, getSiteActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes',
     retry: {
         maximumAttempts: 3,
@@ -53,12 +53,25 @@ async function siteSetupWorkflow(params) {
         setup_completed_at: new Date().toISOString()
     };
     try {
+        // Step 0: Get site information to ensure we have user_id and company details
+        console.log('🏢 Step 0: Getting site information...');
+        const siteInfo = await getSiteActivity(params.site_id);
+        if (!siteInfo.success || !siteInfo.site) {
+            throw new Error(`Failed to get site information: ${siteInfo.error || 'Site not found'}`);
+        }
+        const actualUserId = params.user_id || siteInfo.site.user_id;
+        const actualCompanyName = params.company_name || siteInfo.site.name;
+        if (!actualUserId) {
+            throw new Error('Cannot proceed: user_id is required but not found in params or site data');
+        }
+        console.log(`✅ Site information retrieved: ${siteInfo.site.name} (${siteInfo.site.url})`);
+        console.log(`📋 Using user_id: ${actualUserId}, company: ${actualCompanyName}`);
         // Step 1: Create agents for the site using detailed configuration
         console.log('🤖 Step 1: Creating agents with detailed configuration...');
         const agentsResult = await createAgentsActivity({
             site_id: params.site_id,
-            user_id: params.user_id,
-            company_name: params.company_name,
+            user_id: actualUserId,
+            company_name: actualCompanyName,
             agent_types: (0, agentsConfig_1.getAgentTypes)(),
             custom_config: {
                 agents_config: agentsConfig_1.defaultAgentsConfig.agents,
@@ -83,7 +96,7 @@ async function siteSetupWorkflow(params) {
                 site_id: params.site_id, // Added required field
                 segmentCount: 5,
                 mode: 'create',
-                userId: params.user_id,
+                userId: actualUserId,
                 industryContext: 'ecommerce', // Default context, could be made configurable
                 aiProvider: 'openai',
                 aiModel: 'gpt-4o'
@@ -128,56 +141,109 @@ async function siteSetupWorkflow(params) {
         }
         // Step 3: Assign account manager
         console.log('👤 Step 3: Assigning account manager...');
-        const accountManagerResult = await assignAccountManagerActivity({
-            site_id: params.site_id,
-            user_id: params.user_id,
-            contact_email: params.contact_email,
-            contact_name: params.contact_name,
-            company_name: params.company_name
-        });
-        if (!accountManagerResult.success) {
-            throw new Error('Failed to assign account manager');
+        try {
+            const accountManagerResult = await assignAccountManagerActivity({
+                site_id: params.site_id,
+                user_id: actualUserId,
+                contact_email: params.contact_email,
+                contact_name: params.contact_name,
+                company_name: actualCompanyName
+            });
+            if (accountManagerResult.success) {
+                result.account_manager_assigned = {
+                    success: true,
+                    account_manager: accountManagerResult.account_manager,
+                    assignment_date: accountManagerResult.assignment_date
+                };
+                console.log(`✅ Step 3 completed: Account manager ${accountManagerResult.account_manager.name} assigned`);
+            }
+            else {
+                result.account_manager_assigned = {
+                    success: false,
+                    account_manager: {
+                        manager_id: '',
+                        name: '',
+                        email: ''
+                    },
+                    assignment_date: ''
+                };
+                console.warn('⚠️  Step 3 warning: Failed to assign account manager');
+                console.warn('   • Setup will continue without account manager assignment');
+            }
         }
-        result.account_manager_assigned = {
-            success: true,
-            account_manager: accountManagerResult.account_manager,
-            assignment_date: accountManagerResult.assignment_date
-        };
-        console.log(`✅ Step 3 completed: Account manager ${accountManagerResult.account_manager.name} assigned`);
+        catch (accountManagerError) {
+            const errorMessage = accountManagerError instanceof Error ? accountManagerError.message : String(accountManagerError);
+            result.account_manager_assigned = {
+                success: false,
+                account_manager: {
+                    manager_id: '',
+                    name: '',
+                    email: ''
+                },
+                assignment_date: ''
+            };
+            console.warn(`⚠️  Step 3 warning: Account manager assignment failed - ${errorMessage}`);
+            console.warn('   • Setup will continue without account manager assignment');
+        }
         // Step 4: Send follow-up email with next steps
         console.log('📧 Step 4: Sending follow-up email...');
-        const emailResult = await sendSetupFollowUpEmailActivity({
-            contact_email: params.contact_email,
-            contact_name: params.contact_name,
-            company_name: params.company_name,
-            site_id: params.site_id,
-            account_manager: {
-                name: accountManagerResult.account_manager.name,
-                email: accountManagerResult.account_manager.email,
-                phone: accountManagerResult.account_manager.phone
-            },
-            agents_created: agentsResult.agents.map((agent) => ({
-                type: agent.type,
-                name: agent.name
-            })),
-            next_steps: params.custom_requirements || [
-                'Configurar las integraciones necesarias',
-                'Personalizar las respuestas de los agentes',
-                'Realizar pruebas de funcionamiento',
-                'Programar sesión de entrenamiento del equipo',
-                'Activar el servicio en producción'
-            ]
-        });
-        if (!emailResult.success) {
-            throw new Error('Failed to send follow-up email');
+        try {
+            const emailResult = await sendSetupFollowUpEmailActivity({
+                contact_email: params.contact_email,
+                contact_name: params.contact_name,
+                company_name: actualCompanyName,
+                site_id: params.site_id,
+                account_manager: result.account_manager_assigned.success ? {
+                    name: result.account_manager_assigned.account_manager.name,
+                    email: result.account_manager_assigned.account_manager.email,
+                    phone: result.account_manager_assigned.account_manager.phone
+                } : {
+                    name: '',
+                    email: ''
+                },
+                agents_created: agentsResult.agents.map((agent) => ({
+                    type: agent.type,
+                    name: agent.name
+                })),
+                next_steps: params.custom_requirements || [
+                    'Configurar las integraciones necesarias',
+                    'Personalizar las respuestas de los agentes',
+                    'Realizar pruebas de funcionamiento',
+                    'Programar sesión de entrenamiento del equipo',
+                    'Activar el servicio en producción'
+                ]
+            });
+            if (emailResult.success) {
+                result.follow_up_email_sent = {
+                    success: true,
+                    messageId: emailResult.messageId,
+                    recipient: emailResult.recipient,
+                    timestamp: emailResult.timestamp
+                };
+                console.log(`✅ Step 4 completed: Follow-up email sent to ${emailResult.recipient}`);
+            }
+            else {
+                result.follow_up_email_sent = {
+                    success: false,
+                    messageId: '',
+                    recipient: '',
+                    timestamp: ''
+                };
+                console.warn('⚠️  Step 4 warning: Failed to send follow-up email');
+                console.warn('   • Setup completed without follow-up email');
+            }
         }
-        result.follow_up_email_sent = {
-            success: true,
-            messageId: emailResult.messageId,
-            recipient: emailResult.recipient,
-            timestamp: emailResult.timestamp
-        };
-        console.log(`✅ Step 4 completed: Follow-up email sent to ${emailResult.recipient}`);
+        catch (emailError) {
+            const errorMessage = emailError instanceof Error ? emailError.message : String(emailError);
+            result.follow_up_email_sent = {
+                success: false,
+                messageId: '',
+                recipient: '',
+                timestamp: ''
+            };
+            console.warn(`⚠️  Step 4 warning: Follow-up email failed - ${errorMessage}`);
+            console.warn('   • Setup completed without follow-up email');
+        }
         // Mark overall success
         result.success = true;
         result.setup_completed_at = new Date().toISOString();

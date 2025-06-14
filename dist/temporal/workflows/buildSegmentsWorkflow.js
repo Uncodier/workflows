@@ -4,7 +4,7 @@ exports.buildSegmentsWorkflow = buildSegmentsWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const buildSegmentsICPWorkflow_1 = require("./buildSegmentsICPWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, buildNewSegmentsActivity, buildICPSegmentsActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, buildNewSegmentsActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes', // Each activity has 5 minutes maximum execution time
     retry: {
         maximumAttempts: 3,

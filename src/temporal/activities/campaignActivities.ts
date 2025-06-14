@@ -731,8 +731,8 @@ export async function leadFollowUpActivity(request: LeadFollowUpRequest): Promis
   
   try {
     const requestBody = {
-      lead_id: request.lead_id,
-      site_id: request.site_id,
+      leadId: request.lead_id,        // Convert to camelCase for API
+      siteId: request.site_id,        // Convert to camelCase for API
       userId: request.userId,
       ...request.additionalData,
     };
@@ -787,8 +787,8 @@ export async function leadResearchActivity(request: LeadResearchRequest): Promis
   
   try {
     const requestBody = {
-      lead_id: request.lead_id,
-      site_id: request.site_id,
+      leadId: request.lead_id,        // Convert to camelCase for API
+      siteId: request.site_id,        // Convert to camelCase for API
       userId: request.userId,
       ...request.additionalData,
     };
