@@ -103,30 +103,27 @@ export async function emailCustomerSupportMessageWorkflow(
     console.log('✅ Customer support message sent successfully');
     console.log(`📋 Customer support response:`, JSON.stringify(response.data, null, 2));
     
-    // 🌟 NEW: Call sendEmailFromAgent workflow ONLY if customer support was successful
+    // 🌟 Call sendEmailFromAgent workflow ONLY if customer support was successful and origin is email
     let emailWorkflowId: string | undefined;
     let emailSent = false;
     
     try {
-      // Check if we have contact email and original lead_notification indicates email should be sent
-      if (emailData.contact_info.email && emailData.lead_notification === 'email') {
+      // Simple validation: if origin is email and we have an email address, send the email
+      if (baseParams.origin === 'email' && emailData.contact_info.email) {
         console.log('📧 Starting sendEmailFromAgent workflow - customer support was successful...');
-        console.log(`🔄 Original lead_notification: ${emailData.lead_notification} - proceeding with follow-up email`);
+        console.log(`🔄 Origin: ${baseParams.origin} - proceeding with follow-up email`);
         
-        // ✅ FIXED: Manejar analysis_id opcional para el workflowId
         const emailWorkflowSuffix = emailData.analysis_id || `temp-${Date.now()}`;
         emailWorkflowId = `send-email-agent-${emailWorkflowSuffix}`;
         
-        // Prepare email parameters
+        // Prepare email parameters with agent response
         const emailParams = {
           email: emailData.contact_info.email,
-          subject: response.data?.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`, // ✅ FIXED: Usar conversation_title para el subject
-          // ✅ FIXED: Usar la respuesta real del agente desde messages.assistant.content
+          subject: response.data?.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`,
           message: response.data?.data?.messages?.assistant?.content || 
                    `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
           site_id: emailData.site_id,
           agent_id: baseParams.agentId,
-          // ✅ FIXED: Solo enviar lead_id si hay un analysis_id real
           lead_id: emailData.analysis_id || undefined
         };
         
@@ -150,10 +147,10 @@ export async function emailCustomerSupportMessageWorkflow(
           console.log('⚠️ Follow-up email failed, but customer support was successful');
         }
         
+      } else if (baseParams.origin !== 'email') {
+        console.log(`📋 Origin: ${baseParams.origin} - skipping follow-up email`);
       } else if (!emailData.contact_info.email) {
         console.log('📭 No email address available for follow-up');
-      } else if (emailData.lead_notification !== 'email') {
-        console.log(`📋 lead_notification = "${emailData.lead_notification}" - skipping follow-up email`);
       }
       
     } catch (emailError) {

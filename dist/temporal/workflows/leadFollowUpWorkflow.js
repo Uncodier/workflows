@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.leadFollowUpWorkflow = leadFollowUpWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, leadFollowUpActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
     retry: {
         maximumAttempts: 3,
@@ -15,6 +15,7 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, l
  * This workflow:
  * 1. Gets site information by siteId to obtain site details
  * 2. Executes lead follow-up using the sales agent API
+ * 3. Saves the follow-up data/logs to the database
  *
  * @param options - Configuration options for lead follow-up
  */
@@ -102,6 +103,25 @@ async function leadFollowUpWorkflow(options) {
             nextSteps.forEach((step, index) => {
                 console.log(`   ${index + 1}. ${step}`);
             });
+        }
+        // Step 3: Save lead follow-up logs to database
+        if (data) {
+            console.log(`📝 Step 3: Saving lead follow-up logs to database...`);
+            const saveLogsResult = await saveLeadFollowUpLogsActivity({
+                siteId: site_id,
+                leadId: lead_id,
+                userId: options.userId || site.user_id,
+                data: data
+            });
+            if (!saveLogsResult.success) {
+                const errorMsg = `Failed to save lead follow-up logs: ${saveLogsResult.error}`;
+                console.error(`⚠️ ${errorMsg}`);
+                errors.push(errorMsg);
+                // Note: We don't throw here as the main operation was successful
+            }
+            else {
+                console.log(`✅ Lead follow-up logs saved successfully`);
+            }
         }
         const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         const result = {

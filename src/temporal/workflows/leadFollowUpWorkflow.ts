@@ -7,6 +7,9 @@ const {
   saveCronStatusActivity,
   getSiteActivity,
   leadFollowUpActivity,
+  saveLeadFollowUpLogsActivity,
+  sendEmailFromAgentActivity,
+  sendWhatsAppFromAgentActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
   retry: {
@@ -30,6 +33,12 @@ export interface LeadFollowUpResult {
   followUpActions?: any[];
   nextSteps?: string[];
   data?: any;
+  messageSent?: {
+    channel: 'email' | 'whatsapp';
+    recipient: string;
+    success: boolean;
+    messageId?: string;
+  };
   errors: string[];
   executionTime: string;
   completedAt: string;
@@ -41,6 +50,8 @@ export interface LeadFollowUpResult {
  * This workflow:
  * 1. Gets site information by siteId to obtain site details
  * 2. Executes lead follow-up using the sales agent API
+ * 3. Saves the follow-up data/logs to the database
+ * 4. Sends follow-up message via email or WhatsApp based on the communication channel
  * 
  * @param options - Configuration options for lead follow-up
  */
@@ -87,6 +98,7 @@ export async function leadFollowUpWorkflow(
   let siteName = '';
   let siteUrl = '';
   let data: any = null;
+  let messageSent: { channel: 'email' | 'whatsapp'; recipient: string; success: boolean; messageId?: string } | undefined;
 
   try {
     console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
@@ -153,6 +165,116 @@ export async function leadFollowUpWorkflow(
       });
     }
 
+    // Step 3: Save lead follow-up logs to database
+    if (data) {
+      console.log(`📝 Step 3: Saving lead follow-up logs to database...`);
+      
+      const saveLogsResult = await saveLeadFollowUpLogsActivity({
+        siteId: site_id,
+        leadId: lead_id,
+        userId: options.userId || site.user_id,
+        data: data
+      });
+      
+      if (!saveLogsResult.success) {
+        const errorMsg = `Failed to save lead follow-up logs: ${saveLogsResult.error}`;
+        console.error(`⚠️ ${errorMsg}`);
+        errors.push(errorMsg);
+        // Note: We don't throw here as the main operation was successful
+      } else {
+        console.log(`✅ Lead follow-up logs saved successfully`);
+      }
+    }
+
+    // Step 4: Send follow-up message based on channel
+    if (data && data.success && data.data) {
+      console.log(`📤 Step 4: Sending follow-up message based on communication channel...`);
+      
+      try {
+        const responseData = data.data;
+        const messages = responseData.messages || {};
+        const lead = responseData.lead || {};
+        
+        // Determine the communication channel and message content
+        const email = lead.email || lead.contact_email;
+        const phone = lead.phone || lead.phone_number;
+        const messageContent = messages.assistant?.content || messages.agent?.content;
+        
+        if (messageContent) {
+          if (email && !phone) {
+            // Send via email
+            console.log(`📧 Sending follow-up email to ${email}...`);
+            
+            const emailResult = await sendEmailFromAgentActivity({
+              email: email,
+              subject: `Follow-up: ${lead.name || 'Lead'} - ${siteName}`,
+              message: messageContent,
+              site_id: site_id,
+              agent_id: options.userId || site.user_id,
+              lead_id: lead_id,
+              from: siteName,
+            });
+            
+            messageSent = {
+              channel: 'email',
+              recipient: email,
+              success: emailResult.success,
+              messageId: emailResult.messageId,
+            };
+            
+            if (emailResult.success) {
+              console.log(`✅ Follow-up email sent successfully to ${email}`);
+            } else {
+              const errorMsg = `Failed to send follow-up email: ${emailResult.messageId}`;
+              console.error(`⚠️ ${errorMsg}`);
+              errors.push(errorMsg);
+            }
+            
+          } else if (phone) {
+            // Send via WhatsApp (prioritize WhatsApp if phone exists)
+            console.log(`📱 Sending follow-up WhatsApp to ${phone}...`);
+            
+            const whatsappResult = await sendWhatsAppFromAgentActivity({
+              phone_number: phone,
+              message: messageContent,
+              site_id: site_id,
+              agent_id: options.userId || site.user_id,
+              lead_id: lead_id,
+              from: siteName,
+            });
+            
+            messageSent = {
+              channel: 'whatsapp',
+              recipient: phone,
+              success: whatsappResult.success,
+              messageId: whatsappResult.messageId,
+            };
+            
+            if (whatsappResult.success) {
+              console.log(`✅ Follow-up WhatsApp sent successfully to ${phone}`);
+            } else {
+              const errorMsg = `Failed to send follow-up WhatsApp: ${whatsappResult.messageId}`;
+              console.error(`⚠️ ${errorMsg}`);
+              errors.push(errorMsg);
+            }
+            
+          } else {
+            console.log(`⚠️ No valid communication channel found (email: ${email}, phone: ${phone})`);
+            errors.push('No valid communication channel found for follow-up message');
+          }
+        } else {
+          console.log(`⚠️ No message content found in follow-up response`);
+          errors.push('No message content found in follow-up response');
+        }
+        
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`⚠️ Failed to send follow-up message: ${errorMessage}`);
+        errors.push(`Failed to send follow-up message: ${errorMessage}`);
+        // Note: We don't throw here as the main operation was successful
+      }
+    }
+
     const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
     const result: LeadFollowUpResult = {
       success: true,
@@ -163,6 +285,7 @@ export async function leadFollowUpWorkflow(
       followUpActions,
       nextSteps,
       data,
+      messageSent,
       errors,
       executionTime,
       completedAt: new Date().toISOString()
@@ -170,6 +293,11 @@ export async function leadFollowUpWorkflow(
 
     console.log(`🎉 Lead follow-up workflow completed successfully!`);
     console.log(`📊 Summary: Lead ${lead_id} follow-up completed for ${siteName} in ${executionTime}`);
+    
+    if (messageSent) {
+      const status = messageSent.success ? '✅ sent' : '❌ failed';
+      console.log(`📤 Follow-up message ${status} via ${messageSent.channel} to ${messageSent.recipient}`);
+    }
 
     // Update cron status to indicate successful completion
     await saveCronStatusActivity({
@@ -229,6 +357,7 @@ export async function leadFollowUpWorkflow(
       followUpActions,
       nextSteps,
       data,
+      messageSent,
       errors: [...errors, errorMessage],
       executionTime,
       completedAt: new Date().toISOString()

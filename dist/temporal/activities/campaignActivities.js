@@ -17,6 +17,7 @@ exports.buildNewSegmentsActivity = buildNewSegmentsActivity;
 exports.buildICPSegmentsActivity = buildICPSegmentsActivity;
 exports.leadFollowUpActivity = leadFollowUpActivity;
 exports.leadResearchActivity = leadResearchActivity;
+exports.saveLeadFollowUpLogsActivity = saveLeadFollowUpLogsActivity;
 const apiService_1 = require("../services/apiService");
 const supabaseService_1 = require("../services/supabaseService");
 /**
@@ -540,6 +541,44 @@ async function leadResearchActivity(request) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Exception executing lead research for lead ${request.lead_id}:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to save lead follow-up logs via API
+ */
+async function saveLeadFollowUpLogsActivity(request) {
+    console.log(`📝 Saving lead follow-up logs for lead ${request.leadId} on site ${request.siteId}`);
+    try {
+        // Extract the nested data fields to flatten them at root level
+        const { success, data: nestedData } = request.data;
+        const requestBody = {
+            siteId: request.siteId,
+            leadId: request.leadId,
+            userId: request.userId,
+            success,
+            ...nestedData // Flatten the nested data fields (messages, lead, command_ids) to root
+        };
+        console.log('📤 Sending lead follow-up logs:', JSON.stringify(requestBody, null, 2));
+        const response = await apiService_1.apiService.post('/api/agents/sales/leadFollowUp/logs', requestBody);
+        if (!response.success) {
+            console.error(`❌ Failed to save lead follow-up logs:`, response.error);
+            return {
+                success: false,
+                error: response.error?.message || 'Failed to save lead follow-up logs'
+            };
+        }
+        console.log(`✅ Lead follow-up logs saved successfully`);
+        return {
+            success: true
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception saving lead follow-up logs:`, errorMessage);
         return {
             success: false,
             error: errorMessage

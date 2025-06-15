@@ -71,7 +71,6 @@ export async function scheduleEmailSyncWorkflowActivity(
                 site.email?.incomingServer?.includes('outlook') ? 'outlook' as const : 'imap' as const,
       since: sinceTimestamp, // Use calculated timestamp instead of hardcoded 24 hours
       batchSize: 50,
-      enableAnalysis: true, // Enable AI email analysis
       analysisLimit: 15     // Analyze up to 15 emails
     }];
 
