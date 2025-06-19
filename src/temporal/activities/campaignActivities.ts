@@ -690,6 +690,92 @@ export async function buildICPSegmentsActivity(request: {
   }
 }
 
+export interface Lead {
+  id: string;
+  email?: string;
+  name?: string;
+  company?: string;
+  company_name?: string;
+  job_title?: string;
+  position?: string;
+  industry?: string;
+  location?: string;
+  phone?: string;
+  website?: string;
+  company_size?: string;
+  site_id: string;
+  created_at: string;
+  updated_at: string;
+  [key: string]: any;
+}
+
+export interface GetLeadResult {
+  success: boolean;
+  lead?: Lead;
+  error?: string;
+}
+
+/**
+ * Activity to get lead information from database
+ */
+export async function getLeadActivity(leadId: string): Promise<GetLeadResult> {
+  console.log(`👤 Getting lead information for: ${leadId}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot fetch lead information');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, fetching lead...');
+    
+    const leadData = await supabaseService.fetchLead(leadId);
+
+    const lead: Lead = {
+      id: leadData.id,
+      email: leadData.email,
+      name: leadData.name || leadData.full_name,
+      company: leadData.company || leadData.company_name,
+      company_name: leadData.company_name || leadData.company,
+      job_title: leadData.job_title || leadData.position,
+      position: leadData.position || leadData.job_title,
+      industry: leadData.industry,
+      location: leadData.location,
+      phone: leadData.phone,
+      website: leadData.website,
+      company_size: leadData.company_size,
+      site_id: leadData.site_id,
+      created_at: leadData.created_at,
+      updated_at: leadData.updated_at,
+      ...leadData
+    };
+
+    console.log(`✅ Retrieved lead information for ${lead.name || lead.email}: ${lead.company}`);
+    
+    return {
+      success: true,
+      lead
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception getting lead ${leadId}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
 // Lead follow-up interfaces
 export interface LeadFollowUpRequest {
   lead_id: string;

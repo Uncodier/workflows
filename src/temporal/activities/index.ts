@@ -15,6 +15,7 @@ export * from './siteSetupActivities';
 export * from './executeToolActivities';
 export * from './campaignActivities';
 export * from './interventionActivities';
+export * from './dataAnalystActivities';
 
 // Bundle all activities for the worker
 import * as supabaseActivities from './supabaseActivities';
@@ -33,6 +34,7 @@ import * as siteSetupActivities from './siteSetupActivities';
 import * as executeToolActivities from './executeToolActivities';
 import * as campaignActivities from './campaignActivities';
 import * as interventionActivities from './interventionActivities';
+import * as dataAnalystActivities from './dataAnalystActivities';
 
 export const activities = {
   ...supabaseActivities,
@@ -51,6 +53,7 @@ export const activities = {
   ...executeToolActivities,
   ...campaignActivities,
   ...interventionActivities,
+  ...dataAnalystActivities,
 };
 
 export type Activities = typeof activities; 

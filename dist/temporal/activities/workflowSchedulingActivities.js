@@ -63,7 +63,6 @@ async function scheduleEmailSyncWorkflowActivity(site, options = {}) {
                     site.email?.incomingServer?.includes('outlook') ? 'outlook' : 'imap',
                 since: sinceTimestamp, // Use calculated timestamp instead of hardcoded 24 hours
                 batchSize: 50,
-                enableAnalysis: true, // Enable AI email analysis
                 analysisLimit: 15 // Analyze up to 15 emails
             }];
         // Create immediate workflow execution (ASAP scheduling)

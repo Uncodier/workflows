@@ -306,6 +306,35 @@ export class SupabaseService {
   }
 
   /**
+   * Fetch lead information by lead ID
+   */
+  async fetchLead(leadId: string): Promise<any> {
+    const isConnected = await this.getConnectionStatus();
+    if (!isConnected) {
+      throw new Error('Database not connected');
+    }
+
+    console.log(`🔍 Fetching lead information for: ${leadId}`);
+    const { data, error } = await this.client
+      .from('leads')
+      .select('*')
+      .eq('id', leadId)
+      .single();
+
+    if (error) {
+      console.error(`❌ Error fetching lead ${leadId}:`, error);
+      throw new Error(`Failed to fetch lead: ${error.message}`);
+    }
+
+    if (!data) {
+      throw new Error(`Lead ${leadId} not found`);
+    }
+
+    console.log(`✅ Successfully fetched lead information for ${leadId}`);
+    return data;
+  }
+
+  /**
    * Fetch segments for a specific site
    */
   async fetchSegments(siteId: string): Promise<any[]> {

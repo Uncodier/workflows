@@ -34,6 +34,8 @@ const buildContentWorkflow_1 = require("./buildContentWorkflow");
 const leadFollowUpWorkflow_1 = require("./leadFollowUpWorkflow");
 const leadResearchWorkflow_1 = require("./leadResearchWorkflow");
 const buildSegmentsICPWorkflow_1 = require("./buildSegmentsICPWorkflow");
+const humanInterventionWorkflow_1 = require("./humanInterventionWorkflow");
+const deepResearchWorkflow_1 = require("./deepResearchWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -53,6 +55,8 @@ __exportStar(require("./buildContentWorkflow"), exports);
 __exportStar(require("./leadFollowUpWorkflow"), exports);
 __exportStar(require("./leadResearchWorkflow"), exports);
 __exportStar(require("./buildSegmentsICPWorkflow"), exports);
+__exportStar(require("./humanInterventionWorkflow"), exports);
+__exportStar(require("./deepResearchWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -77,6 +81,8 @@ exports.workflows = {
     leadResearchWorkflow: leadResearchWorkflow_1.leadResearchWorkflow,
     buildSegmentsICPWorkflow: buildSegmentsICPWorkflow_1.buildSegmentsICPWorkflow,
     buildSingleSegmentICPWorkflow: buildSegmentsICPWorkflow_1.buildSingleSegmentICPWorkflow,
+    humanInterventionWorkflow: humanInterventionWorkflow_1.humanInterventionWorkflow,
+    deepResearchWorkflow: deepResearchWorkflow_1.deepResearchWorkflow,
 };
 // Workflow names for Temporal Client (strings)
 exports.workflowNames = {
@@ -102,4 +108,6 @@ exports.workflowNames = {
     leadResearchWorkflow: 'leadResearchWorkflow',
     buildSegmentsICPWorkflow: 'buildSegmentsICPWorkflow',
     buildSingleSegmentICPWorkflow: 'buildSingleSegmentICPWorkflow',
+    humanInterventionWorkflow: 'humanInterventionWorkflow',
+    deepResearchWorkflow: 'deepResearchWorkflow',
 };

@@ -35,3 +35,5 @@ __exportStar(require("./buildSegmentsICPWorkflow"), exports);
 __exportStar(require("./buildContentWorkflow"), exports);
 __exportStar(require("./leadFollowUpWorkflow"), exports);
 __exportStar(require("./leadResearchWorkflow"), exports);
+__exportStar(require("./humanInterventionWorkflow"), exports);
+__exportStar(require("./deepResearchWorkflow"), exports);

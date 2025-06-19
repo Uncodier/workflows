@@ -19,4 +19,5 @@ export * from './buildSegmentsICPWorkflow';
 export * from './buildContentWorkflow';
 export * from './leadFollowUpWorkflow';
 export * from './leadResearchWorkflow';
-export * from './humanInterventionWorkflow'; 
+export * from './humanInterventionWorkflow';
+export * from './deepResearchWorkflow'; 
