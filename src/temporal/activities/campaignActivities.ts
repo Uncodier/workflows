@@ -974,3 +974,179 @@ export async function saveLeadFollowUpLogsActivity(request: {
     };
   }
 }
+
+// Update Lead interfaces
+export interface UpdateLeadRequest {
+  lead_id: string;
+  updateData: any;
+  safeUpdate?: boolean; // If true, will not update email or phone
+}
+
+export interface UpdateLeadResult {
+  success: boolean;
+  lead?: any;
+  error?: string;
+}
+
+/**
+ * Activity to update lead information in database
+ */
+export async function updateLeadActivity(request: UpdateLeadRequest): Promise<UpdateLeadResult> {
+  console.log(`👤 Updating lead information for: ${request.lead_id}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot update lead information');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, updating lead...');
+    
+    // Prepare update data, excluding dangerous fields if safeUpdate is true
+    let updateData = { ...request.updateData };
+    
+    if (request.safeUpdate !== false) { // Default to safe update
+      // Remove dangerous fields that should not be overwritten
+      const { email, phone, ...safeData } = updateData;
+      updateData = safeData;
+      
+      if (email || phone) {
+        console.log('⚠️  Skipping email/phone update for safety (safeUpdate mode)');
+        console.log(`   - Email: ${email ? 'would be updated' : 'not provided'}`);
+        console.log(`   - Phone: ${phone ? 'would be updated' : 'not provided'}`);
+      }
+    }
+    
+    const updatedLead = await supabaseService.updateLead(request.lead_id, updateData);
+
+    console.log(`✅ Successfully updated lead information for ${request.lead_id}`);
+    
+    return {
+      success: true,
+      lead: updatedLead
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception updating lead ${request.lead_id}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+// Company interfaces
+export interface GetCompanyResult {
+  success: boolean;
+  company?: any;
+  error?: string;
+}
+
+export interface UpsertCompanyResult {
+  success: boolean;
+  company?: any;
+  error?: string;
+}
+
+/**
+ * Activity to get company information from database
+ */
+export async function getCompanyActivity(companyId: string): Promise<GetCompanyResult> {
+  console.log(`🏢 Getting company information for: ${companyId}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot fetch company information');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, fetching company...');
+    
+    const companyData = await supabaseService.fetchCompany(companyId);
+
+    if (!companyData) {
+      console.log(`⚠️  Company ${companyId} not found`);
+      return {
+        success: false,
+        error: 'Company not found'
+      };
+    }
+
+    console.log(`✅ Retrieved company information for ${companyData.name}`);
+    
+    return {
+      success: true,
+      company: companyData
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception getting company ${companyId}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * Activity to create or update company information in the database
+ */
+export async function upsertCompanyActivity(companyData: any): Promise<UpsertCompanyResult> {
+  console.log(`🏢 Upserting company: ${companyData.name}`);
+  console.log(`📋 Company data:`, JSON.stringify(companyData, null, 2));
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot upsert company');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, upserting company...');
+    
+    const upsertedCompany = await supabaseService.upsertCompany(companyData);
+
+    console.log(`✅ Successfully upserted company: ${upsertedCompany.name}`);
+    
+    return {
+      success: true,
+      company: upsertedCompany
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception upserting company:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}

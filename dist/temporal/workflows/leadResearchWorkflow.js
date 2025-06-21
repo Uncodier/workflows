@@ -4,7 +4,7 @@ exports.leadResearchWorkflow = leadResearchWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const deepResearchWorkflow_1 = require("./deepResearchWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, updateLeadActivity, upsertCompanyActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes', // Reasonable timeout for lead research
     retry: {
         maximumAttempts: 3,
@@ -65,6 +65,56 @@ function generateLeadResearchQuery(lead) {
     // Combinar todas las partes del query
     const baseQuery = queryParts.join(', ');
     return `investigación profunda sobre prospecto: ${baseQuery} - análisis de mercado, competencia, oportunidades de negocio y estrategias de acercamiento`;
+}
+/**
+ * Genera una estructura de deliverables basada en la información actual del lead
+ * Esto define qué campos esperamos que el deep research llene o actualice
+ * Retorna estructura separada en lead y company para mejor procesamiento
+ */
+function generateLeadDeliverables(lead) {
+    return {
+        // Estructura para información del lead
+        lead: {
+            // Información básica del lead que puede ser completada/mejorada
+            name: lead.name || null,
+            job_title: lead.job_title || lead.position || null,
+            position: lead.position || lead.job_title || null,
+            industry: lead.industry || null,
+            location: lead.location || null,
+            linkedin_url: lead.linkedin_url || null,
+            phone: lead.phone || null,
+            // Información profesional que puede ser enriquecida
+            decision_maker_info: lead.decision_maker_info || null,
+            pain_points: lead.pain_points || null,
+            business_priorities: lead.business_priorities || null,
+            recent_news: lead.recent_news || null,
+            // Metadatos de investigación
+            research_timestamp: new Date().toISOString(),
+            research_source: 'lead_research_workflow',
+            // Campos que NO deben ser sobrescritos (para referencia de la API)
+            _preserve_fields: ['email', 'id', 'site_id', 'created_at', 'updated_at', 'user_id']
+        },
+        // Estructura para información de la empresa (se usará la estructura de deepResearchWorkflow)
+        // Esta será completada por el deepResearchWorkflow usando generateCompanyStructure()
+        company: {
+            // Información básica que tenemos del lead
+            name: lead.company || lead.company_name || null,
+            website: lead.website || null,
+            industry: lead.industry || null,
+            size: lead.company_size || null,
+            // Campos que pueden ser enriquecidos por la investigación
+            description: lead.company_description || null,
+            founded: lead.company_founded || null,
+            employees_count: lead.company_employees || null,
+            annual_revenue: lead.company_revenue || null,
+            tech_stack: lead.company_technologies || null,
+            competitors: lead.competitors || null,
+            // Metadatos de investigación
+            _preserve_fields: ['id', 'created_at', 'updated_at'],
+            _research_timestamp: new Date().toISOString(),
+            _research_source: 'lead_research_workflow'
+        }
+    };
 }
 /**
  * Workflow to execute lead research using deepResearchWorkflow
@@ -152,11 +202,15 @@ async function leadResearchWorkflow(options) {
         researchQuery = generateLeadResearchQuery(leadInfo);
         console.log(`🔧 Generated research query: "${researchQuery}"`);
         console.log(`🔬 Step 4: Executing deep research workflow...`);
+        // Generar deliverables basados en la estructura actual del lead
+        const leadDeliverables = generateLeadDeliverables(leadInfo);
+        console.log(`📋 Generated deliverables structure:`, JSON.stringify(leadDeliverables, null, 2));
         // Preparar opciones para el deep research workflow
         const deepResearchOptions = {
             site_id: site_id,
             research_topic: researchQuery,
             userId: options.userId || site.user_id,
+            deliverables: leadDeliverables,
             additionalData: {
                 ...options.additionalData,
                 leadId: lead_id,
@@ -182,10 +236,137 @@ async function leadResearchWorkflow(options) {
                 console.log(`   - Operations executed: ${deepResearchResult.operationResults?.length || 0}`);
                 console.log(`   - Insights generated: ${deepResearchResult.insights?.length || 0}`);
                 console.log(`   - Recommendations: ${deepResearchResult.recommendations?.length || 0}`);
-                // Check for data.data nesting issue
-                if (deepResearchResult.data && deepResearchResult.data.data) {
-                    console.log(`⚠️ Detected data.data nesting - this might be the anidation issue`);
-                    console.log(`   - Operations in data.data: ${deepResearchResult.data.data.operations?.length || 0}`);
+                // Process deliverables and analysis for lead and company updates
+                let leadDeliverablesToUpdate = null;
+                let companyDeliverablesToUpdate = null;
+                let analysisForMetadata = null;
+                // Extract deliverables from the result - structured format
+                if (deepResearchResult.data && deepResearchResult.data.deliverables) {
+                    const deliverables = deepResearchResult.data.deliverables;
+                    console.log(`📦 Found deliverables in data.deliverables:`, JSON.stringify(deliverables, null, 2));
+                    // Extract lead deliverables
+                    if (deliverables.lead) {
+                        leadDeliverablesToUpdate = deliverables.lead;
+                        console.log(`👤 Found lead deliverables:`, Object.keys(leadDeliverablesToUpdate));
+                    }
+                    // Extract company deliverables  
+                    if (deliverables.company) {
+                        companyDeliverablesToUpdate = deliverables.company;
+                        console.log(`🏢 Found company deliverables:`, Object.keys(companyDeliverablesToUpdate));
+                    }
+                }
+                // Extract analysis for metadata - simplified structure
+                if (deepResearchResult.data && deepResearchResult.data.analysis) {
+                    analysisForMetadata = deepResearchResult.data.analysis;
+                    console.log(`🔍 Found analysis in data.analysis`);
+                }
+                else if (deepResearchResult.analysis) {
+                    analysisForMetadata = deepResearchResult.analysis;
+                    console.log(`🔍 Found analysis in main level`);
+                }
+                // Step 5a: Update lead if we have lead deliverables or analysis
+                if (leadDeliverablesToUpdate || analysisForMetadata) {
+                    console.log(`🔄 Step 5a: Updating lead with research results...`);
+                    try {
+                        // Prepare lead update data
+                        const leadUpdateData = {};
+                        // Add lead deliverables (excluding preserved fields)
+                        if (leadDeliverablesToUpdate) {
+                            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                            const { _preserve_fields, ...safeLeadDeliverables } = leadDeliverablesToUpdate;
+                            Object.assign(leadUpdateData, safeLeadDeliverables);
+                            console.log(`📦 Adding lead deliverables to update:`, Object.keys(safeLeadDeliverables));
+                        }
+                        // Add analysis to metadata
+                        if (analysisForMetadata) {
+                            leadUpdateData.metadata = {
+                                ...leadInfo.metadata,
+                                research_analysis: analysisForMetadata,
+                                last_research_date: new Date().toISOString(),
+                                research_workflow_id: workflowId
+                            };
+                            console.log(`🔍 Adding analysis to lead metadata`);
+                        }
+                        if (Object.keys(leadUpdateData).length > 0) {
+                            const leadUpdateResult = await updateLeadActivity({
+                                lead_id: lead_id,
+                                updateData: leadUpdateData,
+                                safeUpdate: true // Ensure email and phone are not overwritten
+                            });
+                            if (leadUpdateResult.success) {
+                                console.log(`✅ Lead updated successfully with research results`);
+                                console.log(`📊 Updated lead fields: ${Object.keys(leadUpdateData).join(', ')}`);
+                            }
+                            else {
+                                console.error(`❌ Failed to update lead: ${leadUpdateResult.error}`);
+                                errors.push(`Lead update failed: ${leadUpdateResult.error}`);
+                            }
+                        }
+                        else {
+                            console.log(`⚠️ No lead deliverables or analysis found to update lead`);
+                        }
+                    }
+                    catch (updateError) {
+                        const updateErrorMessage = updateError instanceof Error ? updateError.message : String(updateError);
+                        console.error(`❌ Exception updating lead: ${updateErrorMessage}`);
+                        errors.push(`Lead update exception: ${updateErrorMessage}`);
+                    }
+                }
+                else {
+                    console.log(`⚠️ No lead deliverables or analysis found in deep research result`);
+                }
+                // Step 5b: Update company if we have company deliverables
+                if (companyDeliverablesToUpdate && companyDeliverablesToUpdate.name) {
+                    console.log(`🔄 Step 5b: Updating company with research results...`);
+                    try {
+                        // Clean up company data (remove metadata fields)
+                        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                        const { _preserve_fields, _research_timestamp, _research_source, ...cleanCompanyData } = companyDeliverablesToUpdate;
+                        // If lead has company_id, use it for company identification
+                        const companyId = leadInfo.company_id;
+                        if (companyId) {
+                            cleanCompanyData.id = companyId;
+                            console.log(`🔗 Using company_id from lead: ${companyId}`);
+                        }
+                        console.log(`🏢 Upserting company: ${cleanCompanyData.name}`);
+                        console.log(`📊 Company fields to update: ${Object.keys(cleanCompanyData).join(', ')}`);
+                        const companyUpsertResult = await upsertCompanyActivity(cleanCompanyData);
+                        if (companyUpsertResult.success) {
+                            console.log(`✅ Company updated successfully: ${companyUpsertResult.company.name}`);
+                            console.log(`🆔 Company ID: ${companyUpsertResult.company.id}`);
+                            // Update lead with company_id if it wasn't set before
+                            if (!leadInfo.company_id && companyUpsertResult.company.id) {
+                                try {
+                                    const leadCompanyUpdateResult = await updateLeadActivity({
+                                        lead_id: lead_id,
+                                        updateData: { company_id: companyUpsertResult.company.id },
+                                        safeUpdate: true
+                                    });
+                                    if (leadCompanyUpdateResult.success) {
+                                        console.log(`✅ Lead updated with company_id: ${companyUpsertResult.company.id}`);
+                                    }
+                                    else {
+                                        console.error(`⚠️ Failed to update lead with company_id: ${leadCompanyUpdateResult.error}`);
+                                    }
+                                }
+                                catch (companyIdUpdateError) {
+                                    console.error(`⚠️ Exception updating lead with company_id:`, companyIdUpdateError);
+                                }
+                            }
+                        }
+                        else {
+                            console.error(`❌ Failed to update company: ${companyUpsertResult.error}`);
+                            errors.push(`Company update failed: ${companyUpsertResult.error}`);
+                        }
+                    }
+                    catch (companyUpdateError) {
+                        const companyUpdateErrorMessage = companyUpdateError instanceof Error ? companyUpdateError.message : String(companyUpdateError);
+                        console.error(`❌ Exception updating company: ${companyUpdateErrorMessage}`);
+                        errors.push(`Company update exception: ${companyUpdateErrorMessage}`);
+                    }
+                }
+                else {
+                    console.log(`ℹ️ No company deliverables found or company name missing - skipping company update`);
                 }
                 if (deepResearchResult.insights && deepResearchResult.insights.length > 0) {
                     console.log(`🔍 Research insights:`);
@@ -218,32 +399,17 @@ async function leadResearchWorkflow(options) {
             // No lanzamos error aquí para que continúe con los resultados parciales
         }
         const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-        // Clean up the deep research result to avoid nesting issues
+        // Deep research result is now already cleaned by the activities - no need for complex cleaning
         let cleanedDeepResearchResult = null;
         if (deepResearchResult) {
-            // Extract operations from nested data.data.operations if main operations array is empty
-            let actualOperations = deepResearchResult.operations || [];
-            let actualOperationResults = deepResearchResult.operationResults || [];
-            // Check if operations are nested in data.data.operations
-            if (actualOperations.length === 0 &&
-                deepResearchResult.data &&
-                deepResearchResult.data.data &&
-                deepResearchResult.data.data.operations) {
-                console.log(`🔄 Mapping operations from data.data.operations to main level`);
-                actualOperations = deepResearchResult.data.data.operations;
-                // Also check for operation results in the nested structure
-                if (deepResearchResult.data.data.operationResults) {
-                    actualOperationResults = deepResearchResult.data.data.operationResults;
-                }
-            }
             cleanedDeepResearchResult = {
                 success: deepResearchResult.success,
                 siteId: deepResearchResult.siteId,
                 researchTopic: deepResearchResult.researchTopic,
                 siteName: deepResearchResult.siteName,
                 siteUrl: deepResearchResult.siteUrl,
-                operations: actualOperations,
-                operationResults: actualOperationResults,
+                operations: deepResearchResult.operations || [],
+                operationResults: deepResearchResult.operationResults || [],
                 analysis: deepResearchResult.analysis,
                 insights: deepResearchResult.insights || [],
                 recommendations: deepResearchResult.recommendations || [],
@@ -252,7 +418,7 @@ async function leadResearchWorkflow(options) {
                 completedAt: deepResearchResult.completedAt
                 // Note: We're NOT including the raw 'data' field to avoid nesting
             };
-            console.log(`🧹 Cleaned result operations count: ${actualOperations.length}`);
+            console.log(`🧹 Cleaned result operations count: ${cleanedDeepResearchResult.operations.length}`);
         }
         const result = {
             success: true,
@@ -274,10 +440,10 @@ async function leadResearchWorkflow(options) {
         console.log(`   - Site: ${siteName}`);
         console.log(`   - Deep research executed: ${deepResearchResult ? 'Yes' : 'No'}`);
         if (cleanedDeepResearchResult) {
-            console.log(`   - Operations mapped: ${cleanedDeepResearchResult.operations?.length || 0}`);
-            console.log(`   - Operation results: ${cleanedDeepResearchResult.operationResults?.length || 0}`);
-            console.log(`   - Total insights: ${cleanedDeepResearchResult.insights?.length || 0}`);
-            console.log(`   - Total recommendations: ${cleanedDeepResearchResult.recommendations?.length || 0}`);
+            console.log(`   - Operations mapped: ${cleanedDeepResearchResult.operations.length}`);
+            console.log(`   - Operation results: ${cleanedDeepResearchResult.operationResults.length}`);
+            console.log(`   - Total insights: ${cleanedDeepResearchResult.insights.length}`);
+            console.log(`   - Total recommendations: ${cleanedDeepResearchResult.recommendations.length}`);
         }
         // Update cron status to indicate successful completion
         await saveCronStatusActivity({
@@ -324,29 +490,14 @@ async function leadResearchWorkflow(options) {
         // Clean up the deep research result even in error cases
         let cleanedDeepResearchResult = null;
         if (deepResearchResult) {
-            // Extract operations from nested data.data.operations if main operations array is empty
-            let actualOperations = deepResearchResult.operations || [];
-            let actualOperationResults = deepResearchResult.operationResults || [];
-            // Check if operations are nested in data.data.operations
-            if (actualOperations.length === 0 &&
-                deepResearchResult.data &&
-                deepResearchResult.data.data &&
-                deepResearchResult.data.data.operations) {
-                console.log(`🔄 Mapping operations from data.data.operations to main level (error case)`);
-                actualOperations = deepResearchResult.data.data.operations;
-                // Also check for operation results in the nested structure
-                if (deepResearchResult.data.data.operationResults) {
-                    actualOperationResults = deepResearchResult.data.data.operationResults;
-                }
-            }
             cleanedDeepResearchResult = {
                 success: deepResearchResult.success,
                 siteId: deepResearchResult.siteId,
                 researchTopic: deepResearchResult.researchTopic,
                 siteName: deepResearchResult.siteName,
                 siteUrl: deepResearchResult.siteUrl,
-                operations: actualOperations,
-                operationResults: actualOperationResults,
+                operations: deepResearchResult.operations || [],
+                operationResults: deepResearchResult.operationResults || [],
                 analysis: deepResearchResult.analysis,
                 insights: deepResearchResult.insights || [],
                 recommendations: deepResearchResult.recommendations || [],

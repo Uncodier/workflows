@@ -20,9 +20,13 @@ export interface DeepResearchResponse {
 }
 
 export interface Operation {
-  id: string;
+  id?: string;
   type: string;
-  description: string;
+  objective?: string;
+  description?: string;
+  search_queries?: string[];
+  search_options?: any;
+  expected_deliverables?: any; // This should be an object, not a JSON string
   params?: any;
   [key: string]: any;
 }
@@ -31,6 +35,7 @@ export interface SearchRequest {
   operation: Operation;
   site_id?: string;
   userId?: string;
+  command_id?: string;
 }
 
 export interface SearchResponse {
@@ -42,10 +47,11 @@ export interface SearchResponse {
 
 export interface AnalysisRequest {
   site_id: string;
-  operations_results: any[];
   research_topic: string;
   userId?: string;
   additionalData?: any;
+  deliverables?: any;
+  command_id?: string;
 }
 
 export interface AnalysisResponse {
@@ -79,6 +85,22 @@ export async function deepResearchActivity(
 
     const operations = response.data?.operations || response.data?.results || [];
     
+    // Fix parsing issue: ensure expected_deliverables is an object, not a JSON string
+    if (Array.isArray(operations)) {
+      operations.forEach((operation: any, index: number) => {
+        if (operation.expected_deliverables && typeof operation.expected_deliverables === 'string') {
+          try {
+            console.log(`🔧 Parsing expected_deliverables from JSON string for operation ${index + 1}`);
+            operation.expected_deliverables = JSON.parse(operation.expected_deliverables);
+            console.log(`✅ Successfully parsed expected_deliverables for operation ${index + 1}`);
+          } catch (parseError) {
+            console.error(`⚠️ Failed to parse expected_deliverables for operation ${index + 1}:`, parseError);
+            // Keep the original string value if parsing fails
+          }
+        }
+      });
+    }
+    
     console.log(`✅ Deep research started successfully`);
     console.log(`📊 Generated ${operations.length} operations`);
     
@@ -86,13 +108,31 @@ export async function deepResearchActivity(
       console.log(`🔍 Operations:`);
       operations.forEach((op: Operation, index: number) => {
         console.log(`   ${index + 1}. ${op.type || op.description || `Operation ${index + 1}`}`);
+        // Log the type of expected_deliverables to verify it's now an object
+        if (op.expected_deliverables) {
+          console.log(`      - expected_deliverables type: ${typeof op.expected_deliverables}`);
+        }
       });
+    }
+
+    // Flatten the data structure if it has nested data.data
+    let flattenedData = response.data;
+    if (response.data && response.data.data && typeof response.data.data === 'object') {
+      console.log(`🔄 Flattening nested data.data structure to avoid unnecessary nesting`);
+      flattenedData = {
+        ...response.data,
+        ...response.data.data, // Merge the nested data to the top level
+        // Remove the nested data property to avoid duplication
+        data: undefined
+      };
+      // Clean up undefined values
+      delete flattenedData.data;
     }
 
     return {
       success: true,
       operations,
-      data: response.data
+      data: flattenedData
     };
 
   } catch (error) {
@@ -136,7 +176,8 @@ export async function searchOperationActivity(
     const requestBody = {
       operation: request.operation,  // Single operation object, NOT an array
       ...(request.site_id && { site_id: request.site_id }),
-      ...(request.userId && { userId: request.userId })
+      ...(request.userId && { userId: request.userId }),
+      ...(request.command_id && { command_id: request.command_id })
     };
 
     console.log(`📤 Final request body being sent to API:`, JSON.stringify(requestBody, null, 2));
@@ -156,9 +197,23 @@ export async function searchOperationActivity(
     console.log(`✅ Search operation completed successfully`);
     console.log(`📊 Found ${Array.isArray(results) ? results.length : 'N/A'} results`);
 
+    // Flatten the data structure if it has nested data.data
+    let flattenedData = response.data;
+    if (response.data && response.data.data && typeof response.data.data === 'object') {
+      console.log(`🔄 Flattening nested data.data structure to avoid unnecessary nesting`);
+      flattenedData = {
+        ...response.data,
+        ...response.data.data, // Merge the nested data to the top level
+        // Remove the nested data property to avoid duplication
+        data: undefined
+      };
+      // Clean up undefined values
+      delete flattenedData.data;
+    }
+
     return {
       success: true,
-      data: response.data,
+      data: flattenedData,
       results
     };
 
@@ -180,9 +235,12 @@ export async function dataAnalysisActivity(
   request: AnalysisRequest
 ): Promise<AnalysisResponse> {
   console.log(`📊 Performing data analysis for topic: ${request.research_topic}, site: ${request.site_id}`);
-  console.log(`📋 Analysis request with ${request.operations_results.length} operation results`);
+  console.log(`📋 Analysis request with command_id: ${request.command_id}`);
 
   try {
+    // Send the complete request including command_id if present
+    console.log(`📤 Final analysis request being sent to API:`, JSON.stringify(request, null, 2));
+    
     const response = await apiService.post('/api/agents/dataAnalyst/analysis', request);
 
     if (!response.success) {
@@ -207,12 +265,26 @@ export async function dataAnalysisActivity(
       console.log(`💡 Generated ${recommendations.length} recommendations`);
     }
 
+    // Flatten the data structure if it has nested data.data
+    let flattenedData = response.data;
+    if (response.data && response.data.data && typeof response.data.data === 'object') {
+      console.log(`🔄 Flattening nested data.data structure to avoid unnecessary nesting`);
+      flattenedData = {
+        ...response.data,
+        ...response.data.data, // Merge the nested data to the top level
+        // Remove the nested data property to avoid duplication
+        data: undefined
+      };
+      // Clean up undefined values
+      delete flattenedData.data;
+    }
+
     return {
       success: true,
       analysis,
       insights,
       recommendations,
-      data: response.data
+      data: flattenedData
     };
 
   } catch (error) {

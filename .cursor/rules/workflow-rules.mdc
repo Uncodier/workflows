@@ -10,3 +10,10 @@ nunca edites directo dist, siempre hay que trabajar sobre el código pre compila
 en las actividades que consumane el api externa del proyecto, siempre verifica que las repuestas tengan un success (true o false) error (declarado o null) y normalmente un data (con la respuesta del api), así puedes fallar o pasar la actividad correctamente.
 
 Hay un archivo específico para el worker llamado worker-workflows.ts donde se exportan  nuestros workflows, siempre que crees uno nuevo añadelo para que se exporte.
+
+los workflows deben tener una estructura :
+success (true o false)
+data (con toda la respuesta) del workflow
+error, null o json con el error 
+
+cuidado de no anidar objetos data entre sub workflows o actividades, pues genera problemas de acoplamiento.
