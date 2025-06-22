@@ -4,7 +4,7 @@ exports.leadResearchWorkflow = leadResearchWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const deepResearchWorkflow_1 = require("./deepResearchWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, updateLeadActivity, upsertCompanyActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, updateLeadActivity, upsertCompanyActivity, leadSegmentationActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes', // Reasonable timeout for lead research
     retry: {
         maximumAttempts: 3,
@@ -15,9 +15,9 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, g
  */
 function generateLeadResearchQuery(lead) {
     const queryParts = [];
+    let companyName = 'Unknown Company';
     // Información básica del lead
     if (lead.company || lead.company_name) {
-        let companyName = 'Unknown Company';
         // Extraer el nombre de la empresa de diferentes estructuras posibles
         if (typeof lead.company === 'object' && lead.company !== null) {
             // Si company es un objeto, buscar propiedades comunes
@@ -57,64 +57,291 @@ function generateLeadResearchQuery(lead) {
     if (lead.name) {
         queryParts.push(`contacto: ${lead.name}`);
     }
+    // Construir el query con enfoque en investigación profunda de persona y empresa
+    const personName = lead.name || lead.email || 'prospecto';
+    const hasCompany = companyName !== 'Unknown Company' && companyName.trim() !== '';
     // Si no hay información específica, usar un query genérico
     if (queryParts.length === 0) {
-        const identifier = lead.email || lead.name || lead.id;
-        return `investigación de prospecto ${identifier} - análisis de oportunidades comerciales`;
+        return `Make deep research about this person: ${personName} - comprehensive analysis of professional background, career history, social media presence (LinkedIn, Twitter, Facebook, Instagram, YouTube, GitHub), business opportunities, and market positioning`;
     }
-    // Combinar todas las partes del query
+    // Combinar todas las partes del query con enfoque específico
     const baseQuery = queryParts.join(', ');
-    return `investigación profunda sobre prospecto: ${baseQuery} - análisis de mercado, competencia, oportunidades de negocio y estrategias de acercamiento`;
+    if (hasCompany) {
+        return `Make deep research about this person: ${personName} and the company he works from: ${companyName}. Research context: ${baseQuery}. Comprehensive analysis including: professional background, career trajectory, company information, industry analysis, competitive landscape, business opportunities, social media presence (LinkedIn, Twitter, Facebook, Instagram, YouTube, GitHub), market positioning, and strategic approach recommendations`;
+    }
+    else {
+        return `Make deep research about this person: ${personName}. Research context: ${baseQuery}. Comprehensive analysis including: professional background, career trajectory, industry analysis, business opportunities, social media presence (LinkedIn, Twitter, Facebook, Instagram, YouTube, GitHub), market positioning, and strategic approach recommendations`;
+    }
 }
 /**
- * Genera una estructura de deliverables basada en la información actual del lead
- * Esto define qué campos esperamos que el deep research llene o actualice
+ * Genera una estructura de deliverables basada en lo que queremos completar del lead
+ * NO prellenamos datos existentes - solo definimos la estructura de campos a completar
  * Retorna estructura separada en lead y company para mejor procesamiento
  */
 function generateLeadDeliverables(lead) {
-    return {
-        // Estructura para información del lead
-        lead: {
-            // Información básica del lead que puede ser completada/mejorada
-            name: lead.name || null,
-            job_title: lead.job_title || lead.position || null,
-            position: lead.position || lead.job_title || null,
-            industry: lead.industry || null,
-            location: lead.location || null,
-            linkedin_url: lead.linkedin_url || null,
-            phone: lead.phone || null,
-            // Información profesional que puede ser enriquecida
-            decision_maker_info: lead.decision_maker_info || null,
-            pain_points: lead.pain_points || null,
-            business_priorities: lead.business_priorities || null,
-            recent_news: lead.recent_news || null,
-            // Metadatos de investigación
-            research_timestamp: new Date().toISOString(),
-            research_source: 'lead_research_workflow',
-            // Campos que NO deben ser sobrescritos (para referencia de la API)
-            _preserve_fields: ['email', 'id', 'site_id', 'created_at', 'updated_at', 'user_id']
-        },
-        // Estructura para información de la empresa (se usará la estructura de deepResearchWorkflow)
-        // Esta será completada por el deepResearchWorkflow usando generateCompanyStructure()
-        company: {
-            // Información básica que tenemos del lead
-            name: lead.company || lead.company_name || null,
-            website: lead.website || null,
-            industry: lead.industry || null,
-            size: lead.company_size || null,
-            // Campos que pueden ser enriquecidos por la investigación
-            description: lead.company_description || null,
-            founded: lead.company_founded || null,
-            employees_count: lead.company_employees || null,
-            annual_revenue: lead.company_revenue || null,
-            tech_stack: lead.company_technologies || null,
-            competitors: lead.competitors || null,
-            // Metadatos de investigación
-            _preserve_fields: ['id', 'created_at', 'updated_at'],
-            _research_timestamp: new Date().toISOString(),
-            _research_source: 'lead_research_workflow'
-        }
+    const deliverables = {
+        // Estructura para información del lead - SOLO campos que queremos completar/actualizar
+        lead: {},
+        // Estructura para información de la empresa - SOLO campos que queremos completar/actualizar  
+        company: {}
     };
+    // Para el LEAD: Solo agregar campos que NO tenemos o que están incompletos
+    if (!lead.name || lead.name.trim() === '') {
+        deliverables.lead.name = null; // Buscar nombre si no lo tenemos
+    }
+    if (!lead.position || lead.position.trim() === '') {
+        deliverables.lead.position = null; // Buscar posición si no la tenemos
+    }
+    if (!lead.phone || lead.phone.trim() === '') {
+        deliverables.lead.phone = null; // Buscar teléfono si no lo tenemos
+    }
+    if (!lead.language || lead.language.trim() === '') {
+        deliverables.lead.language = null; // Detectar idioma si no lo tenemos
+    }
+    if (!lead.birthday) {
+        deliverables.lead.birthday = null; // Buscar fecha de cumpleaños si no la tenemos
+    }
+    // Redes sociales: Solo buscar si no las tenemos o están incompletas
+    const currentSocialNetworks = lead.social_networks || {};
+    const socialNetworksToFind = {};
+    const socialPlatforms = ['linkedin', 'twitter', 'facebook', 'instagram', 'youtube', 'github'];
+    socialPlatforms.forEach(platform => {
+        if (!currentSocialNetworks[platform] || currentSocialNetworks[platform].trim() === '') {
+            socialNetworksToFind[platform] = null;
+        }
+    });
+    // Solo agregar social_networks si hay plataformas por completar
+    if (Object.keys(socialNetworksToFind).length > 0) {
+        deliverables.lead.social_networks = socialNetworksToFind;
+    }
+    // Siempre buscar enriquecer las notas con información de investigación
+    deliverables.lead.notes = null; // Para agregar información de investigación
+    // Para la EMPRESA: Solo agregar campos que NO tenemos o necesitamos completar
+    const hasCompanyName = lead.company || lead.company_name;
+    if (hasCompanyName) {
+        // Solo buscar información de empresa si tenemos al menos el nombre
+        if (!lead.company_description) {
+            deliverables.company.description = null;
+        }
+        if (!lead.industry) {
+            deliverables.company.industry = null;
+        }
+        if (!lead.company_size) {
+            deliverables.company.size = null;
+        }
+        if (!lead.website) {
+            deliverables.company.website = null;
+        }
+        // Campos adicionales que usualmente no tenemos
+        deliverables.company.founded = null;
+        deliverables.company.employees_count = null;
+        deliverables.company.annual_revenue = null;
+        deliverables.company.phone = null;
+        deliverables.company.email = null;
+        deliverables.company.linkedin_url = null;
+        deliverables.company.social_media = {};
+        deliverables.company.key_people = [];
+        deliverables.company.funding_info = {};
+        deliverables.company.business_model = null;
+        deliverables.company.products_services = [];
+        deliverables.company.tech_stack = null;
+        deliverables.company.competitor_info = {};
+        deliverables.company.address = {};
+        // Asegurar que el nombre de la empresa esté disponible para contexto
+        const companyName = typeof lead.company === 'object' && lead.company !== null ?
+            (lead.company.name || lead.company.company_name || lead.company.title) :
+            (typeof lead.company === 'string' ? lead.company : lead.company_name);
+        if (companyName && companyName.trim() !== '') {
+            deliverables.company.name = companyName; // Para contexto, no para completar
+        }
+    }
+    return deliverables;
+}
+/**
+ * Mapea un valor de industry libre a uno de los valores válidos de la base de datos
+ */
+function mapIndustryToValidValue(industryValue) {
+    if (!industryValue || typeof industryValue !== 'string') {
+        return null;
+    }
+    // Lista de valores válidos según el schema de la base de datos
+    const validIndustries = [
+        'technology', 'finance', 'healthcare', 'education', 'retail',
+        'manufacturing', 'services', 'hospitality', 'media', 'real_estate',
+        'logistics', 'nonprofit', 'other'
+    ];
+    // Normalizar el valor de entrada (lowercase y trim)
+    const normalizedInput = industryValue.toLowerCase().trim();
+    // Mapeo de patrones comunes a valores válidos
+    const industryMappings = {
+        // Technology variations
+        'software': 'technology',
+        'tech': 'technology',
+        'it': 'technology',
+        'saas': 'technology',
+        'digital': 'technology',
+        'programming': 'technology',
+        'development': 'technology',
+        'computing': 'technology',
+        // Finance variations
+        'banking': 'finance',
+        'financial': 'finance',
+        'investment': 'finance',
+        'fintech': 'finance',
+        // Healthcare variations
+        'medical': 'healthcare',
+        'pharma': 'healthcare',
+        'pharmaceutical': 'healthcare',
+        'health': 'healthcare',
+        // Education variations
+        'learning': 'education',
+        'training': 'education',
+        'academic': 'education',
+        'university': 'education',
+        // Media variations
+        'marketing': 'media',
+        'advertising': 'media',
+        'content': 'media',
+        'publishing': 'media',
+        'social media': 'media',
+        'digital marketing': 'media',
+        // Services variations
+        'consulting': 'services',
+        'professional services': 'services',
+        'business services': 'services',
+        'support': 'services',
+        // Sports and other specific cases
+        'cycling': 'other',
+        'sports': 'other',
+        'entertainment': 'media',
+        'entrepreneurship': 'other',
+        'startup': 'technology',
+        // Real estate variations
+        'property': 'real_estate',
+        'real estate': 'real_estate',
+        // Manufacturing variations
+        'production': 'manufacturing',
+        'industrial': 'manufacturing',
+        // Retail variations
+        'ecommerce': 'retail',
+        'e-commerce': 'retail',
+        'sales': 'retail',
+        // Logistics variations
+        'shipping': 'logistics',
+        'transportation': 'logistics',
+        'supply chain': 'logistics',
+        // Hospitality variations
+        'hotel': 'hospitality',
+        'tourism': 'hospitality',
+        'travel': 'hospitality',
+        'restaurant': 'hospitality'
+    };
+    // Si el valor normalizado ya es válido, retornarlo
+    if (validIndustries.includes(normalizedInput)) {
+        return normalizedInput;
+    }
+    // Buscar coincidencia exacta en el mapeo
+    if (industryMappings[normalizedInput]) {
+        return industryMappings[normalizedInput];
+    }
+    // Manejar casos con múltiples industrias separadas por comas
+    if (normalizedInput.includes(',')) {
+        const industries = normalizedInput.split(',').map(i => i.trim());
+        // Buscar la primera industria que tenga un mapeo válido
+        for (const industry of industries) {
+            // Buscar coincidencia exacta
+            if (industryMappings[industry]) {
+                console.log(`🔧 Found mapping for "${industry}" in multi-industry string: ${industryMappings[industry]}`);
+                return industryMappings[industry];
+            }
+            // Buscar coincidencias parciales
+            for (const [pattern, mappedValue] of Object.entries(industryMappings)) {
+                if (industry.includes(pattern)) {
+                    console.log(`🔧 Found partial mapping for "${industry}" (contains "${pattern}"): ${mappedValue}`);
+                    return mappedValue;
+                }
+            }
+        }
+    }
+    // Buscar coincidencias parciales en el input completo
+    for (const [pattern, mappedValue] of Object.entries(industryMappings)) {
+        if (normalizedInput.includes(pattern)) {
+            console.log(`🔧 Found partial mapping for "${normalizedInput}" (contains "${pattern}"): ${mappedValue}`);
+            return mappedValue;
+        }
+    }
+    // Si no hay coincidencias, retornar 'other' como fallback
+    console.log(`🔧 No industry mapping found for "${industryValue}", using fallback: other`);
+    return 'other';
+}
+/**
+ * Limpia y valida los campos de company que tienen restricciones de check en la base de datos
+ */
+function cleanCompanyDataForDatabase(companyData) {
+    const cleanedData = { ...companyData };
+    // Limpiar industry
+    if (cleanedData.industry) {
+        const originalIndustry = cleanedData.industry;
+        cleanedData.industry = mapIndustryToValidValue(originalIndustry);
+        if (originalIndustry !== cleanedData.industry) {
+            console.log(`🔧 Mapped industry from "${originalIndustry}" to "${cleanedData.industry}"`);
+        }
+    }
+    // Limpiar size (debe ser uno de los valores válidos)
+    if (cleanedData.size) {
+        const validSizes = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1001-5000', '5001-10000', '10001+'];
+        if (!validSizes.includes(cleanedData.size)) {
+            console.log(`⚠️ Invalid company size "${cleanedData.size}", setting to null`);
+            cleanedData.size = null;
+        }
+    }
+    // Limpiar annual_revenue (debe ser uno de los valores válidos)
+    if (cleanedData.annual_revenue) {
+        const validRevenues = ['<1M', '1M-10M', '10M-50M', '50M-100M', '100M-500M', '500M-1B', '>1B'];
+        if (!validRevenues.includes(cleanedData.annual_revenue)) {
+            console.log(`⚠️ Invalid annual revenue "${cleanedData.annual_revenue}", setting to null`);
+            cleanedData.annual_revenue = null;
+        }
+    }
+    // Limpiar legal_structure (debe ser uno de los valores válidos)
+    if (cleanedData.legal_structure) {
+        const validStructures = [
+            'sole_proprietorship', 'partnership', 'llc', 'corporation', 'nonprofit', 'cooperative',
+            's_corp', 'c_corp', 'lp', 'llp', 'sa', 'srl', 'gmbh', 'ltd', 'plc', 'bv', 'nv', 'other'
+        ];
+        if (!validStructures.includes(cleanedData.legal_structure)) {
+            console.log(`⚠️ Invalid legal structure "${cleanedData.legal_structure}", setting to null`);
+            cleanedData.legal_structure = null;
+        }
+    }
+    // Limpiar business_model (debe ser uno de los valores válidos)
+    if (cleanedData.business_model) {
+        const validModels = ['b2b', 'b2c', 'b2b2c', 'marketplace', 'saas', 'ecommerce', 'other'];
+        if (!validModels.includes(cleanedData.business_model)) {
+            console.log(`⚠️ Invalid business model "${cleanedData.business_model}", setting to null`);
+            cleanedData.business_model = null;
+        }
+    }
+    // Limpiar remote_policy (debe ser uno de los valores válidos)
+    if (cleanedData.remote_policy) {
+        const validPolicies = ['remote_first', 'hybrid', 'office_only', 'flexible'];
+        if (!validPolicies.includes(cleanedData.remote_policy)) {
+            console.log(`⚠️ Invalid remote policy "${cleanedData.remote_policy}", setting to null`);
+            cleanedData.remote_policy = null;
+        }
+    }
+    // Validar sustainability_score (debe estar entre 0 y 100)
+    if (cleanedData.sustainability_score !== null && cleanedData.sustainability_score !== undefined) {
+        const score = parseInt(cleanedData.sustainability_score);
+        if (isNaN(score) || score < 0 || score > 100) {
+            console.log(`⚠️ Invalid sustainability score "${cleanedData.sustainability_score}", setting to null`);
+            cleanedData.sustainability_score = null;
+        }
+        else {
+            cleanedData.sustainability_score = score;
+        }
+    }
+    return cleanedData;
 }
 /**
  * Workflow to execute lead research using deepResearchWorkflow
@@ -270,17 +497,65 @@ async function leadResearchWorkflow(options) {
                     try {
                         // Prepare lead update data
                         const leadUpdateData = {};
-                        // Add lead deliverables (excluding preserved fields)
+                        // Add lead deliverables
                         if (leadDeliverablesToUpdate) {
-                            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                            const { _preserve_fields, ...safeLeadDeliverables } = leadDeliverablesToUpdate;
+                            const rawLeadDeliverables = leadDeliverablesToUpdate;
+                            // Debug: Log social_networks specifically
+                            if (rawLeadDeliverables.social_networks) {
+                                console.log(`🔍 Found social_networks in deliverables:`, JSON.stringify(rawLeadDeliverables.social_networks, null, 2));
+                            }
+                            else {
+                                console.log(`⚠️ No social_networks found in deliverables`);
+                            }
+                            // Define campos que SÍ existen en la tabla leads según database.md
+                            const validLeadFields = [
+                                'id', 'name', 'email', 'position', 'segment_id', 'status', 'notes', 'last_contact',
+                                'site_id', 'user_id', 'created_at', 'updated_at', 'phone', 'origin', 'social_networks',
+                                'address', 'company', 'subscription', 'birthday', 'campaign_id', 'command_id',
+                                'language', 'company_id', 'attribution', 'metadata'
+                            ];
+                            // Separar campos válidos de los que van a metadata
+                            const safeLeadDeliverables = {};
+                            const metadataFields = {};
+                            Object.keys(rawLeadDeliverables).forEach(key => {
+                                if (validLeadFields.includes(key)) {
+                                    safeLeadDeliverables[key] = rawLeadDeliverables[key];
+                                    // Debug específico para social_networks
+                                    if (key === 'social_networks') {
+                                        console.log(`✅ Adding social_networks to safeLeadDeliverables:`, JSON.stringify(rawLeadDeliverables[key], null, 2));
+                                    }
+                                }
+                                else {
+                                    metadataFields[key] = rawLeadDeliverables[key];
+                                    console.log(`📦 Moving field "${key}" to metadata (not in validLeadFields)`);
+                                }
+                            });
+                            // Add safe fields that exist in the table
                             Object.assign(leadUpdateData, safeLeadDeliverables);
+                            // Debug: Verificar que social_networks esté en leadUpdateData
+                            if (leadUpdateData.social_networks) {
+                                console.log(`✅ social_networks confirmed in leadUpdateData:`, JSON.stringify(leadUpdateData.social_networks, null, 2));
+                            }
+                            else {
+                                console.log(`❌ social_networks NOT found in leadUpdateData`);
+                            }
+                            // Handle metadata fields - merge with existing metadata
+                            if (Object.keys(metadataFields).length > 0) {
+                                leadUpdateData.metadata = {
+                                    ...leadInfo.metadata,
+                                    ...metadataFields,
+                                    // Agregar timestamp de investigación
+                                    research_timestamp: new Date().toISOString(),
+                                    research_source: 'lead_research_workflow'
+                                };
+                                console.log(`📦 Adding metadata fields to lead:`, Object.keys(metadataFields));
+                            }
                             console.log(`📦 Adding lead deliverables to update:`, Object.keys(safeLeadDeliverables));
                         }
-                        // Add analysis to metadata
+                        // Add analysis to metadata (merge with any existing metadata from deliverables)
                         if (analysisForMetadata) {
                             leadUpdateData.metadata = {
-                                ...leadInfo.metadata,
+                                ...leadUpdateData.metadata || leadInfo.metadata,
                                 research_analysis: analysisForMetadata,
                                 last_research_date: new Date().toISOString(),
                                 research_workflow_id: workflowId
@@ -320,17 +595,48 @@ async function leadResearchWorkflow(options) {
                     console.log(`🔄 Step 5b: Updating company with research results...`);
                     try {
                         // Clean up company data (remove metadata fields)
-                        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                        const { _preserve_fields, _research_timestamp, _research_source, ...cleanCompanyData } = companyDeliverablesToUpdate;
+                        const rawCompanyData = companyDeliverablesToUpdate;
+                        // Define campos que SÍ existen en la tabla companies según database.md
+                        const validCompanyFields = [
+                            'id', 'name', 'website', 'industry', 'size', 'annual_revenue', 'founded', 'description',
+                            'address', 'created_at', 'updated_at', 'legal_name', 'tax_id', 'tax_country',
+                            'registration_number', 'vat_number', 'legal_structure', 'phone', 'email', 'linkedin_url',
+                            'employees_count', 'is_public', 'stock_symbol', 'parent_company_id', 'logo_url',
+                            'cover_image_url', 'social_media', 'key_people', 'funding_info', 'certifications',
+                            'awards', 'business_model', 'products_services', 'tech_stack', 'languages',
+                            'business_hours', 'video_url', 'press_releases', 'partnerships', 'competitor_info',
+                            'sustainability_score', 'diversity_info', 'remote_policy', 'office_locations',
+                            'market_cap', 'last_funding_date', 'ipo_date', 'acquisition_date', 'acquired_by_id'
+                        ];
+                        // Separar campos válidos de los que van a metadata
+                        const cleanCompanyData = {};
+                        const metadataFields = {};
+                        Object.keys(rawCompanyData).forEach(key => {
+                            if (validCompanyFields.includes(key)) {
+                                cleanCompanyData[key] = rawCompanyData[key];
+                            }
+                            else {
+                                metadataFields[key] = rawCompanyData[key];
+                            }
+                        });
+                        // Si hay campos adicionales, añadirlos a metadata
+                        if (Object.keys(metadataFields).length > 0) {
+                            // Agregar metadata al objeto de company, no como campo separado
+                            // Ya que companies no tiene campo metadata según el schema
+                            console.log(`⚠️ Found ${Object.keys(metadataFields).length} fields not in companies schema: ${Object.keys(metadataFields).join(', ')}`);
+                            console.log(`📋 These fields will be skipped: ${Object.keys(metadataFields).join(', ')}`);
+                        }
                         // If lead has company_id, use it for company identification
                         const companyId = leadInfo.company_id;
                         if (companyId) {
                             cleanCompanyData.id = companyId;
                             console.log(`🔗 Using company_id from lead: ${companyId}`);
                         }
-                        console.log(`🏢 Upserting company: ${cleanCompanyData.name}`);
-                        console.log(`📊 Company fields to update: ${Object.keys(cleanCompanyData).join(', ')}`);
-                        const companyUpsertResult = await upsertCompanyActivity(cleanCompanyData);
+                        // Aplicar limpieza adicional para campos con restricciones de check
+                        const finalCleanCompanyData = cleanCompanyDataForDatabase(cleanCompanyData);
+                        console.log(`🏢 Upserting company: ${finalCleanCompanyData.name}`);
+                        console.log(`📊 Company fields to update: ${Object.keys(finalCleanCompanyData).join(', ')}`);
+                        const companyUpsertResult = await upsertCompanyActivity(finalCleanCompanyData);
                         if (companyUpsertResult.success) {
                             console.log(`✅ Company updated successfully: ${companyUpsertResult.company.name}`);
                             console.log(`🆔 Company ID: ${companyUpsertResult.company.id}`);
@@ -351,6 +657,54 @@ async function leadResearchWorkflow(options) {
                                 }
                                 catch (companyIdUpdateError) {
                                     console.error(`⚠️ Exception updating lead with company_id:`, companyIdUpdateError);
+                                }
+                            }
+                            // Si hay campos adicionales, los guardamos en la metadata del lead ya que companies no tiene metadata
+                            if (Object.keys(metadataFields).length > 0) {
+                                try {
+                                    const leadMetadataUpdate = await updateLeadActivity({
+                                        lead_id: lead_id,
+                                        updateData: {
+                                            metadata: {
+                                                ...leadInfo.metadata,
+                                                company_additional_fields: metadataFields,
+                                                company_metadata_updated: new Date().toISOString()
+                                            }
+                                        },
+                                        safeUpdate: true
+                                    });
+                                    if (leadMetadataUpdate.success) {
+                                        console.log(`✅ Additional company fields saved to lead metadata: ${Object.keys(metadataFields).join(', ')}`);
+                                    }
+                                    else {
+                                        console.log(`⚠️ Failed to save additional company fields to lead metadata: ${leadMetadataUpdate.error}`);
+                                    }
+                                }
+                                catch (metadataError) {
+                                    console.log(`⚠️ Exception saving additional company fields to lead metadata:`, metadataError);
+                                }
+                            }
+                            // Preservar información original de industria si fue mapeada
+                            if (rawCompanyData.industry && rawCompanyData.industry !== finalCleanCompanyData.industry) {
+                                try {
+                                    const originalIndustryUpdate = await updateLeadActivity({
+                                        lead_id: lead_id,
+                                        updateData: {
+                                            metadata: {
+                                                ...leadInfo.metadata,
+                                                company_original_industry: rawCompanyData.industry,
+                                                company_mapped_industry: finalCleanCompanyData.industry,
+                                                industry_mapping_timestamp: new Date().toISOString()
+                                            }
+                                        },
+                                        safeUpdate: true
+                                    });
+                                    if (originalIndustryUpdate.success) {
+                                        console.log(`✅ Original industry information preserved in lead metadata`);
+                                    }
+                                }
+                                catch (industryError) {
+                                    console.log(`⚠️ Exception preserving original industry info:`, industryError);
                                 }
                             }
                         }
@@ -398,6 +752,39 @@ async function leadResearchWorkflow(options) {
             errors.push(`Deep research workflow error: ${errorMessage}`);
             // No lanzamos error aquí para que continúe con los resultados parciales
         }
+        // Step 6: Execute lead segmentation after research and updates are complete
+        let leadSegmentationResult = null;
+        console.log(`🎯 Step 6: Executing lead segmentation...`);
+        try {
+            const segmentationResult = await leadSegmentationActivity({
+                site_id: site_id,
+                lead_id: lead_id,
+                userId: options.userId || site.user_id,
+                additionalData: {
+                    ...options.additionalData,
+                    leadInfo: leadInfo,
+                    siteName: siteName,
+                    siteUrl: siteUrl,
+                    researchCompleted: true,
+                    deepResearchCompleted: !!deepResearchResult,
+                    workflowId: workflowId
+                }
+            });
+            if (segmentationResult.success) {
+                leadSegmentationResult = segmentationResult;
+                console.log(`✅ Lead segmentation completed successfully`);
+                console.log(`🎯 Segmentation data:`, segmentationResult.segmentation ? 'Available' : 'Not available');
+            }
+            else {
+                console.error(`❌ Lead segmentation failed: ${segmentationResult.error}`);
+                errors.push(`Lead segmentation error: ${segmentationResult.error}`);
+            }
+        }
+        catch (segmentationError) {
+            const segmentationErrorMessage = segmentationError instanceof Error ? segmentationError.message : String(segmentationError);
+            console.error(`❌ Lead segmentation exception: ${segmentationErrorMessage}`);
+            errors.push(`Lead segmentation exception: ${segmentationErrorMessage}`);
+        }
         const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         // Deep research result is now already cleaned by the activities - no need for complex cleaning
         let cleanedDeepResearchResult = null;
@@ -429,6 +816,7 @@ async function leadResearchWorkflow(options) {
             leadInfo,
             deepResearchResult: cleanedDeepResearchResult,
             researchQuery,
+            leadSegmentationResult,
             data: cleanedDeepResearchResult, // Use cleaned version instead of raw deepResearchResult
             errors,
             executionTime,
@@ -444,6 +832,10 @@ async function leadResearchWorkflow(options) {
             console.log(`   - Operation results: ${cleanedDeepResearchResult.operationResults.length}`);
             console.log(`   - Total insights: ${cleanedDeepResearchResult.insights.length}`);
             console.log(`   - Total recommendations: ${cleanedDeepResearchResult.recommendations.length}`);
+        }
+        console.log(`   - Lead segmentation executed: ${leadSegmentationResult ? 'Yes' : 'No'}`);
+        if (leadSegmentationResult?.segmentation) {
+            console.log(`   - Segmentation data: Available`);
         }
         // Update cron status to indicate successful completion
         await saveCronStatusActivity({
@@ -516,6 +908,7 @@ async function leadResearchWorkflow(options) {
             leadInfo,
             deepResearchResult: cleanedDeepResearchResult,
             researchQuery,
+            leadSegmentationResult: null, // Set to null on error
             data: cleanedDeepResearchResult,
             errors: [...errors, errorMessage],
             executionTime,

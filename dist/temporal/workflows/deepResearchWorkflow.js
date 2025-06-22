@@ -10,40 +10,52 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, g
     },
 });
 /**
+ * Helper function to safely extract string values, handling empty objects
+ */
+const safeString = (value) => {
+    if (!value)
+        return null;
+    if (typeof value === 'string' && value.trim())
+        return value.trim();
+    if (typeof value === 'object' && Object.keys(value).length === 0)
+        return null;
+    return typeof value === 'string' ? value : null;
+};
+/**
  * Generates a company structure based on the database schema
  */
 function generateCompanyStructure(existingCompany) {
     return {
         // Basic required fields
-        name: existingCompany?.name || null,
+        name: safeString(existingCompany?.name),
         // Basic optional fields
-        website: existingCompany?.website || null,
-        industry: existingCompany?.industry || null,
-        size: existingCompany?.size || null,
-        annual_revenue: existingCompany?.annual_revenue || null,
-        founded: existingCompany?.founded || null,
-        description: existingCompany?.description || null,
+        website: safeString(existingCompany?.website),
+        industry: safeString(existingCompany?.industry),
+        size: safeString(existingCompany?.size),
+        annual_revenue: safeString(existingCompany?.annual_revenue),
+        founded: safeString(existingCompany?.founded),
+        description: safeString(existingCompany?.description),
         address: existingCompany?.address || {},
         // Legal information
-        legal_name: existingCompany?.legal_name || null,
-        tax_id: existingCompany?.tax_id || null,
-        tax_country: existingCompany?.tax_country || null,
-        registration_number: existingCompany?.registration_number || null,
-        vat_number: existingCompany?.vat_number || null,
-        legal_structure: existingCompany?.legal_structure || null,
+        legal_name: safeString(existingCompany?.legal_name),
+        tax_id: safeString(existingCompany?.tax_id),
+        tax_country: safeString(existingCompany?.tax_country),
+        registration_number: safeString(existingCompany?.registration_number),
+        vat_number: safeString(existingCompany?.vat_number),
+        legal_structure: safeString(existingCompany?.legal_structure),
         // Contact information
-        phone: existingCompany?.phone || null,
-        email: existingCompany?.email || null,
-        linkedin_url: existingCompany?.linkedin_url || null,
+        phone: safeString(existingCompany?.phone),
+        email: safeString(existingCompany?.email),
+        linkedin_url: safeString(existingCompany?.linkedin_url),
         // Company details
         employees_count: existingCompany?.employees_count || null,
         is_public: existingCompany?.is_public || false,
-        stock_symbol: existingCompany?.stock_symbol || null,
+        stock_symbol: safeString(existingCompany?.stock_symbol),
         parent_company_id: existingCompany?.parent_company_id || null,
         // Media and branding
-        logo_url: existingCompany?.logo_url || null,
-        cover_image_url: existingCompany?.cover_image_url || null,
-        video_url: existingCompany?.video_url || null,
+        logo_url: safeString(existingCompany?.logo_url),
+        cover_image_url: safeString(existingCompany?.cover_image_url),
+        video_url: safeString(existingCompany?.video_url),
         // Social and business information
         social_media: existingCompany?.social_media || {},
         key_people: existingCompany?.key_people || [],
@@ -51,7 +63,7 @@ function generateCompanyStructure(existingCompany) {
         certifications: existingCompany?.certifications || [],
         awards: existingCompany?.awards || [],
         // Business model and operations
-        business_model: existingCompany?.business_model || null,
+        business_model: safeString(existingCompany?.business_model),
         products_services: existingCompany?.products_services || [],
         tech_stack: existingCompany?.tech_stack || [],
         languages: existingCompany?.languages || ['en'],
@@ -63,7 +75,7 @@ function generateCompanyStructure(existingCompany) {
         sustainability_score: existingCompany?.sustainability_score || null,
         diversity_info: existingCompany?.diversity_info || {},
         // Work and location information
-        remote_policy: existingCompany?.remote_policy || null,
+        remote_policy: safeString(existingCompany?.remote_policy),
         office_locations: existingCompany?.office_locations || [],
         // Financial information
         market_cap: existingCompany?.market_cap || null,
@@ -127,13 +139,11 @@ async function deepResearchWorkflow(options) {
     const errors = [];
     let operations = [];
     const operationResults = [];
-    let analysis = null;
     let insights = [];
     let recommendations = [];
     let research_analysis = null; // Initialize at workflow level
     let siteName = '';
     let siteUrl = '';
-    let data = null;
     let companyInfo = null;
     let enhancedDeliverables = null; // Initialize at workflow level
     try {
@@ -179,11 +189,16 @@ async function deepResearchWorkflow(options) {
             console.log(`📋 Using pre-structured deliverables from leadResearchWorkflow`);
             const companyStructure = generateCompanyStructure(companyInfo);
             // Merge the existing company info with the structured company template
+            // Also check if lead has company_name that should be used for company name
+            const leadCompanyName = safeString(options.additionalData?.leadInfo?.company_name);
+            const leadCompany = options.deliverables.company || {};
             enhancedDeliverables = {
                 lead: options.deliverables.lead,
                 company: {
                     ...companyStructure,
-                    ...options.deliverables.company // Override with existing data from lead
+                    ...leadCompany, // Override with existing data from lead
+                    // Prioritize company_name from lead if available
+                    name: leadCompanyName || safeString(leadCompany.name) || companyStructure.name
                 }
             };
         }
@@ -191,9 +206,15 @@ async function deepResearchWorkflow(options) {
             // Generic deep research: create structure from scratch
             console.log(`📋 Creating fresh deliverable structure for generic deep research`);
             const companyStructure = generateCompanyStructure(companyInfo);
+            // Also check if lead has company_name in additionalData
+            const leadCompanyName = safeString(options.additionalData?.leadInfo?.company_name);
             enhancedDeliverables = {
                 lead: options.deliverables || {},
-                company: companyStructure
+                company: {
+                    ...companyStructure,
+                    // Use company_name from lead if available
+                    name: leadCompanyName || companyStructure.name
+                }
             };
         }
         const researchRequest = {
@@ -224,26 +245,26 @@ async function deepResearchWorkflow(options) {
         // Debug: Log the complete research result to understand the structure
         console.log(`🔍 Deep research result structure:`, JSON.stringify(researchResult, null, 2));
         operations = researchResult.operations || [];
-        data = researchResult.data;
+        const researchData = researchResult.data;
         // Extract command_id for workflow consolidation - simplified structure
         let commandId;
-        if (data && data.command_id) {
-            commandId = data.command_id;
+        if (researchData && researchData.command_id) {
+            commandId = researchData.command_id;
             console.log(`🔗 Extracted command_id for workflow consolidation: ${commandId}`);
         }
         else {
             console.log(`⚠️ No command_id found in research result - operations may not be properly consolidated`);
         }
-        // Check if operations are in data.operations
-        if (operations.length === 0 && data && data.operations) {
-            console.log(`🔄 Found operations in data.operations, using those instead`);
-            operations = data.operations;
+        // Check if operations are in researchData.operations
+        if (operations.length === 0 && researchData && researchData.operations) {
+            console.log(`🔄 Found operations in researchData.operations, using those instead`);
+            operations = researchData.operations;
         }
         console.log(`✅ Deep research started successfully`);
         console.log(`📊 Generated ${operations.length} operations to execute`);
         if (operations.length === 0) {
             console.log(`⚠️ No operations generated for research topic "${research_topic}"`);
-            console.log(`🔍 Data structure:`, JSON.stringify(data, null, 2));
+            console.log(`🔍 Research data structure:`, JSON.stringify(researchData, null, 2));
             errors.push('No operations generated for the research topic');
         }
         else {
@@ -359,41 +380,61 @@ async function deepResearchWorkflow(options) {
                         site_id: site_id,
                         research_topic: research_topic,
                         deliverables: enhancedDeliverables,
-                        timestamp: new Date().toISOString()
-                    };
-                    // Also update the main data object even in error case
-                    data = {
-                        ...data, // Preserve existing data
-                        research_analysis,
-                        deliverables: enhancedDeliverables, // Include deliverables at data level for leadResearchWorkflow
-                        analysis: null // No analysis available in error case
+                        timestamp: new Date().toISOString(),
+                        operations_count: operations.length,
+                        operation_results_count: operationResults.length,
+                        successful_operations: operationResults.filter(result => result.success).length,
+                        insights: [],
+                        recommendations: []
                     };
                 }
                 else {
-                    analysis = analysisResult.analysis;
                     insights = analysisResult.insights || [];
                     recommendations = analysisResult.recommendations || [];
-                    // Build the complete research_analysis object
+                    // Flatten the analysis result - extract the actual analysis data
+                    let analysisData = analysisResult.data || {};
+                    const analysisContent = analysisResult.analysis || {};
+                    // If analysis has nested data structure, extract it
+                    if (analysisContent.data) {
+                        analysisData = { ...analysisData, ...analysisContent.data };
+                    }
+                    // Extract deliverables from dataAnalysis API response (data.deliverables)
+                    let processedDeliverables = null;
+                    if (analysisResult.data?.deliverables) {
+                        processedDeliverables = analysisResult.data.deliverables;
+                        console.log(`✅ Found deliverables in analysisResult.data.deliverables:`, JSON.stringify(processedDeliverables, null, 2));
+                    }
+                    else {
+                        // Fallback to enhancedDeliverables if API didn't return deliverables
+                        processedDeliverables = enhancedDeliverables;
+                        console.log(`⚠️ API dataAnalysis didn't return data.deliverables, using fallback enhancedDeliverables`);
+                        console.log(`🔍 Available analysisResult.data keys:`, Object.keys(analysisResult.data || {}));
+                        console.log(`🔍 analysisResult.data content:`, JSON.stringify(analysisResult.data, null, 2));
+                    }
+                    // Build a flattened research_analysis object
                     research_analysis = {
                         success: true,
-                        analysis: analysisResult.analysis,
-                        insights: analysisResult.insights || [],
-                        recommendations: analysisResult.recommendations || [],
-                        data: analysisResult.data || {},
-                        deliverables: enhancedDeliverables,
                         site_id: site_id,
                         research_topic: research_topic,
                         timestamp: new Date().toISOString(),
                         operations_count: operations.length,
                         operation_results_count: operationResults.length,
-                        successful_operations: operationResults.filter(result => result.success).length
-                    };
-                    // Also update the main data object to include research_analysis and deliverables for leadResearchWorkflow
-                    data = {
-                        ...data, // Preserve existing data
-                        research_analysis,
-                        deliverables: enhancedDeliverables, // Include deliverables at data level for leadResearchWorkflow
-                        analysis: analysisResult.analysis // Include analysis at data level
+                        successful_operations: operationResults.filter(result => result.success).length,
+                        insights: insights,
+                        recommendations: recommendations,
+                        deliverables: processedDeliverables,
+                        // Flatten analysis content directly at root level
+                        ...analysisData,
+                        // Add structured analysis if available
+                        ...(analysisContent.conclusions && {
+                            conclusions: analysisContent.conclusions,
+                            key_findings: analysisContent.key_findings,
+                            data_insights: analysisContent.data_insights,
+                            trend_analysis: analysisContent.trend_analysis,
+                            methodology: analysisContent.methodology,
+                            limitations: analysisContent.limitations,
+                            executive_summary: analysisContent.executive_summary
+                        })
                     };
                     console.log(`✅ Data analysis completed successfully`);
                     if (insights.length > 0) {
@@ -448,14 +489,12 @@ async function deepResearchWorkflow(options) {
                     site_id: site_id,
                     research_topic: research_topic,
                     deliverables: enhancedDeliverables,
-                    timestamp: new Date().toISOString()
-                };
-                // Also update the main data object even in exception case
-                data = {
-                    ...data, // Preserve existing data
-                    research_analysis,
-                    deliverables: enhancedDeliverables, // Include deliverables at data level for leadResearchWorkflow
-                    analysis: null // No analysis available in exception case
+                    timestamp: new Date().toISOString(),
+                    operations_count: operations.length,
+                    operation_results_count: operationResults.length,
+                    successful_operations: operationResults.filter(result => result.success).length,
+                    insights: [],
+                    recommendations: []
                 };
             }
         }
@@ -471,33 +510,22 @@ async function deepResearchWorkflow(options) {
                 timestamp: new Date().toISOString(),
                 operations_count: 0,
                 operation_results_count: 0,
-                successful_operations: 0
-            };
-            // Also update the main data object even when no operations executed
-            data = {
-                ...data, // Preserve existing data
-                research_analysis,
-                deliverables: enhancedDeliverables, // Include deliverables at data level for leadResearchWorkflow
-                analysis: null // No analysis available when no operations executed
+                successful_operations: 0,
+                insights: [],
+                recommendations: []
             };
         }
         const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-        // Prepare result data with all the information including research_analysis
+        // Prepare flattened result data - merge research_analysis content directly
         const resultData = {
-            siteId: site_id,
-            researchTopic: research_topic,
-            siteName,
-            siteUrl,
-            operations,
-            operationResults,
-            analysis,
-            insights,
-            recommendations,
-            companyInfo,
-            data: data,
-            research_analysis, // Always include research_analysis
-            executionTime,
-            completedAt: new Date().toISOString()
+            // Spread research_analysis content directly at root level
+            ...research_analysis,
+            // Keep deliverables at top level for leadResearchWorkflow compatibility
+            // Use the deliverables from research_analysis (which already contains processed deliverables)
+            deliverables: research_analysis?.deliverables || enhancedDeliverables,
+            // Add execution metadata
+            execution_time: executionTime,
+            completed_at: new Date().toISOString()
         };
         console.log(`🎉 Deep research workflow completed successfully!`);
         console.log(`📊 Summary: Research on "${research_topic}" for ${siteName} completed in ${executionTime}`);
@@ -516,13 +544,24 @@ async function deepResearchWorkflow(options) {
             status: 'COMPLETED',
             lastRun: new Date().toISOString()
         });
-        // Log successful completion
+        // Log successful completion (with full data for logging purposes)
         await logWorkflowExecutionActivity({
             workflowId,
             workflowType: 'deepResearchWorkflow',
             status: 'COMPLETED',
             input: options,
-            output: resultData,
+            output: {
+                siteId: site_id,
+                researchTopic: research_topic,
+                siteName,
+                siteUrl,
+                operations: operations.length,
+                operationResults: operationResults.length,
+                insights: insights.length,
+                recommendations: recommendations.length,
+                executionTime,
+                completedAt: new Date().toISOString()
+            },
         });
         return {
             success: true,
@@ -533,7 +572,6 @@ async function deepResearchWorkflow(options) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Deep research workflow failed: ${errorMessage}`);
-        const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         // Update cron status to indicate failure
         await saveCronStatusActivity({
             siteId: site_id,
@@ -545,7 +583,7 @@ async function deepResearchWorkflow(options) {
             errorMessage: errorMessage,
             retryCount: 1
         });
-        // Log workflow execution failure
+        // Log workflow execution failure (with full data for logging purposes)
         await logWorkflowExecutionActivity({
             workflowId,
             workflowType: 'deepResearchWorkflow',
@@ -553,29 +591,24 @@ async function deepResearchWorkflow(options) {
             input: options,
             error: errorMessage,
         });
-        // Prepare error result data
+        // Prepare flattened error result data
+        const errorResearchAnalysis = research_analysis || {
+            success: false,
+            error: errorMessage,
+            site_id: site_id,
+            research_topic: research_topic,
+            deliverables: enhancedDeliverables || options.deliverables,
+            timestamp: new Date().toISOString()
+        };
         const errorData = {
-            siteId: site_id,
-            researchTopic: research_topic,
-            siteName,
-            siteUrl,
-            operations,
-            operationResults,
-            analysis,
-            insights,
-            recommendations,
-            companyInfo,
-            data: data,
-            research_analysis: research_analysis || {
-                success: false,
-                error: errorMessage,
-                site_id: site_id,
-                research_topic: research_topic,
-                deliverables: enhancedDeliverables || options.deliverables,
-                timestamp: new Date().toISOString()
-            },
-            executionTime,
-            completedAt: new Date().toISOString()
+            // Spread error research analysis content directly at root level
+            ...errorResearchAnalysis,
+            // Keep deliverables at top level for consistency
+            // Use the deliverables from errorResearchAnalysis (which already contains appropriate deliverables)
+            deliverables: errorResearchAnalysis?.deliverables || enhancedDeliverables || options.deliverables,
+            // Add execution metadata
+            execution_time: `${((Date.now() - startTime) / 1000).toFixed(2)}s`,
+            completed_at: new Date().toISOString()
         };
         return {
             success: false,

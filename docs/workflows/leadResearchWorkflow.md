@@ -33,9 +33,9 @@ interface LeadResearchResult {
   siteId: string;                     // ID del sitio
   siteName?: string;                  // Nombre del sitio
   siteUrl?: string;                   // URL del sitio
-  researchData?: any;                 // Datos de investigación obtenidos
-  insights?: any[];                   // Insights generados
-  recommendations?: string[];         // Recomendaciones de seguimiento
+  leadInfo?: any;                     // Información del lead de la base de datos
+  deepResearchResult?: any;           // Resultado del deep research
+  researchQuery?: string;             // Query generado para la investigación
   data?: any;                         // Datos completos de la respuesta
   errors: string[];                   // Lista de errores (si los hay)
   executionTime: string;              // Tiempo de ejecución
@@ -61,32 +61,35 @@ El workflow consume la API: `POST /api/agents/sales/leadResearch`
 ```json
 {
   "success": true,
-  "data": {
-    "researchData": {
-      "company": "Acme Corp",
-      "industry": "Technology",
-      "size": "50-100 employees",
-      "revenue": "$5M-$10M",
-      "location": "San Francisco, CA",
-      "website": "https://acme.com",
-      "contact": {
-        "name": "John Doe",
-        "title": "VP of Sales",
-        "email": "john@acme.com",
-        "phone": "+1-555-0123"
-      }
-    },
+  "leadInfo": {
+    "id": "lead_12345",
+    "name": "John Doe",
+    "email": "john@acme.com",
+    "position": "VP of Sales",
+    "phone": "+1-555-0123",
+    "social_networks": {
+      "linkedin": "https://linkedin.com/in/johndoe",
+      "twitter": "https://twitter.com/johndoe",
+      "github": "https://github.com/johndoe",
+      "website": "https://johndoe.com"
+    }
+  },
+  "deepResearchResult": {
+    "success": true,
+    "operations": [],
+    "operationResults": [],
     "insights": [
       {
-        "title": "Company Growth",
-        "description": "Company has grown 50% YoY",
-        "confidence": 0.85,
-        "source": "LinkedIn analysis"
+        "title": "Social Media Presence",
+        "description": "Active on LinkedIn with 2K+ connections",
+        "confidence": 0.9,
+        "source": "LinkedIn profile analysis"
       }
     ],
     "recommendations": [
-      "Follow up within 24 hours",
-      "Focus on scalability benefits"
+      "Connect on LinkedIn first",
+      "Reference shared connections",
+      "Focus on technology solutions"
     ]
   }
 }
@@ -149,15 +152,39 @@ const quickOptions = {
 };
 ```
 
+## Información capturada
+
+### Datos del Lead
+El workflow actualiza los siguientes campos del lead:
+- **Información básica**: nombre, posición, teléfono, notas, idioma, fecha de cumpleaños
+- **Redes sociales**: perfiles en LinkedIn, Twitter, Facebook, Instagram, YouTube, GitHub y sitio web personal
+- **Metadatos**: análisis e información adicional obtenida durante la investigación
+
+### Formato de redes sociales (JSONb)
+```json
+{
+  "linkedin": "https://linkedin.com/in/username",
+  "twitter": "https://twitter.com/username",
+  "facebook": "https://facebook.com/username", 
+  "instagram": "https://instagram.com/username",
+  "youtube": "https://youtube.com/channel/username",
+  "github": "https://github.com/username",
+  "website": "https://personalwebsite.com"
+}
+```
+
 ## Flujo de trabajo
 
 1. **Validación**: Verifica que `lead_id` y `site_id` estén presentes
 2. **Logging inicial**: Registra el inicio del workflow
 3. **Obtener sitio**: Busca información del sitio usando `getSiteActivity`
-4. **Investigación**: Ejecuta la investigación usando `leadResearchActivity`
-5. **Procesamiento**: Extrae insights y recomendaciones de la respuesta
-6. **Logging final**: Registra el resultado (éxito o fallo)
-7. **Retorno**: Devuelve el resultado estructurado
+4. **Obtener lead**: Busca información del lead de la base de datos
+5. **Generar query**: Crea un query de investigación incluyendo búsqueda de redes sociales
+6. **Deep research**: Ejecuta el workflow de investigación profunda
+7. **Actualizar lead**: Actualiza la información del lead con los datos encontrados
+8. **Actualizar empresa**: Crea o actualiza la información de la empresa asociada
+9. **Logging final**: Registra el resultado (éxito o fallo)
+10. **Retorno**: Devuelve el resultado estructurado
 
 ## Manejo de errores
 

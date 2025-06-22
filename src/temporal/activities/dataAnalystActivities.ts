@@ -63,6 +63,20 @@ export interface AnalysisResponse {
   error?: string;
 }
 
+export interface LeadSegmentationRequest {
+  site_id: string;
+  lead_id: string;
+  userId?: string;
+  additionalData?: any;
+}
+
+export interface LeadSegmentationResponse {
+  success: boolean;
+  data?: any;
+  segmentation?: any;
+  error?: string;
+}
+
 /**
  * Activity to start deep research and get operations list
  */
@@ -73,7 +87,12 @@ export async function deepResearchActivity(
   console.log(`📋 Request:`, JSON.stringify(request, null, 2));
 
   try {
-    const response = await apiService.post('/api/agents/dataAnalyst/deepResearch', request);
+    // Use extended timeout for deep research operations (10 minutes to match activity timeout)
+    const response = await apiService.request('/api/agents/dataAnalyst/deepResearch', {
+      method: 'POST',
+      body: request,
+      timeout: 600000 // 10 minutes timeout (600,000ms) to match workflow activity timeout
+    });
 
     if (!response.success) {
       console.error(`❌ Deep research failed:`, response.error);
@@ -182,7 +201,12 @@ export async function searchOperationActivity(
 
     console.log(`📤 Final request body being sent to API:`, JSON.stringify(requestBody, null, 2));
 
-    const response = await apiService.post('/api/agents/dataAnalyst/search', requestBody);
+    // Use extended timeout for search operations (10 minutes to match activity timeout)
+    const response = await apiService.request('/api/agents/dataAnalyst/search', {
+      method: 'POST',
+      body: requestBody,
+      timeout: 600000 // 10 minutes timeout (600,000ms) to match workflow activity timeout
+    });
 
     if (!response.success) {
       console.error(`❌ Search operation failed:`, response.error);
@@ -241,7 +265,12 @@ export async function dataAnalysisActivity(
     // Send the complete request including command_id if present
     console.log(`📤 Final analysis request being sent to API:`, JSON.stringify(request, null, 2));
     
-    const response = await apiService.post('/api/agents/dataAnalyst/analysis', request);
+    // Use extended timeout for data analysis operations (10 minutes to match activity timeout)
+    const response = await apiService.request('/api/agents/dataAnalyst/analysis', {
+      method: 'POST',
+      body: request,
+      timeout: 600000 // 10 minutes timeout (600,000ms) to match workflow activity timeout
+    });
 
     if (!response.success) {
       console.error(`❌ Data analysis failed:`, response.error);
@@ -294,6 +323,62 @@ export async function dataAnalysisActivity(
     return {
       success: false,
       error: `Data analysis activity failed: ${errorMessage}`
+    };
+  }
+}
+
+/**
+ * Activity to perform lead segmentation analysis
+ */
+export async function leadSegmentationActivity(
+  request: LeadSegmentationRequest
+): Promise<LeadSegmentationResponse> {
+  console.log(`🎯 Performing lead segmentation for lead: ${request.lead_id}, site: ${request.site_id}`);
+  console.log(`📋 Segmentation request:`, JSON.stringify(request, null, 2));
+
+  try {
+    const requestBody = {
+      site_id: request.site_id,
+      lead_id: request.lead_id,
+      ...(request.userId && { userId: request.userId }),
+      ...(request.additionalData && { ...request.additionalData })
+    };
+
+    console.log(`📤 Final segmentation request being sent to API:`, JSON.stringify(requestBody, null, 2));
+
+    // Use reasonable timeout for lead segmentation operations
+    const response = await apiService.request('/api/agents/dataAnalyst/leadSegmentation', {
+      method: 'POST',
+      body: requestBody,
+      timeout: 300000 // 5 minutes timeout for segmentation operations
+    });
+
+    if (!response.success) {
+      console.error(`❌ Lead segmentation failed:`, response.error);
+      return {
+        success: false,
+        error: response.error?.message || 'Failed to perform lead segmentation'
+      };
+    }
+
+    const segmentation = response.data?.segmentation || response.data;
+    
+    console.log(`✅ Lead segmentation completed successfully`);
+    console.log(`🎯 Segmentation result:`, JSON.stringify(segmentation, null, 2));
+
+    return {
+      success: true,
+      data: response.data,
+      segmentation
+    };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Lead segmentation failed: ${errorMessage}`);
+    
+    return {
+      success: false,
+      error: `Lead segmentation activity failed: ${errorMessage}`
     };
   }
 } 

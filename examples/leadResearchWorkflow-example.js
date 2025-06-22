@@ -111,7 +111,7 @@ async function runDifferentScenarios() {
         includeContactHistory: true,
         includeSocialMedia: true,
         researchDepth: 'comprehensive',
-        focusAreas: ['technology', 'budget', 'decision_makers']
+        focusAreas: ['technology', 'budget', 'decision_makers', 'social_networks']
       }
     };
     console.log('Options:', detailedOptions);
