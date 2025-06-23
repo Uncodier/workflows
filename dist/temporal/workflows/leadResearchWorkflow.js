@@ -106,7 +106,9 @@ function generateLeadDeliverables(lead) {
     const socialNetworksToFind = {};
     const socialPlatforms = ['linkedin', 'twitter', 'facebook', 'instagram', 'youtube', 'github'];
     socialPlatforms.forEach(platform => {
-        if (!currentSocialNetworks[platform] || currentSocialNetworks[platform].trim() === '') {
+        const platformValue = currentSocialNetworks[platform];
+        // Verificar que sea un string antes de usar .trim()
+        if (!platformValue || typeof platformValue !== 'string' || platformValue.trim() === '') {
             socialNetworksToFind[platform] = null;
         }
     });
