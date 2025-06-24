@@ -12,7 +12,7 @@
   {
     "info_type": "SCHEMA_SUMMARY",
     "object_type": "TRIGGERS",
-    "count": 33
+    "count": 34
   },
   {
     "info_type": "SCHEMA_SUMMARY",
@@ -858,10 +858,15 @@ CREATE TABLE public.task_comments (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   is_private boolean NOT NULL DEFAULT false,
   files jsonb NOT NULL DEFAULT '[]'::jsonb,
+  cta jsonb DEFAULT NULL,
   CONSTRAINT task_comments_pkey PRIMARY KEY (id),
   CONSTRAINT task_comments_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.tasks(id),
   CONSTRAINT task_comments_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
+
+-- Comments on columns
+COMMENT ON COLUMN public.task_comments.cta IS 'Call to Action button data in JSONB format with structure: {"primary_action": {"title": "string", "url": "string"}}';
+
 CREATE TABLE public.tasks (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   lead_id uuid NOT NULL,
@@ -1346,6 +1351,7 @@ CREATE TABLE public.waitlist (
 | INDEX       | waitlist_pkey                                    | waitlist              |
 | TRIGGER     | activate_pending_memberships_trigger             | profiles              |
 | TRIGGER     | billing_timestamp_trigger                        | billing               |
+| TRIGGER     | campaign_cascade_delete_trigger                  | campaigns             |
 | TRIGGER     | check_expired_api_keys                           | api_keys              |
 | TRIGGER     | check_expired_api_keys                           | api_keys              |
 | TRIGGER     | log_asset_insert_trigger                         | assets                |

@@ -132,72 +132,92 @@ async function leadFollowUpWorkflow(options) {
                 const responseData = data.data;
                 const messages = responseData.messages || {};
                 const lead = responseData.lead || {};
-                // Determine the communication channel and message content
+                // Extract contact information
                 const email = lead.email || lead.contact_email;
                 const phone = lead.phone || lead.phone_number;
-                const messageContent = messages.assistant?.content || messages.agent?.content;
-                if (messageContent) {
-                    if (email && !phone) {
-                        // Send via email
-                        console.log(`📧 Sending follow-up email to ${email}...`);
-                        const emailResult = await sendEmailFromAgentActivity({
-                            email: email,
-                            subject: `Follow-up: ${lead.name || 'Lead'} - ${siteName}`,
-                            message: messageContent,
-                            site_id: site_id,
-                            agent_id: options.userId || site.user_id,
-                            lead_id: lead_id,
-                            from: siteName,
-                        });
+                // Extract message content from the correct structure
+                const emailMessage = messages.email?.message;
+                const emailTitle = messages.email?.title;
+                const whatsappMessage = messages.whatsapp?.message;
+                console.log(`📞 Contact info - Email: ${email}, Phone: ${phone}`);
+                console.log(`📝 Messages available - Email: ${!!emailMessage}, WhatsApp: ${!!whatsappMessage}`);
+                let emailSent = false;
+                let whatsappSent = false;
+                // Send email if available
+                if (email && emailMessage) {
+                    console.log(`📧 Sending follow-up email to ${email}...`);
+                    const emailResult = await sendEmailFromAgentActivity({
+                        email: email,
+                        subject: emailTitle || `Follow-up: ${lead.name || 'Lead'} - ${siteName}`,
+                        message: emailMessage,
+                        site_id: site_id,
+                        agent_id: options.userId || site.user_id,
+                        lead_id: lead_id,
+                        from: siteName,
+                    });
+                    if (emailResult.success) {
+                        console.log(`✅ Follow-up email sent successfully to ${email}`);
+                        emailSent = true;
                         messageSent = {
                             channel: 'email',
                             recipient: email,
-                            success: emailResult.success,
+                            success: true,
                             messageId: emailResult.messageId,
                         };
-                        if (emailResult.success) {
-                            console.log(`✅ Follow-up email sent successfully to ${email}`);
-                        }
-                        else {
-                            const errorMsg = `Failed to send follow-up email: ${emailResult.messageId}`;
-                            console.error(`⚠️ ${errorMsg}`);
-                            errors.push(errorMsg);
-                        }
                     }
-                    else if (phone) {
-                        // Send via WhatsApp (prioritize WhatsApp if phone exists)
-                        console.log(`📱 Sending follow-up WhatsApp to ${phone}...`);
-                        const whatsappResult = await sendWhatsAppFromAgentActivity({
-                            phone_number: phone,
-                            message: messageContent,
-                            site_id: site_id,
-                            agent_id: options.userId || site.user_id,
-                            lead_id: lead_id,
-                            from: siteName,
-                        });
-                        messageSent = {
-                            channel: 'whatsapp',
-                            recipient: phone,
-                            success: whatsappResult.success,
-                            messageId: whatsappResult.messageId,
-                        };
-                        if (whatsappResult.success) {
-                            console.log(`✅ Follow-up WhatsApp sent successfully to ${phone}`);
-                        }
-                        else {
-                            const errorMsg = `Failed to send follow-up WhatsApp: ${whatsappResult.messageId}`;
-                            console.error(`⚠️ ${errorMsg}`);
-                            errors.push(errorMsg);
+                    else {
+                        const errorMsg = `Failed to send follow-up email: ${emailResult.messageId}`;
+                        console.error(`⚠️ ${errorMsg}`);
+                        errors.push(errorMsg);
+                    }
+                }
+                // Send WhatsApp if available
+                if (phone && whatsappMessage) {
+                    console.log(`📱 Sending follow-up WhatsApp to ${phone}...`);
+                    const whatsappResult = await sendWhatsAppFromAgentActivity({
+                        phone_number: phone,
+                        message: whatsappMessage,
+                        site_id: site_id,
+                        agent_id: options.userId || site.user_id,
+                        lead_id: lead_id,
+                        from: siteName,
+                    });
+                    if (whatsappResult.success) {
+                        console.log(`✅ Follow-up WhatsApp sent successfully to ${phone}`);
+                        whatsappSent = true;
+                        // If no email was sent or email failed, set WhatsApp as primary message sent
+                        if (!emailSent) {
+                            messageSent = {
+                                channel: 'whatsapp',
+                                recipient: phone,
+                                success: true,
+                                messageId: whatsappResult.messageId,
+                            };
                         }
                     }
                     else {
-                        console.log(`⚠️ No valid communication channel found (email: ${email}, phone: ${phone})`);
-                        errors.push('No valid communication channel found for follow-up message');
+                        const errorMsg = `Failed to send follow-up WhatsApp: ${whatsappResult.messageId}`;
+                        console.error(`⚠️ ${errorMsg}`);
+                        errors.push(errorMsg);
                     }
                 }
+                // Log results
+                if (emailSent || whatsappSent) {
+                    console.log(`✅ Follow-up messages sent - Email: ${emailSent}, WhatsApp: ${whatsappSent}`);
+                }
                 else {
-                    console.log(`⚠️ No message content found in follow-up response`);
-                    errors.push('No message content found in follow-up response');
+                    if (!email && !phone) {
+                        console.log(`⚠️ No valid communication channels found (email: ${email}, phone: ${phone})`);
+                        errors.push('No valid communication channels found for follow-up message');
+                    }
+                    else if (!emailMessage && !whatsappMessage) {
+                        console.log(`⚠️ No message content found in follow-up response`);
+                        errors.push('No message content found in follow-up response');
+                    }
+                    else {
+                        console.log(`⚠️ Messages available but delivery failed`);
+                        errors.push('Messages available but delivery failed');
+                    }
                 }
             }
             catch (error) {
