@@ -4,6 +4,7 @@ import { syncEmailsWorkflow } from './syncEmailsWorkflow';
 import { syncEmailsScheduleWorkflow } from './syncEmailsScheduleWorkflow';
 import { scheduleActivitiesWorkflow } from './scheduleActivitiesWorkflow';
 import { activityPrioritizationEngineWorkflow } from './activityPrioritizationEngineWorkflow';
+import { dailyOperationsWorkflow } from './dailyOperationsWorkflow';
 import { sendReportWorkflow } from './sendReportWorkflow';
 import { scheduleCustomerSupportMessagesWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
 import { customerSupportMessageWorkflow, emailCustomerSupportMessageWorkflow } from './customerSupportWorkflow';
@@ -28,6 +29,7 @@ export * from './syncEmailsWorkflow';
 export * from './syncEmailsScheduleWorkflow';
 export * from './scheduleActivitiesWorkflow';
 export * from './activityPrioritizationEngineWorkflow';
+export * from './dailyOperationsWorkflow';
 export * from './sendReportWorkflow';
 export * from './scheduleCustomerSupportMessagesWorkflow';
 export * from './sendEmailFromAgentWorkflow';
@@ -52,6 +54,7 @@ export const workflows = {
   syncEmailsScheduleWorkflow,
   scheduleActivitiesWorkflow,
   activityPrioritizationEngineWorkflow,
+  dailyOperationsWorkflow,
   sendReportWorkflow,
   scheduleCustomerSupportMessagesWorkflow,
   customerSupportMessageWorkflow,
@@ -81,6 +84,7 @@ export const workflowNames = {
   syncEmailsScheduleWorkflow: 'syncEmailsScheduleWorkflow',
   scheduleActivitiesWorkflow: 'scheduleActivitiesWorkflow',
   activityPrioritizationEngineWorkflow: 'activityPrioritizationEngineWorkflow',
+  dailyOperationsWorkflow: 'dailyOperationsWorkflow',
   sendReportWorkflow: 'sendReportWorkflow',
   scheduleCustomerSupportMessagesWorkflow: 'scheduleCustomerSupportMessagesWorkflow',
   customerSupportMessageWorkflow: 'customerSupportMessageWorkflow',

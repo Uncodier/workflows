@@ -743,14 +743,16 @@ function getNextRunTime(cronExpression: string): Date {
 }
 
 /**
- * Simple activity to schedule daily stand up workflows for all sites
- * Uses business_hours from settings or defaults to Mexico schedule
+ * Execute daily stand up workflows for all sites
  * 
- * @param options.dryRun - If true, only simulates scheduling without creating real schedules
+ * NOTE: Site selection and business hours logic is now handled by activityPrioritizationEngine.
+ * This activity simply executes the workflow for all sites without duplicating selection logic.
+ * 
+ * @param options.dryRun - If true, only simulates execution without running real workflows
  * @param options.testMode - If true, adds safety checks and limits to prevent production issues
  * @param options.maxSites - Maximum number of sites to process (useful for testing)
  */
-export async function scheduleDailyStandUpWorkflowsActivity(
+export async function executeDailyStandUpWorkflowsActivity(
   options: { 
     dryRun?: boolean; 
     testMode?: boolean; 
@@ -764,7 +766,11 @@ export async function scheduleDailyStandUpWorkflowsActivity(
   errors: string[];
   testInfo?: any;
 }> {
-  console.log('🌅 Starting Daily Stand Up workflow scheduling for all sites...');
+  console.log('🌅 Starting Daily Stand Up workflow execution for all sites...');
+  console.log('📋 SIMPLIFIED LOGIC:');
+  console.log('   - activityPrioritizationEngine handles site selection & business hours logic');
+  console.log('   - This activity simply executes dailyStandUpWorkflow for all sites');
+  console.log('   - No duplicate selection logic');
   
   // Safety checks for test mode
   if (options.testMode) {
@@ -774,18 +780,23 @@ export async function scheduleDailyStandUpWorkflowsActivity(
   }
   
   if (options.dryRun) {
-    console.log('🔬 DRY RUN MODE - No real schedules will be created');
+    console.log('🔬 DRY RUN MODE - No real workflows will be executed');
   }
   
   const results: ScheduleWorkflowResult[] = [];
   const errors: string[] = [];
   let scheduled = 0;
   let failed = 0;
+  const skipped = 0;
   const testInfo: any = {
-    mode: options.dryRun ? 'dry-run' : 'live',
-    testMode: options.testMode || false,
-    maxSites: options.maxSites,
-    startTime: new Date().toISOString()
+    mode: options.dryRun ? 'DRY_RUN' : 'PRODUCTION',
+    testMode: options.testMode,
+    startTime: new Date().toISOString(),
+    endTime: '',
+    duration: '',
+    totalSites: 0,
+    maxSites: options.maxSites || 0,
+    siteNames: []
   };
 
   try {
@@ -794,7 +805,7 @@ export async function scheduleDailyStandUpWorkflowsActivity(
     // Check database connection
     const isConnected = await supabaseService.getConnectionStatus();
     if (!isConnected) {
-      throw new Error('Database not available for scheduling');
+      throw new Error('Database not available for workflow execution');
     }
 
     // Fetch all sites
@@ -808,7 +819,7 @@ export async function scheduleDailyStandUpWorkflowsActivity(
     }
 
     if (sites.length === 0) {
-      console.log('⚠️ No sites found, nothing to schedule');
+      console.log('⚠️ No sites found, nothing to execute');
       return { 
         scheduled: 0, 
         skipped: 0, 
@@ -819,40 +830,38 @@ export async function scheduleDailyStandUpWorkflowsActivity(
       };
     }
 
-    testInfo.sitesProcessed = sites.length;
-    testInfo.siteNames = sites.map(site => site.name);
+    testInfo.totalSites = sites.length;
+    testInfo.siteNames = sites.map(s => s.name);
 
-    // For each site, schedule a daily stand up
+    // Execute daily stand up workflow for each site
     for (const site of sites) {
       try {
-        console.log(`📋 Processing site: ${site.name} (${site.id})`);
+        console.log(`\n📋 Executing Daily Stand Up for site: ${site.name} (${site.id})`);
 
         if (options.dryRun) {
-          console.log(`🧪 DRY RUN: Would schedule dailyStandUp for ${site.name}`);
-          console.log(`      📅 Schedule: Monday-Friday at 8:00 AM (Mexico City time)`);
-          console.log(`      🕐 Cron expression: "0 8 * * 1-5"`);
-          console.log(`      🌍 Timezone: America/Mexico_City`);
+          console.log(`🧪 DRY RUN: Would execute dailyStandUpWorkflow for ${site.name}`);
           scheduled++;
           continue;
         }
 
-        // Create the schedule with default Mexico timezone and weekdays
-        const scheduleResult = await createSimpleDailyStandUpSchedule(site);
-        results.push(scheduleResult);
+        // Execute the daily stand up workflow directly
+        const workflowResult = await executeDailyStandUpWorkflow(site);
+        
+        results.push(workflowResult);
 
-        if (scheduleResult.success) {
+        if (workflowResult.success) {
           scheduled++;
-          console.log(`✅ Successfully scheduled for ${site.name}`);
+          console.log(`✅ Successfully executed Daily Stand Up for ${site.name}`);
         } else {
           failed++;
-          const error = `Failed to schedule ${site.name}: ${scheduleResult.error}`;
+          const error = `Failed to execute Daily Stand Up for ${site.name}: ${workflowResult.error}`;
           errors.push(error);
           console.error(`❌ ${error}`);
         }
 
       } catch (siteError) {
         failed++;
-        const errorMsg = `Error processing site ${site.name}: ${siteError instanceof Error ? siteError.message : String(siteError)}`;
+        const errorMsg = `Error executing Daily Stand Up for site ${site.name}: ${siteError instanceof Error ? siteError.message : String(siteError)}`;
         errors.push(errorMsg);
         console.error(`❌ ${errorMsg}`);
       }
@@ -861,28 +870,20 @@ export async function scheduleDailyStandUpWorkflowsActivity(
     testInfo.endTime = new Date().toISOString();
     testInfo.duration = `${Date.now() - new Date(testInfo.startTime).getTime()}ms`;
     
-    // Calculate next execution time for Mexico timezone
-    const nextExecution = calculateNextDailyStandUpTime();
-    testInfo.nextExecution = nextExecution;
+    console.log(`\n📊 Daily Stand Up execution completed:`);
+    console.log(`   ✅ Executed: ${scheduled} sites`);
+    console.log(`   ⏭️ Skipped: ${skipped} sites`);
+    console.log(`   ❌ Failed: ${failed} sites`);
     
-    console.log(`📊 Daily Stand Up scheduling completed: ${scheduled} scheduled, ${failed} failed`);
     if (options.dryRun) {
-      console.log(`⏰ Next execution would be: ${nextExecution.toLocaleString('es-MX', { 
-        timeZone: 'America/Mexico_City',
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long', 
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })} (Mexico City)`);
+      console.log(`⏰ This was a dry run - no actual workflows were executed`);
     }
     
-    return { scheduled, skipped: 0, failed, results, errors, testInfo };
+    return { scheduled, skipped, failed, results, errors, testInfo };
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`❌ Failed to schedule Daily Stand Up workflows: ${errorMessage}`);
+    console.error(`❌ Failed to execute Daily Stand Up workflows: ${errorMessage}`);
     testInfo.error = errorMessage;
     testInfo.endTime = new Date().toISOString();
     return { 
@@ -897,80 +898,53 @@ export async function scheduleDailyStandUpWorkflowsActivity(
 }
 
 /**
- * Calculate the next Daily Stand Up execution time based on Mexico timezone
+ * Execute daily stand up workflow for a single site
  */
-function calculateNextDailyStandUpTime(): Date {
-  const now = new Date();
-  const mexicoTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Mexico_City"}));
-  
-  // Set to 8:00 AM
-  const nextExecution = new Date(mexicoTime);
-  nextExecution.setHours(8, 0, 0, 0);
-  
-  // If it's already past 8 AM today, or it's weekend, find next weekday
-  if (nextExecution <= mexicoTime || nextExecution.getDay() === 0 || nextExecution.getDay() === 6) {
-    do {
-      nextExecution.setDate(nextExecution.getDate() + 1);
-      nextExecution.setHours(8, 0, 0, 0);
-    } while (nextExecution.getDay() === 0 || nextExecution.getDay() === 6); // Skip weekends
-  }
-  
-  return nextExecution;
-}
-
-/**
- * Create a simple daily stand up schedule for a site
- */
-async function createSimpleDailyStandUpSchedule(site: any): Promise<ScheduleWorkflowResult> {
-  const scheduleId = `daily-standup-${site.id}`;
-  const workflowId = `${scheduleId}-${Date.now()}`;
+async function executeDailyStandUpWorkflow(site: any): Promise<ScheduleWorkflowResult> {
+  const workflowId = `daily-standup-${site.id}-${Date.now()}`;
 
   try {
     const client = await getTemporalClient();
     
-    // Default schedule: Monday to Friday at 8 AM Mexico time
-    const cronExpression = '0 8 * * 1-5'; // 8 AM on weekdays
-    const timezone = 'America/Mexico_City';
+    console.log(`🚀 Executing Daily Stand Up workflow for ${site.name}`);
     
-    console.log(`🕐 Creating simple schedule: "${cronExpression}" (${timezone})`);
-
-    // Create the schedule
-    await client.schedule.create({
-      scheduleId,
-      spec: {
-        cron: cronExpression,
-        timezone
-      },
-      action: {
-        type: 'startWorkflow',
-        workflowType: 'dailyStandUpWorkflow',
-        taskQueue: temporalConfig.taskQueue,
-        args: [{
-          site_id: site.id,
-          userId: site.user_id,
-          additionalData: {
-            scheduledBy: 'activityPrioritizationEngine',
-            scheduleTime: '08:00',
-            workingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
-            timezone
-          }
-        }],
-        workflowId: `daily-standup-${site.id}-${Date.now()}`,
-      },
-      policies: {
-        catchupWindow: '8h',  // 8 hours catchup window for better recovery
-        overlap: 'SKIP',
-        pauseOnFailure: false
-      }
+    const handle = await client.workflow.start('dailyStandUpWorkflow', {
+      args: [{
+        site_id: site.id,
+        userId: site.user_id,
+        additionalData: {
+          scheduledBy: 'activityPrioritizationEngine',
+          executeReason: 'immediate-execution',
+          scheduleType: 'immediate',
+          scheduleTime: 'immediate',
+          executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+          timezone: 'UTC',
+          executionMode: 'direct'
+        }
+      }],
+      taskQueue: temporalConfig.taskQueue,
+      workflowId: workflowId,
     });
-
-    console.log(`✅ Successfully created simple schedule for ${site.name}`);
-    return { workflowId, scheduleId, success: true };
+    
+    console.log(`✅ Daily Stand Up workflow started for ${site.name}`);
+    console.log(`   Workflow ID: ${handle.workflowId}`);
+    
+    return { workflowId, scheduleId: 'immediate-execution', success: true };
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`❌ Failed to create simple schedule for ${site.name}: ${errorMessage}`);
-    return { workflowId, scheduleId, success: false, error: errorMessage };
+    console.error(`❌ Failed to execute Daily Stand Up workflow for ${site.name}: ${errorMessage}`);
+    return { workflowId, scheduleId: 'immediate-execution', success: false, error: errorMessage };
   }
 }
+
+// Removed calculateNextDailyStandUpTime function as it's not used
+
+// Removed isValidBusinessDay function as it's not used
+
+
+
+
+
+
 

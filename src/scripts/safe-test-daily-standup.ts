@@ -5,7 +5,7 @@
  * This script is designed to be 100% safe for testing
  */
 
-import { scheduleDailyStandUpWorkflowsActivity } from '../temporal/activities/workflowSchedulingActivities';
+import { executeDailyStandUpWorkflowsActivity } from '../temporal/activities/workflowSchedulingActivities';
 
 async function safeTestDailyStandUp() {
   console.log('🛡️  ULTRA SAFE Daily Stand Up Test');
@@ -18,7 +18,7 @@ async function safeTestDailyStandUp() {
   try {
     console.log('\n🧪 Testing Daily Stand Up scheduling...');
     
-    const result = await scheduleDailyStandUpWorkflowsActivity({
+    const result = await executeDailyStandUpWorkflowsActivity({
       dryRun: true,        // FORCE dry run - no real schedules
       testMode: true,      // FORCE test mode - extra safety
       maxSites: 2          // FORCE limit to 2 sites max

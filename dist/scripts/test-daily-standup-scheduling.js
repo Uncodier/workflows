@@ -13,7 +13,7 @@ async function testDailyStandUpScheduling() {
         console.log('📋 Test 1: Dry Run Mode');
         console.log('-------------------------');
         // Test dry run to see what would be scheduled
-        const dryRunResult = await (0, workflowSchedulingActivities_1.scheduleDailyStandUpWorkflowsActivity)({
+        const dryRunResult = await (0, workflowSchedulingActivities_1.executeDailyStandUpWorkflowsActivity)({
             dryRun: true,
             testMode: true
         });
@@ -37,7 +37,7 @@ async function testDailyStandUpScheduling() {
         if (proceedWithScheduling) {
             console.log('\n📋 Test 2: Actual Scheduling');
             console.log('-----------------------------');
-            const actualResult = await (0, workflowSchedulingActivities_1.scheduleDailyStandUpWorkflowsActivity)({
+            const actualResult = await (0, workflowSchedulingActivities_1.executeDailyStandUpWorkflowsActivity)({
                 dryRun: false,
                 testMode: true
             });

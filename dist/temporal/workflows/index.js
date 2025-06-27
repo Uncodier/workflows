@@ -21,6 +21,7 @@ const syncEmailsWorkflow_1 = require("./syncEmailsWorkflow");
 const syncEmailsScheduleWorkflow_1 = require("./syncEmailsScheduleWorkflow");
 const scheduleActivitiesWorkflow_1 = require("./scheduleActivitiesWorkflow");
 const activityPrioritizationEngineWorkflow_1 = require("./activityPrioritizationEngineWorkflow");
+const dailyOperationsWorkflow_1 = require("./dailyOperationsWorkflow");
 const sendReportWorkflow_1 = require("./sendReportWorkflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
 const customerSupportWorkflow_1 = require("./customerSupportWorkflow");
@@ -44,6 +45,7 @@ __exportStar(require("./syncEmailsWorkflow"), exports);
 __exportStar(require("./syncEmailsScheduleWorkflow"), exports);
 __exportStar(require("./scheduleActivitiesWorkflow"), exports);
 __exportStar(require("./activityPrioritizationEngineWorkflow"), exports);
+__exportStar(require("./dailyOperationsWorkflow"), exports);
 __exportStar(require("./sendReportWorkflow"), exports);
 __exportStar(require("./scheduleCustomerSupportMessagesWorkflow"), exports);
 __exportStar(require("./sendEmailFromAgentWorkflow"), exports);
@@ -67,6 +69,7 @@ exports.workflows = {
     syncEmailsScheduleWorkflow: syncEmailsScheduleWorkflow_1.syncEmailsScheduleWorkflow,
     scheduleActivitiesWorkflow: scheduleActivitiesWorkflow_1.scheduleActivitiesWorkflow,
     activityPrioritizationEngineWorkflow: activityPrioritizationEngineWorkflow_1.activityPrioritizationEngineWorkflow,
+    dailyOperationsWorkflow: dailyOperationsWorkflow_1.dailyOperationsWorkflow,
     sendReportWorkflow: sendReportWorkflow_1.sendReportWorkflow,
     scheduleCustomerSupportMessagesWorkflow: scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow,
     customerSupportMessageWorkflow: customerSupportWorkflow_1.customerSupportMessageWorkflow,
@@ -95,6 +98,7 @@ exports.workflowNames = {
     syncEmailsScheduleWorkflow: 'syncEmailsScheduleWorkflow',
     scheduleActivitiesWorkflow: 'scheduleActivitiesWorkflow',
     activityPrioritizationEngineWorkflow: 'activityPrioritizationEngineWorkflow',
+    dailyOperationsWorkflow: 'dailyOperationsWorkflow',
     sendReportWorkflow: 'sendReportWorkflow',
     scheduleCustomerSupportMessagesWorkflow: 'scheduleCustomerSupportMessagesWorkflow',
     customerSupportMessageWorkflow: 'customerSupportMessageWorkflow',

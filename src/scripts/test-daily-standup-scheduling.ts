@@ -5,7 +5,7 @@
  * Tests the scheduling of dailyStandUp workflows for all sites based on business_hours
  */
 
-import { scheduleDailyStandUpWorkflowsActivity } from '../temporal/activities/workflowSchedulingActivities';
+import { executeDailyStandUpWorkflowsActivity } from '../temporal/activities/workflowSchedulingActivities';
 
 async function testDailyStandUpScheduling() {
   console.log('🌅 Testing Daily Stand Up Workflow Scheduling...\n');
@@ -15,7 +15,7 @@ async function testDailyStandUpScheduling() {
     console.log('-------------------------');
     
     // Test dry run to see what would be scheduled
-    const dryRunResult = await scheduleDailyStandUpWorkflowsActivity({
+    const dryRunResult = await executeDailyStandUpWorkflowsActivity({
       dryRun: true,
       testMode: true
     });
@@ -45,7 +45,7 @@ async function testDailyStandUpScheduling() {
       console.log('\n📋 Test 2: Actual Scheduling');
       console.log('-----------------------------');
       
-      const actualResult = await scheduleDailyStandUpWorkflowsActivity({
+      const actualResult = await executeDailyStandUpWorkflowsActivity({
         dryRun: false,
         testMode: true
       });

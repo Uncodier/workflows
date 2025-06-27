@@ -16,7 +16,7 @@ async function safeTestDailyStandUp() {
     console.log('='.repeat(50));
     try {
         console.log('\n🧪 Testing Daily Stand Up scheduling...');
-        const result = await (0, workflowSchedulingActivities_1.scheduleDailyStandUpWorkflowsActivity)({
+        const result = await (0, workflowSchedulingActivities_1.executeDailyStandUpWorkflowsActivity)({
             dryRun: true, // FORCE dry run - no real schedules
             testMode: true, // FORCE test mode - extra safety
             maxSites: 2 // FORCE limit to 2 sites max

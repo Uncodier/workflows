@@ -1,111 +1,86 @@
-import { proxyActivities } from '@temporalio/workflow';
-import type * as activities from '../activities';
-
-// Configure activity options
-const { 
-  getContext, 
-  designPlan, 
-  sendPlan, 
-  sendPriorityMail, 
-  scheduleActivities
-} = proxyActivities<typeof activities>({
-  startToCloseTimeout: '2 minutes',
-});
-
-// Configure longer timeout for scheduling activities
-const { 
-  scheduleDailyStandUpWorkflowsActivity
-} = proxyActivities<typeof activities>({
-  startToCloseTimeout: '10 minutes', // Longer timeout for site processing
-});
+import { executeChild } from '@temporalio/workflow';
 
 /**
  * Activity Prioritization Engine Workflow
- * Runs once a day and manages different prioritization activities
+ * Decides WHETHER to execute daily operations based on business logic
+ * If YES → executes dailyOperationsWorkflow
  */
 export async function activityPrioritizationEngineWorkflow(): Promise<{
-  contextRetrieved: boolean;
-  planDesigned: boolean;
-  planSent: boolean;
-  priorityMailsSent: number;
-  activitiesScheduled: number;
-  dailyStandUpsScheduled: number;
+  shouldExecute: boolean;
+  reason: string;
+  operationsExecuted: boolean;
+  operationsResult?: any;
   executionTime: string;
 }> {
   console.log('🎯 Starting activity prioritization engine workflow...');
   const startTime = new Date();
 
   try {
-    // Step 1: Get context
-    console.log('🔍 Step 1: Getting context...');
-    const contextResult = await getContext();
-    console.log('✅ Context retrieved successfully');
-
-    // Step 2: Design plan
-    console.log('📋 Step 2: Designing plan...');
-    const planResult = await designPlan(contextResult.context);
-    console.log('✅ Plan designed successfully');
-
-    // Step 3: Send plan
-    console.log('📤 Step 3: Sending plan...');
-    const sendPlanResult = await sendPlan(planResult.plan);
-    console.log(`✅ Plan sent to ${sendPlanResult.recipients.length} recipients`);
-
-    // Step 4: Send priority mail
-    console.log('📬 Step 4: Sending priority mails...');
-    const priorityMailResult = await sendPriorityMail(planResult.activities);
-    console.log(`✅ Priority mails sent: ${priorityMailResult.count}`);
-
-    // Step 5: Schedule activities (API calls)
-    console.log('📅 Step 5: Scheduling activities...');
-    const scheduleResult = await scheduleActivities(planResult.activities);
-    console.log(`✅ Activities scheduled via ${scheduleResult.apiCalls} API calls`);
-
-    // Step 6: Schedule daily stand up workflows for all sites
-    console.log('🌅 Step 6: Scheduling daily stand up workflows...');
+    // Step 1: Decision Logic - Should we execute operations today?
+    console.log('🤔 Step 1: Analyzing if operations should execute today...');
     
-    let dailyStandUpResult;
-    try {
-      console.log('🔄 About to call scheduleDailyStandUpWorkflowsActivity...');
+    const today = new Date();
+    const dayOfWeek = today.getDay(); // 0=Sunday, 1=Monday, etc.
+    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek];
+    const currentHour = today.getHours();
+    
+    console.log(`📅 Today is ${dayName} (${dayOfWeek}) at ${currentHour}:${today.getMinutes().toString().padStart(2, '0')}`);
+    
+    // Decision logic: Execute operations or not
+    let shouldExecute = false;
+    let reason = '';
+    
+    // For now, simple logic: execute on weekdays (Monday-Friday)
+    // This is where you can add more sophisticated business logic
+    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+      shouldExecute = true;
+      reason = `Weekday execution (${dayName}) - operations should run`;
+    } else {
+      shouldExecute = false;
+      reason = `Weekend (${dayName}) - skipping operations`;
+    }
+    
+    console.log(`📋 Decision: ${shouldExecute ? '✅ EXECUTE' : '⏭️ SKIP'}`);
+    console.log(`📝 Reason: ${reason}`);
+
+    let operationsResult;
+    let operationsExecuted = false;
+
+    // Step 2: Execute operations if decision is YES
+    if (shouldExecute) {
+      console.log('🚀 Step 2: Executing daily operations workflow...');
       
-      // Production mode - changed from test mode for actual scheduling
-      dailyStandUpResult = await scheduleDailyStandUpWorkflowsActivity({
-        dryRun: false,  // PRODUCTION: Actually create schedules
-        testMode: false, // PRODUCTION: Full production mode
-        // No maxSites limit for production - will process all sites
-      });
-      
-      console.log('🎯 scheduleDailyStandUpWorkflowsActivity completed successfully');
-      console.log(`✅ Daily stand ups scheduled: ${dailyStandUpResult.scheduled} sites`);
-      console.log(`   Failed: ${dailyStandUpResult.failed}, Skipped: ${dailyStandUpResult.skipped}`);
-      
-      if (dailyStandUpResult.testInfo) {
-        console.log(`   Mode: ${dailyStandUpResult.testInfo.mode}`);
-        console.log(`   Duration: ${dailyStandUpResult.testInfo.duration}`);
+      try {
+        operationsResult = await executeChild('dailyOperationsWorkflow', {
+          workflowId: `daily-operations-${Date.now()}`,
+        });
+        
+        operationsExecuted = true;
+        console.log('✅ Daily operations workflow completed successfully');
+      } catch (operationsError) {
+        console.error('❌ Daily operations workflow failed:', operationsError);
+        operationsResult = {
+          error: operationsError instanceof Error ? operationsError.message : String(operationsError)
+        };
       }
-    } catch (dailyStandUpError) {
-      console.error('❌ Error in scheduleDailyStandUpWorkflowsActivity:', dailyStandUpError);
-      // Set default values for the failed activity
-      dailyStandUpResult = {
-        scheduled: 0,
-        failed: 1,
-        skipped: 0,
-        results: [],
-        errors: [dailyStandUpError instanceof Error ? dailyStandUpError.message : String(dailyStandUpError)]
-      };
+    } else {
+      console.log('⏭️ Step 2: Skipping daily operations (decision was NO)');
     }
 
     const endTime = new Date();
     const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
 
-    console.log('🎉 Activity prioritization engine workflow completed successfully');
+    console.log('🎉 Activity prioritization engine workflow completed');
+    console.log(`   Decision: ${shouldExecute ? 'EXECUTE' : 'SKIP'}`);
+    console.log(`   Operations executed: ${operationsExecuted ? 'YES' : 'NO'}`);
+    console.log(`   Total execution time: ${executionTime}`);
+    console.log('   Role: Decision maker and orchestrator');
+    
     return {
-      contextRetrieved: true,
-      planDesigned: true,
-      planSent: true,
-      priorityMailsSent: priorityMailResult.count,
-      activitiesScheduled: scheduleResult.apiCalls,
-      dailyStandUpsScheduled: dailyStandUpResult.scheduled,
+      shouldExecute,
+      reason,
+      operationsExecuted,
+      operationsResult,
       executionTime
     };
 

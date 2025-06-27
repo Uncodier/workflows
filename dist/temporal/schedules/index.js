@@ -13,13 +13,13 @@ exports.defaultSchedules = [
     {
         id: 'central-schedule-activities',
         workflowType: 'scheduleActivitiesWorkflow',
-        intervalMinutes: 24 * 60, // Every 24 hours (1440 minutes)
+        intervalMinutes: 24 * 60, // Every 24 hours - business hours logic handled inside workflow
         args: [],
-        description: 'Central schedule that manages all workflow orchestration',
-        startAt: new Date(), // Start immediately
+        description: 'Central schedule that runs every 24 hours and uses business_hours to determine optimal scheduling',
+        startAt: new Date(),
         jitterMs: 30000, // 30 seconds jitter
         pauseOnFailure: false,
-        catchupWindow: '1h', // 1 hour catchup window
+        catchupWindow: '3h', // 3 hour catchup window - extendido para mejor recuperación
         paused: false
     },
     {
@@ -143,6 +143,34 @@ async function createSchedule(spec) {
                 console.log(`📝 Proceeding with creation attempt anyway...`);
             }
         }
+        // Build schedule spec - either intervals or cron
+        let scheduleSpec;
+        if (spec.cron) {
+            // Use cron expression
+            scheduleSpec = {
+                cron: spec.cron,
+                timezone: spec.timezone || 'UTC',
+            };
+            if (spec.startAt) {
+                scheduleSpec.startAt = spec.startAt;
+            }
+            if (spec.endAt) {
+                scheduleSpec.endAt = spec.endAt;
+            }
+        }
+        else {
+            // Use intervals (legacy approach)
+            scheduleSpec = {
+                intervals: [{
+                        every: `${spec.intervalMinutes || 30}m`, // Use minutes format
+                        offset: '0s', // Start immediately
+                    }],
+                startAt: spec.startAt || new Date(),
+                endAt: spec.endAt || undefined,
+                jitter: spec.jitterMs ? `${spec.jitterMs}ms` : '30s', // Default 30 second jitter
+                timezone: spec.timezone || 'UTC',
+            };
+        }
         const scheduleOptions = {
             scheduleId: spec.id,
             action: {
@@ -152,16 +180,7 @@ async function createSchedule(spec) {
                 args: spec.args || [],
                 workflowId: `${spec.id}-${Date.now()}`, // Unique workflow ID for each run
             },
-            spec: {
-                intervals: [{
-                        every: `${spec.intervalMinutes || 30}m`, // Use minutes format
-                        offset: '0s', // Start immediately
-                    }],
-                startAt: spec.startAt || new Date(),
-                endAt: spec.endAt || undefined,
-                jitter: spec.jitterMs ? `${spec.jitterMs}ms` : '30s', // Default 30 second jitter
-                timezone: 'UTC',
-            },
+            spec: scheduleSpec,
             policies: {
                 catchupWindow: spec.catchupWindow || '1h',
                 overlap: ScheduleOverlapPolicy.SKIP,
@@ -173,15 +192,21 @@ async function createSchedule(spec) {
             },
         };
         console.log(`🚀 Creating schedule ${spec.id} in Temporal...`);
-        console.log(`   - Interval: Every ${spec.intervalMinutes || 30} minutes`);
+        if (spec.cron) {
+            console.log(`   - Cron: ${spec.cron}`);
+            console.log(`   - Time Zone: ${spec.timezone || 'UTC'}`);
+        }
+        else {
+            console.log(`   - Interval: Every ${spec.intervalMinutes || 30} minutes`);
+            console.log(`   - Time Zone: ${spec.timezone || 'UTC'}`);
+            console.log(`   - Jitter: ${spec.jitterMs ? `${spec.jitterMs}ms` : '30s'}`);
+        }
         console.log(`   - Workflow: ${workflows_1.workflowNames[spec.workflowType]}`);
         console.log(`   - Task Queue: ${config_1.temporalConfig.taskQueue}`);
-        console.log(`   - Time Zone: UTC`);
         console.log(`   - Start At: ${(spec.startAt || new Date()).toISOString()}`);
         if (spec.endAt) {
             console.log(`   - End At: ${spec.endAt.toISOString()}`);
         }
-        console.log(`   - Jitter: ${spec.jitterMs ? `${spec.jitterMs}ms` : '30s'}`);
         console.log(`   - Catchup Window: ${spec.catchupWindow || '1h'}`);
         console.log(`   - Pause on Failure: ${spec.pauseOnFailure !== undefined ? spec.pauseOnFailure : false}`);
         console.log(`   - Initially Paused: ${spec.paused || false}`);
@@ -239,7 +264,12 @@ async function createAllSchedules() {
         try {
             console.log(`📅 Processing schedule: ${schedule.id}`);
             console.log(`   - Workflow: ${schedule.workflowType}`);
-            console.log(`   - Interval: Every ${schedule.intervalMinutes} minutes`);
+            if (schedule.cron) {
+                console.log(`   - Cron: ${schedule.cron} (${schedule.timezone || 'UTC'})`);
+            }
+            else {
+                console.log(`   - Interval: Every ${schedule.intervalMinutes} minutes`);
+            }
             console.log(`   - Description: ${schedule.description}`);
             const result = await createSchedule(schedule);
             console.log(`   ✅ ${result.message}`);
