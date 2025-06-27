@@ -8,6 +8,7 @@ import { temporalConfig } from '../../config/config';
 import { EmailSyncSchedulingService, SiteWithCronStatus, SchedulingOptions } from '../services';
 import { saveCronStatusActivity, CronStatusUpdate } from './cronActivities';
 import { logWorkflowExecutionActivity } from './supabaseActivities';
+import { getSupabaseService } from '../services/supabaseService';
 
 export interface ScheduleWorkflowResult {
   workflowId: string;
@@ -740,3 +741,236 @@ function getNextRunTime(cronExpression: string): Date {
   // Default to 1 hour from now for other patterns
   return new Date(Date.now() + 60 * 60 * 1000);
 }
+
+/**
+ * Simple activity to schedule daily stand up workflows for all sites
+ * Uses business_hours from settings or defaults to Mexico schedule
+ * 
+ * @param options.dryRun - If true, only simulates scheduling without creating real schedules
+ * @param options.testMode - If true, adds safety checks and limits to prevent production issues
+ * @param options.maxSites - Maximum number of sites to process (useful for testing)
+ */
+export async function scheduleDailyStandUpWorkflowsActivity(
+  options: { 
+    dryRun?: boolean; 
+    testMode?: boolean; 
+    maxSites?: number;
+  } = {}
+): Promise<{
+  scheduled: number;
+  skipped: number;
+  failed: number;
+  results: ScheduleWorkflowResult[];
+  errors: string[];
+  testInfo?: any;
+}> {
+  console.log('🌅 Starting Daily Stand Up workflow scheduling for all sites...');
+  
+  // Safety checks for test mode
+  if (options.testMode) {
+    console.log('🧪 TEST MODE ENABLED - Extra safety checks activated');
+    options.dryRun = true; // Force dry run in test mode
+    options.maxSites = options.maxSites || 3; // Limit to 3 sites max in test mode
+  }
+  
+  if (options.dryRun) {
+    console.log('🔬 DRY RUN MODE - No real schedules will be created');
+  }
+  
+  const results: ScheduleWorkflowResult[] = [];
+  const errors: string[] = [];
+  let scheduled = 0;
+  let failed = 0;
+  const testInfo: any = {
+    mode: options.dryRun ? 'dry-run' : 'live',
+    testMode: options.testMode || false,
+    maxSites: options.maxSites,
+    startTime: new Date().toISOString()
+  };
+
+  try {
+    const supabaseService = getSupabaseService();
+    
+    // Check database connection
+    const isConnected = await supabaseService.getConnectionStatus();
+    if (!isConnected) {
+      throw new Error('Database not available for scheduling');
+    }
+
+    // Fetch all sites
+    let sites = await supabaseService.fetchSites();
+    console.log(`✅ Found ${sites.length} sites total`);
+
+    // Apply maxSites limit if specified
+    if (options.maxSites && options.maxSites > 0) {
+      sites = sites.slice(0, options.maxSites);
+      console.log(`🔢 Limited to first ${sites.length} sites for testing`);
+    }
+
+    if (sites.length === 0) {
+      console.log('⚠️ No sites found, nothing to schedule');
+      return { 
+        scheduled: 0, 
+        skipped: 0, 
+        failed: 0, 
+        results: [], 
+        errors: [],
+        testInfo 
+      };
+    }
+
+    testInfo.sitesProcessed = sites.length;
+    testInfo.siteNames = sites.map(site => site.name);
+
+    // For each site, schedule a daily stand up
+    for (const site of sites) {
+      try {
+        console.log(`📋 Processing site: ${site.name} (${site.id})`);
+
+        if (options.dryRun) {
+          console.log(`🧪 DRY RUN: Would schedule dailyStandUp for ${site.name}`);
+          console.log(`      📅 Schedule: Monday-Friday at 8:00 AM (Mexico City time)`);
+          console.log(`      🕐 Cron expression: "0 8 * * 1-5"`);
+          console.log(`      🌍 Timezone: America/Mexico_City`);
+          scheduled++;
+          continue;
+        }
+
+        // Create the schedule with default Mexico timezone and weekdays
+        const scheduleResult = await createSimpleDailyStandUpSchedule(site);
+        results.push(scheduleResult);
+
+        if (scheduleResult.success) {
+          scheduled++;
+          console.log(`✅ Successfully scheduled for ${site.name}`);
+        } else {
+          failed++;
+          const error = `Failed to schedule ${site.name}: ${scheduleResult.error}`;
+          errors.push(error);
+          console.error(`❌ ${error}`);
+        }
+
+      } catch (siteError) {
+        failed++;
+        const errorMsg = `Error processing site ${site.name}: ${siteError instanceof Error ? siteError.message : String(siteError)}`;
+        errors.push(errorMsg);
+        console.error(`❌ ${errorMsg}`);
+      }
+    }
+
+    testInfo.endTime = new Date().toISOString();
+    testInfo.duration = `${Date.now() - new Date(testInfo.startTime).getTime()}ms`;
+    
+    // Calculate next execution time for Mexico timezone
+    const nextExecution = calculateNextDailyStandUpTime();
+    testInfo.nextExecution = nextExecution;
+    
+    console.log(`📊 Daily Stand Up scheduling completed: ${scheduled} scheduled, ${failed} failed`);
+    if (options.dryRun) {
+      console.log(`⏰ Next execution would be: ${nextExecution.toLocaleString('es-MX', { 
+        timeZone: 'America/Mexico_City',
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long', 
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })} (Mexico City)`);
+    }
+    
+    return { scheduled, skipped: 0, failed, results, errors, testInfo };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Failed to schedule Daily Stand Up workflows: ${errorMessage}`);
+    testInfo.error = errorMessage;
+    testInfo.endTime = new Date().toISOString();
+    return { 
+      scheduled: 0, 
+      skipped: 0, 
+      failed: 1, 
+      results: [], 
+      errors: [errorMessage],
+      testInfo 
+    };
+  }
+}
+
+/**
+ * Calculate the next Daily Stand Up execution time based on Mexico timezone
+ */
+function calculateNextDailyStandUpTime(): Date {
+  const now = new Date();
+  const mexicoTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Mexico_City"}));
+  
+  // Set to 8:00 AM
+  const nextExecution = new Date(mexicoTime);
+  nextExecution.setHours(8, 0, 0, 0);
+  
+  // If it's already past 8 AM today, or it's weekend, find next weekday
+  if (nextExecution <= mexicoTime || nextExecution.getDay() === 0 || nextExecution.getDay() === 6) {
+    do {
+      nextExecution.setDate(nextExecution.getDate() + 1);
+      nextExecution.setHours(8, 0, 0, 0);
+    } while (nextExecution.getDay() === 0 || nextExecution.getDay() === 6); // Skip weekends
+  }
+  
+  return nextExecution;
+}
+
+/**
+ * Create a simple daily stand up schedule for a site
+ */
+async function createSimpleDailyStandUpSchedule(site: any): Promise<ScheduleWorkflowResult> {
+  const scheduleId = `daily-standup-${site.id}`;
+  const workflowId = `${scheduleId}-${Date.now()}`;
+
+  try {
+    const client = await getTemporalClient();
+    
+    // Default schedule: Monday to Friday at 8 AM Mexico time
+    const cronExpression = '0 8 * * 1-5'; // 8 AM on weekdays
+    const timezone = 'America/Mexico_City';
+    
+    console.log(`🕐 Creating simple schedule: "${cronExpression}" (${timezone})`);
+
+    // Create the schedule
+    await client.schedule.create({
+      scheduleId,
+      spec: {
+        cron: cronExpression,
+        timezone
+      },
+      action: {
+        type: 'startWorkflow',
+        workflowType: 'dailyStandUpWorkflow',
+        taskQueue: temporalConfig.taskQueue,
+        args: [{
+          site_id: site.id,
+          userId: site.user_id,
+          additionalData: {
+            scheduledBy: 'activityPrioritizationEngine',
+            scheduleTime: '08:00',
+            workingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+            timezone
+          }
+        }],
+        workflowId: `daily-standup-${site.id}-${Date.now()}`,
+      },
+      policies: {
+        catchupWindow: '1h',
+        overlap: 'SKIP',
+        pauseOnFailure: false
+      }
+    });
+
+    console.log(`✅ Successfully created simple schedule for ${site.name}`);
+    return { workflowId, scheduleId, success: true };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Failed to create simple schedule for ${site.name}: ${errorMessage}`);
+    return { workflowId, scheduleId, success: false, error: errorMessage };
+  }
+}
+

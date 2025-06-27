@@ -110,6 +110,12 @@ class ApiService {
       const data = await response.json();
       console.log(`✅ API Response:`, JSON.stringify(data, null, 2));
       
+      // If the API response already has success/data structure, return it directly
+      if (data && typeof data === 'object' && 'success' in data && 'data' in data) {
+        return data;
+      }
+      
+      // Otherwise, wrap it in our standard format
       return {
         success: true,
         data

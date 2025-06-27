@@ -50,4 +50,29 @@ export async function deleteApiResourceActivity(resourceId: string): Promise<any
   }
   
   return response.data;
+}
+
+/**
+ * Activity to send daily stand up notification
+ */
+export async function sendDailyStandUpNotificationActivity(params: {
+  site_id: string;
+  subject: string;
+  message: string;
+  systemAnalysis?: any; // Optional system analysis data
+}): Promise<any> {
+  const { site_id, subject, message, systemAnalysis } = params;
+  
+  const response = await apiService.post('/api/notifications/dailyStandUp', {
+    site_id,
+    subject,
+    message,
+    systemAnalysis
+  });
+  
+  if (!response.success) {
+    throw new Error(`Failed to send daily stand up notification: ${response.error?.message}`);
+  }
+  
+  return response.data;
 } 

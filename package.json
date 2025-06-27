@@ -30,6 +30,8 @@
     "test:send-whatsapp": "ts-node src/scripts/test-send-whatsapp-from-agent.ts",
     "test:create-agents": "ts-node src/scripts/test-create-agents.ts",
     "test:execute-tool": "ts-node src/scripts/test-execute-tool-workflow.ts",
+    "test:daily-standup-safe": "ts-node src/scripts/safe-test-daily-standup.ts",
+    "test:activity-prioritization-dry": "ts-node src/scripts/test-activity-prioritization-dry-run.ts",
     "dev:all": "concurrently \"npm run dev\" \"npm run worker:dev\"",
     "build:all": "npm run build && npm run worker:build",
     "start:all": "concurrently \"npm run start\" \"npm run worker:start\"",

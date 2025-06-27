@@ -36,6 +36,7 @@ const leadResearchWorkflow_1 = require("./leadResearchWorkflow");
 const buildSegmentsICPWorkflow_1 = require("./buildSegmentsICPWorkflow");
 const humanInterventionWorkflow_1 = require("./humanInterventionWorkflow");
 const deepResearchWorkflow_1 = require("./deepResearchWorkflow");
+const dailyStandUpWorkflow_1 = require("./dailyStandUpWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -57,6 +58,7 @@ __exportStar(require("./leadResearchWorkflow"), exports);
 __exportStar(require("./buildSegmentsICPWorkflow"), exports);
 __exportStar(require("./humanInterventionWorkflow"), exports);
 __exportStar(require("./deepResearchWorkflow"), exports);
+__exportStar(require("./dailyStandUpWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -83,6 +85,7 @@ exports.workflows = {
     buildSingleSegmentICPWorkflow: buildSegmentsICPWorkflow_1.buildSingleSegmentICPWorkflow,
     humanInterventionWorkflow: humanInterventionWorkflow_1.humanInterventionWorkflow,
     deepResearchWorkflow: deepResearchWorkflow_1.deepResearchWorkflow,
+    dailyStandUpWorkflow: dailyStandUpWorkflow_1.dailyStandUpWorkflow,
 };
 // Workflow names for Temporal Client (strings)
 exports.workflowNames = {
@@ -110,4 +113,5 @@ exports.workflowNames = {
     buildSingleSegmentICPWorkflow: 'buildSingleSegmentICPWorkflow',
     humanInterventionWorkflow: 'humanInterventionWorkflow',
     deepResearchWorkflow: 'deepResearchWorkflow',
+    dailyStandUpWorkflow: 'dailyStandUpWorkflow',
 };

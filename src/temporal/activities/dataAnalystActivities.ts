@@ -102,7 +102,52 @@ export async function deepResearchActivity(
       };
     }
 
-    const operations = response.data?.operations || response.data?.results || [];
+    // Debug: Log the complete response structure to understand where data is
+    console.log(`🔍 Deep research API response structure:`, JSON.stringify(response, null, 2));
+
+    // After apiService changes, we need to look for operations in multiple places
+    // Try to find operations in various possible locations
+    let operations: any[] = [];
+    let command_id: string | undefined;
+    
+    // Cast response to any to access potential properties that may not be in ApiResponse interface
+    const apiResponse = response as any;
+    
+    // Check different possible locations for operations
+    if (response.data?.operations) {
+      operations = response.data.operations;
+      console.log(`✅ Found operations in response.data.operations (${operations.length} operations)`);
+    } else if (response.data?.data?.operations) {
+      operations = response.data.data.operations;
+      console.log(`✅ Found operations in response.data.data.operations (${operations.length} operations)`);
+    } else if (response.data?.results) {
+      operations = response.data.results;
+      console.log(`✅ Found operations in response.data.results (${operations.length} operations)`);
+    } else if (apiResponse.operations) {
+      operations = apiResponse.operations;
+      console.log(`✅ Found operations in response.operations (${operations.length} operations)`);
+    } else if (Array.isArray(response.data)) {
+      operations = response.data;
+      console.log(`✅ Found operations as response.data array (${operations.length} operations)`);
+    } else {
+      console.log(`⚠️ No operations found in response structure`);
+      console.log(`🔍 Available response.data keys:`, Object.keys(response.data || {}));
+      operations = [];
+    }
+
+    // Check different possible locations for command_id
+    if (response.data?.command_id) {
+      command_id = response.data.command_id;
+      console.log(`✅ Found command_id in response.data.command_id: ${command_id}`);
+    } else if (response.data?.data?.command_id) {
+      command_id = response.data.data.command_id;
+      console.log(`✅ Found command_id in response.data.data.command_id: ${command_id}`);
+    } else if (apiResponse.command_id) {
+      command_id = apiResponse.command_id;
+      console.log(`✅ Found command_id in response.command_id: ${command_id}`);
+    } else {
+      console.log(`⚠️ No command_id found in response`);
+    }
     
     // Fix parsing issue: ensure expected_deliverables is an object, not a JSON string
     if (Array.isArray(operations)) {
@@ -134,24 +179,17 @@ export async function deepResearchActivity(
       });
     }
 
-    // Flatten the data structure if it has nested data.data
-    let flattenedData = response.data;
-    if (response.data && response.data.data && typeof response.data.data === 'object') {
-      console.log(`🔄 Flattening nested data.data structure to avoid unnecessary nesting`);
-      flattenedData = {
-        ...response.data,
-        ...response.data.data, // Merge the nested data to the top level
-        // Remove the nested data property to avoid duplication
-        data: undefined
-      };
-      // Clean up undefined values
-      delete flattenedData.data;
-    }
+    // Create enhanced response data that includes command_id at the top level for workflow access
+    const enhancedData = {
+      ...response.data,
+      command_id: command_id, // Ensure command_id is available at top level
+      operations: operations   // Ensure operations are available at top level
+    };
 
     return {
       success: true,
       operations,
-      data: flattenedData
+      data: enhancedData
     };
 
   } catch (error) {
@@ -221,23 +259,9 @@ export async function searchOperationActivity(
     console.log(`✅ Search operation completed successfully`);
     console.log(`📊 Found ${Array.isArray(results) ? results.length : 'N/A'} results`);
 
-    // Flatten the data structure if it has nested data.data
-    let flattenedData = response.data;
-    if (response.data && response.data.data && typeof response.data.data === 'object') {
-      console.log(`🔄 Flattening nested data.data structure to avoid unnecessary nesting`);
-      flattenedData = {
-        ...response.data,
-        ...response.data.data, // Merge the nested data to the top level
-        // Remove the nested data property to avoid duplication
-        data: undefined
-      };
-      // Clean up undefined values
-      delete flattenedData.data;
-    }
-
     return {
       success: true,
-      data: flattenedData,
+      data: response.data,
       results
     };
 
@@ -294,26 +318,12 @@ export async function dataAnalysisActivity(
       console.log(`💡 Generated ${recommendations.length} recommendations`);
     }
 
-    // Flatten the data structure if it has nested data.data
-    let flattenedData = response.data;
-    if (response.data && response.data.data && typeof response.data.data === 'object') {
-      console.log(`🔄 Flattening nested data.data structure to avoid unnecessary nesting`);
-      flattenedData = {
-        ...response.data,
-        ...response.data.data, // Merge the nested data to the top level
-        // Remove the nested data property to avoid duplication
-        data: undefined
-      };
-      // Clean up undefined values
-      delete flattenedData.data;
-    }
-
     return {
       success: true,
       analysis,
       insights,
       recommendations,
-      data: flattenedData
+      data: response.data
     };
 
   } catch (error) {

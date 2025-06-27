@@ -19,6 +19,7 @@ import { leadResearchWorkflow } from './leadResearchWorkflow';
 import { buildSegmentsICPWorkflow, buildSingleSegmentICPWorkflow } from './buildSegmentsICPWorkflow';
 import { humanInterventionWorkflow } from './humanInterventionWorkflow';
 import { deepResearchWorkflow } from './deepResearchWorkflow';
+import { dailyStandUpWorkflow } from './dailyStandUpWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -41,6 +42,7 @@ export * from './leadResearchWorkflow';
 export * from './buildSegmentsICPWorkflow';
 export * from './humanInterventionWorkflow';
 export * from './deepResearchWorkflow';
+export * from './dailyStandUpWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -68,6 +70,7 @@ export const workflows = {
   buildSingleSegmentICPWorkflow,
   humanInterventionWorkflow,
   deepResearchWorkflow,
+  dailyStandUpWorkflow,
 };
 
 // Workflow names for Temporal Client (strings)
@@ -96,6 +99,7 @@ export const workflowNames = {
   buildSingleSegmentICPWorkflow: 'buildSingleSegmentICPWorkflow',
   humanInterventionWorkflow: 'humanInterventionWorkflow',
   deepResearchWorkflow: 'deepResearchWorkflow',
+  dailyStandUpWorkflow: 'dailyStandUpWorkflow',
 };
 
 // Workflow types for type-safe execution

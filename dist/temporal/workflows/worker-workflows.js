@@ -37,3 +37,4 @@ __exportStar(require("./leadFollowUpWorkflow"), exports);
 __exportStar(require("./leadResearchWorkflow"), exports);
 __exportStar(require("./humanInterventionWorkflow"), exports);
 __exportStar(require("./deepResearchWorkflow"), exports);
+__exportStar(require("./dailyStandUpWorkflow"), exports);

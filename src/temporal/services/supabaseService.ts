@@ -126,6 +126,30 @@ export class SupabaseService {
   }
 
   /**
+   * Fetch complete settings for specific site IDs including business_hours
+   */
+  async fetchCompleteSettings(siteIds: string[]): Promise<any[]> {
+    const isConnected = await this.getConnectionStatus();
+    if (!isConnected) {
+      throw new Error('Database not connected');
+    }
+
+    console.log(`🔍 Fetching complete settings for ${siteIds.length} sites from Supabase...`);
+    const { data, error } = await this.client
+      .from('settings')
+      .select('site_id, channels, business_hours')
+      .in('site_id', siteIds);
+
+    if (error) {
+      console.error('❌ Error fetching complete settings:', error);
+      throw new Error(`Failed to fetch complete settings: ${error.message}`);
+    }
+
+    console.log(`✅ Successfully fetched ${data?.length || 0} complete settings from database`);
+    return data || [];
+  }
+
+  /**
    * Fetch sites that have email sync enabled (channels.email.enabled = true)
    */
   async fetchSitesWithEmailEnabled(): Promise<any[]> {

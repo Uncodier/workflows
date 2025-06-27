@@ -20,4 +20,5 @@ export * from './buildContentWorkflow';
 export * from './leadFollowUpWorkflow';
 export * from './leadResearchWorkflow';
 export * from './humanInterventionWorkflow';
-export * from './deepResearchWorkflow'; 
+export * from './deepResearchWorkflow';
+export * from './dailyStandUpWorkflow'; 

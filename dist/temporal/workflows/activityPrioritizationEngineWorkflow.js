@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activityPrioritizationEngineWorkflow = activityPrioritizationEngineWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 // Configure activity options
-const { getContext, designPlan, sendPlan, sendPriorityMail, scheduleActivities } = (0, workflow_1.proxyActivities)({
+const { getContext, designPlan, sendPlan, sendPriorityMail, scheduleActivities, scheduleDailyStandUpWorkflowsActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '2 minutes',
 });
 /**
@@ -34,6 +34,20 @@ async function activityPrioritizationEngineWorkflow() {
         console.log('📅 Step 5: Scheduling activities...');
         const scheduleResult = await scheduleActivities(planResult.activities);
         console.log(`✅ Activities scheduled via ${scheduleResult.apiCalls} API calls`);
+        // Step 6: Schedule daily stand up workflows for all sites
+        console.log('🌅 Step 6: Scheduling daily stand up workflows...');
+        // Use test mode by default for safety - change to false when ready for production
+        const dailyStandUpResult = await scheduleDailyStandUpWorkflowsActivity({
+            dryRun: true, // SAFETY: Change to false when ready for production
+            testMode: true, // SAFETY: Change to false when ready for production
+            maxSites: 5 // SAFETY: Limit to 5 sites for testing
+        });
+        console.log(`✅ Daily stand ups scheduled: ${dailyStandUpResult.scheduled} sites`);
+        console.log(`   Failed: ${dailyStandUpResult.failed}, Skipped: ${dailyStandUpResult.skipped}`);
+        if (dailyStandUpResult.testInfo) {
+            console.log(`   Mode: ${dailyStandUpResult.testInfo.mode}`);
+            console.log(`   Duration: ${dailyStandUpResult.testInfo.duration}`);
+        }
         const endTime = new Date();
         const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
         console.log('🎉 Activity prioritization engine workflow completed successfully');
@@ -43,6 +57,7 @@ async function activityPrioritizationEngineWorkflow() {
             planSent: true,
             priorityMailsSent: priorityMailResult.count,
             activitiesScheduled: scheduleResult.apiCalls,
+            dailyStandUpsScheduled: dailyStandUpResult.scheduled,
             executionTime
         };
     }
