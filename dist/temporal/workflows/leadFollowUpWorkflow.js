@@ -53,7 +53,7 @@ async function leadFollowUpWorkflow(options) {
     let nextSteps = [];
     let siteName = '';
     let siteUrl = '';
-    let data = null;
+    let response = null;
     let messageSent;
     try {
         console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
@@ -91,7 +91,7 @@ async function leadFollowUpWorkflow(options) {
         }
         followUpActions = followUpResult.followUpActions || [];
         nextSteps = followUpResult.nextSteps || [];
-        data = followUpResult.data;
+        response = followUpResult.data;
         console.log(`✅ Successfully executed lead follow-up for lead ${lead_id}`);
         console.log(`📊 Results: ${followUpActions.length} follow-up actions, ${nextSteps.length} next steps`);
         if (followUpActions.length > 0) {
@@ -107,13 +107,13 @@ async function leadFollowUpWorkflow(options) {
             });
         }
         // Step 3: Save lead follow-up logs to database
-        if (data) {
+        if (response) {
             console.log(`📝 Step 3: Saving lead follow-up logs to database...`);
             const saveLogsResult = await saveLeadFollowUpLogsActivity({
                 siteId: site_id,
                 leadId: lead_id,
                 userId: options.userId || site.user_id,
-                data: data
+                data: response
             });
             if (!saveLogsResult.success) {
                 const errorMsg = `Failed to save lead follow-up logs: ${saveLogsResult.error}`;
@@ -126,10 +126,10 @@ async function leadFollowUpWorkflow(options) {
             }
         }
         // Step 4: Send follow-up message based on channel
-        if (data && data.success && data.data) {
+        if (response && response.messages && response.lead) {
             console.log(`📤 Step 4: Sending follow-up message based on communication channel...`);
             try {
-                const responseData = data.data;
+                const responseData = response; // response is already the response data
                 const messages = responseData.messages || {};
                 const lead = responseData.lead || {};
                 // Extract contact information
@@ -236,7 +236,7 @@ async function leadFollowUpWorkflow(options) {
             siteUrl,
             followUpActions,
             nextSteps,
-            data,
+            data: response,
             messageSent,
             errors,
             executionTime,
@@ -299,7 +299,7 @@ async function leadFollowUpWorkflow(options) {
             siteUrl,
             followUpActions,
             nextSteps,
-            data,
+            data: response,
             messageSent,
             errors: [...errors, errorMessage],
             executionTime,

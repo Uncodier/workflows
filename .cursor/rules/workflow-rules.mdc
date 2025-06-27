@@ -17,3 +17,4 @@ data (con toda la respuesta) del workflow
 error, null o json con el error 
 
 cuidado de no anidar objetos data entre sub workflows o actividades, pues genera problemas de acoplamiento.
+cuando referencies las respuestas de un api, referencialos como response, para que sea más limpio el acceso, response.sucess, error, etc.

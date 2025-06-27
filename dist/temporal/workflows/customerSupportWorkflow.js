@@ -89,8 +89,8 @@ async function emailCustomerSupportMessageWorkflow(emailData, baseParams) {
                 // Prepare email parameters with agent response
                 const emailParams = {
                     email: emailData.contact_info.email,
-                    subject: response.data?.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`,
-                    message: response.data?.data?.messages?.assistant?.content ||
+                    subject: response.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`,
+                    message: response.data?.messages?.assistant?.content ||
                         `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
                     site_id: emailData.site_id,
                     agent_id: baseParams.agentId,
@@ -204,7 +204,7 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
                 // Prepare WhatsApp parameters from customer support response
                 const whatsappParams = {
                     phone_number: whatsappData.phoneNumber,
-                    message: response.data?.data?.messages?.assistant?.content ||
+                    message: response.data?.messages?.assistant?.content ||
                         `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
                     site_id: whatsappData.siteId,
                     from: 'Customer Support',

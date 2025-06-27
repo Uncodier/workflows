@@ -97,7 +97,7 @@ export async function leadFollowUpWorkflow(
   let nextSteps: string[] = [];
   let siteName = '';
   let siteUrl = '';
-  let data: any = null;
+  let response: any = null;
   let messageSent: { channel: 'email' | 'whatsapp'; recipient: string; success: boolean; messageId?: string } | undefined;
 
   try {
@@ -146,7 +146,7 @@ export async function leadFollowUpWorkflow(
     
     followUpActions = followUpResult.followUpActions || [];
     nextSteps = followUpResult.nextSteps || [];
-    data = followUpResult.data;
+    response = followUpResult.data;
     
     console.log(`✅ Successfully executed lead follow-up for lead ${lead_id}`);
     console.log(`📊 Results: ${followUpActions.length} follow-up actions, ${nextSteps.length} next steps`);
@@ -166,14 +166,14 @@ export async function leadFollowUpWorkflow(
     }
 
     // Step 3: Save lead follow-up logs to database
-    if (data) {
+    if (response) {
       console.log(`📝 Step 3: Saving lead follow-up logs to database...`);
       
       const saveLogsResult = await saveLeadFollowUpLogsActivity({
         siteId: site_id,
         leadId: lead_id,
         userId: options.userId || site.user_id,
-        data: data
+        data: response
       });
       
       if (!saveLogsResult.success) {
@@ -187,11 +187,11 @@ export async function leadFollowUpWorkflow(
     }
 
     // Step 4: Send follow-up message based on channel
-    if (data && data.success && data.data) {
+    if (response && response.messages && response.lead) {
       console.log(`📤 Step 4: Sending follow-up message based on communication channel...`);
       
       try {
-        const responseData = data.data;
+        const responseData = response; // response is already the response data
         const messages = responseData.messages || {};
         const lead = responseData.lead || {};
         
@@ -305,7 +305,7 @@ export async function leadFollowUpWorkflow(
       siteUrl,
       followUpActions,
       nextSteps,
-      data,
+      data: response,
       messageSent,
       errors,
       executionTime,
@@ -377,7 +377,7 @@ export async function leadFollowUpWorkflow(
       siteUrl,
       followUpActions,
       nextSteps,
-      data,
+      data: response,
       messageSent,
       errors: [...errors, errorMessage],
       executionTime,
