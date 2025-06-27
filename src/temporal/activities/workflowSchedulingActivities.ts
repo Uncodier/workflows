@@ -958,7 +958,7 @@ async function createSimpleDailyStandUpSchedule(site: any): Promise<ScheduleWork
         workflowId: `daily-standup-${site.id}-${Date.now()}`,
       },
       policies: {
-        catchupWindow: '1h',
+        catchupWindow: '3h',  // 3 hours catchup window for UI re-execution
         overlap: 'SKIP',
         pauseOnFailure: false
       }
