@@ -7,10 +7,16 @@ const {
   designPlan, 
   sendPlan, 
   sendPriorityMail, 
-  scheduleActivities,
-  scheduleDailyStandUpWorkflowsActivity
+  scheduleActivities
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: '2 minutes',
+});
+
+// Configure longer timeout for scheduling activities
+const { 
+  scheduleDailyStandUpWorkflowsActivity
+} = proxyActivities<typeof activities>({
+  startToCloseTimeout: '10 minutes', // Longer timeout for site processing
 });
 
 /**
@@ -58,19 +64,35 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
     // Step 6: Schedule daily stand up workflows for all sites
     console.log('🌅 Step 6: Scheduling daily stand up workflows...');
     
-    // Use test mode by default for safety - change to false when ready for production
-    const dailyStandUpResult = await scheduleDailyStandUpWorkflowsActivity({
-      dryRun: true,  // SAFETY: Change to false when ready for production
-      testMode: true, // SAFETY: Change to false when ready for production
-      maxSites: 5     // SAFETY: Limit to 5 sites for testing
-    });
-    
-    console.log(`✅ Daily stand ups scheduled: ${dailyStandUpResult.scheduled} sites`);
-    console.log(`   Failed: ${dailyStandUpResult.failed}, Skipped: ${dailyStandUpResult.skipped}`);
-    
-    if (dailyStandUpResult.testInfo) {
-      console.log(`   Mode: ${dailyStandUpResult.testInfo.mode}`);
-      console.log(`   Duration: ${dailyStandUpResult.testInfo.duration}`);
+    let dailyStandUpResult;
+    try {
+      console.log('🔄 About to call scheduleDailyStandUpWorkflowsActivity...');
+      
+      // Production mode - changed from test mode for actual scheduling
+      dailyStandUpResult = await scheduleDailyStandUpWorkflowsActivity({
+        dryRun: false,  // PRODUCTION: Actually create schedules
+        testMode: false, // PRODUCTION: Full production mode
+        // No maxSites limit for production - will process all sites
+      });
+      
+      console.log('🎯 scheduleDailyStandUpWorkflowsActivity completed successfully');
+      console.log(`✅ Daily stand ups scheduled: ${dailyStandUpResult.scheduled} sites`);
+      console.log(`   Failed: ${dailyStandUpResult.failed}, Skipped: ${dailyStandUpResult.skipped}`);
+      
+      if (dailyStandUpResult.testInfo) {
+        console.log(`   Mode: ${dailyStandUpResult.testInfo.mode}`);
+        console.log(`   Duration: ${dailyStandUpResult.testInfo.duration}`);
+      }
+    } catch (dailyStandUpError) {
+      console.error('❌ Error in scheduleDailyStandUpWorkflowsActivity:', dailyStandUpError);
+      // Set default values for the failed activity
+      dailyStandUpResult = {
+        scheduled: 0,
+        failed: 1,
+        skipped: 0,
+        results: [],
+        errors: [dailyStandUpError instanceof Error ? dailyStandUpError.message : String(dailyStandUpError)]
+      };
     }
 
     const endTime = new Date();
