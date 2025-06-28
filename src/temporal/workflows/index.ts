@@ -11,6 +11,9 @@ import { customerSupportMessageWorkflow, emailCustomerSupportMessageWorkflow } f
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 import { answerWhatsappMessageWorkflow, processWhatsAppMessagesWorkflow } from './answerWhatsappMessageWorkflow';
+
+// Export alias for backward compatibility
+export const whatsappMessageWorkflow = answerWhatsappMessageWorkflow;
 import { siteSetupWorkflow } from './siteSetupWorkflow';
 import { buildCampaignsWorkflow } from './buildCampaignsWorkflow';
 import { buildSegmentsWorkflow } from './buildSegmentsWorkflow';
@@ -74,6 +77,8 @@ export const workflows = {
   humanInterventionWorkflow,
   deepResearchWorkflow,
   dailyStandUpWorkflow,
+  // Alias for backward compatibility
+  whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
 };
 
 // Workflow names for Temporal Client (strings)
@@ -104,6 +109,8 @@ export const workflowNames = {
   humanInterventionWorkflow: 'humanInterventionWorkflow',
   deepResearchWorkflow: 'deepResearchWorkflow',
   dailyStandUpWorkflow: 'dailyStandUpWorkflow',
+  // Alias for backward compatibility
+  whatsappMessageWorkflow: 'whatsappMessageWorkflow',
 };
 
 // Workflow types for type-safe execution

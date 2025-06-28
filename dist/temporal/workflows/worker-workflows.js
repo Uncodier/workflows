@@ -14,6 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.whatsappMessageWorkflow = void 0;
 // This file is specifically for the worker to load workflows
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -28,6 +29,9 @@ __exportStar(require("./customerSupportWorkflow"), exports);
 __exportStar(require("./sendEmailFromAgentWorkflow"), exports);
 __exportStar(require("./sendWhatsappFromAgentWorkflow"), exports);
 __exportStar(require("./answerWhatsappMessageWorkflow"), exports);
+// Export alias for backward compatibility  
+var answerWhatsappMessageWorkflow_1 = require("./answerWhatsappMessageWorkflow");
+Object.defineProperty(exports, "whatsappMessageWorkflow", { enumerable: true, get: function () { return answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow; } });
 __exportStar(require("./siteSetupWorkflow"), exports);
 __exportStar(require("./executeToolWorkflow"), exports);
 __exportStar(require("./buildCampaignsWorkflow"), exports);

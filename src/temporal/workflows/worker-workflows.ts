@@ -12,6 +12,8 @@ export * from './customerSupportWorkflow';
 export * from './sendEmailFromAgentWorkflow';
 export * from './sendWhatsappFromAgentWorkflow';
 export * from './answerWhatsappMessageWorkflow';
+// Export alias for backward compatibility  
+export { answerWhatsappMessageWorkflow as whatsappMessageWorkflow } from './answerWhatsappMessageWorkflow';
 export * from './siteSetupWorkflow';
 export * from './executeToolWorkflow';
 export * from './buildCampaignsWorkflow';

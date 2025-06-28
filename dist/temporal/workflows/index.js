@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.workflowNames = exports.workflows = void 0;
+exports.workflowNames = exports.workflows = exports.whatsappMessageWorkflow = void 0;
 const dataProcessingWorkflow_1 = require("./dataProcessingWorkflow");
 const cronWorkflow_1 = require("./cronWorkflow");
 const syncEmailsWorkflow_1 = require("./syncEmailsWorkflow");
@@ -28,6 +28,8 @@ const customerSupportWorkflow_1 = require("./customerSupportWorkflow");
 const sendEmailFromAgentWorkflow_1 = require("./sendEmailFromAgentWorkflow");
 const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow");
 const answerWhatsappMessageWorkflow_1 = require("./answerWhatsappMessageWorkflow");
+// Export alias for backward compatibility
+exports.whatsappMessageWorkflow = answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow;
 const siteSetupWorkflow_1 = require("./siteSetupWorkflow");
 const buildCampaignsWorkflow_1 = require("./buildCampaignsWorkflow");
 const buildSegmentsWorkflow_1 = require("./buildSegmentsWorkflow");
@@ -89,6 +91,8 @@ exports.workflows = {
     humanInterventionWorkflow: humanInterventionWorkflow_1.humanInterventionWorkflow,
     deepResearchWorkflow: deepResearchWorkflow_1.deepResearchWorkflow,
     dailyStandUpWorkflow: dailyStandUpWorkflow_1.dailyStandUpWorkflow,
+    // Alias for backward compatibility
+    whatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
 };
 // Workflow names for Temporal Client (strings)
 exports.workflowNames = {
@@ -118,4 +122,6 @@ exports.workflowNames = {
     humanInterventionWorkflow: 'humanInterventionWorkflow',
     deepResearchWorkflow: 'deepResearchWorkflow',
     dailyStandUpWorkflow: 'dailyStandUpWorkflow',
+    // Alias for backward compatibility
+    whatsappMessageWorkflow: 'whatsappMessageWorkflow',
 };
