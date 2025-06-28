@@ -55,9 +55,11 @@ async function emailCustomerSupportMessageWorkflow(emailData, baseParams) {
             console.log('⏭️ Skipping email - not requiring immediate action');
             return {
                 success: true,
-                processed: false,
-                reason: processResult.reason,
-                emailSent: false
+                data: {
+                    processed: false,
+                    reason: processResult.reason,
+                    emailSent: false
+                }
             };
         }
         console.log('📞 Processing email - sending customer support message');
@@ -68,10 +70,7 @@ async function emailCustomerSupportMessageWorkflow(emailData, baseParams) {
             console.error('❌ Customer support message failed:', response?.error || 'Unknown error');
             return {
                 success: false,
-                processed: true,
-                reason: 'Customer support message failed',
-                error: response?.error || 'Customer support call was not successful',
-                emailSent: false
+                error: response?.error || 'Customer support call was not successful'
             };
         }
         console.log('✅ Customer support message sent successfully');
@@ -128,21 +127,20 @@ async function emailCustomerSupportMessageWorkflow(emailData, baseParams) {
         console.log('✅ Email customer support message workflow completed successfully');
         return {
             success: true,
-            processed: true,
-            reason: processResult.reason,
-            response,
-            emailSent,
-            emailWorkflowId
+            data: {
+                ...response.data, // ✅ Extract data directly to root level
+                processed: true,
+                reason: processResult.reason,
+                emailSent,
+                emailWorkflowId
+            }
         };
     }
     catch (error) {
         console.error('❌ Email customer support message workflow failed:', error);
         return {
             success: false,
-            processed: false,
-            reason: 'Workflow execution failed',
-            error: error instanceof Error ? error.message : String(error),
-            emailSent: false
+            error: error instanceof Error ? error.message : String(error)
         };
     }
 }
@@ -188,8 +186,6 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
                 console.error('❌ WhatsApp customer support message failed:', response?.error || 'Unknown error');
                 return {
                     success: false,
-                    processed: true,
-                    reason: 'WhatsApp customer support message failed',
                     error: response?.error || 'Customer support call was not successful'
                 };
             }
@@ -238,11 +234,13 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
             console.log('✅ WhatsApp customer support message workflow completed successfully');
             return {
                 success: true,
-                processed: true,
-                reason: 'WhatsApp message processed for customer support',
-                response,
-                whatsappSent,
-                whatsappWorkflowId
+                data: {
+                    ...response.data, // ✅ Extract data directly to root level
+                    processed: true,
+                    reason: 'WhatsApp message processed for customer support',
+                    whatsappSent,
+                    whatsappWorkflowId
+                }
             };
         }
         else {
@@ -255,11 +253,7 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
         console.error('❌ Customer support workflow failed:', error);
         return {
             success: false,
-            processed: false,
-            reason: 'Workflow execution failed',
-            error: error instanceof Error ? error.message : String(error),
-            emailSent: false,
-            whatsappSent: false
+            error: error instanceof Error ? error.message : String(error)
         };
     }
 }

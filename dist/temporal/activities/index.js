@@ -53,6 +53,7 @@ __exportStar(require("./whatsappActivities"), exports);
 __exportStar(require("./siteSetupActivities"), exports);
 __exportStar(require("./executeToolActivities"), exports);
 __exportStar(require("./campaignActivities"), exports);
+__exportStar(require("./leadActivities"), exports);
 __exportStar(require("./interventionActivities"), exports);
 __exportStar(require("./dataAnalystActivities"), exports);
 __exportStar(require("./cmoActivities"), exports);
@@ -72,6 +73,7 @@ const whatsappActivities = __importStar(require("./whatsappActivities"));
 const siteSetupActivities = __importStar(require("./siteSetupActivities"));
 const executeToolActivities = __importStar(require("./executeToolActivities"));
 const campaignActivities = __importStar(require("./campaignActivities"));
+const leadActivities = __importStar(require("./leadActivities"));
 const interventionActivities = __importStar(require("./interventionActivities"));
 const dataAnalystActivities = __importStar(require("./dataAnalystActivities"));
 const cmoActivities = __importStar(require("./cmoActivities"));
@@ -91,6 +93,7 @@ exports.activities = {
     ...siteSetupActivities,
     ...executeToolActivities,
     ...campaignActivities,
+    ...leadActivities,
     ...interventionActivities,
     ...dataAnalystActivities,
     ...cmoActivities,

@@ -55,22 +55,22 @@ async function answerWhatsappMessageWorkflow(messageData, options) {
             const csResult = await customerSupportHandle.result();
             customerSupportResult = {
                 success: csResult.success,
-                processed: csResult.processed,
+                processed: csResult.data?.processed || false,
                 workflowId: customerSupportWorkflowId,
-                reason: csResult.reason,
-                whatsappSent: csResult.whatsappSent,
-                whatsappWorkflowId: csResult.whatsappWorkflowId
+                reason: csResult.data?.reason || 'No reason provided',
+                whatsappSent: csResult.data?.whatsappSent || false,
+                whatsappWorkflowId: csResult.data?.whatsappWorkflowId
             };
             if (csResult.success) {
                 console.log('✅ Customer support workflow completed successfully');
-                if (csResult.processed) {
-                    console.log(`📋 Customer support processed: ${csResult.reason}`);
-                    if (csResult.whatsappSent) {
-                        console.log(`📱 Follow-up WhatsApp sent via workflow: ${csResult.whatsappWorkflowId}`);
+                if (csResult.data?.processed) {
+                    console.log(`📋 Customer support processed: ${csResult.data.reason}`);
+                    if (csResult.data?.whatsappSent) {
+                        console.log(`📱 Follow-up WhatsApp sent via workflow: ${csResult.data.whatsappWorkflowId}`);
                     }
                 }
                 else {
-                    console.log(`⏭️ Customer support skipped: ${csResult.reason}`);
+                    console.log(`⏭️ Customer support skipped: ${csResult.data?.reason}`);
                 }
             }
             else {

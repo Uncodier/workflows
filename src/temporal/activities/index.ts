@@ -14,6 +14,7 @@ export * from './whatsappActivities';
 export * from './siteSetupActivities';
 export * from './executeToolActivities';
 export * from './campaignActivities';
+export * from './leadActivities';
 export * from './interventionActivities';
 export * from './dataAnalystActivities';
 export * from './cmoActivities';
@@ -34,9 +35,10 @@ import * as whatsappActivities from './whatsappActivities';
 import * as siteSetupActivities from './siteSetupActivities';
 import * as executeToolActivities from './executeToolActivities';
 import * as campaignActivities from './campaignActivities';
+import * as leadActivities from './leadActivities';
 import * as interventionActivities from './interventionActivities';
 import * as dataAnalystActivities from './dataAnalystActivities';
-  import * as cmoActivities from './cmoActivities';
+import * as cmoActivities from './cmoActivities';
 
 export const activities = {
   ...supabaseActivities,
@@ -54,9 +56,10 @@ export const activities = {
   ...siteSetupActivities,
   ...executeToolActivities,
   ...campaignActivities,
+  ...leadActivities,
   ...interventionActivities,
-      ...dataAnalystActivities,
-    ...cmoActivities,
+  ...dataAnalystActivities,
+  ...cmoActivities,
 };
 
 export type Activities = typeof activities; 

@@ -57,11 +57,7 @@ export async function emailCustomerSupportMessageWorkflow(
   }
 ): Promise<{
   success: boolean;
-  processed: boolean;
-  reason: string;
-  response?: any;
-  emailSent?: boolean;
-  emailWorkflowId?: string;
+  data?: any;
   error?: string;
 }> {
   console.log('🎯 Starting email customer support message workflow...');
@@ -77,9 +73,11 @@ export async function emailCustomerSupportMessageWorkflow(
       console.log('⏭️ Skipping email - not requiring immediate action');
       return {
         success: true,
-        processed: false,
-        reason: processResult.reason,
-        emailSent: false
+        data: {
+          processed: false,
+          reason: processResult.reason,
+          emailSent: false
+        }
       };
     }
     
@@ -93,10 +91,7 @@ export async function emailCustomerSupportMessageWorkflow(
       console.error('❌ Customer support message failed:', response?.error || 'Unknown error');
       return {
         success: false,
-        processed: true,
-        reason: 'Customer support message failed',
-        error: response?.error || 'Customer support call was not successful',
-        emailSent: false
+        error: response?.error || 'Customer support call was not successful'
       };
     }
     
@@ -161,21 +156,20 @@ export async function emailCustomerSupportMessageWorkflow(
     console.log('✅ Email customer support message workflow completed successfully');
     return {
       success: true,
-      processed: true,
-      reason: processResult.reason,
-      response,
-      emailSent,
-      emailWorkflowId
+      data: {
+        ...response.data, // ✅ Extract data directly to root level
+        processed: true,
+        reason: processResult.reason,
+        emailSent,
+        emailWorkflowId
+      }
     };
     
   } catch (error) {
     console.error('❌ Email customer support message workflow failed:', error);
     return {
       success: false,
-      processed: false,
-      reason: 'Workflow execution failed',
-      error: error instanceof Error ? error.message : String(error),
-      emailSent: false
+      error: error instanceof Error ? error.message : String(error)
     };
   }
 }
@@ -193,13 +187,7 @@ export async function customerSupportMessageWorkflow(
   }
 ): Promise<{
   success: boolean;
-  processed: boolean;
-  reason: string;
-  response?: any;
-  emailSent?: boolean;
-  emailWorkflowId?: string;
-  whatsappSent?: boolean;
-  whatsappWorkflowId?: string;
+  data?: any;
   error?: string;
 }> {
   console.log('🎯 Starting customer support message workflow...');
@@ -244,8 +232,6 @@ export async function customerSupportMessageWorkflow(
         console.error('❌ WhatsApp customer support message failed:', response?.error || 'Unknown error');
         return {
           success: false,
-          processed: true,
-          reason: 'WhatsApp customer support message failed',
           error: response?.error || 'Customer support call was not successful'
         };
       }
@@ -303,11 +289,13 @@ export async function customerSupportMessageWorkflow(
       console.log('✅ WhatsApp customer support message workflow completed successfully');
       return {
         success: true,
-        processed: true,
-        reason: 'WhatsApp message processed for customer support',
-        response,
-        whatsappSent,
-        whatsappWorkflowId
+        data: {
+          ...response.data, // ✅ Extract data directly to root level
+          processed: true,
+          reason: 'WhatsApp message processed for customer support',
+          whatsappSent,
+          whatsappWorkflowId
+        }
       };
       
     } else {
@@ -321,11 +309,7 @@ export async function customerSupportMessageWorkflow(
     console.error('❌ Customer support workflow failed:', error);
     return {
       success: false,
-      processed: false,
-      reason: 'Workflow execution failed',
-      error: error instanceof Error ? error.message : String(error),
-      emailSent: false,
-      whatsappSent: false
+      error: error instanceof Error ? error.message : String(error)
     };
   }
 } 

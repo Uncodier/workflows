@@ -121,18 +121,18 @@ export async function scheduleCustomerSupportMessagesWorkflow(
         const result = await handle.result();
         
         if (result.success) {
-          if (result.processed) {
+          if (result.data?.processed) {
             completed++;
-            console.log(`✅ Completed processing email ${i + 1}: ${result.reason}`);
+            console.log(`✅ Completed processing email ${i + 1}: ${result.data.reason}`);
             
             // Count emails sent for traceability
-            if (result.emailSent) {
+            if (result.data?.emailSent) {
               emailsSent++;
-              console.log(`📧 Follow-up email sent via workflow: ${result.emailWorkflowId}`);
+              console.log(`📧 Follow-up email sent via workflow: ${result.data.emailWorkflowId}`);
             }
           } else {
             skipped++;
-            console.log(`⏭️ Skipped email ${i + 1}: ${result.reason}`);
+            console.log(`⏭️ Skipped email ${i + 1}: ${result.data?.reason}`);
           }
         } else {
           failed++;
@@ -143,12 +143,12 @@ export async function scheduleCustomerSupportMessagesWorkflow(
           index: i,
           workflowId,
           success: result.success,
-          processed: result.processed,
-          reason: result.reason,
+          processed: result.data?.processed || false,
+          reason: result.data?.reason || 'No reason provided',
           error: result.error,
           emailId: trackingId,
-          emailSent: result.emailSent,
-          emailWorkflowId: result.emailWorkflowId
+          emailSent: result.data?.emailSent || false,
+          emailWorkflowId: result.data?.emailWorkflowId
         });
         
         // Sleep for 1 minute before processing the next email (except for the last one)
