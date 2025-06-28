@@ -233,7 +233,7 @@ export async function leadResearchActivity(request: LeadResearchRequest): Promis
 
     console.log('📤 Sending lead research request:', JSON.stringify(requestBody, null, 2));
     
-    const response = await apiService.post('/api/agents/lead-research/leadResearch', requestBody);
+    const response = await apiService.post('/api/agents/sales/leadResearch', requestBody);
     
     if (!response.success) {
       console.error(`❌ Failed to execute lead research for lead ${request.lead_id}:`, response.error);

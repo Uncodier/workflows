@@ -83,7 +83,6 @@ async function getSiteActivity(siteId) {
             };
         }
         console.log('✅ Database connection confirmed, fetching site...');
-        // Fetch all sites and find the specific one
         const allSites = await supabaseService.fetchSites();
         const siteData = allSites.find(site => site.id === siteId);
         if (!siteData) {
@@ -123,7 +122,7 @@ async function buildSegmentsActivity(request) {
     console.log(`🎯 Building segments for URL: ${request.url}`);
     try {
         console.log('📤 Sending segment building request to agent API...');
-        const response = await apiService_1.apiService.post('/api/agents/segmentation/buildSegments', request);
+        const response = await apiService_1.apiService.post('/api/agents/growth/segments', request);
         if (!response.success) {
             console.error(`❌ Failed to build segments:`, response.error);
             return {
@@ -163,7 +162,7 @@ async function createCampaignsActivity(request) {
     console.log(`📢 Creating campaigns for site: ${request.siteId}`);
     try {
         console.log('📤 Sending campaign creation request...');
-        const response = await apiService_1.apiService.post('/api/agents/cmo/createCampaigns', {
+        const response = await apiService_1.apiService.post('/api/agents/growth/campaigns', {
             siteId: request.siteId,
             userId: request.userId,
             agentId: request.agent_id,
@@ -199,7 +198,7 @@ async function createCampaignRequirementsActivity(request) {
     console.log(`📋 Creating campaign requirements for site: ${request.siteId}`);
     try {
         console.log('📤 Sending campaign requirements creation request...');
-        const response = await apiService_1.apiService.post('/api/agents/cmo/createCampaignRequirements', {
+        const response = await apiService_1.apiService.post('/api/agents/growth/campaigns/requirements', {
             siteId: request.siteId,
             userId: request.userId,
             agentId: request.agent_id,
@@ -285,7 +284,7 @@ async function getDraftContentActivity(siteId) {
 async function buildContentActivity(request) {
     console.log(`📝 Building content recommendations for URL: ${request.url}`);
     try {
-        const endpoint = request.endpoint || '/api/agents/content/buildContent';
+        const endpoint = request.endpoint || '/api/agentes/copywriter/content-editor';
         console.log(`📤 Sending content building request to: ${endpoint}`);
         const response = await apiService_1.apiService.post(endpoint, request);
         if (!response.success) {
@@ -327,7 +326,11 @@ async function createContentCalendarActivity(request) {
     console.log(`📅 Creating content calendar for site: ${request.siteId}`);
     try {
         console.log('📤 Sending content calendar creation request...');
-        const response = await apiService_1.apiService.post('/api/agents/content/createContentCalendar', request);
+        const response = await apiService_1.apiService.request('/api/agentes/copywriter/content-calendar', {
+            method: 'POST',
+            body: request,
+            timeout: 120000 // 2 minutes timeout for content operations
+        });
         if (!response.success) {
             console.error(`❌ Failed to create content calendar:`, response.error);
             return {
@@ -365,7 +368,11 @@ async function improveContentActivity(request) {
     console.log(`✨ Improving content for site: ${request.siteId}`);
     try {
         console.log('📤 Sending content improvement request...');
-        const response = await apiService_1.apiService.post('/api/agents/content/improveContent', request);
+        const response = await apiService_1.apiService.request('/api/agentes/copywriter/content-improve', {
+            method: 'POST',
+            body: request,
+            timeout: 120000 // 2 minutes timeout for content operations
+        });
         if (!response.success) {
             console.error(`❌ Failed to improve content:`, response.error);
             return {
@@ -403,10 +410,15 @@ async function buildNewSegmentsActivity(request) {
     console.log(`🎯 Building new segments for site: ${request.siteId}`);
     try {
         console.log('📤 Sending new segment building request...');
-        const response = await apiService_1.apiService.post('/api/agents/segmentation/buildNewSegments', {
+        const requestBody = {
             siteId: request.siteId,
             userId: request.userId,
             ...request.segmentData
+        };
+        const response = await apiService_1.apiService.request('/api/agents/growth/segments', {
+            method: 'POST',
+            body: requestBody,
+            timeout: 300000 // 5 minutes timeout for segment building operations
         });
         if (!response.success) {
             console.error(`❌ Failed to build new segments:`, response.error);
@@ -447,11 +459,16 @@ async function buildICPSegmentsActivity(request) {
     console.log(`🎯 Building ICP segments for site: ${request.siteId}`);
     try {
         console.log('📤 Sending ICP segment building request...');
-        const response = await apiService_1.apiService.post('/api/agents/segmentation/buildICPSegments', {
+        const requestBody = {
             siteId: request.siteId,
             userId: request.userId,
             segmentIds: request.segmentIds,
             ...request.segmentData
+        };
+        const response = await apiService_1.apiService.request('/api/agents/growth/segments/icp', {
+            method: 'POST',
+            body: requestBody,
+            timeout: 300000 // 5 minutes timeout for ICP segment building operations
         });
         if (!response.success) {
             console.error(`❌ Failed to build ICP segments:`, response.error);
