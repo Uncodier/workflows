@@ -70,10 +70,10 @@ export interface CustomerSupportMessageRequest {
 }
 
 /**
- * Send customer support message based on email data
+ * Send customer support message based on email data or website chat data
  */
 export async function sendCustomerSupportMessageActivity(
-  emailData: EmailData,
+  emailData: EmailData | any, // Allow both EmailData and direct website chat format
   baseParams: {
     agentId?: string;
     origin?: string; // Parámetro opcional para identificar el origen
@@ -85,12 +85,49 @@ export async function sendCustomerSupportMessageActivity(
 }> {
   console.log('📞 Sending customer support message...');
   
-  const { summary, site_id, user_id, conversation_id, visitor_id, lead_id } = emailData;
+  // ✅ NEW: Support both EmailData format and direct website chat format
+  let message: string;
+  let site_id: string;
+  let user_id: string;
+  let conversation_id: string | undefined;
+  let visitor_id: string | undefined;
+  let lead_id: string | undefined;
+  let contactName: string | undefined;
+  let contactEmail: string | undefined;
+  let contactPhone: string | undefined;
+  
+  // Detect if this is EmailData format (has contact_info) or direct website chat format
+  if (emailData.contact_info) {
+    // EmailData format
+    console.log('📧 Processing EmailData format');
+    message = emailData.summary || 'Customer support interaction from analysis';
+    site_id = emailData.site_id;
+    user_id = emailData.user_id;
+    conversation_id = emailData.conversation_id;
+    visitor_id = emailData.visitor_id;
+    lead_id = emailData.lead_id;
+    contactName = emailData.contact_info.name;
+    contactEmail = emailData.contact_info.email;
+    contactPhone = emailData.contact_info.phone;
+  } else {
+    // Direct website chat format
+    console.log('💬 Processing website chat format');
+    message = emailData.message || 'Website chat interaction';
+    site_id = emailData.site_id;
+    user_id = emailData.user_id || ''; // May be empty for website chat
+    conversation_id = emailData.conversationId;
+    visitor_id = emailData.visitor_id;
+    lead_id = emailData.lead_id;
+    contactName = emailData.name;
+    contactEmail = emailData.email;
+    contactPhone = emailData.phone;
+  }
+  
   const { agentId, origin } = baseParams;
   
   // Build the message request payload con SOLO los parámetros requeridos por el API
   const messageRequest: CustomerSupportMessageRequest = {
-    message: summary || 'Customer support interaction from analysis',
+    message: message,
     site_id: site_id,
     userId: user_id,
     agentId: agentId,
@@ -111,18 +148,18 @@ export async function sendCustomerSupportMessageActivity(
   }
 
   // Add all available contact information - origin indicates response channel, not data restrictions
-  if (emailData.contact_info.name) {
-    messageRequest.name = emailData.contact_info.name;
+  if (contactName) {
+    messageRequest.name = contactName;
   }
   
   // Always send email if available (helps with lead creation/matching)
-  if (emailData.contact_info.email) {
-    messageRequest.email = emailData.contact_info.email;
+  if (contactEmail) {
+    messageRequest.email = contactEmail;
   }
   
   // Always send phone if available (helps with lead creation/matching)  
-  if (emailData.contact_info.phone) {
-    messageRequest.phone = emailData.contact_info.phone;
+  if (contactPhone) {
+    messageRequest.phone = contactPhone;
   }
 
   // ✅ FIXED: Solo enviar lead_id si viene explícitamente, NUNCA generar o derivar automáticamente

@@ -180,8 +180,8 @@ export async function emailCustomerSupportMessageWorkflow(
  * Este es el workflow principal que debe ser llamado desde el API
  */
 export async function customerSupportMessageWorkflow(
-  messageData: EmailData | { whatsappData: WhatsAppMessageData },
-  baseParams: {
+  messageData: EmailData | { whatsappData: WhatsAppMessageData } | any,
+  baseParams?: {
     agentId?: string;
     origin?: string;
   }
@@ -191,11 +191,72 @@ export async function customerSupportMessageWorkflow(
   error?: string;
 }> {
   console.log('🎯 Starting customer support message workflow...');
-  console.log(`🔄 Origin: ${baseParams.origin || 'not specified'}`);
+  
+  // ✅ NEW: Support for parameters in root of request
+  // If baseParams is undefined or missing values, look for them in messageData
+  let origin = baseParams?.origin;
+  let agentId = baseParams?.agentId;
+  
+  // If not found in baseParams, check messageData root level
+  if (!origin && messageData && typeof messageData === 'object' && 'origin' in messageData) {
+    origin = (messageData as any).origin;
+    console.log(`🔍 Found origin in messageData root: ${origin}`);
+  }
+  
+  if (!agentId && messageData && typeof messageData === 'object' && 'agentId' in messageData) {
+    agentId = (messageData as any).agentId;
+    console.log(`🔍 Found agentId in messageData root: ${agentId}`);
+  }
+  
+  // Create effective baseParams for internal use
+  const effectiveBaseParams = {
+    origin: origin || 'not specified',
+    agentId: agentId
+  };
+  
+  console.log(`🔄 Origin: ${effectiveBaseParams.origin}`);
+  console.log(`🤖 Agent ID: ${effectiveBaseParams.agentId || 'not specified'}`);
   
   try {
+    // ✅ NEW: If messageData has website_chat origin, process as-is without transformation
+    if (effectiveBaseParams.origin === 'website_chat' && 'message' in messageData) {
+      console.log('💬 Detected website chat message - processing original data without transformation');
+      
+      console.log('📞 Processing website chat message - sending customer support message');
+      
+      // Send customer support message with original data (no transformation to EmailData)
+      const response = await sendCustomerSupportMessageActivity(messageData, effectiveBaseParams);
+      
+      if (!response || !response.success) {
+        console.error('❌ Website chat customer support message failed:', response?.error || 'Unknown error');
+        return {
+          success: false,
+          error: response?.error || 'Customer support call was not successful'
+        };
+      }
+      
+      console.log('✅ Website chat customer support message sent successfully');
+      console.log(`📋 Customer support response:`, JSON.stringify(response.data, null, 2));
+      
+      // ✅ FIXED: For website_chat, DON'T automatically send follow-up emails
+      // Website chat interactions should only use the chat medium unless explicitly requested
+      console.log('💬 Website chat completed - no email follow-up needed (chat is the primary communication channel)');
+      
+      console.log('✅ Website chat customer support message workflow completed successfully');
+      return {
+        success: true,
+        data: {
+          ...response.data, // ✅ Extract data directly to root level
+          processed: true,
+          reason: 'Website chat message processed for customer support',
+          emailSent: false, // Website chat doesn't send follow-up emails
+          emailWorkflowId: undefined
+        }
+      };
+    }
+    
     // Detectar si es WhatsApp o Email basado en el origen o estructura de datos
-    if (baseParams.origin === 'whatsapp' && 'whatsappData' in messageData) {
+    if (effectiveBaseParams.origin === 'whatsapp' && 'whatsappData' in messageData) {
       console.log('📱 Detected WhatsApp message - processing directly');
       
       const whatsappData = messageData.whatsappData;
@@ -226,7 +287,7 @@ export async function customerSupportMessageWorkflow(
       console.log('📞 Processing WhatsApp message - sending customer support message directly');
       
       // Enviar mensaje de customer support
-      const response = await sendCustomerSupportMessageActivity(emailDataForCS, baseParams);
+      const response = await sendCustomerSupportMessageActivity(emailDataForCS, effectiveBaseParams);
       
       if (!response || !response.success) {
         console.error('❌ WhatsApp customer support message failed:', response?.error || 'Unknown error');
@@ -255,7 +316,7 @@ export async function customerSupportMessageWorkflow(
                   `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
           site_id: whatsappData.siteId,
           from: 'Customer Support',
-          agent_id: baseParams.agentId,
+          agent_id: effectiveBaseParams.agentId,
           conversation_id: whatsappData.conversationId,
           // ✅ REMOVED: lead_id - API can obtain it from phone number
         };
@@ -302,7 +363,7 @@ export async function customerSupportMessageWorkflow(
       console.log('📧 Detected email message - delegating to email workflow');
       
       // Usar el workflow específico para emails
-      return await emailCustomerSupportMessageWorkflow(messageData as EmailData, baseParams);
+      return await emailCustomerSupportMessageWorkflow(messageData as EmailData, effectiveBaseParams);
     }
     
   } catch (error) {
