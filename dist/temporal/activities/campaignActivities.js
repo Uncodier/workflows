@@ -83,10 +83,11 @@ async function getSiteActivity(siteId) {
             };
         }
         console.log('✅ Database connection confirmed, fetching site...');
+        // Fetch all sites and find the specific one
         const allSites = await supabaseService.fetchSites();
         const siteData = allSites.find(site => site.id === siteId);
         if (!siteData) {
-            console.log(`⚠️  Site ${siteId} not found`);
+            console.error(`❌ Site ${siteId} not found`);
             return {
                 success: false,
                 error: 'Site not found'
@@ -94,13 +95,13 @@ async function getSiteActivity(siteId) {
         }
         const site = {
             id: siteData.id,
-            name: siteData.name,
-            url: siteData.url,
+            name: siteData.name || 'Unnamed Site',
+            url: siteData.url || '',
             user_id: siteData.user_id,
             created_at: siteData.created_at,
             updated_at: siteData.updated_at
         };
-        console.log(`✅ Retrieved site information: ${site.name} (${site.url})`);
+        console.log(`✅ Retrieved site information for ${site.name}: ${site.url}`);
         return {
             success: true,
             site
@@ -120,35 +121,27 @@ async function getSiteActivity(siteId) {
  */
 async function buildSegmentsActivity(request) {
     console.log(`🎯 Building segments for URL: ${request.url}`);
+    console.log(`📊 Request data:`, JSON.stringify(request, null, 2));
     try {
-        console.log('📤 Sending segment building request to agent API...');
-        const response = await apiService_1.apiService.post('/api/agents/growth/segments', request);
+        const response = await apiService_1.apiService.post('/api/site/segments', request);
         if (!response.success) {
-            console.error(`❌ Failed to build segments:`, response.error);
+            console.error(`❌ Failed to build segments for URL ${request.url}:`, response.error);
             return {
                 success: false,
                 error: response.error?.message || 'Failed to build segments'
             };
         }
-        const data = response.data;
-        const segments = data?.segments || [];
-        const analysis = data?.analysis || {};
-        console.log(`✅ Successfully built ${segments.length} segments`);
-        if (segments.length > 0) {
-            console.log(`📋 Segments created:`);
-            segments.forEach((segment, index) => {
-                console.log(`   ${index + 1}. ${segment.name || `Segment ${index + 1}`}`);
-            });
-        }
+        console.log(`✅ Successfully built segments for URL ${request.url}`);
+        console.log(`📈 Segments result:`, JSON.stringify(response.data, null, 2));
         return {
             success: true,
-            segments,
-            analysis
+            segments: response.data?.segments || response.data?.results || [],
+            analysis: response.data?.analysis || response.data
         };
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`❌ Exception building segments:`, errorMessage);
+        console.error(`❌ Exception building segments for URL ${request.url}:`, errorMessage);
         return {
             success: false,
             error: errorMessage
@@ -156,35 +149,36 @@ async function buildSegmentsActivity(request) {
     }
 }
 /**
- * Activity to create campaigns for selected segments
+ * Activity to create campaigns for a site using segments
  */
 async function createCampaignsActivity(request) {
-    console.log(`📢 Creating campaigns for site: ${request.siteId}`);
+    console.log(`🚀 Creating campaigns for site: ${request.siteId}`);
+    console.log(`📊 Campaign data:`, JSON.stringify(request.campaignData, null, 2));
     try {
-        console.log('📤 Sending campaign creation request...');
-        const response = await apiService_1.apiService.post('/api/agents/growth/campaigns', {
+        const requestBody = {
             siteId: request.siteId,
-            userId: request.userId,
-            agentId: request.agent_id,
-            ...request.campaignData
-        });
+            ...(request.agent_id && { agent_id: request.agent_id }),
+            ...(request.userId && { userId: request.userId }),
+            campaignData: request.campaignData
+        };
+        const response = await apiService_1.apiService.post('/api/agents/growth/campaigns', requestBody);
         if (!response.success) {
-            console.error(`❌ Failed to create campaigns:`, response.error);
+            console.error(`❌ Failed to create campaigns for site ${request.siteId}:`, response.error);
             return {
                 success: false,
                 error: response.error?.message || 'Failed to create campaigns'
             };
         }
-        const campaign = response.data;
-        console.log(`✅ Successfully created campaign`);
+        console.log(`✅ Successfully created campaigns for site ${request.siteId}`);
+        console.log(`📈 Campaign result:`, JSON.stringify(response.data, null, 2));
         return {
             success: true,
-            campaign
+            campaign: response.data
         };
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`❌ Exception creating campaigns:`, errorMessage);
+        console.error(`❌ Exception creating campaigns for site ${request.siteId}:`, errorMessage);
         return {
             success: false,
             error: errorMessage
@@ -192,35 +186,36 @@ async function createCampaignsActivity(request) {
     }
 }
 /**
- * Activity to create campaign requirements
+ * Activity to create campaign requirements for a site using segments
  */
 async function createCampaignRequirementsActivity(request) {
     console.log(`📋 Creating campaign requirements for site: ${request.siteId}`);
+    console.log(`📊 Campaign data:`, JSON.stringify(request.campaignData, null, 2));
     try {
-        console.log('📤 Sending campaign requirements creation request...');
-        const response = await apiService_1.apiService.post('/api/agents/growth/campaigns/requirements', {
+        const requestBody = {
             siteId: request.siteId,
-            userId: request.userId,
-            agentId: request.agent_id,
-            ...request.campaignData
-        });
+            ...(request.agent_id && { agent_id: request.agent_id }),
+            ...(request.userId && { userId: request.userId }),
+            campaignData: request.campaignData
+        };
+        const response = await apiService_1.apiService.post('/api/agents/growth/campaigns/requirements', requestBody);
         if (!response.success) {
-            console.error(`❌ Failed to create campaign requirements:`, response.error);
+            console.error(`❌ Failed to create campaign requirements for site ${request.siteId}:`, response.error);
             return {
                 success: false,
                 error: response.error?.message || 'Failed to create campaign requirements'
             };
         }
-        const requirements = response.data;
-        console.log(`✅ Successfully created campaign requirements`);
+        console.log(`✅ Successfully created campaign requirements for site ${request.siteId}`);
+        console.log(`📋 Requirements result:`, JSON.stringify(response.data, null, 2));
         return {
             success: true,
-            requirements
+            requirements: response.data
         };
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`❌ Exception creating campaign requirements:`, errorMessage);
+        console.error(`❌ Exception creating campaign requirements for site ${request.siteId}:`, errorMessage);
         return {
             success: false,
             error: errorMessage
@@ -228,10 +223,10 @@ async function createCampaignRequirementsActivity(request) {
     }
 }
 /**
- * Activity to get draft content for a specific site
+ * Activity to get draft contents for a site
  */
 async function getDraftContentActivity(siteId) {
-    console.log(`📝 Getting draft content for site: ${siteId}`);
+    console.log(`📋 Getting draft content for site: ${siteId}`);
     try {
         const supabaseService = (0, supabaseService_1.getSupabaseService)();
         console.log('🔍 Checking database connection...');
@@ -244,25 +239,9 @@ async function getDraftContentActivity(siteId) {
             };
         }
         console.log('✅ Database connection confirmed, fetching draft content...');
-        // Fetch draft content for the specific site
-        const draftContentData = await supabaseService.fetchDraftContent(siteId);
-        const draftContents = draftContentData.map(contentData => ({
-            id: contentData.id,
-            title: contentData.title || 'Untitled Content',
-            description: contentData.description || '',
-            type: contentData.type || 'unknown',
-            status: contentData.status || 'draft',
-            site_id: contentData.site_id,
-            created_at: contentData.created_at,
-            updated_at: contentData.updated_at
-        }));
-        console.log(`✅ Retrieved ${draftContents.length} draft content items for site ${siteId}`);
-        if (draftContents.length > 0) {
-            console.log(`📋 Draft content found:`);
-            draftContents.forEach((content, index) => {
-                console.log(`   ${index + 1}. ${content.title} (${content.type})`);
-            });
-        }
+        // Query content table for draft status content
+        const draftContents = await supabaseService.fetchDraftContent(siteId);
+        console.log(`✅ Found ${draftContents.length} draft contents for site ${siteId}`);
         return {
             success: true,
             draftContents,
@@ -279,40 +258,35 @@ async function getDraftContentActivity(siteId) {
     }
 }
 /**
- * Activity to build content recommendations
+ * Activity to build content recommendations for a site
+ * Uses AI to analyze the site and generate content recommendations
  */
 async function buildContentActivity(request) {
     console.log(`📝 Building content recommendations for URL: ${request.url}`);
+    console.log('📊 Request data:', JSON.stringify(request, null, 2));
+    // Determine endpoint based on request or default
+    const endpoint = request.endpoint || '/api/content/recommendations';
+    console.log(`🎯 Using endpoint: ${endpoint}`);
     try {
-        const endpoint = request.endpoint || '/api/agentes/copywriter/content-editor';
-        console.log(`📤 Sending content building request to: ${endpoint}`);
         const response = await apiService_1.apiService.post(endpoint, request);
         if (!response.success) {
-            console.error(`❌ Failed to build content:`, response.error);
+            console.error(`❌ Failed to build content for URL ${request.url}:`, response.error);
             return {
                 success: false,
-                error: response.error?.message || 'Failed to build content'
+                error: response.error?.message || 'Failed to build content recommendations'
             };
         }
-        const data = response.data;
-        const recommendations = data?.recommendations || [];
-        const analysis = data?.analysis || {};
-        console.log(`✅ Successfully built ${recommendations.length} content recommendations`);
-        if (recommendations.length > 0) {
-            console.log(`📋 Content recommendations:`);
-            recommendations.forEach((rec, index) => {
-                console.log(`   ${index + 1}. ${rec.title || rec.name || `Recommendation ${index + 1}`}`);
-            });
-        }
+        console.log(`✅ Successfully built content recommendations for URL ${request.url}`);
+        console.log('📈 Content result:', JSON.stringify(response.data, null, 2));
         return {
             success: true,
-            recommendations,
-            analysis
+            recommendations: response.data.recommendations || response.data?.results || [],
+            analysis: response.data.analysis || response.data
         };
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`❌ Exception building content:`, errorMessage);
+        console.error(`❌ Exception building content for URL ${request.url}:`, errorMessage);
         return {
             success: false,
             error: errorMessage
@@ -320,41 +294,37 @@ async function buildContentActivity(request) {
     }
 }
 /**
- * Activity to create content calendar
+ * Activity to create content calendar using the new copywriter agent API
  */
 async function createContentCalendarActivity(request) {
     console.log(`📅 Creating content calendar for site: ${request.siteId}`);
+    console.log('📊 Request data:', JSON.stringify(request, null, 2));
     try {
-        console.log('📤 Sending content calendar creation request...');
-        const response = await apiService_1.apiService.request('/api/agentes/copywriter/content-calendar', {
+        // Use 2 minute timeout for content calendar operations since they can take up to 2 minutes
+        const response = await apiService_1.apiService.request('/api/agents/copywriter/content-calendar', {
             method: 'POST',
             body: request,
             timeout: 120000 // 2 minutes timeout for content operations
         });
         if (!response.success) {
-            console.error(`❌ Failed to create content calendar:`, response.error);
+            console.error(`❌ Failed to create content calendar for site ${request.siteId}:`, response.error);
             return {
                 success: false,
                 error: response.error?.message || 'Failed to create content calendar'
             };
         }
-        const data = response.data;
-        const recommendations = data?.recommendations || [];
-        const analysis = data?.analysis || {};
-        console.log(`✅ Successfully created content calendar`);
-        if (recommendations.length > 0) {
-            console.log(`📋 Content calendar recommendations: ${recommendations.length}`);
-        }
+        console.log(`✅ Successfully created content calendar for site ${request.siteId}`);
+        console.log('📈 Content calendar result:', JSON.stringify(response.data, null, 2));
         return {
             success: true,
-            data,
-            recommendations,
-            analysis
+            data: response.data,
+            recommendations: response.data?.recommendations || response.data?.results || [],
+            analysis: response.data?.analysis || response.data
         };
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`❌ Exception creating content calendar:`, errorMessage);
+        console.error(`❌ Exception creating content calendar for site ${request.siteId}:`, errorMessage);
         return {
             success: false,
             error: errorMessage
@@ -362,41 +332,37 @@ async function createContentCalendarActivity(request) {
     }
 }
 /**
- * Activity to improve existing content
+ * Activity to improve existing draft content using the new copywriter agent API
  */
 async function improveContentActivity(request) {
-    console.log(`✨ Improving content for site: ${request.siteId}`);
+    console.log(`🔧 Improving content for site: ${request.siteId}`);
+    console.log('📊 Request data:', JSON.stringify(request, null, 2));
     try {
-        console.log('📤 Sending content improvement request...');
-        const response = await apiService_1.apiService.request('/api/agentes/copywriter/content-improve', {
+        // Use 2 minute timeout for content improvement operations since they can take up to 2 minutes
+        const response = await apiService_1.apiService.request('/api/agents/copywriter/content-improve', {
             method: 'POST',
             body: request,
             timeout: 120000 // 2 minutes timeout for content operations
         });
         if (!response.success) {
-            console.error(`❌ Failed to improve content:`, response.error);
+            console.error(`❌ Failed to improve content for site ${request.siteId}:`, response.error);
             return {
                 success: false,
                 error: response.error?.message || 'Failed to improve content'
             };
         }
-        const data = response.data;
-        const recommendations = data?.recommendations || [];
-        const analysis = data?.analysis || {};
-        console.log(`✅ Successfully improved content`);
-        if (recommendations.length > 0) {
-            console.log(`📋 Content improvement recommendations: ${recommendations.length}`);
-        }
+        console.log(`✅ Successfully improved content for site ${request.siteId}`);
+        console.log('📈 Content improvement result:', JSON.stringify(response.data, null, 2));
         return {
             success: true,
-            data,
-            recommendations,
-            analysis
+            data: response.data,
+            recommendations: response.data?.recommendations || response.data?.results || [],
+            analysis: response.data?.analysis || response.data
         };
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`❌ Exception improving content:`, errorMessage);
+        console.error(`❌ Exception improving content for site ${request.siteId}:`, errorMessage);
         return {
             success: false,
             error: errorMessage
@@ -404,16 +370,16 @@ async function improveContentActivity(request) {
     }
 }
 /**
- * Activity to build new segments for a site
+ * Activity to build segments using the new segments API
  */
 async function buildNewSegmentsActivity(request) {
-    console.log(`🎯 Building new segments for site: ${request.siteId}`);
+    console.log(`🎯 Building segments using new API for site: ${request.siteId}`);
+    console.log(`📊 Request data:`, JSON.stringify(request, null, 2));
     try {
-        console.log('📤 Sending new segment building request...');
         const requestBody = {
             siteId: request.siteId,
-            userId: request.userId,
-            ...request.segmentData
+            ...(request.userId && { userId: request.userId }),
+            ...(request.segmentData && { segmentData: request.segmentData })
         };
         const response = await apiService_1.apiService.request('/api/agents/growth/segments', {
             method: 'POST',
@@ -421,31 +387,21 @@ async function buildNewSegmentsActivity(request) {
             timeout: 300000 // 5 minutes timeout for segment building operations
         });
         if (!response.success) {
-            console.error(`❌ Failed to build new segments:`, response.error);
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to build new segments'
-            };
+            const errorMessage = response.error?.message || 'Failed to build segments';
+            console.error(`❌ Failed to build segments for site ${request.siteId}:`, response.error);
+            throw new Error(errorMessage);
         }
-        const data = response.data;
-        const segments = data?.segments || [];
-        const analysis = data?.analysis || {};
-        console.log(`✅ Successfully built ${segments.length} new segments`);
-        if (segments.length > 0) {
-            console.log(`📋 New segments created:`);
-            segments.forEach((segment, index) => {
-                console.log(`   ${index + 1}. ${segment.name || `Segment ${index + 1}`}`);
-            });
-        }
+        console.log(`✅ Successfully built segments for site ${request.siteId}`);
+        console.log(`📈 Segments result:`, JSON.stringify(response.data, null, 2));
         return {
             success: true,
-            segments,
-            analysis
+            segments: response.data?.segments || response.data?.results || [],
+            analysis: response.data?.analysis || response.data
         };
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`❌ Exception building new segments for site ${request.siteId}:`, errorMessage);
+        console.error(`❌ Exception building segments for site ${request.siteId}:`, errorMessage);
         return {
             success: false,
             error: errorMessage
@@ -453,17 +409,17 @@ async function buildNewSegmentsActivity(request) {
     }
 }
 /**
- * Activity to build ICP (Ideal Customer Profile) segments
+ * Activity to build ICP segments using the new segments ICP API
  */
 async function buildICPSegmentsActivity(request) {
     console.log(`🎯 Building ICP segments for site: ${request.siteId}`);
+    console.log(`📊 Request data:`, JSON.stringify(request, null, 2));
     try {
-        console.log('📤 Sending ICP segment building request...');
         const requestBody = {
             siteId: request.siteId,
-            userId: request.userId,
-            segmentIds: request.segmentIds,
-            ...request.segmentData
+            ...(request.userId && { userId: request.userId }),
+            ...(request.segmentIds && { segmentIds: request.segmentIds }),
+            ...(request.segmentData && { segmentData: request.segmentData })
         };
         const response = await apiService_1.apiService.request('/api/agents/growth/segments/icp', {
             method: 'POST',
@@ -471,26 +427,16 @@ async function buildICPSegmentsActivity(request) {
             timeout: 300000 // 5 minutes timeout for ICP segment building operations
         });
         if (!response.success) {
-            console.error(`❌ Failed to build ICP segments:`, response.error);
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to build ICP segments'
-            };
+            const errorMessage = response.error?.message || 'Failed to build ICP segments';
+            console.error(`❌ Failed to build ICP segments for site ${request.siteId}:`, response.error);
+            throw new Error(errorMessage);
         }
-        const data = response.data;
-        const segments = data?.segments || [];
-        const analysis = data?.analysis || {};
-        console.log(`✅ Successfully built ${segments.length} ICP segments`);
-        if (segments.length > 0) {
-            console.log(`📋 ICP segments created:`);
-            segments.forEach((segment, index) => {
-                console.log(`   ${index + 1}. ${segment.name || `ICP Segment ${index + 1}`}`);
-            });
-        }
+        console.log(`✅ Successfully built ICP segments for site ${request.siteId}`);
+        console.log(`📈 ICP Segments result:`, JSON.stringify(response.data, null, 2));
         return {
             success: true,
-            segments,
-            analysis
+            segments: response.data?.segments || response.data?.results || [],
+            analysis: response.data?.analysis || response.data
         };
     }
     catch (error) {

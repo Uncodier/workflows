@@ -32,62 +32,6 @@ export interface GetLeadResult {
   error?: string;
 }
 
-export interface LeadFollowUpRequest {
-  lead_id: string;
-  site_id: string;
-  userId?: string;
-  additionalData?: any;
-}
-
-export interface LeadFollowUpResult {
-  success: boolean;
-  data?: any;
-  error?: string;
-  followUpActions?: any[];
-  nextSteps?: string[];
-}
-
-export interface LeadResearchRequest {
-  lead_id: string;
-  site_id: string;
-  userId?: string;
-  additionalData?: any;
-}
-
-export interface LeadResearchResult {
-  success: boolean;
-  data?: any;
-  error?: string;
-  researchData?: any;
-  insights?: any[];
-  recommendations?: string[];
-}
-
-export interface UpdateLeadRequest {
-  lead_id: string;
-  updateData: any;
-  safeUpdate?: boolean; // If true, will not update email or phone
-}
-
-export interface UpdateLeadResult {
-  success: boolean;
-  lead?: any;
-  error?: string;
-}
-
-// Company interfaces
-export interface GetCompanyResult {
-  success: boolean;
-  company?: any;
-  error?: string;
-}
-
-export interface UpsertCompanyResult {
-  success: boolean;
-  company?: any;
-  error?: string;
-}
-
 /**
  * Activity to get lead information from database
  */
@@ -112,22 +56,14 @@ export async function getLeadActivity(leadId: string): Promise<GetLeadResult> {
     
     const leadData = await supabaseService.fetchLead(leadId);
 
-    if (!leadData) {
-      console.log(`⚠️  Lead ${leadId} not found`);
-      return {
-        success: false,
-        error: 'Lead not found'
-      };
-    }
-
     const lead: Lead = {
       id: leadData.id,
       email: leadData.email,
-      name: leadData.name,
+      name: leadData.name || leadData.full_name,
       company: leadData.company || leadData.company_name,
-      company_name: leadData.company_name,
+      company_name: leadData.company_name || leadData.company,
       job_title: leadData.job_title || leadData.position,
-      position: leadData.position,
+      position: leadData.position || leadData.job_title,
       industry: leadData.industry,
       location: leadData.location,
       phone: leadData.phone,
@@ -136,14 +72,10 @@ export async function getLeadActivity(leadId: string): Promise<GetLeadResult> {
       site_id: leadData.site_id,
       created_at: leadData.created_at,
       updated_at: leadData.updated_at,
-      ...leadData // Include any additional fields
+      ...leadData
     };
 
-    console.log(`✅ Retrieved lead information for ${lead.name || lead.email}`);
-    console.log(`📧 Contact: ${lead.email}, 📱 Phone: ${lead.phone}`);
-    if (lead.company) {
-      console.log(`🏢 Company: ${lead.company}`);
-    }
+    console.log(`✅ Retrieved lead information for ${lead.name || lead.email}: ${lead.company}`);
     
     return {
       success: true,
@@ -159,6 +91,39 @@ export async function getLeadActivity(leadId: string): Promise<GetLeadResult> {
       error: errorMessage
     };
   }
+}
+
+// Lead follow-up interfaces
+export interface LeadFollowUpRequest {
+  lead_id: string;
+  site_id: string;
+  userId?: string;
+  additionalData?: any;
+}
+
+export interface LeadFollowUpResult {
+  success: boolean;
+  data?: any;
+  error?: string;
+  followUpActions?: any[];
+  nextSteps?: string[];
+}
+
+// Lead research interfaces
+export interface LeadResearchRequest {
+  lead_id: string;
+  site_id: string;
+  userId?: string;
+  additionalData?: any;
+}
+
+export interface LeadResearchResult {
+  success: boolean;
+  data?: any;
+  error?: string;
+  researchData?: any;
+  insights?: any[];
+  recommendations?: string[];
 }
 
 /**
@@ -218,7 +183,7 @@ export async function leadFollowUpActivity(request: LeadFollowUpRequest): Promis
 }
 
 /**
- * Activity to execute lead research via lead research agent API
+ * Activity to execute lead research via sales agent API
  */
 export async function leadResearchActivity(request: LeadResearchRequest): Promise<LeadResearchResult> {
   console.log(`🔍 Executing lead research for lead: ${request.lead_id}, site: ${request.site_id}`);
@@ -245,15 +210,15 @@ export async function leadResearchActivity(request: LeadResearchRequest): Promis
     
     const data = response.data;
     const researchData = data?.researchData || data?.research || data;
-    const insights = data?.insights || [];
-    const recommendations = data?.recommendations || [];
+    const insights = data?.insights || data?.findings || [];
+    const recommendations = data?.recommendations || data?.next_steps || [];
     
     console.log(`✅ Lead research executed successfully for lead ${request.lead_id}`);
     if (insights.length > 0) {
-      console.log(`💡 Insights generated: ${insights.length}`);
+      console.log(`🔍 Research insights generated: ${insights.length}`);
     }
     if (recommendations.length > 0) {
-      console.log(`💭 Recommendations identified: ${recommendations.length}`);
+      console.log(`💡 Recommendations identified: ${recommendations.length}`);
     }
     
     return {
@@ -287,13 +252,15 @@ export async function saveLeadFollowUpLogsActivity(request: {
   console.log(`📝 Saving lead follow-up logs for lead ${request.leadId} on site ${request.siteId}`);
   
   try {
-    // The data contains the direct response from the API with messages, lead, and command_ids
+    // Extract the nested data fields to flatten them at root level
+    const { success, data: nestedData } = request.data;
+    
     const requestBody = {
       siteId: request.siteId,
       leadId: request.leadId,
       userId: request.userId,
-      success: true,  // Mark as successful since we reached this point
-      ...request.data  // Flatten the data fields (messages, lead, command_ids) to root
+      success,
+      ...nestedData  // Flatten the nested data fields (messages, lead, command_ids) to root
     };
     
     console.log('📤 Sending lead follow-up logs:', JSON.stringify(requestBody, null, 2));
@@ -323,6 +290,19 @@ export async function saveLeadFollowUpLogsActivity(request: {
       error: errorMessage
     };
   }
+}
+
+// Update Lead interfaces
+export interface UpdateLeadRequest {
+  lead_id: string;
+  updateData: any;
+  safeUpdate?: boolean; // If true, will not update email or phone
+}
+
+export interface UpdateLeadResult {
+  success: boolean;
+  lead?: any;
+  error?: string;
 }
 
 /**
@@ -380,6 +360,19 @@ export async function updateLeadActivity(request: UpdateLeadRequest): Promise<Up
       error: errorMessage
     };
   }
+}
+
+// Company interfaces
+export interface GetCompanyResult {
+  success: boolean;
+  company?: any;
+  error?: string;
+}
+
+export interface UpsertCompanyResult {
+  success: boolean;
+  company?: any;
+  error?: string;
 }
 
 /**
@@ -446,7 +439,7 @@ export async function upsertCompanyActivity(companyData: any): Promise<UpsertCom
     const isConnected = await supabaseService.getConnectionStatus();
     
     if (!isConnected) {
-      console.log('⚠️  Database not available, cannot upsert company information');
+      console.log('⚠️  Database not available, cannot upsert company');
       return {
         success: false,
         error: 'Database not available'
@@ -455,13 +448,13 @@ export async function upsertCompanyActivity(companyData: any): Promise<UpsertCom
 
     console.log('✅ Database connection confirmed, upserting company...');
     
-    const company = await supabaseService.upsertCompany(companyData);
+    const upsertedCompany = await supabaseService.upsertCompany(companyData);
 
-    console.log(`✅ Successfully upserted company: ${company.name}`);
+    console.log(`✅ Successfully upserted company: ${upsertedCompany.name}`);
     
     return {
       success: true,
-      company
+      company: upsertedCompany
     };
     
   } catch (error) {

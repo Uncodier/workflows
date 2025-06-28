@@ -1,4 +1,4 @@
-import { getSupabaseService } from '../services/supabaseService.js';
+import { getSupabaseService } from '../services/supabaseService';
 
 // Prioritization Engine Activities
 

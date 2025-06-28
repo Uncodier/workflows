@@ -6,7 +6,7 @@ exports.designPlan = designPlan;
 exports.sendPlan = sendPlan;
 exports.sendPriorityMail = sendPriorityMail;
 exports.scheduleActivities = scheduleActivities;
-const supabaseService_js_1 = require("../services/supabaseService.js");
+const supabaseService_1 = require("../services/supabaseService");
 // Prioritization Engine Activities
 /**
  * Evaluates if any sites have business_hours that allow operations for the given day
@@ -14,7 +14,7 @@ const supabaseService_js_1 = require("../services/supabaseService.js");
 async function evaluateBusinessHoursForDay(dayOfWeek) {
     console.log(`🕐 Evaluating business hours for day ${dayOfWeek} (0=Sunday, 6=Saturday)...`);
     try {
-        const supabaseService = (0, supabaseService_js_1.getSupabaseService)();
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
         const isConnected = await supabaseService.getConnectionStatus();
         if (!isConnected) {
             console.log('⚠️  Database not connected, falling back to weekday-only logic');
