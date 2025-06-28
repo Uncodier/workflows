@@ -1,8 +1,14 @@
-import { executeChild } from '@temporalio/workflow';
+import { executeChild, proxyActivities } from '@temporalio/workflow';
+import type { Activities } from '../activities';
+
+const { evaluateBusinessHoursForDay } = proxyActivities<Activities>({
+  startToCloseTimeout: '10 minutes',
+});
 
 /**
  * Activity Prioritization Engine Workflow
  * Decides WHETHER to execute daily operations based on business logic
+ * Now considers business_hours from database for smarter scheduling
  * If YES → executes dailyOperationsWorkflow
  */
 export async function activityPrioritizationEngineWorkflow(): Promise<{
@@ -11,6 +17,7 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
   operationsExecuted: boolean;
   operationsResult?: any;
   executionTime: string;
+  businessHoursAnalysis?: any;
 }> {
   console.log('🎯 Starting activity prioritization engine workflow...');
   const startTime = new Date();
@@ -26,21 +33,27 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
     
     console.log(`📅 Today is ${dayName} (${dayOfWeek}) at ${currentHour}:${today.getMinutes().toString().padStart(2, '0')}`);
     
-    // Decision logic: Execute operations or not
-    let shouldExecute = false;
-    let reason = '';
+    // NEW: Evaluate business hours from database
+    console.log('🏢 Evaluating business hours from database...');
+    const businessHoursAnalysis = await evaluateBusinessHoursForDay(dayOfWeek);
     
-    // For now, simple logic: execute on weekdays (Monday-Friday)
-    // This is where you can add more sophisticated business logic
-    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-      shouldExecute = true;
-      reason = `Weekday execution (${dayName}) - operations should run`;
-    } else {
-      shouldExecute = false;
-      reason = `Weekend (${dayName}) - skipping operations`;
+    console.log('📊 Business Hours Analysis:');
+    console.log(`   - Sites with business_hours: ${businessHoursAnalysis.sitesWithBusinessHours}`);
+    console.log(`   - Sites open today: ${businessHoursAnalysis.sitesOpenToday}`);
+    console.log(`   - Decision: ${businessHoursAnalysis.shouldExecuteOperations ? 'EXECUTE' : 'SKIP'}`);
+    console.log(`   - Reason: ${businessHoursAnalysis.reason}`);
+    
+    if (businessHoursAnalysis.openSites.length > 0) {
+      console.log('   - Open sites today:');
+      businessHoursAnalysis.openSites.forEach(site => {
+        console.log(`     • Site ${site.siteId}: ${site.businessHours.open} - ${site.businessHours.close}`);
+      });
     }
     
-    console.log(`📋 Decision: ${shouldExecute ? '✅ EXECUTE' : '⏭️ SKIP'}`);
+    const shouldExecute = businessHoursAnalysis.shouldExecuteOperations;
+    const reason = businessHoursAnalysis.reason;
+    
+    console.log(`📋 Final Decision: ${shouldExecute ? '✅ EXECUTE' : '⏭️ SKIP'}`);
     console.log(`📝 Reason: ${reason}`);
 
     let operationsResult;
@@ -81,7 +94,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
       reason,
       operationsExecuted,
       operationsResult,
-      executionTime
+      executionTime,
+      businessHoursAnalysis
     };
 
   } catch (error) {
