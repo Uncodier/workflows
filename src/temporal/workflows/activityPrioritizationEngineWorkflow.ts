@@ -66,6 +66,7 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
       try {
         operationsResult = await executeChild('dailyOperationsWorkflow', {
           workflowId: `daily-operations-${Date.now()}`,
+          args: [{ businessHoursAnalysis }],
         });
         
         operationsExecuted = true;

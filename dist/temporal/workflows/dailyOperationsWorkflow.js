@@ -20,9 +20,22 @@ const { executeDailyStandUpWorkflowsActivity: executeDailyStandUp, } = (0, workf
  * Daily Operations Workflow
  * Executes all daily operational activities when triggered by activityPrioritizationEngine
  */
-async function dailyOperationsWorkflow() {
+async function dailyOperationsWorkflow(options = {}) {
     console.log('⚙️ Starting daily operations workflow...');
     const startTime = new Date();
+    // Extract business hours analysis
+    const { businessHoursAnalysis } = options;
+    if (businessHoursAnalysis) {
+        console.log('📊 Using business hours analysis from prioritization engine:');
+        console.log(`   - Sites open today: ${businessHoursAnalysis.sitesOpenToday}`);
+        console.log(`   - Should execute operations: ${businessHoursAnalysis.shouldExecuteOperations}`);
+        if (businessHoursAnalysis.openSites && businessHoursAnalysis.openSites.length > 0) {
+            console.log('   - Open sites:');
+            businessHoursAnalysis.openSites.forEach((site) => {
+                console.log(`     • Site ${site.siteId}: ${site.businessHours.open} - ${site.businessHours.close}`);
+            });
+        }
+    }
     try {
         // Step 1: Get context
         console.log('🔍 Step 1: Getting context...');
@@ -44,17 +57,23 @@ async function dailyOperationsWorkflow() {
         console.log('📅 Step 5: Scheduling activities...');
         const scheduleResult = await scheduleActivities(planResult.activities);
         console.log(`✅ Activities scheduled via ${scheduleResult.apiCalls} API calls`);
-        // Step 6: Execute daily stand up workflows for all sites
+        // Step 6: Execute daily stand up workflows for sites with active business hours
         console.log('🌅 Step 6: Executing daily stand up workflows...');
         let dailyStandUpResult;
         try {
             console.log('🔄 About to call executeDailyStandUpWorkflowsActivity...');
-            console.log('   Activity executes dailyStandUpWorkflow for all sites');
-            console.log('   Simple execution without duplicate logic');
-            // Execute the simplified activity that just runs workflows for all sites
+            if (businessHoursAnalysis && businessHoursAnalysis.openSites.length > 0) {
+                console.log(`   Executing workflows for ${businessHoursAnalysis.openSites.length} sites with active business hours`);
+                console.log('   Respecting business hours scheduling');
+            }
+            else {
+                console.log('   No business hours analysis available - executing for all sites (fallback mode)');
+            }
+            // Execute the activity with business hours filtering
             dailyStandUpResult = await executeDailyStandUp({
                 dryRun: false, // PRODUCTION: Actually execute workflows
                 testMode: false, // PRODUCTION: Full production mode
+                businessHoursAnalysis, // PASS business hours analysis for filtering
             });
             console.log('🎯 executeDailyStandUpWorkflowsActivity completed successfully');
             console.log(`✅ Daily stand ups executed: ${dailyStandUpResult.scheduled} sites`);

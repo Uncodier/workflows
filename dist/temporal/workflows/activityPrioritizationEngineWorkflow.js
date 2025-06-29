@@ -48,6 +48,7 @@ async function activityPrioritizationEngineWorkflow() {
             try {
                 operationsResult = await (0, workflow_1.executeChild)('dailyOperationsWorkflow', {
                     workflowId: `daily-operations-${Date.now()}`,
+                    args: [{ businessHoursAnalysis }],
                 });
                 operationsExecuted = true;
                 console.log('✅ Daily operations workflow completed successfully');

@@ -743,20 +743,19 @@ function getNextRunTime(cronExpression: string): Date {
 }
 
 /**
- * Execute daily stand up workflows for all sites
- * 
- * NOTE: Site selection and business hours logic is now handled by activityPrioritizationEngine.
- * This activity simply executes the workflow for all sites without duplicating selection logic.
+ * Execute daily stand up workflows for sites with active business hours
  * 
  * @param options.dryRun - If true, only simulates execution without running real workflows
  * @param options.testMode - If true, adds safety checks and limits to prevent production issues
  * @param options.maxSites - Maximum number of sites to process (useful for testing)
+ * @param options.businessHoursAnalysis - Business hours analysis from prioritization engine for filtering sites
  */
 export async function executeDailyStandUpWorkflowsActivity(
   options: { 
     dryRun?: boolean; 
     testMode?: boolean; 
     maxSites?: number;
+    businessHoursAnalysis?: any;
   } = {}
 ): Promise<{
   scheduled: number;
@@ -766,11 +765,19 @@ export async function executeDailyStandUpWorkflowsActivity(
   errors: string[];
   testInfo?: any;
 }> {
-  console.log('🌅 Starting Daily Stand Up workflow execution for all sites...');
-  console.log('📋 SIMPLIFIED LOGIC:');
-  console.log('   - activityPrioritizationEngine handles site selection & business hours logic');
-  console.log('   - This activity simply executes dailyStandUpWorkflow for all sites');
-  console.log('   - No duplicate selection logic');
+  console.log('🌅 Starting Daily Stand Up workflow execution...');
+  
+  const { businessHoursAnalysis } = options;
+  
+  if (businessHoursAnalysis) {
+    console.log('📋 BUSINESS HOURS FILTERING ENABLED:');
+    console.log(`   - Sites with business_hours: ${businessHoursAnalysis.sitesWithBusinessHours}`);
+    console.log(`   - Sites open today: ${businessHoursAnalysis.sitesOpenToday}`);
+    console.log(`   - Will execute for filtered sites only`);
+  } else {
+    console.log('📋 FALLBACK MODE - No business hours filtering:');
+    console.log('   - Will execute for all sites (legacy behavior)');
+  }
   
   // Safety checks for test mode
   if (options.testMode) {
@@ -787,10 +794,10 @@ export async function executeDailyStandUpWorkflowsActivity(
   const errors: string[] = [];
   let scheduled = 0;
   let failed = 0;
-  const skipped = 0;
   const testInfo: any = {
     mode: options.dryRun ? 'DRY_RUN' : 'PRODUCTION',
     testMode: options.testMode,
+    businessHoursFiltering: !!businessHoursAnalysis,
     startTime: new Date().toISOString(),
     endTime: '',
     duration: '',
@@ -808,18 +815,40 @@ export async function executeDailyStandUpWorkflowsActivity(
       throw new Error('Database not available for workflow execution');
     }
 
-    // Fetch all sites
-    let sites = await supabaseService.fetchSites();
-    console.log(`✅ Found ${sites.length} sites total`);
+    let sitesToProcess: any[] = [];
+
+    if (businessHoursAnalysis && businessHoursAnalysis.openSites.length > 0) {
+      // FILTERED MODE: Only process sites with active business hours
+      console.log('🔍 Using business hours filtering...');
+      
+      const allSites = await supabaseService.fetchSites();
+      const openSiteIds = businessHoursAnalysis.openSites.map((site: any) => site.siteId);
+      
+      sitesToProcess = allSites.filter(site => openSiteIds.includes(site.id));
+      
+      console.log(`✅ Found ${allSites.length} total sites, filtered to ${sitesToProcess.length} sites with active business hours`);
+      
+      if (businessHoursAnalysis.openSites.length > 0) {
+        console.log('📊 Sites to process:');
+        businessHoursAnalysis.openSites.forEach((site: any) => {
+          console.log(`   • Site ${site.siteId}: ${site.businessHours.open} - ${site.businessHours.close}`);
+        });
+      }
+    } else {
+      // FALLBACK MODE: Process all sites (legacy behavior)
+      console.log('⏮️ Using fallback mode - processing all sites...');
+      sitesToProcess = await supabaseService.fetchSites();
+      console.log(`✅ Found ${sitesToProcess.length} sites total (fallback mode)`);
+    }
 
     // Apply maxSites limit if specified
     if (options.maxSites && options.maxSites > 0) {
-      sites = sites.slice(0, options.maxSites);
-      console.log(`🔢 Limited to first ${sites.length} sites for testing`);
+      sitesToProcess = sitesToProcess.slice(0, options.maxSites);
+      console.log(`🔢 Limited to first ${sitesToProcess.length} sites for testing`);
     }
 
-    if (sites.length === 0) {
-      console.log('⚠️ No sites found, nothing to execute');
+    if (sitesToProcess.length === 0) {
+      console.log('⚠️ No sites to process');
       return { 
         scheduled: 0, 
         skipped: 0, 
@@ -830,11 +859,11 @@ export async function executeDailyStandUpWorkflowsActivity(
       };
     }
 
-    testInfo.totalSites = sites.length;
-    testInfo.siteNames = sites.map(s => s.name);
+    testInfo.totalSites = sitesToProcess.length;
+    testInfo.siteNames = sitesToProcess.map(s => s.name);
 
-    // Execute daily stand up workflow for each site
-    for (const site of sites) {
+    // Execute daily stand up workflow for each filtered site
+    for (const site of sitesToProcess) {
       try {
         console.log(`\n📋 Executing Daily Stand Up for site: ${site.name} (${site.id})`);
 
@@ -844,8 +873,18 @@ export async function executeDailyStandUpWorkflowsActivity(
           continue;
         }
 
-        // Execute the daily stand up workflow directly
-        const workflowResult = await executeDailyStandUpWorkflow(site);
+        // Determine execution mode based on business hours analysis
+        const hasBusinessHours = businessHoursAnalysis && businessHoursAnalysis.openSites.length > 0;
+        const executeReason = hasBusinessHours ? 'business-hours-scheduled' : 'fallback-execution';
+        const scheduleType = hasBusinessHours ? 'business-hours' : 'immediate';
+        
+        // Execute the daily stand up workflow with proper scheduling mode
+        const workflowResult = await executeDailyStandUpWorkflow(site, {
+          executeReason,
+          scheduleType,
+          businessHoursAnalysis,
+          scheduledBy: 'activityPrioritizationEngine'
+        });
         
         results.push(workflowResult);
 
@@ -872,16 +911,17 @@ export async function executeDailyStandUpWorkflowsActivity(
     
     console.log(`\n📊 Daily Stand Up execution completed:`);
     console.log(`   ✅ Executed: ${scheduled} sites`);
-    console.log(`   ⏭️ Skipped: ${skipped} sites`);
+    console.log(`   ⏭️ Skipped: 0 sites`);
     console.log(`   ❌ Failed: ${failed} sites`);
+    console.log(`   🔍 Business hours filtering: ${businessHoursAnalysis ? 'ENABLED' : 'DISABLED'}`);
     
     if (options.dryRun) {
       console.log(`⏰ This was a dry run - no actual workflows were executed`);
     }
     
-    return { scheduled, skipped, failed, results, errors, testInfo };
+    return { scheduled, skipped: 0, failed, results, errors, testInfo };
 
-  } catch (error) {
+  } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Failed to execute Daily Stand Up workflows: ${errorMessage}`);
     testInfo.error = errorMessage;
@@ -900,26 +940,37 @@ export async function executeDailyStandUpWorkflowsActivity(
 /**
  * Execute daily stand up workflow for a single site
  */
-async function executeDailyStandUpWorkflow(site: any): Promise<ScheduleWorkflowResult> {
+async function executeDailyStandUpWorkflow(
+  site: any, 
+  executionOptions: {
+    executeReason: string;
+    scheduleType: string;
+    businessHoursAnalysis?: any;
+    scheduledBy: string;
+  }
+): Promise<ScheduleWorkflowResult> {
   const workflowId = `daily-standup-${site.id}-${Date.now()}`;
 
   try {
     const client = await getTemporalClient();
     
     console.log(`🚀 Executing Daily Stand Up workflow for ${site.name}`);
+    console.log(`   Schedule type: ${executionOptions.scheduleType}`);
+    console.log(`   Execute reason: ${executionOptions.executeReason}`);
     
     const handle = await client.workflow.start('dailyStandUpWorkflow', {
       args: [{
         site_id: site.id,
         userId: site.user_id,
         additionalData: {
-          scheduledBy: 'activityPrioritizationEngine',
-          executeReason: 'immediate-execution',
-          scheduleType: 'immediate',
-          scheduleTime: 'immediate',
+          scheduledBy: executionOptions.scheduledBy,
+          executeReason: executionOptions.executeReason,
+          scheduleType: executionOptions.scheduleType,
+          scheduleTime: executionOptions.scheduleType === 'business-hours' ? 'business-hours-based' : 'immediate',
           executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
           timezone: 'UTC',
-          executionMode: 'direct'
+          executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
+          businessHoursAnalysis: executionOptions.businessHoursAnalysis
         }
       }],
       taskQueue: temporalConfig.taskQueue,
@@ -929,12 +980,12 @@ async function executeDailyStandUpWorkflow(site: any): Promise<ScheduleWorkflowR
     console.log(`✅ Daily Stand Up workflow started for ${site.name}`);
     console.log(`   Workflow ID: ${handle.workflowId}`);
     
-    return { workflowId, scheduleId: 'immediate-execution', success: true };
+    return { workflowId, scheduleId: executionOptions.scheduleType, success: true };
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Failed to execute Daily Stand Up workflow for ${site.name}: ${errorMessage}`);
-    return { workflowId, scheduleId: 'immediate-execution', success: false, error: errorMessage };
+    return { workflowId, scheduleId: executionOptions.scheduleType, success: false, error: errorMessage };
   }
 }
 
