@@ -20,8 +20,8 @@ baseParams) {
     let contactName;
     let contactEmail;
     let contactPhone;
-    // Detect if this is EmailData format (has contact_info) or direct website chat format
-    if (emailData.contact_info) {
+    // Detect if this is EmailData format (has valid contact_info) or direct website chat format
+    if (emailData.contact_info && typeof emailData.contact_info === 'object') {
         // EmailData format
         console.log('📧 Processing EmailData format');
         message = emailData.summary || 'Customer support interaction from analysis';
