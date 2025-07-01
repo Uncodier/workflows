@@ -27,11 +27,11 @@ timezone = 'America/Mexico_City') {
     const nowMexico = new Date(nowUTC.getTime() - (6 * 60 * 60 * 1000));
     const mexicoDateStr = nowMexico.toISOString().split('T')[0];
     console.log(`   📅 Current time (UTC): ${nowUTC.toISOString()}`);
-    console.log(`   📅 Current Mexico time: ${nowMexico.getHours().toString().padStart(2, '0')}:${nowMexico.getMinutes().toString().padStart(2, '0')} on ${mexicoDateStr}`);
+    console.log(`   📅 Current Mexico time: ${nowMexico.getUTCHours().toString().padStart(2, '0')}:${nowMexico.getUTCMinutes().toString().padStart(2, '0')} on ${mexicoDateStr}`);
     // Step 2: Create target time for "today" in Mexico timezone
     const targetMexicoToday = new Date(nowMexico);
-    targetMexicoToday.setHours(hours, minutes, 0, 0);
-    console.log(`   📅 Target Mexico time TODAY (${mexicoDateStr}): ${targetMexicoToday.getHours().toString().padStart(2, '0')}:${targetMexicoToday.getMinutes().toString().padStart(2, '0')}`);
+    targetMexicoToday.setUTCHours(hours, minutes, 0, 0);
+    console.log(`   📅 Target Mexico time TODAY (${mexicoDateStr}): ${targetMexicoToday.getUTCHours().toString().padStart(2, '0')}:${targetMexicoToday.getUTCMinutes().toString().padStart(2, '0')}`);
     // Step 3: Check if target time already passed in Mexico
     const targetAlreadyPassed = targetMexicoToday <= nowMexico;
     // Step 4: Determine final target date (today or tomorrow in Mexico)
@@ -40,7 +40,7 @@ timezone = 'America/Mexico_City') {
     if (targetAlreadyPassed) {
         // Schedule for tomorrow in Mexico
         finalTargetMexico = new Date(targetMexicoToday);
-        finalTargetMexico.setDate(finalTargetMexico.getDate() + 1);
+        finalTargetMexico.setUTCDate(finalTargetMexico.getUTCDate() + 1);
         scheduleForTomorrow = true;
         console.log(`   ⏰ Target time already passed in Mexico TODAY, scheduling for TOMORROW`);
     }
@@ -51,7 +51,7 @@ timezone = 'America/Mexico_City') {
         console.log(`   ⏰ Target time hasn't passed in Mexico TODAY, scheduling for TODAY`);
     }
     const finalMexicoDateStr = finalTargetMexico.toISOString().split('T')[0];
-    console.log(`   📅 Final target Mexico time: ${finalTargetMexico.getHours().toString().padStart(2, '0')}:${finalTargetMexico.getMinutes().toString().padStart(2, '0')} on ${finalMexicoDateStr}`);
+    console.log(`   📅 Final target Mexico time: ${finalTargetMexico.getUTCHours().toString().padStart(2, '0')}:${finalTargetMexico.getUTCMinutes().toString().padStart(2, '0')} on ${finalMexicoDateStr}`);
     // Step 5: Convert final Mexico time to UTC
     const finalTargetUTC = new Date(finalTargetMexico.getTime() + (6 * 60 * 60 * 1000));
     console.log(`   📅 Final target UTC time: ${finalTargetUTC.toISOString()}`);
@@ -74,7 +74,7 @@ function testSchedulingScenarios() {
     // Mexico = UTC - 6 hours
     const mexicoTime = new Date(currentTime.getTime() - (6 * 60 * 60 * 1000));
     const mexicoDateStr = mexicoTime.toISOString().split('T')[0];
-    console.log(`🇲🇽 Mexico time: ${mexicoTime.getHours().toString().padStart(2, '0')}:${mexicoTime.getMinutes().toString().padStart(2, '0')} on ${mexicoDateStr} (UTC-6)`);
+    console.log(`🇲🇽 Mexico time: ${mexicoTime.getUTCHours().toString().padStart(2, '0')}:${mexicoTime.getUTCMinutes().toString().padStart(2, '0')} on ${mexicoDateStr} (UTC-6)`);
     console.log(`📅 Current day: ${currentTime.toLocaleDateString('en-US', { weekday: 'long' })}`);
     // Test the business hours analysis
     console.log('\n🏢 Testing Business Hours Analysis...');

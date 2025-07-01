@@ -12,6 +12,7 @@ exports.executeBuildSegmentsWorkflowActivity = executeBuildSegmentsWorkflowActiv
 exports.executeBuildContentWorkflowActivity = executeBuildContentWorkflowActivity;
 exports.executeDailyStandUpWorkflowsActivity = executeDailyStandUpWorkflowsActivity;
 exports.scheduleDailyOperationsWorkflowActivity = scheduleDailyOperationsWorkflowActivity;
+exports.scheduleIndividualDailyStandUpsActivity = scheduleIndividualDailyStandUpsActivity;
 const client_1 = require("../client");
 const config_1 = require("../../config/config");
 const services_1 = require("../services");
@@ -822,11 +823,11 @@ businessHoursAnalysis, options = {}) {
         const nowLocal = new Date(nowUTC.getTime() - (timezoneOffset * 60 * 60 * 1000));
         const localDateStr = nowLocal.toISOString().split('T')[0];
         console.log(`   - Current time (UTC): ${nowUTC.toISOString()}`);
-        console.log(`   - Current ${timezone} time: ${nowLocal.getHours().toString().padStart(2, '0')}:${nowLocal.getMinutes().toString().padStart(2, '0')} on ${localDateStr}`);
+        console.log(`   - Current ${timezone} time: ${nowLocal.getUTCHours().toString().padStart(2, '0')}:${nowLocal.getUTCMinutes().toString().padStart(2, '0')} on ${localDateStr}`);
         // Step 2: Create target time for "today" in local timezone
         const targetLocalToday = new Date(nowLocal);
-        targetLocalToday.setHours(hours, minutes, 0, 0);
-        console.log(`   - Target ${timezone} time TODAY (${localDateStr}): ${targetLocalToday.getHours().toString().padStart(2, '0')}:${targetLocalToday.getMinutes().toString().padStart(2, '0')}`);
+        targetLocalToday.setUTCHours(hours, minutes, 0, 0);
+        console.log(`   - Target ${timezone} time TODAY (${localDateStr}): ${targetLocalToday.getUTCHours().toString().padStart(2, '0')}:${targetLocalToday.getUTCMinutes().toString().padStart(2, '0')}`);
         // Step 3: Check if target time already passed in local timezone
         const targetAlreadyPassed = targetLocalToday <= nowLocal;
         // Step 4: Determine final target date (today or tomorrow in local timezone)
@@ -835,7 +836,7 @@ businessHoursAnalysis, options = {}) {
         if (targetAlreadyPassed) {
             // Schedule for tomorrow in local timezone
             finalTargetLocal = new Date(targetLocalToday);
-            finalTargetLocal.setDate(finalTargetLocal.getDate() + 1);
+            finalTargetLocal.setUTCDate(finalTargetLocal.getUTCDate() + 1);
             scheduleForTomorrow = true;
             console.log(`   ⏰ Target time already passed in ${timezone} TODAY, scheduling for TOMORROW`);
         }
@@ -846,7 +847,7 @@ businessHoursAnalysis, options = {}) {
             console.log(`   ⏰ Target time hasn't passed in ${timezone} TODAY, scheduling for TODAY`);
         }
         const finalLocalDateStr = finalTargetLocal.toISOString().split('T')[0];
-        console.log(`   - Final target ${timezone} time: ${finalTargetLocal.getHours().toString().padStart(2, '0')}:${finalTargetLocal.getMinutes().toString().padStart(2, '0')} on ${finalLocalDateStr}`);
+        console.log(`   - Final target ${timezone} time: ${finalTargetLocal.getUTCHours().toString().padStart(2, '0')}:${finalTargetLocal.getUTCMinutes().toString().padStart(2, '0')} on ${finalLocalDateStr}`);
         // Step 5: Convert final local time to UTC for scheduling
         const finalTargetUTC = new Date(finalTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
         console.log(`   - Final target UTC time: ${finalTargetUTC.toISOString()}`);
@@ -917,6 +918,166 @@ businessHoursAnalysis, options = {}) {
             scheduleId: failedId,
             success: false,
             error: errorMessage
+        };
+    }
+}
+/**
+ * Schedule Daily Stand Up Workflows for individual sites
+ * Creates separate schedules for each site based on their specific business hours
+ */
+async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, options = {}) {
+    const { timezone = 'America/Mexico_City' } = options;
+    console.log(`📅 Scheduling individual Daily Stand Up workflows for sites`);
+    console.log(`   - Timezone: ${timezone}`);
+    console.log(`   - Sites to process: ${businessHoursAnalysis.openSites?.length || 0}`);
+    const results = [];
+    const errors = [];
+    let scheduled = 0;
+    let failed = 0;
+    try {
+        if (!businessHoursAnalysis.openSites || businessHoursAnalysis.openSites.length === 0) {
+            console.log('⚠️ No sites with business hours to schedule');
+            return { scheduled: 0, failed: 0, results: [], errors: [] };
+        }
+        const client = await (0, client_1.getTemporalClient)();
+        const scheduleClient = client.schedule;
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        // Get site details for each site
+        const allSites = await supabaseService.fetchSites();
+        for (const businessHoursSite of businessHoursAnalysis.openSites) {
+            try {
+                // Find the full site data
+                const site = allSites.find(s => s.id === businessHoursSite.siteId);
+                if (!site) {
+                    console.log(`⚠️ Site ${businessHoursSite.siteId} not found in database`);
+                    continue;
+                }
+                const businessHours = businessHoursSite.businessHours;
+                const scheduledTime = businessHours.open; // e.g., "09:00"
+                console.log(`\n📋 Scheduling Daily Stand Up for ${site.name}`);
+                console.log(`   - Site ID: ${site.id}`);
+                console.log(`   - Business Hours: ${businessHours.open} - ${businessHours.close}`);
+                console.log(`   - Timezone: ${businessHours.timezone || timezone}`);
+                // Parse the target time
+                const [hours, minutes] = scheduledTime.split(':').map(Number);
+                const nowUTC = new Date();
+                const siteTimezone = businessHours.timezone || timezone;
+                const timezoneOffset = siteTimezone === 'America/Mexico_City' ? 6 : 0;
+                // Calculate current time in site's timezone
+                const nowLocal = new Date(nowUTC.getTime() - (timezoneOffset * 60 * 60 * 1000));
+                // Create target time for "today" in site's timezone
+                const targetLocalToday = new Date(nowLocal);
+                targetLocalToday.setUTCHours(hours, minutes, 0, 0);
+                // Check if target time already passed in site's timezone
+                const targetAlreadyPassed = targetLocalToday <= nowLocal;
+                // Determine final target date (today or tomorrow in site's timezone)
+                let finalTargetLocal;
+                if (targetAlreadyPassed) {
+                    finalTargetLocal = new Date(targetLocalToday);
+                    finalTargetLocal.setUTCDate(finalTargetLocal.getUTCDate() + 1);
+                    console.log(`   ⏰ Target time already passed, scheduling for TOMORROW`);
+                }
+                else {
+                    finalTargetLocal = targetLocalToday;
+                    console.log(`   ⏰ Target time hasn't passed, scheduling for TODAY`);
+                }
+                const finalLocalDateStr = finalTargetLocal.toISOString().split('T')[0];
+                const finalTargetUTC = new Date(finalTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
+                console.log(`   - Final target: ${finalTargetLocal.getUTCHours().toString().padStart(2, '0')}:${finalTargetLocal.getUTCMinutes().toString().padStart(2, '0')} ${siteTimezone} on ${finalLocalDateStr}`);
+                console.log(`   - Final target UTC: ${finalTargetUTC.toISOString()}`);
+                // Create unique schedule ID for this site
+                const scheduleId = `daily-standup-${site.id}-${finalLocalDateStr}-${scheduledTime.replace(':', '')}`;
+                const workflowId = `daily-standup-scheduled-${site.id}-${Date.now()}`;
+                // Create cron expression for the specific time on the target date
+                const cronExpression = `${minutes} ${hours} ${finalTargetUTC.getUTCDate()} ${finalTargetUTC.getUTCMonth() + 1} *`;
+                console.log(`   - Schedule ID: ${scheduleId}`);
+                console.log(`   - Cron Expression: ${cronExpression}`);
+                // Prepare workflow arguments for dailyStandUpWorkflow
+                const workflowArgs = [{
+                        site_id: site.id,
+                        userId: site.user_id,
+                        additionalData: {
+                            scheduledBy: 'activityPrioritizationEngine-individualScheduling',
+                            executeReason: `business-hours-individual-${scheduledTime}`,
+                            scheduleType: 'business-hours-individual',
+                            scheduleTime: `${scheduledTime} ${siteTimezone}`,
+                            executionDay: finalLocalDateStr,
+                            timezone: siteTimezone,
+                            executionMode: 'scheduled-individual',
+                            businessHours: businessHours,
+                            siteName: site.name
+                        }
+                    }];
+                // Create the schedule for this specific site
+                await scheduleClient.create({
+                    scheduleId,
+                    spec: {
+                        cron: cronExpression
+                    },
+                    action: {
+                        type: 'startWorkflow',
+                        workflowType: 'dailyStandUpWorkflow',
+                        taskQueue: config_1.temporalConfig.taskQueue,
+                        args: workflowArgs,
+                        workflowId: `${workflowId}-execution`,
+                    },
+                    timeZone: siteTimezone,
+                    policies: {
+                        catchupWindow: '5m',
+                        overlap: 'SKIP',
+                        pauseOnFailure: false,
+                    },
+                    state: {
+                        note: `Daily Stand Up for ${site.name} at ${scheduledTime} ${siteTimezone} on ${finalLocalDateStr}`,
+                        paused: false,
+                    },
+                });
+                console.log(`✅ Successfully scheduled Daily Stand Up for ${site.name}`);
+                console.log(`   - Will execute at: ${scheduledTime} ${siteTimezone} on ${finalLocalDateStr}`);
+                // Update cron status to reflect the scheduled workflow
+                const cronUpdate = {
+                    siteId: site.id,
+                    workflowId: scheduleId,
+                    scheduleId,
+                    activityName: 'dailyStandUpWorkflow-individual',
+                    status: 'SCHEDULED',
+                    nextRun: finalTargetUTC.toISOString(),
+                };
+                await (0, cronActivities_1.saveCronStatusActivity)(cronUpdate);
+                results.push({
+                    workflowId: scheduleId,
+                    scheduleId,
+                    success: true
+                });
+                scheduled++;
+            }
+            catch (siteError) {
+                const errorMessage = siteError instanceof Error ? siteError.message : String(siteError);
+                console.error(`❌ Failed to schedule Daily Stand Up for site ${businessHoursSite.siteId}: ${errorMessage}`);
+                errors.push(`Site ${businessHoursSite.siteId}: ${errorMessage}`);
+                failed++;
+                results.push({
+                    workflowId: `failed-${businessHoursSite.siteId}-${Date.now()}`,
+                    scheduleId: `failed-${businessHoursSite.siteId}-${Date.now()}`,
+                    success: false,
+                    error: errorMessage
+                });
+            }
+        }
+        console.log(`\n📊 Individual Daily Stand Up scheduling completed:`);
+        console.log(`   ✅ Scheduled: ${scheduled} sites`);
+        console.log(`   ❌ Failed: ${failed} sites`);
+        console.log(`   📅 Each site will execute at their specific business hours`);
+        return { scheduled, failed, results, errors };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Failed to schedule individual Daily Stand Ups: ${errorMessage}`);
+        return {
+            scheduled: 0,
+            failed: 1,
+            results: [],
+            errors: [errorMessage]
         };
     }
 }

@@ -1,7 +1,7 @@
 import { executeChild, proxyActivities } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
-const { evaluateBusinessHoursForDay, scheduleDailyOperationsWorkflowActivity } = proxyActivities<Activities>({
+const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity } = proxyActivities<Activities>({
   startToCloseTimeout: '10 minutes',
 });
 
@@ -119,45 +119,54 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
       console.log('⏰ Step 2: SCHEDULING operations for later execution...');
       
       try {
-        console.log(`📅 Creating Temporal schedule for: ${scheduledForTime}`);
+        console.log(`📅 Creating individual schedules for each site at their specific business hours`);
         
-        // Call the new scheduling activity
-        const scheduleResult = await scheduleDailyOperationsWorkflowActivity(
-          scheduledForTime!, // The time (e.g., "09:00")
+        // Use the new individual scheduling approach instead of global scheduling
+        const scheduleResult = await scheduleIndividualDailyStandUpsActivity(
           businessHoursAnalysis,
           {
-            timezone: 'America/Mexico_City' // Default timezone from business hours
+            timezone: 'America/Mexico_City'
           }
         );
         
-        if (scheduleResult.success) {
-          console.log(`✅ Successfully created schedule: ${scheduleResult.scheduleId}`);
+        if (scheduleResult.scheduled > 0) {
+          console.log(`✅ Successfully created ${scheduleResult.scheduled} individual schedules`);
+          if (scheduleResult.failed > 0) {
+            console.log(`⚠️ Failed to schedule ${scheduleResult.failed} sites`);
+          }
+          
           operationsResult = {
             scheduled: true,
             scheduledTime: scheduledForTime,
-            scheduleId: scheduleResult.scheduleId,
-            workflowId: scheduleResult.workflowId,
-            message: `Operations scheduled for ${scheduledForTime} (schedule created in Temporal)`
+            individualSchedules: scheduleResult.scheduled,
+            failedSchedules: scheduleResult.failed,
+            scheduleDetails: scheduleResult.results,
+            message: `Individual schedules created: ${scheduleResult.scheduled} sites will execute at their specific business hours`,
+            approach: 'individual-site-schedules'
           };
         } else {
-          console.error(`❌ Failed to create schedule: ${scheduleResult.error}`);
+          console.error(`❌ No schedules were created successfully`);
           operationsResult = {
             scheduled: false,
             scheduledTime: scheduledForTime,
-            error: scheduleResult.error,
-            message: `Failed to schedule operations for ${scheduledForTime}: ${scheduleResult.error}`
+            individualSchedules: 0,
+            failedSchedules: scheduleResult.failed,
+            errors: scheduleResult.errors,
+            message: `Failed to create individual schedules: ${scheduleResult.errors.join(', ')}`,
+            approach: 'individual-site-schedules'
           };
         }
         
-        operationsExecuted = false; // Not executed now, but scheduled
+        operationsExecuted = false; // Not executed now, but scheduled individually
         
       } catch (schedulingError) {
-        console.error('❌ Error creating schedule:', schedulingError);
+        console.error('❌ Error creating individual schedules:', schedulingError);
         operationsResult = {
           scheduled: false,
           scheduledTime: scheduledForTime,
           error: schedulingError instanceof Error ? schedulingError.message : String(schedulingError),
-          message: `Failed to schedule operations: ${schedulingError instanceof Error ? schedulingError.message : String(schedulingError)}`
+          message: `Failed to schedule individual operations: ${schedulingError instanceof Error ? schedulingError.message : String(schedulingError)}`,
+          approach: 'individual-site-schedules'
         };
         operationsExecuted = false;
       }
@@ -174,6 +183,10 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
     console.log(`   Operations executed: ${operationsExecuted ? 'YES' : 'NO'}`);
     if (scheduledForTime) {
       console.log(`   Scheduled for: ${scheduledForTime}`);
+    }
+    if (operationsResult?.individualSchedules) {
+      console.log(`   Individual schedules created: ${operationsResult.individualSchedules}`);
+      console.log(`   Approach: ${operationsResult.approach || 'individual-site-schedules'}`);
     }
     console.log(`   Total execution time: ${executionTime}`);
     console.log('   Role: Decision maker and orchestrator with business hours respect');
