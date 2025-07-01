@@ -924,44 +924,64 @@ businessHoursAnalysis, options = {}) {
 /**
  * Schedule Daily Stand Up Workflows for individual sites
  * Creates separate schedules for each site based on their specific business hours
+ * Includes ALL sites: those with business_hours AND those without (using fallback)
  */
 async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, options = {}) {
     const { timezone = 'America/Mexico_City' } = options;
-    console.log(`📅 Scheduling individual Daily Stand Up workflows for sites`);
-    console.log(`   - Timezone: ${timezone}`);
-    console.log(`   - Sites to process: ${businessHoursAnalysis.openSites?.length || 0}`);
+    console.log(`📅 Scheduling individual Daily Stand Up workflows for ALL sites`);
+    console.log(`   - Default timezone: ${timezone}`);
+    console.log(`   - Sites with business_hours: ${businessHoursAnalysis.openSites?.length || 0}`);
     const results = [];
     const errors = [];
     let scheduled = 0;
     let failed = 0;
     try {
-        if (!businessHoursAnalysis.openSites || businessHoursAnalysis.openSites.length === 0) {
-            console.log('⚠️ No sites with business hours to schedule');
-            return { scheduled: 0, failed: 0, results: [], errors: [] };
-        }
         const client = await (0, client_1.getTemporalClient)();
         const scheduleClient = client.schedule;
         const supabaseService = (0, supabaseService_1.getSupabaseService)();
-        // Get site details for each site
+        // Get ALL sites from database
         const allSites = await supabaseService.fetchSites();
-        for (const businessHoursSite of businessHoursAnalysis.openSites) {
+        console.log(`   - Total sites in database: ${allSites.length}`);
+        if (!allSites || allSites.length === 0) {
+            console.log('⚠️ No sites found in database');
+            return { scheduled: 0, failed: 0, results: [], errors: [] };
+        }
+        // Create a map of sites with business hours for quick lookup
+        const sitesWithBusinessHours = new Map();
+        if (businessHoursAnalysis.openSites) {
+            businessHoursAnalysis.openSites.forEach((site) => {
+                sitesWithBusinessHours.set(site.siteId, site.businessHours);
+            });
+        }
+        // Process ALL sites (both with and without business_hours)
+        for (const site of allSites) {
             try {
-                // Find the full site data
-                const site = allSites.find(s => s.id === businessHoursSite.siteId);
-                if (!site) {
-                    console.log(`⚠️ Site ${businessHoursSite.siteId} not found in database`);
-                    continue;
+                console.log(`\n📋 Processing site: ${site.name || 'Unnamed'} (${site.id})`);
+                // Check if this site has business_hours
+                const businessHours = sitesWithBusinessHours.get(site.id);
+                let scheduledTime;
+                let siteTimezone;
+                let businessHoursSource;
+                if (businessHours) {
+                    // Site HAS business_hours - use them
+                    scheduledTime = businessHours.open; // e.g., "09:00"
+                    siteTimezone = businessHours.timezone || timezone;
+                    businessHoursSource = 'database-configured';
+                    console.log(`   ✅ Has business_hours: ${businessHours.open} - ${businessHours.close} ${siteTimezone}`);
                 }
-                const businessHours = businessHoursSite.businessHours;
-                const scheduledTime = businessHours.open; // e.g., "09:00"
-                console.log(`\n📋 Scheduling Daily Stand Up for ${site.name}`);
-                console.log(`   - Site ID: ${site.id}`);
-                console.log(`   - Business Hours: ${businessHours.open} - ${businessHours.close}`);
-                console.log(`   - Timezone: ${businessHours.timezone || timezone}`);
+                else {
+                    // Site DOES NOT have business_hours - use fallback
+                    scheduledTime = "09:00"; // Default fallback time
+                    siteTimezone = timezone; // Default timezone
+                    businessHoursSource = 'fallback-default';
+                    console.log(`   ⚠️ No business_hours found - using FALLBACK: ${scheduledTime} ${siteTimezone}`);
+                }
+                console.log(`   - Scheduled time: ${scheduledTime}`);
+                console.log(`   - Timezone: ${siteTimezone}`);
+                console.log(`   - Business hours source: ${businessHoursSource}`);
                 // Parse the target time
                 const [hours, minutes] = scheduledTime.split(':').map(Number);
                 const nowUTC = new Date();
-                const siteTimezone = businessHours.timezone || timezone;
                 const timezoneOffset = siteTimezone === 'America/Mexico_City' ? 6 : 0;
                 // Calculate current time in site's timezone
                 const nowLocal = new Date(nowUTC.getTime() - (timezoneOffset * 60 * 60 * 1000));
@@ -998,14 +1018,21 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
                         userId: site.user_id,
                         additionalData: {
                             scheduledBy: 'activityPrioritizationEngine-individualScheduling',
-                            executeReason: `business-hours-individual-${scheduledTime}`,
-                            scheduleType: 'business-hours-individual',
+                            executeReason: `${businessHoursSource}-${scheduledTime}`,
+                            scheduleType: businessHoursSource,
                             scheduleTime: `${scheduledTime} ${siteTimezone}`,
                             executionDay: finalLocalDateStr,
                             timezone: siteTimezone,
                             executionMode: 'scheduled-individual',
-                            businessHours: businessHours,
-                            siteName: site.name
+                            businessHours: businessHours || {
+                                open: scheduledTime,
+                                close: '18:00',
+                                enabled: true,
+                                timezone: siteTimezone,
+                                source: businessHoursSource
+                            },
+                            siteName: site.name || `Site ${site.id.substring(0, 8)}`,
+                            fallbackUsed: !businessHours
                         }
                     }];
                 // Create the schedule for this specific site
@@ -1028,12 +1055,13 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
                         pauseOnFailure: false,
                     },
                     state: {
-                        note: `Daily Stand Up for ${site.name} at ${scheduledTime} ${siteTimezone} on ${finalLocalDateStr}`,
+                        note: `Daily Stand Up for ${site.name || 'Site'} at ${scheduledTime} ${siteTimezone} on ${finalLocalDateStr} (${businessHoursSource})`,
                         paused: false,
                     },
                 });
-                console.log(`✅ Successfully scheduled Daily Stand Up for ${site.name}`);
+                console.log(`✅ Successfully scheduled Daily Stand Up for ${site.name || 'Site'}`);
                 console.log(`   - Will execute at: ${scheduledTime} ${siteTimezone} on ${finalLocalDateStr}`);
+                console.log(`   - Business hours source: ${businessHoursSource}`);
                 // Update cron status to reflect the scheduled workflow
                 const cronUpdate = {
                     siteId: site.id,
@@ -1053,12 +1081,12 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
             }
             catch (siteError) {
                 const errorMessage = siteError instanceof Error ? siteError.message : String(siteError);
-                console.error(`❌ Failed to schedule Daily Stand Up for site ${businessHoursSite.siteId}: ${errorMessage}`);
-                errors.push(`Site ${businessHoursSite.siteId}: ${errorMessage}`);
+                console.error(`❌ Failed to schedule Daily Stand Up for site ${site.id}: ${errorMessage}`);
+                errors.push(`Site ${site.id}: ${errorMessage}`);
                 failed++;
                 results.push({
-                    workflowId: `failed-${businessHoursSite.siteId}-${Date.now()}`,
-                    scheduleId: `failed-${businessHoursSite.siteId}-${Date.now()}`,
+                    workflowId: `failed-${site.id}-${Date.now()}`,
+                    scheduleId: `failed-${site.id}-${Date.now()}`,
                     success: false,
                     error: errorMessage
                 });
