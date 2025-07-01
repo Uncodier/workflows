@@ -11,66 +11,143 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, g
     },
 });
 /**
- * Genera un query de búsqueda estructurado basado en la información del lead
+ * Genera un query de búsqueda estructurado basado en TODA la información disponible del lead
  */
 function generateLeadResearchQuery(lead) {
-    const queryParts = [];
+    const contextParts = [];
     let companyName = 'Unknown Company';
-    // Información básica del lead
+    // === INFORMACIÓN PERSONAL ===
+    const personName = lead.name || lead.email || 'prospecto';
+    contextParts.push(`PERSONA: ${personName}`);
+    if (lead.email && lead.email !== personName) {
+        contextParts.push(`email: ${lead.email}`);
+    }
+    if (lead.phone) {
+        contextParts.push(`teléfono: ${lead.phone}`);
+    }
+    if (lead.position || lead.job_title) {
+        contextParts.push(`cargo: ${lead.position || lead.job_title}`);
+    }
+    if (lead.location) {
+        contextParts.push(`ubicación: ${lead.location}`);
+    }
+    if (lead.language) {
+        contextParts.push(`idioma: ${lead.language}`);
+    }
+    if (lead.birthday) {
+        contextParts.push(`cumpleaños: ${lead.birthday}`);
+    }
+    // === INFORMACIÓN DE LA EMPRESA ===
     if (lead.company || lead.company_name) {
         // Extraer el nombre de la empresa de diferentes estructuras posibles
         if (typeof lead.company === 'object' && lead.company !== null) {
-            // Si company es un objeto, buscar propiedades comunes
             companyName = lead.company.name || lead.company.company_name || lead.company.title || 'Unknown Company';
         }
         else if (typeof lead.company === 'string') {
-            // Si company es un string directo
             companyName = lead.company;
         }
         else if (lead.company_name) {
-            // Usar company_name como fallback
             companyName = typeof lead.company_name === 'object' ?
                 (lead.company_name.name || lead.company_name.title || 'Unknown Company') :
                 lead.company_name;
         }
-        // Solo agregar si no es el valor por defecto o está vacío
         if (companyName !== 'Unknown Company' && companyName.trim() !== '') {
-            queryParts.push(`empresa: ${companyName}`);
+            contextParts.push(`EMPRESA: ${companyName}`);
         }
     }
     if (lead.industry) {
-        queryParts.push(`industria: ${lead.industry}`);
-    }
-    if (lead.job_title || lead.position) {
-        queryParts.push(`cargo: ${lead.job_title || lead.position}`);
-    }
-    if (lead.location) {
-        queryParts.push(`ubicación: ${lead.location}`);
+        contextParts.push(`industria: ${lead.industry}`);
     }
     if (lead.company_size) {
-        queryParts.push(`tamaño empresa: ${lead.company_size}`);
+        contextParts.push(`tamaño empresa: ${lead.company_size}`);
     }
     if (lead.website) {
-        queryParts.push(`sitio web: ${lead.website}`);
+        contextParts.push(`sitio web empresa: ${lead.website}`);
     }
-    // Información del contacto
-    if (lead.name) {
-        queryParts.push(`contacto: ${lead.name}`);
+    // === REDES SOCIALES EXISTENTES ===
+    if (lead.social_networks && typeof lead.social_networks === 'object') {
+        const socialNetworks = lead.social_networks;
+        const socialParts = [];
+        Object.keys(socialNetworks).forEach(platform => {
+            const value = socialNetworks[platform];
+            if (value && typeof value === 'string' && value.trim() !== '') {
+                socialParts.push(`${platform}: ${value}`);
+            }
+        });
+        if (socialParts.length > 0) {
+            contextParts.push(`redes sociales conocidas: ${socialParts.join(', ')}`);
+        }
     }
-    // Construir el query con enfoque en investigación profunda de persona y empresa
-    const personName = lead.name || lead.email || 'prospecto';
+    // === INFORMACIÓN ADICIONAL ===
+    if (lead.status) {
+        contextParts.push(`status: ${lead.status}`);
+    }
+    if (lead.origin) {
+        contextParts.push(`origen: ${lead.origin}`);
+    }
+    if (lead.attribution) {
+        contextParts.push(`atribución: ${lead.attribution}`);
+    }
+    if (lead.subscription) {
+        contextParts.push(`suscripción: ${lead.subscription}`);
+    }
+    if (lead.last_contact) {
+        contextParts.push(`último contacto: ${lead.last_contact}`);
+    }
+    if (lead.address && typeof lead.address === 'object') {
+        const addressParts = [];
+        if (lead.address.street)
+            addressParts.push(lead.address.street);
+        if (lead.address.city)
+            addressParts.push(lead.address.city);
+        if (lead.address.state)
+            addressParts.push(lead.address.state);
+        if (lead.address.country)
+            addressParts.push(lead.address.country);
+        if (addressParts.length > 0) {
+            contextParts.push(`dirección: ${addressParts.join(', ')}`);
+        }
+    }
+    if (lead.notes && lead.notes.trim() !== '') {
+        contextParts.push(`NOTAS IMPORTANTES: ${lead.notes}`);
+    }
+    // === METADATA ADICIONAL ===
+    if (lead.metadata && typeof lead.metadata === 'object') {
+        const metadataEntries = Object.entries(lead.metadata)
+            .filter(([_key, value]) => value !== null && value !== undefined && value !== '')
+            .map(([key, value]) => `${key}: ${value}`)
+            .slice(0, 5); // Limitar a las primeras 5 entradas para no sobrecargar
+        if (metadataEntries.length > 0) {
+            contextParts.push(`información adicional: ${metadataEntries.join(', ')}`);
+        }
+    }
+    // === CONSTRUIR EL QUERY FINAL ===
     const hasCompany = companyName !== 'Unknown Company' && companyName.trim() !== '';
-    // Si no hay información específica, usar un query genérico
-    if (queryParts.length === 0) {
-        return `Make deep research about this person: ${personName} - comprehensive analysis of professional background, career history, social media presence (LinkedIn, Twitter, Facebook, Instagram, YouTube, GitHub), business opportunities, and market positioning`;
+    const fullContext = contextParts.join(', ');
+    // Extraer notas para darles más prominencia en el query
+    const hasNotes = lead.notes && lead.notes.trim() !== '';
+    const notesSection = hasNotes ? `
+
+🔍 EXISTING NOTES TO CONSIDER: ${lead.notes}` : '';
+    // Si no hay información específica, usar un query básico
+    if (contextParts.length <= 1) {
+        return `Make deep research about this person: ${personName}${notesSection} - comprehensive analysis of professional background, career history, social media presence (LinkedIn, Twitter, Facebook, Instagram, YouTube, GitHub), business opportunities, and market positioning`;
     }
-    // Combinar todas las partes del query con enfoque específico
-    const baseQuery = queryParts.join(', ');
+    // Query completo con todo el contexto disponible
+    const baseResearchAreas = "professional background, career trajectory, industry analysis, competitive landscape, business opportunities, social media presence (LinkedIn, Twitter, Facebook, Instagram, YouTube, GitHub), market positioning, strategic approach recommendations";
     if (hasCompany) {
-        return `Make deep research about this person: ${personName} and the company he works from: ${companyName}. Research context: ${baseQuery}. Comprehensive analysis including: professional background, career trajectory, company information, industry analysis, competitive landscape, business opportunities, social media presence (LinkedIn, Twitter, Facebook, Instagram, YouTube, GitHub), market positioning, and strategic approach recommendations`;
+        return `Make deep research about this person: ${personName} and the company: ${companyName}.${notesSection}
+
+KNOWN CONTEXT: ${fullContext}
+
+Comprehensive analysis including: ${baseResearchAreas}, company information, industry positioning, competitive analysis, and strategic insights. Use the known context to validate existing information and discover new details that complement what we already know. ${hasNotes ? 'Pay special attention to the existing notes and use them to guide your research focus.' : ''}`;
     }
     else {
-        return `Make deep research about this person: ${personName}. Research context: ${baseQuery}. Comprehensive analysis including: professional background, career trajectory, industry analysis, business opportunities, social media presence (LinkedIn, Twitter, Facebook, Instagram, YouTube, GitHub), market positioning, and strategic approach recommendations`;
+        return `Make deep research about this person: ${personName}.${notesSection}
+
+KNOWN CONTEXT: ${fullContext}
+
+Comprehensive analysis including: ${baseResearchAreas}. Use the known context to validate existing information and discover new details that complement what we already know. ${hasNotes ? 'Pay special attention to the existing notes and use them to guide your research focus.' : ''}`;
     }
 }
 /**
