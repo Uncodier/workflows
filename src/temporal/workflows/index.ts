@@ -24,6 +24,7 @@ import { buildSegmentsICPWorkflow, buildSingleSegmentICPWorkflow } from './build
 import { humanInterventionWorkflow } from './humanInterventionWorkflow';
 import { deepResearchWorkflow } from './deepResearchWorkflow';
 import { dailyStandUpWorkflow } from './dailyStandUpWorkflow';
+import { delayedExecutionWorkflow } from './delayedExecutionWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -48,6 +49,7 @@ export * from './buildSegmentsICPWorkflow';
 export * from './humanInterventionWorkflow';
 export * from './deepResearchWorkflow';
 export * from './dailyStandUpWorkflow';
+export * from './delayedExecutionWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -77,6 +79,7 @@ export const workflows = {
   humanInterventionWorkflow,
   deepResearchWorkflow,
   dailyStandUpWorkflow,
+  delayedExecutionWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
 };
@@ -109,6 +112,7 @@ export const workflowNames = {
   humanInterventionWorkflow: 'humanInterventionWorkflow',
   deepResearchWorkflow: 'deepResearchWorkflow',
   dailyStandUpWorkflow: 'dailyStandUpWorkflow',
+  delayedExecutionWorkflow: 'delayedExecutionWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',
 };

@@ -922,13 +922,13 @@ businessHoursAnalysis, options = {}) {
     }
 }
 /**
- * Schedule Daily Stand Up Workflows for individual sites
- * Creates separate schedules for each site based on their specific business hours
- * Includes ALL sites: those with business_hours AND those without (using fallback)
+ * Schedule Daily Stand Up Workflows for individual sites using TIMERS
+ * Creates delayed workflow executions for each site based on their specific business hours
+ * Uses Temporal timers instead of schedules for one-time executions
  */
 async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, options = {}) {
     const { timezone = 'America/Mexico_City' } = options;
-    console.log(`📅 Scheduling individual Daily Stand Up workflows for ALL sites`);
+    console.log(`📅 Scheduling individual Daily Stand Up workflows using TIMERS`);
     console.log(`   - Default timezone: ${timezone}`);
     console.log(`   - Sites with business_hours: ${businessHoursAnalysis.openSites?.length || 0}`);
     const results = [];
@@ -937,7 +937,6 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
     let failed = 0;
     try {
         const client = await (0, client_1.getTemporalClient)();
-        const scheduleClient = client.schedule;
         const supabaseService = (0, supabaseService_1.getSupabaseService)();
         // Get ALL sites from database
         const allSites = await supabaseService.fetchSites();
@@ -1005,25 +1004,32 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
                 const finalTargetUTC = new Date(finalTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
                 console.log(`   - Final target: ${finalTargetLocal.getUTCHours().toString().padStart(2, '0')}:${finalTargetLocal.getUTCMinutes().toString().padStart(2, '0')} ${siteTimezone} on ${finalLocalDateStr}`);
                 console.log(`   - Final target UTC: ${finalTargetUTC.toISOString()}`);
-                // Create unique schedule ID for this site
-                const scheduleId = `daily-standup-${site.id}-${finalLocalDateStr}-${scheduledTime.replace(':', '')}`;
-                const workflowId = `daily-standup-scheduled-${site.id}-${Date.now()}`;
-                // Create cron expression for the specific time on the target date
-                const cronExpression = `${minutes} ${hours} ${finalTargetUTC.getUTCDate()} ${finalTargetUTC.getUTCMonth() + 1} *`;
-                console.log(`   - Schedule ID: ${scheduleId}`);
-                console.log(`   - Cron Expression: ${cronExpression}`);
+                // Calculate delay in milliseconds from now
+                const now = new Date();
+                const delayMs = finalTargetUTC.getTime() - now.getTime();
+                if (delayMs <= 0) {
+                    console.log(`   ⚠️ Target time is in the past, executing immediately`);
+                }
+                else {
+                    const delayHours = delayMs / (1000 * 60 * 60);
+                    console.log(`   ⏰ Will execute in ${delayHours.toFixed(2)} hours`);
+                }
+                // Create unique workflow ID for this site
+                const workflowId = `daily-standup-timer-${site.id}-${Date.now()}`;
+                console.log(`   - Workflow ID: ${workflowId}`);
+                console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
                 // Prepare workflow arguments for dailyStandUpWorkflow
                 const workflowArgs = [{
                         site_id: site.id,
                         userId: site.user_id,
                         additionalData: {
-                            scheduledBy: 'activityPrioritizationEngine-individualScheduling',
+                            scheduledBy: 'activityPrioritizationEngine-timerBased',
                             executeReason: `${businessHoursSource}-${scheduledTime}`,
                             scheduleType: businessHoursSource,
                             scheduleTime: `${scheduledTime} ${siteTimezone}`,
                             executionDay: finalLocalDateStr,
                             timezone: siteTimezone,
-                            executionMode: 'scheduled-individual',
+                            executionMode: 'timer-delayed',
                             businessHours: businessHours || {
                                 open: scheduledTime,
                                 close: '18:00',
@@ -1032,49 +1038,42 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
                                 source: businessHoursSource
                             },
                             siteName: site.name || `Site ${site.id.substring(0, 8)}`,
-                            fallbackUsed: !businessHours
+                            fallbackUsed: !businessHours,
+                            delayMs,
+                            targetTimeUTC: finalTargetUTC.toISOString()
                         }
                     }];
-                // Create the schedule for this specific site
-                await scheduleClient.create({
-                    scheduleId,
-                    spec: {
-                        cron: cronExpression
-                    },
-                    action: {
-                        type: 'startWorkflow',
-                        workflowType: 'dailyStandUpWorkflow',
-                        taskQueue: config_1.temporalConfig.taskQueue,
-                        args: workflowArgs,
-                        workflowId: `${workflowId}-execution`,
-                    },
-                    timeZone: siteTimezone,
-                    policies: {
-                        catchupWindow: '5m',
-                        overlap: 'SKIP',
-                        pauseOnFailure: false,
-                    },
-                    state: {
-                        note: `Daily Stand Up for ${site.name || 'Site'} at ${scheduledTime} ${siteTimezone} on ${finalLocalDateStr} (${businessHoursSource})`,
-                        paused: false,
-                    },
+                // Start the DELAYED workflow instead of creating a schedule
+                await client.workflow.start('delayedExecutionWorkflow', {
+                    args: [{
+                            delayMs: Math.max(delayMs, 0), // Ensure non-negative delay
+                            targetWorkflow: 'dailyStandUpWorkflow',
+                            targetArgs: workflowArgs,
+                            siteName: site.name || 'Site',
+                            scheduledTime: `${scheduledTime} ${siteTimezone}`,
+                            executionType: 'timer-based-standup'
+                        }],
+                    taskQueue: config_1.temporalConfig.taskQueue,
+                    workflowId: workflowId,
+                    workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
                 });
-                console.log(`✅ Successfully scheduled Daily Stand Up for ${site.name || 'Site'}`);
+                console.log(`✅ Successfully scheduled Daily Stand Up with TIMER for ${site.name || 'Site'}`);
                 console.log(`   - Will execute at: ${scheduledTime} ${siteTimezone} on ${finalLocalDateStr}`);
                 console.log(`   - Business hours source: ${businessHoursSource}`);
+                console.log(`   - Using TIMER approach instead of schedule`);
                 // Update cron status to reflect the scheduled workflow
                 const cronUpdate = {
                     siteId: site.id,
-                    workflowId: scheduleId,
-                    scheduleId,
-                    activityName: 'dailyStandUpWorkflow-individual',
+                    workflowId: workflowId,
+                    scheduleId: workflowId, // Use workflowId as scheduleId for timers
+                    activityName: 'dailyStandUpWorkflow-timer',
                     status: 'SCHEDULED',
                     nextRun: finalTargetUTC.toISOString(),
                 };
                 await (0, cronActivities_1.saveCronStatusActivity)(cronUpdate);
                 results.push({
-                    workflowId: scheduleId,
-                    scheduleId,
+                    workflowId: workflowId,
+                    scheduleId: workflowId,
                     success: true
                 });
                 scheduled++;
@@ -1092,9 +1091,10 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
                 });
             }
         }
-        console.log(`\n📊 Individual Daily Stand Up scheduling completed:`);
+        console.log(`\n📊 Individual Daily Stand Up TIMER scheduling completed:`);
         console.log(`   ✅ Scheduled: ${scheduled} sites`);
         console.log(`   ❌ Failed: ${failed} sites`);
+        console.log(`   🎯 Using TIMER-based approach for reliable one-time execution`);
         console.log(`   📅 Each site will execute at their specific business hours`);
         return { scheduled, failed, results, errors };
     }
