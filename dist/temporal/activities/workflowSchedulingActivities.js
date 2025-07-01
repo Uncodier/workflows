@@ -11,6 +11,7 @@ exports.executeBuildCampaignsWorkflowActivity = executeBuildCampaignsWorkflowAct
 exports.executeBuildSegmentsWorkflowActivity = executeBuildSegmentsWorkflowActivity;
 exports.executeBuildContentWorkflowActivity = executeBuildContentWorkflowActivity;
 exports.executeDailyStandUpWorkflowsActivity = executeDailyStandUpWorkflowsActivity;
+exports.scheduleDailyOperationsWorkflowActivity = scheduleDailyOperationsWorkflowActivity;
 const client_1 = require("../client");
 const config_1 = require("../../config/config");
 const services_1 = require("../services");
@@ -800,3 +801,122 @@ async function executeDailyStandUpWorkflow(site, executionOptions) {
 }
 // Removed calculateNextDailyStandUpTime function as it's not used
 // Removed isValidBusinessDay function as it's not used
+/**
+ * Schedule Daily Operations Workflow for later execution
+ * Creates a Temporal schedule to run dailyOperationsWorkflow at a specific time
+ */
+async function scheduleDailyOperationsWorkflowActivity(scheduledTime, // Format: "HH:MM" (e.g., "09:00")
+businessHoursAnalysis, options = {}) {
+    const { timezone = 'America/Mexico_City' } = options;
+    console.log(`📅 Scheduling Daily Operations Workflow for ${scheduledTime}`);
+    console.log(`   - Timezone: ${timezone}`);
+    console.log(`   - Target time: ${scheduledTime}`);
+    try {
+        const client = await (0, client_1.getTemporalClient)();
+        const scheduleClient = client.schedule;
+        // Parse the target time
+        const [hours, minutes] = scheduledTime.split(':').map(Number);
+        const nowUTC = new Date();
+        // Step 1: Get current time in target timezone (Mexico)
+        const timezoneOffset = timezone === 'America/Mexico_City' ? 6 : 0;
+        const nowLocal = new Date(nowUTC.getTime() - (timezoneOffset * 60 * 60 * 1000));
+        const localDateStr = nowLocal.toISOString().split('T')[0];
+        console.log(`   - Current time (UTC): ${nowUTC.toISOString()}`);
+        console.log(`   - Current ${timezone} time: ${nowLocal.getHours().toString().padStart(2, '0')}:${nowLocal.getMinutes().toString().padStart(2, '0')} on ${localDateStr}`);
+        // Step 2: Create target time for "today" in local timezone
+        const targetLocalToday = new Date(nowLocal);
+        targetLocalToday.setHours(hours, minutes, 0, 0);
+        console.log(`   - Target ${timezone} time TODAY (${localDateStr}): ${targetLocalToday.getHours().toString().padStart(2, '0')}:${targetLocalToday.getMinutes().toString().padStart(2, '0')}`);
+        // Step 3: Check if target time already passed in local timezone
+        const targetAlreadyPassed = targetLocalToday <= nowLocal;
+        // Step 4: Determine final target date (today or tomorrow in local timezone)
+        let finalTargetLocal;
+        let scheduleForTomorrow;
+        if (targetAlreadyPassed) {
+            // Schedule for tomorrow in local timezone
+            finalTargetLocal = new Date(targetLocalToday);
+            finalTargetLocal.setDate(finalTargetLocal.getDate() + 1);
+            scheduleForTomorrow = true;
+            console.log(`   ⏰ Target time already passed in ${timezone} TODAY, scheduling for TOMORROW`);
+        }
+        else {
+            // Schedule for today in local timezone
+            finalTargetLocal = targetLocalToday;
+            scheduleForTomorrow = false;
+            console.log(`   ⏰ Target time hasn't passed in ${timezone} TODAY, scheduling for TODAY`);
+        }
+        const finalLocalDateStr = finalTargetLocal.toISOString().split('T')[0];
+        console.log(`   - Final target ${timezone} time: ${finalTargetLocal.getHours().toString().padStart(2, '0')}:${finalTargetLocal.getMinutes().toString().padStart(2, '0')} on ${finalLocalDateStr}`);
+        // Step 5: Convert final local time to UTC for scheduling
+        const finalTargetUTC = new Date(finalTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
+        console.log(`   - Final target UTC time: ${finalTargetUTC.toISOString()}`);
+        // Create unique schedule ID with the actual date we're scheduling for
+        const scheduleId = `daily-operations-${finalLocalDateStr}-${scheduledTime.replace(':', '')}`;
+        const workflowId = `daily-operations-scheduled-${Date.now()}`;
+        console.log(`   - Schedule ID: ${scheduleId}`);
+        console.log(`   - Scheduling for date: ${finalLocalDateStr}`);
+        // Create cron expression for the specific time on the target date
+        // Format: "minute hour day month dayOfWeek"
+        const cronExpression = `${minutes} ${hours} ${finalTargetUTC.getUTCDate()} ${finalTargetUTC.getUTCMonth() + 1} *`;
+        console.log(`   - Cron Expression: ${cronExpression}`);
+        console.log(`   - Final target UTC datetime: ${finalTargetUTC.toISOString()}`);
+        // Prepare workflow arguments
+        const workflowArgs = [{ businessHoursAnalysis }];
+        // Create the schedule
+        await scheduleClient.create({
+            scheduleId,
+            spec: {
+                cron: cronExpression
+            },
+            action: {
+                type: 'startWorkflow',
+                workflowType: 'dailyOperationsWorkflow',
+                taskQueue: config_1.temporalConfig.taskQueue,
+                args: workflowArgs,
+                workflowId: `${workflowId}-execution`,
+            },
+            timeZone: timezone,
+            policies: {
+                catchupWindow: '5m',
+                overlap: 'SKIP',
+                pauseOnFailure: false,
+            },
+            state: {
+                note: `Scheduled daily operations for ${scheduledTime} on ${finalLocalDateStr} (${timezone})`,
+                paused: false,
+            },
+        });
+        const executionMessage = scheduleForTomorrow ?
+            `Will execute TOMORROW (${finalLocalDateStr}) at ${scheduledTime} ${timezone}` :
+            `Will execute TODAY (${finalLocalDateStr}) at ${scheduledTime} ${timezone}`;
+        console.log(`✅ Successfully scheduled Daily Operations workflow`);
+        console.log(`   - ${executionMessage}`);
+        console.log(`   - Schedule ID: ${scheduleId}`);
+        // Update cron status to reflect the scheduled workflow
+        const cronUpdate = {
+            siteId: 'global', // This is a global schedule
+            workflowId: scheduleId,
+            scheduleId,
+            activityName: 'dailyOperationsWorkflow',
+            status: 'SCHEDULED',
+            nextRun: finalTargetUTC.toISOString(),
+        };
+        await (0, cronActivities_1.saveCronStatusActivity)(cronUpdate);
+        return {
+            workflowId: scheduleId,
+            scheduleId,
+            success: true
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Failed to schedule Daily Operations workflow: ${errorMessage}`);
+        const failedId = `failed-${Date.now()}`;
+        return {
+            workflowId: failedId,
+            scheduleId: failedId,
+            success: false,
+            error: errorMessage
+        };
+    }
+}

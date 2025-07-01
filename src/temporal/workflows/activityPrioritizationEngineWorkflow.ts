@@ -1,7 +1,7 @@
 import { executeChild, proxyActivities } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
-const { evaluateBusinessHoursForDay } = proxyActivities<Activities>({
+const { evaluateBusinessHoursForDay, scheduleDailyOperationsWorkflowActivity } = proxyActivities<Activities>({
   startToCloseTimeout: '10 minutes',
 });
 
@@ -118,17 +118,49 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
     } else if (timingDecision === 'schedule_for_later') {
       console.log('⏰ Step 2: SCHEDULING operations for later execution...');
       
-      // TODO: Implement actual scheduling logic here
-      // For now, we just log that it should be scheduled
-      console.log(`📅 Operations should be scheduled for: ${scheduledForTime}`);
-      console.log('🚧 NOTE: Actual scheduling implementation needed');
-      
-      operationsResult = {
-        scheduled: true,
-        scheduledTime: scheduledForTime,
-        message: `Operations scheduled for ${scheduledForTime} (outside current business hours)`
-      };
-      operationsExecuted = false; // Not executed now, but scheduled
+      try {
+        console.log(`📅 Creating Temporal schedule for: ${scheduledForTime}`);
+        
+        // Call the new scheduling activity
+        const scheduleResult = await scheduleDailyOperationsWorkflowActivity(
+          scheduledForTime!, // The time (e.g., "09:00")
+          businessHoursAnalysis,
+          {
+            timezone: 'America/Mexico_City' // Default timezone from business hours
+          }
+        );
+        
+        if (scheduleResult.success) {
+          console.log(`✅ Successfully created schedule: ${scheduleResult.scheduleId}`);
+          operationsResult = {
+            scheduled: true,
+            scheduledTime: scheduledForTime,
+            scheduleId: scheduleResult.scheduleId,
+            workflowId: scheduleResult.workflowId,
+            message: `Operations scheduled for ${scheduledForTime} (schedule created in Temporal)`
+          };
+        } else {
+          console.error(`❌ Failed to create schedule: ${scheduleResult.error}`);
+          operationsResult = {
+            scheduled: false,
+            scheduledTime: scheduledForTime,
+            error: scheduleResult.error,
+            message: `Failed to schedule operations for ${scheduledForTime}: ${scheduleResult.error}`
+          };
+        }
+        
+        operationsExecuted = false; // Not executed now, but scheduled
+        
+      } catch (schedulingError) {
+        console.error('❌ Error creating schedule:', schedulingError);
+        operationsResult = {
+          scheduled: false,
+          scheduledTime: scheduledForTime,
+          error: schedulingError instanceof Error ? schedulingError.message : String(schedulingError),
+          message: `Failed to schedule operations: ${schedulingError instanceof Error ? schedulingError.message : String(schedulingError)}`
+        };
+        operationsExecuted = false;
+      }
     } else {
       console.log('⏭️ Step 2: Skipping daily operations (decision was SKIP)');
     }
