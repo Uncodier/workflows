@@ -5,6 +5,7 @@ exports.customerSupportMessageWorkflow = customerSupportMessageWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const sendEmailFromAgentWorkflow_1 = require("./sendEmailFromAgentWorkflow");
 const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow");
+const timeouts_1 = require("../config/timeouts");
 /**
  * Helper function to map WhatsApp intents to EmailData intents
  * Currently not used but kept for future WhatsApp integration
@@ -29,12 +30,10 @@ const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow
 //       return 'inquiry'; // Default to inquiry for unknown or undefined
 //   }
 // }
-// Configure activity options
+// Configure activity options using centralized timeouts
 const { sendCustomerSupportMessageActivity, processAnalysisDataActivity } = (0, workflow_1.proxyActivities)({
-    startToCloseTimeout: '2 minutes',
-    retry: {
-        maximumAttempts: 3,
-    },
+    startToCloseTimeout: timeouts_1.ACTIVITY_TIMEOUTS.CUSTOMER_SUPPORT, // ✅ Using centralized config (5 minutes)
+    retry: timeouts_1.RETRY_POLICIES.CUSTOMER_SUPPORT, // ✅ Using appropriate retry policy for customer support
 });
 // Note: sendWhatsAppResponseActivity available if needed in the future
 // const { sendWhatsAppResponseActivity } = proxyActivities<Activities>({...});

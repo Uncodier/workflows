@@ -130,10 +130,17 @@ export async function sendCustomerSupportMessageActivity(
     message: message,
     site_id: site_id,
     userId: user_id,
-    agentId: agentId,
     lead_notification: "none", // Para mejor trazabilidad - no duplicar notificaciones
     origin: origin, // Enviar el origen (whatsapp, email, etc.)
   };
+
+  // ✅ FIXED: Solo agregar agentId si viene explícitamente definido (no undefined)
+  if (agentId) {
+    messageRequest.agentId = agentId;
+    console.log(`🤖 Using explicitly provided agentId: ${agentId}`);
+  } else {
+    console.log(`🤖 No agentId provided - field omitted from request (API should use default behavior)`);
+  }
 
   // Add conversation ID if available (important for WhatsApp)
   if (conversation_id) {
@@ -177,7 +184,7 @@ export async function sendCustomerSupportMessageActivity(
     hasPhone: !!messageRequest.phone,
     site_id: messageRequest.site_id,
     userId: messageRequest.userId,
-    agentId: messageRequest.agentId,
+    agentId: messageRequest.agentId || 'field_omitted', // ✅ Show when field is omitted
     lead_id: messageRequest.lead_id,
     conversationId: messageRequest.conversationId,
     visitor_id: messageRequest.visitor_id,
@@ -188,13 +195,29 @@ export async function sendCustomerSupportMessageActivity(
   console.log('📋 Full payload being sent:', JSON.stringify(messageRequest, null, 2));
 
   try {
+    const startTime = Date.now();
+    console.log('⏱️ Starting customer support API call...');
+    
     const response = await apiService.post('/api/agents/customerSupport/message', messageRequest);
+    
+    const duration = Date.now() - startTime;
+    console.log(`⏱️ API call completed in ${duration}ms`);
     
     if (!response.success) {
       console.error('❌ API call failed:', response.error);
+      
+      // ✅ ENHANCED: Better error handling for timeout scenarios
+      let errorMessage = response.error?.message || 'Failed to send customer support message';
+      
+      if (errorMessage.includes('COMMAND_EXECUTION_FAILED') || errorMessage.includes('expected time')) {
+        errorMessage = `Customer support API timeout (took ${duration}ms). ${errorMessage}`;
+        console.error('🚨 TIMEOUT DETECTED: Customer support API is taking too long to respond');
+        console.error('💡 Suggestions: 1) Check API server load, 2) Increase timeout if needed, 3) Check agent configuration');
+      }
+      
       return {
         success: false,
-        error: response.error?.message || 'Failed to send customer support message'
+        error: errorMessage
       };
     }
     
@@ -209,9 +232,18 @@ export async function sendCustomerSupportMessageActivity(
     
   } catch (error) {
     console.error('❌ Failed to send customer support message:', error);
+    
+    // ✅ ENHANCED: Better error handling for network/timeout errors
+    let errorMessage = error instanceof Error ? error.message : String(error);
+    
+    if (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT')) {
+      errorMessage = `Network timeout when calling customer support API: ${errorMessage}`;
+      console.error('🚨 NETWORK TIMEOUT: Could not reach customer support API in time');
+    }
+    
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: errorMessage
     };
   }
 }

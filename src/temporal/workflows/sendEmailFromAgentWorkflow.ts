@@ -1,9 +1,11 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type * as activities from '../activities';
+import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 
-// Configure activity options
+// Configure activity options using centralized timeouts
 const { sendEmailFromAgentActivity } = proxyActivities<typeof activities>({
-  startToCloseTimeout: '2 minutes',
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.EMAIL_OPERATIONS, // ✅ Using centralized config (3 minutes)
+  retry: RETRY_POLICIES.NETWORK, // ✅ Using appropriate retry policy for email operations
 });
 
 /**

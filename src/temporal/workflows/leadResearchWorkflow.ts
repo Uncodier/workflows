@@ -81,6 +81,16 @@ function generateLeadResearchQuery(lead: any): string {
     // Extraer el nombre de la empresa de diferentes estructuras posibles
     if (typeof lead.company === 'object' && lead.company !== null) {
       companyName = lead.company.name || lead.company.company_name || lead.company.title || 'Unknown Company';
+      
+      // Si es un objeto, también incluir información adicional si está disponible
+      const companyInfo = [];
+      if (lead.company.industry && !lead.industry) companyInfo.push(`industria: ${lead.company.industry}`);
+      if (lead.company.size && !lead.company_size) companyInfo.push(`tamaño: ${lead.company.size}`);
+      if (lead.company.location) companyInfo.push(`ubicación empresa: ${lead.company.location}`);
+      
+      if (companyInfo.length > 0) {
+        contextParts.push(`datos empresa adicionales: ${companyInfo.join(', ')}`);
+      }
     } else if (typeof lead.company === 'string') {
       companyName = lead.company;
     } else if (lead.company_name) {
@@ -133,25 +143,35 @@ function generateLeadResearchQuery(lead: any): string {
   }
   
   if (lead.attribution) {
-    contextParts.push(`atribución: ${lead.attribution}`);
+    const attributionText = typeof lead.attribution === 'object' ? 
+      JSON.stringify(lead.attribution) : 
+      lead.attribution;
+    contextParts.push(`atribución: ${attributionText}`);
   }
   
   if (lead.subscription) {
-    contextParts.push(`suscripción: ${lead.subscription}`);
+    const subscriptionText = typeof lead.subscription === 'object' ? 
+      JSON.stringify(lead.subscription) : 
+      lead.subscription;
+    contextParts.push(`suscripción: ${subscriptionText}`);
   }
   
   if (lead.last_contact) {
     contextParts.push(`último contacto: ${lead.last_contact}`);
   }
   
-  if (lead.address && typeof lead.address === 'object') {
-    const addressParts = [];
-    if (lead.address.street) addressParts.push(lead.address.street);
-    if (lead.address.city) addressParts.push(lead.address.city);
-    if (lead.address.state) addressParts.push(lead.address.state);
-    if (lead.address.country) addressParts.push(lead.address.country);
-    if (addressParts.length > 0) {
-      contextParts.push(`dirección: ${addressParts.join(', ')}`);
+  if (lead.address) {
+    if (typeof lead.address === 'object') {
+      const addressParts = [];
+      if (lead.address.street) addressParts.push(lead.address.street);
+      if (lead.address.city) addressParts.push(lead.address.city);
+      if (lead.address.state) addressParts.push(lead.address.state);
+      if (lead.address.country) addressParts.push(lead.address.country);
+      if (addressParts.length > 0) {
+        contextParts.push(`dirección: ${addressParts.join(', ')}`);
+      }
+    } else {
+      contextParts.push(`dirección: ${lead.address}`);
     }
   }
   
@@ -163,7 +183,13 @@ function generateLeadResearchQuery(lead: any): string {
   if (lead.metadata && typeof lead.metadata === 'object') {
     const metadataEntries = Object.entries(lead.metadata)
       .filter(([_key, value]) => value !== null && value !== undefined && value !== '')
-      .map(([key, value]) => `${key}: ${value}`)
+      .map(([key, value]) => {
+        // Serializar objetos complejos apropiadamente
+        const serializedValue = typeof value === 'object' ? 
+          JSON.stringify(value) : 
+          String(value);
+        return `${key}: ${serializedValue}`;
+      })
       .slice(0, 5); // Limitar a las primeras 5 entradas para no sobrecargar
     
     if (metadataEntries.length > 0) {

@@ -2,9 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendEmailFromAgent = sendEmailFromAgent;
 const workflow_1 = require("@temporalio/workflow");
-// Configure activity options
+const timeouts_1 = require("../config/timeouts");
+// Configure activity options using centralized timeouts
 const { sendEmailFromAgentActivity } = (0, workflow_1.proxyActivities)({
-    startToCloseTimeout: '2 minutes',
+    startToCloseTimeout: timeouts_1.ACTIVITY_TIMEOUTS.EMAIL_OPERATIONS, // ✅ Using centralized config (3 minutes)
+    retry: timeouts_1.RETRY_POLICIES.NETWORK, // ✅ Using appropriate retry policy for email operations
 });
 /**
  * Send Email From Agent Workflow

@@ -4,6 +4,7 @@ import type { EmailData } from '../activities/customerSupportActivities';
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 import type { WhatsAppMessageData } from '../activities/whatsappActivities';
+import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 
 /**
  * Helper function to map WhatsApp intents to EmailData intents
@@ -30,15 +31,13 @@ import type { WhatsAppMessageData } from '../activities/whatsappActivities';
 //   }
 // }
 
-// Configure activity options
+// Configure activity options using centralized timeouts
 const { 
   sendCustomerSupportMessageActivity,
   processAnalysisDataActivity
 } = proxyActivities<Activities>({
-  startToCloseTimeout: '2 minutes',
-  retry: {
-    maximumAttempts: 3,
-  },
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.CUSTOMER_SUPPORT, // ✅ Using centralized config (5 minutes)
+  retry: RETRY_POLICIES.CUSTOMER_SUPPORT, // ✅ Using appropriate retry policy for customer support
 });
 
 // Note: sendWhatsAppResponseActivity available if needed in the future

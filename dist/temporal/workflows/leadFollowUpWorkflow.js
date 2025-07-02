@@ -113,7 +113,7 @@ async function leadFollowUpWorkflow(options) {
                 siteId: site_id,
                 leadId: lead_id,
                 userId: options.userId || site.user_id,
-                data: response
+                ...response
             });
             if (!saveLogsResult.success) {
                 const errorMsg = `Failed to save lead follow-up logs: ${saveLogsResult.error}`;

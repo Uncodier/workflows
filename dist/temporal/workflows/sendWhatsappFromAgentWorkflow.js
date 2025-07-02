@@ -2,9 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendWhatsappFromAgent = sendWhatsappFromAgent;
 const workflow_1 = require("@temporalio/workflow");
-// Configure activity options
+const timeouts_1 = require("../config/timeouts");
+// Configure activity options using centralized timeouts
 const { sendWhatsAppFromAgentActivity } = (0, workflow_1.proxyActivities)({
-    startToCloseTimeout: '2 minutes',
+    startToCloseTimeout: timeouts_1.ACTIVITY_TIMEOUTS.WHATSAPP_OPERATIONS, // ✅ Using centralized config (2 minutes)
+    retry: timeouts_1.RETRY_POLICIES.NETWORK, // ✅ Using appropriate retry policy for WhatsApp operations
 });
 /**
  * Send WhatsApp From Agent Workflow

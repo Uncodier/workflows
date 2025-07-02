@@ -173,7 +173,7 @@ export async function leadFollowUpWorkflow(
         siteId: site_id,
         leadId: lead_id,
         userId: options.userId || site.user_id,
-        data: response
+        ...response
       });
       
       if (!saveLogsResult.success) {
