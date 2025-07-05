@@ -44,3 +44,5 @@ __exportStar(require("./humanInterventionWorkflow"), exports);
 __exportStar(require("./deepResearchWorkflow"), exports);
 __exportStar(require("./dailyStandUpWorkflow"), exports);
 __exportStar(require("./delayedExecutionWorkflow"), exports);
+__exportStar(require("./leadGenerationWorkflow"), exports);
+__exportStar(require("./analyzeSiteWorkflow"), exports);

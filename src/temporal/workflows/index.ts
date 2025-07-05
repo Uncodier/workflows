@@ -25,6 +25,8 @@ import { humanInterventionWorkflow } from './humanInterventionWorkflow';
 import { deepResearchWorkflow } from './deepResearchWorkflow';
 import { dailyStandUpWorkflow } from './dailyStandUpWorkflow';
 import { delayedExecutionWorkflow } from './delayedExecutionWorkflow';
+import { leadGenerationWorkflow } from './leadGenerationWorkflow';
+import { analyzeSiteWorkflow } from './analyzeSiteWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -50,6 +52,8 @@ export * from './humanInterventionWorkflow';
 export * from './deepResearchWorkflow';
 export * from './dailyStandUpWorkflow';
 export * from './delayedExecutionWorkflow';
+export * from './leadGenerationWorkflow';
+export * from './analyzeSiteWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -80,6 +84,8 @@ export const workflows = {
   deepResearchWorkflow,
   dailyStandUpWorkflow,
   delayedExecutionWorkflow,
+  leadGenerationWorkflow,
+  analyzeSiteWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
 };
@@ -113,6 +119,8 @@ export const workflowNames = {
   deepResearchWorkflow: 'deepResearchWorkflow',
   dailyStandUpWorkflow: 'dailyStandUpWorkflow',
   delayedExecutionWorkflow: 'delayedExecutionWorkflow',
+  leadGenerationWorkflow: 'leadGenerationWorkflow',
+  analyzeSiteWorkflow: 'analyzeSiteWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',
 };

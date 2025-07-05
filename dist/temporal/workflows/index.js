@@ -41,6 +41,8 @@ const humanInterventionWorkflow_1 = require("./humanInterventionWorkflow");
 const deepResearchWorkflow_1 = require("./deepResearchWorkflow");
 const dailyStandUpWorkflow_1 = require("./dailyStandUpWorkflow");
 const delayedExecutionWorkflow_1 = require("./delayedExecutionWorkflow");
+const leadGenerationWorkflow_1 = require("./leadGenerationWorkflow");
+const analyzeSiteWorkflow_1 = require("./analyzeSiteWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -65,6 +67,8 @@ __exportStar(require("./humanInterventionWorkflow"), exports);
 __exportStar(require("./deepResearchWorkflow"), exports);
 __exportStar(require("./dailyStandUpWorkflow"), exports);
 __exportStar(require("./delayedExecutionWorkflow"), exports);
+__exportStar(require("./leadGenerationWorkflow"), exports);
+__exportStar(require("./analyzeSiteWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -94,6 +98,8 @@ exports.workflows = {
     deepResearchWorkflow: deepResearchWorkflow_1.deepResearchWorkflow,
     dailyStandUpWorkflow: dailyStandUpWorkflow_1.dailyStandUpWorkflow,
     delayedExecutionWorkflow: delayedExecutionWorkflow_1.delayedExecutionWorkflow,
+    leadGenerationWorkflow: leadGenerationWorkflow_1.leadGenerationWorkflow,
+    analyzeSiteWorkflow: analyzeSiteWorkflow_1.analyzeSiteWorkflow,
     // Alias for backward compatibility
     whatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
 };
@@ -126,6 +132,8 @@ exports.workflowNames = {
     deepResearchWorkflow: 'deepResearchWorkflow',
     dailyStandUpWorkflow: 'dailyStandUpWorkflow',
     delayedExecutionWorkflow: 'delayedExecutionWorkflow',
+    leadGenerationWorkflow: 'leadGenerationWorkflow',
+    analyzeSiteWorkflow: 'analyzeSiteWorkflow',
     // Alias for backward compatibility
     whatsappMessageWorkflow: 'whatsappMessageWorkflow',
 };

@@ -25,4 +25,6 @@ export * from './leadResearchWorkflow';
 export * from './humanInterventionWorkflow';
 export * from './deepResearchWorkflow';
 export * from './dailyStandUpWorkflow';
-export * from './delayedExecutionWorkflow'; 
+export * from './delayedExecutionWorkflow';
+export * from './leadGenerationWorkflow';
+export * from './analyzeSiteWorkflow'; 

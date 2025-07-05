@@ -232,16 +232,56 @@ export async function deepResearchWorkflow(
 
     console.log(`🔬 Step 2: Starting deep research for topic "${research_topic}"...`);
     
-    // Prepare deep research request with structured deliverables (lead + company)
-    // If deliverables already has lead/company structure, use it; otherwise create it
+    // Prepare deep research request with structured deliverables
+    // Support multiple deliverable structures:
+    // 1. New unified structure: deliverables.leads (with company info integrated)
+    // 2. Old separate structure: deliverables.lead + deliverables.company
+    // 3. Legacy structure: deliverables (generic)
     
-    if (options.deliverables && options.deliverables.lead && options.deliverables.company) {
-      // leadResearchWorkflow style: deliverables already structured
-      console.log(`📋 Using pre-structured deliverables from leadResearchWorkflow`);
+    if (options.deliverables && options.deliverables.leads && Array.isArray(options.deliverables.leads)) {
+      // New unified structure: deliverables.leads with integrated company info
+      console.log(`📋 Using new unified deliverables structure (deliverables.leads)`);
+      
+      // For the new structure, we still need to provide both lead and company structures
+      // for backwards compatibility with existing activities
+      const firstLead = options.deliverables.leads[0] || {};
+      const companyStructure = generateCompanyStructure(companyInfo);
+      
+      // Extract company information from the first lead (if available)
+      const leadCompanyInfo = firstLead.company || {};
+      const leadCompanyName = leadCompanyInfo.name || firstLead.company_name || 
+                             safeString(options.additionalData?.leadInfo?.company_name);
+      
+      enhancedDeliverables = {
+        // Keep the unified leads structure for new workflows
+        leads: options.deliverables.leads,
+        
+        // Also provide separate lead/company structures for backwards compatibility
+        lead: {
+          // Extract lead info from first lead for compatibility
+          name: firstLead.name || null,
+          telephone: firstLead.telephone || null,
+          email: firstLead.email || null,
+          position: firstLead.position || null,
+          address: firstLead.address || null,
+          web: firstLead.web || null
+        },
+        company: {
+          ...companyStructure,
+          ...leadCompanyInfo, // Override with company info from lead
+          name: leadCompanyName || companyStructure.name
+        }
+      };
+      
+      console.log(`🔧 Unified structure - leads count: ${options.deliverables.leads.length}`);
+      console.log(`🔧 Company from lead: ${leadCompanyName || 'None'}`);
+      
+    } else if (options.deliverables && options.deliverables.lead && options.deliverables.company) {
+      // Old separate structure: deliverables.lead + deliverables.company
+      console.log(`📋 Using old separate deliverables structure (lead + company)`);
       const companyStructure = generateCompanyStructure(companyInfo);
       
       // Merge the existing company info with the structured company template
-      // Also check if lead has company_name that should be used for company name
       const leadCompanyName = safeString(options.additionalData?.leadInfo?.company_name);
       const leadCompany = options.deliverables.company || {};
       
@@ -254,6 +294,7 @@ export async function deepResearchWorkflow(
           name: leadCompanyName || safeString(leadCompany.name) || companyStructure.name
         }
       };
+      
     } else {
       // Generic deep research: create structure from scratch
       console.log(`📋 Creating fresh deliverable structure for generic deep research`);
@@ -301,6 +342,13 @@ export async function deepResearchWorkflow(
       throw new Error(errorMsg);
     }
     
+    // Check if we're in fallback mode
+    const isFallbackMode = researchResult.fallback || false;
+    if (isFallbackMode) {
+      console.log(`🔄 FALLBACK MODE DETECTED: Deep research API not available`);
+      console.log(`⚠️  Continuing workflow with fallback operations`);
+    }
+    
     // Debug: Log the complete research result to understand the structure
     console.log(`🔍 Deep research result structure:`, JSON.stringify(researchResult, null, 2));
     
@@ -322,13 +370,17 @@ export async function deepResearchWorkflow(
       operations = researchData.operations;
     }
     
-    console.log(`✅ Deep research started successfully`);
+    console.log(`✅ Deep research ${isFallbackMode ? 'fallback' : 'completed'} successfully`);
     console.log(`📊 Generated ${operations.length} operations to execute`);
     
     if (operations.length === 0) {
       console.log(`⚠️ No operations generated for research topic "${research_topic}"`);
       console.log(`🔍 Research data structure:`, JSON.stringify(researchData, null, 2));
-      errors.push('No operations generated for the research topic');
+      if (!isFallbackMode) {
+        errors.push('No operations generated for the research topic');
+      } else {
+        console.log(`ℹ️  This is expected in fallback mode - operations will be minimal`);
+      }
     } else {
       console.log(`🔧 Operations structure sample:`, JSON.stringify(operations[0], null, 2));
       
@@ -403,13 +455,19 @@ export async function deepResearchWorkflow(
               searchResult: searchResult
             });
           } else {
-            console.log(`✅ Operation ${i + 1} completed successfully`);
+            const isSearchFallback = searchResult.fallback || false;
+            if (isSearchFallback) {
+              console.log(`🔄 Operation ${i + 1} completed in fallback mode`);
+            } else {
+              console.log(`✅ Operation ${i + 1} completed successfully`);
+            }
             operationResults.push({
               operation: operation,
               success: true,
               data: searchResult.data,
               results: searchResult.results,
-              searchResult: searchResult
+              searchResult: searchResult,
+              fallback: isSearchFallback
             });
           }
         } catch (error) {
@@ -464,9 +522,17 @@ export async function deepResearchWorkflow(
             operation_results_count: operationResults.length,
             successful_operations: operationResults.filter(result => result.success).length,
             insights: [],
-            recommendations: []
+            recommendations: [],
+            fallback: analysisResult.fallback || false
           };
         } else {
+          const isAnalysisFallback = analysisResult.fallback || false;
+          if (isAnalysisFallback) {
+            console.log(`🔄 Data analysis completed in fallback mode`);
+          } else {
+            console.log(`✅ Data analysis completed successfully`);
+          }
+          
           insights = analysisResult.insights || [];
           recommendations = analysisResult.recommendations || [];
           
@@ -488,9 +554,13 @@ export async function deepResearchWorkflow(
           } else {
             // Fallback to enhancedDeliverables if API didn't return deliverables
             processedDeliverables = enhancedDeliverables;
-            console.log(`⚠️ API dataAnalysis didn't return data.deliverables, using fallback enhancedDeliverables`);
-            console.log(`🔍 Available analysisResult.data keys:`, Object.keys(analysisResult.data || {}));
-            console.log(`🔍 analysisResult.data content:`, JSON.stringify(analysisResult.data, null, 2));
+            if (isAnalysisFallback) {
+              console.log(`🔄 Fallback mode - using enhancedDeliverables`);
+            } else {
+              console.log(`⚠️ API dataAnalysis didn't return data.deliverables, using fallback enhancedDeliverables`);
+              console.log(`🔍 Available analysisResult.data keys:`, Object.keys(analysisResult.data || {}));
+              console.log(`🔍 analysisResult.data content:`, JSON.stringify(analysisResult.data, null, 2));
+            }
           }
           
           // Build a flattened research_analysis object
@@ -505,6 +575,7 @@ export async function deepResearchWorkflow(
             insights: insights,
             recommendations: recommendations,
             deliverables: processedDeliverables,
+            fallback: isAnalysisFallback,
             // Flatten analysis content directly at root level
             ...analysisData,
             // Add structured analysis if available
@@ -518,8 +589,6 @@ export async function deepResearchWorkflow(
               executive_summary: analysisContent.executive_summary
             })
           };
-          
-          console.log(`✅ Data analysis completed successfully`);
           
           if (insights.length > 0) {
             console.log(`🔍 Generated ${insights.length} insights`);
@@ -581,7 +650,8 @@ export async function deepResearchWorkflow(
           operation_results_count: operationResults.length,
           successful_operations: operationResults.filter(result => result.success).length,
           insights: [],
-          recommendations: []
+          recommendations: [],
+          fallback: false
         };
       }
     } else {
@@ -598,11 +668,17 @@ export async function deepResearchWorkflow(
         operation_results_count: 0,
         successful_operations: 0,
         insights: [],
-        recommendations: []
+        recommendations: [],
+        fallback: false
       };
     }
 
     const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+    
+    // Check if workflow ran in fallback mode
+    const workflowFallbackMode = (researchResult?.fallback || false) || 
+                                 operationResults.some(result => result.fallback || false) ||
+                                 (research_analysis?.fallback || false);
     
     // Prepare flattened result data - merge research_analysis content directly
     const resultData = {
@@ -613,17 +689,32 @@ export async function deepResearchWorkflow(
       deliverables: research_analysis?.deliverables || enhancedDeliverables,
       // Add execution metadata
       execution_time: executionTime,
-      completed_at: new Date().toISOString()
+      completed_at: new Date().toISOString(),
+      // Add fallback information
+      workflow_fallback_mode: workflowFallbackMode,
+      fallback_operations: operationResults.filter(result => result.fallback).length,
+      api_status: workflowFallbackMode ? 'fallback' : 'normal'
     };
 
-    console.log(`🎉 Deep research workflow completed successfully!`);
+    const statusMessage = workflowFallbackMode ? 
+      `completed in fallback mode (API unavailable)` : 
+      `completed successfully`;
+    
+    console.log(`🎉 Deep research workflow ${statusMessage}!`);
     console.log(`📊 Summary: Research on "${research_topic}" for ${siteName} completed in ${executionTime}`);
     console.log(`   - Operations executed: ${operationResults.length}`);
     console.log(`   - Insights generated: ${insights.length}`);
     console.log(`   - Recommendations: ${recommendations.length}`);
     
+    if (workflowFallbackMode) {
+      console.log(`🔄 Fallback mode information:`);
+      console.log(`   - Fallback operations: ${operationResults.filter(result => result.fallback).length}`);
+      console.log(`   - Research API status: ${researchResult?.fallback ? 'fallback' : 'normal'}`);
+      console.log(`   - Analysis API status: ${research_analysis?.fallback ? 'fallback' : 'normal'}`);
+    }
+    
     if (errors.length > 0) {
-      console.log(`⚠️ Warnings: ${errors.length} non-critical errors occurred`);
+      console.log(`⚠️ ${workflowFallbackMode ? 'Fallback mode warnings' : 'Non-critical errors'}: ${errors.length} occurred`);
     }
 
     // Update cron status to indicate successful completion
@@ -633,7 +724,11 @@ export async function deepResearchWorkflow(
       scheduleId: `deep-research-${site_id}`,
       activityName: 'deepResearchWorkflow',
       status: 'COMPLETED',
-      lastRun: new Date().toISOString()
+      lastRun: new Date().toISOString(),
+      ...(workflowFallbackMode && {
+        errorMessage: 'Completed in fallback mode - API services unavailable',
+        retryCount: 0
+      })
     });
 
     // Log successful completion (with full data for logging purposes)
@@ -652,14 +747,16 @@ export async function deepResearchWorkflow(
         insights: insights.length,
         recommendations: recommendations.length,
         executionTime,
-        completedAt: new Date().toISOString()
+        completedAt: new Date().toISOString(),
+        fallbackMode: workflowFallbackMode,
+        apiStatus: workflowFallbackMode ? 'fallback' : 'normal'
       },
     });
 
     return {
       success: true,
       data: resultData,
-      error: errors.length > 0 ? errors : null
+      error: errors.length > 0 ? (workflowFallbackMode ? 'Completed in fallback mode' : errors) : null
     };
 
   } catch (error: unknown) {
@@ -694,8 +791,12 @@ export async function deepResearchWorkflow(
       site_id: site_id,
       research_topic: research_topic,
       deliverables: enhancedDeliverables || options.deliverables,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      fallback: false
     };
+    
+    // Check if any operations completed in fallback mode before the error
+    const hadFallbackOperations = operationResults.some(result => result.fallback || false);
     
     const errorData = {
       // Spread error research analysis content directly at root level
@@ -705,7 +806,12 @@ export async function deepResearchWorkflow(
       deliverables: errorResearchAnalysis?.deliverables || enhancedDeliverables || options.deliverables,
       // Add execution metadata
       execution_time: `${((Date.now() - startTime) / 1000).toFixed(2)}s`,
-      completed_at: new Date().toISOString()
+      completed_at: new Date().toISOString(),
+      // Add fallback information
+      workflow_fallback_mode: hadFallbackOperations,
+      fallback_operations: operationResults.filter(result => result.fallback).length,
+      api_status: 'error',
+      error_stage: research_analysis ? 'post_analysis' : 'pre_analysis'
     };
 
     return {
