@@ -43,6 +43,7 @@ const dailyStandUpWorkflow_1 = require("./dailyStandUpWorkflow");
 const delayedExecutionWorkflow_1 = require("./delayedExecutionWorkflow");
 const leadGenerationWorkflow_1 = require("./leadGenerationWorkflow");
 const analyzeSiteWorkflow_1 = require("./analyzeSiteWorkflow");
+const sendNewsletterWorkflow_1 = require("./sendNewsletterWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -69,6 +70,7 @@ __exportStar(require("./dailyStandUpWorkflow"), exports);
 __exportStar(require("./delayedExecutionWorkflow"), exports);
 __exportStar(require("./leadGenerationWorkflow"), exports);
 __exportStar(require("./analyzeSiteWorkflow"), exports);
+__exportStar(require("./sendNewsletterWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -100,6 +102,7 @@ exports.workflows = {
     delayedExecutionWorkflow: delayedExecutionWorkflow_1.delayedExecutionWorkflow,
     leadGenerationWorkflow: leadGenerationWorkflow_1.leadGenerationWorkflow,
     analyzeSiteWorkflow: analyzeSiteWorkflow_1.analyzeSiteWorkflow,
+    sendNewsletterWorkflow: sendNewsletterWorkflow_1.sendNewsletterWorkflow,
     // Alias for backward compatibility
     whatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
 };
@@ -134,6 +137,7 @@ exports.workflowNames = {
     delayedExecutionWorkflow: 'delayedExecutionWorkflow',
     leadGenerationWorkflow: 'leadGenerationWorkflow',
     analyzeSiteWorkflow: 'analyzeSiteWorkflow',
+    sendNewsletterWorkflow: 'sendNewsletterWorkflow',
     // Alias for backward compatibility
     whatsappMessageWorkflow: 'whatsappMessageWorkflow',
 };

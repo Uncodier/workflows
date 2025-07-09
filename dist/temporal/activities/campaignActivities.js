@@ -15,6 +15,7 @@ exports.createContentCalendarActivity = createContentCalendarActivity;
 exports.improveContentActivity = improveContentActivity;
 exports.buildNewSegmentsActivity = buildNewSegmentsActivity;
 exports.buildICPSegmentsActivity = buildICPSegmentsActivity;
+exports.getSettingsActivity = getSettingsActivity;
 const apiService_1 = require("../services/apiService");
 const supabaseService_1 = require("../services/supabaseService");
 /**
@@ -97,6 +98,7 @@ async function getSiteActivity(siteId) {
             id: siteData.id,
             name: siteData.name || 'Unnamed Site',
             url: siteData.url || '',
+            description: siteData.description || null,
             user_id: siteData.user_id,
             created_at: siteData.created_at,
             updated_at: siteData.updated_at
@@ -442,6 +444,62 @@ async function buildICPSegmentsActivity(request) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Exception building ICP segments for site ${request.siteId}:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to get settings information by site_id
+ */
+async function getSettingsActivity(siteId) {
+    console.log(`⚙️ Getting settings information for: ${siteId}`);
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot fetch settings information');
+            return {
+                success: false,
+                error: 'Database not available'
+            };
+        }
+        console.log('✅ Database connection confirmed, fetching settings...');
+        // Fetch complete settings for the site
+        const settingsData = await supabaseService.fetchCompleteSettings([siteId]);
+        const siteSettings = settingsData.find(setting => setting.site_id === siteId);
+        if (!siteSettings) {
+            console.log(`⚠️ Settings for site ${siteId} not found`);
+            return {
+                success: false,
+                error: 'Settings not found'
+            };
+        }
+        console.log(`✅ Retrieved settings information for site ${siteId}`);
+        console.log(`📊 Settings include:`, {
+            about: !!siteSettings.about,
+            industry: !!siteSettings.industry,
+            company_size: !!siteSettings.company_size,
+            products: Array.isArray(siteSettings.products) ? siteSettings.products.length : 'no',
+            services: Array.isArray(siteSettings.services) ? siteSettings.services.length : 'no',
+            goals: Array.isArray(siteSettings.goals) ? siteSettings.goals.length : 'no',
+            competitors: Array.isArray(siteSettings.competitors) ? siteSettings.competitors.length : 'no',
+            team_members: Array.isArray(siteSettings.team_members) ? siteSettings.team_members.length : 'no',
+            locations: Array.isArray(siteSettings.locations) ? siteSettings.locations.length : 'no',
+            business_hours: !!siteSettings.business_hours,
+            channels: !!siteSettings.channels,
+            branding: !!siteSettings.branding ? 'available (context only)' : false
+        });
+        return {
+            success: true,
+            settings: siteSettings
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception getting settings for site ${siteId}:`, errorMessage);
         return {
             success: false,
             error: errorMessage

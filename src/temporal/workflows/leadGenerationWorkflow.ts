@@ -99,6 +99,7 @@ export interface BusinessType {
  * Generate deliverables structure for companies research
  * Returns structure with companies information
  */
+/* COMMENTED OUT - UNUSED FUNCTION
 function generateCompaniesDeliverables(): any {
   return {
     companies: [
@@ -126,6 +127,7 @@ function generateCompaniesDeliverables(): any {
     ]
   };
 }
+*/
 
 /**
  * Generate deliverables structure for employee research
@@ -160,6 +162,7 @@ function generateEmployeeDeliverables(company: CompanyData): any {
 /**
  * Extract companies from deep research deliverables
  */
+/* COMMENTED OUT - UNUSED FUNCTION
 function extractCompaniesFromDeliverables(deliverables: any): CompanyData[] {
   const companies: CompanyData[] = [];
   
@@ -238,6 +241,7 @@ function extractCompaniesFromDeliverables(deliverables: any): CompanyData[] {
   console.log(`📊 Extracted ${companies.length} companies from deliverables`);
   return companies;
 }
+*/
 
 /**
  * Extract employees from deep research deliverables

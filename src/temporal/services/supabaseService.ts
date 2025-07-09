@@ -137,7 +137,7 @@ export class SupabaseService {
     console.log(`🔍 Fetching complete settings for ${siteIds.length} sites from Supabase...`);
     const { data, error } = await this.client
       .from('settings')
-      .select('site_id, channels, business_hours')
+      .select('*')
       .in('site_id', siteIds);
 
     if (error) {
@@ -146,6 +146,32 @@ export class SupabaseService {
     }
 
     console.log(`✅ Successfully fetched ${data?.length || 0} complete settings from database`);
+    
+    // Log which fields we actually got for debugging
+    if (data && data.length > 0) {
+      const availableFields = Object.keys(data[0]);
+      console.log(`📊 Available settings fields:`, {
+        about: availableFields.includes('about'),
+        industry: availableFields.includes('industry'),
+        company_size: availableFields.includes('company_size'),
+        products: availableFields.includes('products'),
+        services: availableFields.includes('services'),
+        goals: availableFields.includes('goals'),
+        competitors: availableFields.includes('competitors'),
+        branding: availableFields.includes('branding'),
+        team_members: availableFields.includes('team_members'),
+        locations: availableFields.includes('locations'),
+        business_hours: availableFields.includes('business_hours'),
+        channels: availableFields.includes('channels'),
+        social_media: availableFields.includes('social_media'),
+        swot: availableFields.includes('swot'),
+        marketing_channels: availableFields.includes('marketing_channels'),
+        marketing_budget: availableFields.includes('marketing_budget'),
+        team_roles: availableFields.includes('team_roles'),
+        org_structure: availableFields.includes('org_structure')
+      });
+    }
+    
     return data || [];
   }
 
@@ -581,6 +607,88 @@ export class SupabaseService {
 
     console.log(`✅ Successfully created agent '${agentData.name}' with ID: ${data.id}`);
     return data;
+  }
+
+  /**
+   * Fetch leads by segments and status with optional filters
+   * Business Rules:
+   * - segmentIds: if empty array, no segment filter is applied
+   * - status: if empty array, no status filter is applied
+   * - Always orders by created_at DESC (newest first)
+   * - Always filters for leads with email (NOT NULL and not empty)
+   * - Respects limit (brings latest X leads if more than limit)
+   */
+  async fetchLeadsBySegmentsAndStatus(
+    siteId: string,
+    segmentIds: string[],
+    status: string[],
+    limit?: number
+  ): Promise<{ data: any[] | null; error: any }> {
+    const isConnected = await this.getConnectionStatus();
+    if (!isConnected) {
+      return { data: null, error: { message: 'Database not connected' } };
+    }
+
+    // Log the query parameters for debugging
+    const hasSegmentFilter = segmentIds.length > 0;
+    const hasStatusFilter = status.length > 0;
+    
+    console.log(`🔍 Fetching leads for site: ${siteId}`);
+    console.log(`   - Segment filter: ${hasSegmentFilter ? segmentIds.join(', ') : 'None (all segments)'}`);
+    console.log(`   - Status filter: ${hasStatusFilter ? status.join(', ') : 'None (all statuses)'}`);
+    console.log(`   - Limit: ${limit || 500}`);
+    console.log(`   - Order: Latest created first (created_at DESC)`);
+    
+    // Build query starting with basic filters
+    let query = this.client
+      .from('leads')
+      .select('*')
+      .eq('site_id', siteId)
+      .not('email', 'is', null)     // Email is not null
+      .neq('email', '');            // Email is not empty string
+    
+    // Apply segment filter only if segmentIds is not empty
+    if (hasSegmentFilter) {
+      query = query.in('segment_id', segmentIds);
+      console.log(`   ✓ Applied segment filter for ${segmentIds.length} segments`);
+    }
+    
+    // Apply status filter only if status is not empty
+    if (hasStatusFilter) {
+      query = query.in('status', status);
+      console.log(`   ✓ Applied status filter for ${status.length} statuses`);
+    }
+    
+    // Always order by created_at DESC to get latest leads first
+    query = query.order('created_at', { ascending: false });
+    
+    // Apply limit
+    if (limit) {
+      query = query.limit(limit);
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error('❌ Error fetching leads:', error);
+      return { data: null, error };
+    }
+    
+    const resultCount = data?.length || 0;
+    console.log(`✅ Successfully fetched ${resultCount} leads from database`);
+    
+    // Log filter results for transparency
+    if (!hasSegmentFilter && !hasStatusFilter) {
+      console.log(`   📋 Query result: All leads with email from site (newest first)`);
+    } else if (!hasSegmentFilter) {
+      console.log(`   📋 Query result: All segments + status filter + email required (newest first)`);
+    } else if (!hasStatusFilter) {
+      console.log(`   📋 Query result: Segment filter + all statuses + email required (newest first)`);
+    } else {
+      console.log(`   📋 Query result: Segment filter + status filter + email required (newest first)`);
+    }
+    
+    return { data, error: null };
   }
 }
 

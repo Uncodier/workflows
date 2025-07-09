@@ -59,6 +59,7 @@ __exportStar(require("./dataAnalystActivities"), exports);
 __exportStar(require("./cmoActivities"), exports);
 __exportStar(require("./leadGenerationActivities"), exports);
 __exportStar(require("./uxActivities"), exports);
+__exportStar(require("./newsletterActivities"), exports);
 // Bundle all activities for the worker
 const supabaseActivities = __importStar(require("./supabaseActivities"));
 const apiActivities = __importStar(require("./apiActivities"));
@@ -81,6 +82,7 @@ const dataAnalystActivities = __importStar(require("./dataAnalystActivities"));
 const cmoActivities = __importStar(require("./cmoActivities"));
 const leadGenerationActivities = __importStar(require("./leadGenerationActivities"));
 const uxActivities = __importStar(require("./uxActivities"));
+const newsletterActivities = __importStar(require("./newsletterActivities"));
 exports.activities = {
     ...supabaseActivities,
     ...apiActivities,
@@ -103,4 +105,5 @@ exports.activities = {
     ...cmoActivities,
     ...leadGenerationActivities,
     ...uxActivities,
+    ...newsletterActivities,
 };
