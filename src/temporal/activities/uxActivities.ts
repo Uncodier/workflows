@@ -71,7 +71,7 @@ export async function uxAnalysisActivity(
 
     console.log('📤 Sending UX analysis request:', JSON.stringify(requestBody, null, 2));
 
-    const response = await apiService.post('/api/agents/ux/analysis', requestBody);
+    const response = await apiService.post('/api/agents/ux/analyze', requestBody);
 
     if (!response.success) {
       logger.error('❌ UX analysis API call failed', {

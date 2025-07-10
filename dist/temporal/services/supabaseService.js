@@ -151,6 +151,35 @@ class SupabaseService {
         return data || [];
     }
     /**
+     * Update site settings by site_id
+     */
+    async updateSiteSettings(siteId, updateData) {
+        const isConnected = await this.getConnectionStatus();
+        if (!isConnected) {
+            throw new Error('Database not connected');
+        }
+        console.log(`🔍 Updating settings for site: ${siteId}`);
+        console.log(`📝 Update data:`, JSON.stringify(updateData, null, 2));
+        const { data, error } = await this.client
+            .from('settings')
+            .update({
+            ...updateData,
+            updated_at: new Date().toISOString()
+        })
+            .eq('site_id', siteId)
+            .select()
+            .single();
+        if (error) {
+            console.error(`❌ Error updating settings for site ${siteId}:`, error);
+            throw new Error(`Failed to update settings: ${error.message}`);
+        }
+        if (!data) {
+            throw new Error(`Settings for site ${siteId} not found or update failed`);
+        }
+        console.log(`✅ Successfully updated settings for site ${siteId}`);
+        return data;
+    }
+    /**
      * Fetch sites that have email sync enabled (channels.email.enabled = true)
      */
     async fetchSitesWithEmailEnabled() {
@@ -581,6 +610,50 @@ class SupabaseService {
             console.log(`   📋 Query result: Segment filter + status filter + email required (newest first)`);
         }
         return { data, error: null };
+    }
+    /**
+     * Check if a site has analysis records
+     */
+    async fetchSiteAnalysis(siteId) {
+        const isConnected = await this.getConnectionStatus();
+        if (!isConnected) {
+            throw new Error('Database not connected');
+        }
+        console.log(`🔍 Checking analysis records for site: ${siteId}`);
+        const { data, error } = await this.client
+            .from('analysis')
+            .select('*')
+            .eq('site_id', siteId)
+            .order('created_at', { ascending: false });
+        if (error) {
+            console.error('❌ Error fetching site analysis:', error);
+            throw new Error(`Failed to fetch site analysis: ${error.message}`);
+        }
+        console.log(`✅ Found ${data?.length || 0} analysis records for site ${siteId}`);
+        return data || [];
+    }
+    /**
+     * Check if site has any completed analysis
+     */
+    async hasSiteAnalysis(siteId) {
+        try {
+            const analysisRecords = await this.fetchSiteAnalysis(siteId);
+            const completedAnalysis = analysisRecords.filter(record => record.status === 'completed' || record.status === null // null is also considered completed
+            );
+            const hasAnalysis = completedAnalysis.length > 0;
+            const lastAnalysis = hasAnalysis ? completedAnalysis[0] : null; // First one is most recent due to ordering
+            console.log(`📊 Site ${siteId} analysis status: ${hasAnalysis ? 'HAS ANALYSIS' : 'NO ANALYSIS'} (${completedAnalysis.length} completed records)`);
+            return {
+                hasAnalysis,
+                lastAnalysis,
+                count: completedAnalysis.length
+            };
+        }
+        catch (error) {
+            console.error(`❌ Error checking site analysis for ${siteId}:`, error);
+            // In case of error, assume no analysis to be safe
+            return { hasAnalysis: false, count: 0 };
+        }
     }
 }
 exports.SupabaseService = SupabaseService;

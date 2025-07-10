@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activityPrioritizationEngineWorkflow = activityPrioritizationEngineWorkflow;
 const workflow_1 = require("@temporalio/workflow");
-const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity } = (0, workflow_1.proxyActivities)({
+const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity, scheduleIndividualSiteAnalysisActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes',
 });
 /**
@@ -89,6 +89,35 @@ async function activityPrioritizationEngineWorkflow() {
                 });
                 operationsExecuted = true;
                 console.log('✅ Daily operations workflow completed successfully');
+                // Step 2.1: Schedule site analysis for sites that haven't been analyzed yet
+                console.log('🔍 Step 2.1: Scheduling site analysis for sites that need initial analysis...');
+                try {
+                    const siteAnalysisResult = await scheduleIndividualSiteAnalysisActivity(businessHoursAnalysis, {
+                        timezone: 'America/Mexico_City'
+                    });
+                    console.log(`🔍 Site analysis scheduling completed:`);
+                    console.log(`   ✅ Scheduled: ${siteAnalysisResult.scheduled} sites`);
+                    console.log(`   ⏭️ Skipped: ${siteAnalysisResult.skipped} sites (already analyzed)`);
+                    console.log(`   ❌ Failed: ${siteAnalysisResult.failed} sites`);
+                    // Add site analysis results to operations result
+                    operationsResult.siteAnalysisScheduling = {
+                        scheduled: siteAnalysisResult.scheduled,
+                        skipped: siteAnalysisResult.skipped,
+                        failed: siteAnalysisResult.failed,
+                        results: siteAnalysisResult.results,
+                        errors: siteAnalysisResult.errors
+                    };
+                }
+                catch (siteAnalysisError) {
+                    console.error('❌ Error scheduling site analysis:', siteAnalysisError);
+                    operationsResult.siteAnalysisScheduling = {
+                        scheduled: 0,
+                        skipped: 0,
+                        failed: 1,
+                        results: [],
+                        errors: [siteAnalysisError instanceof Error ? siteAnalysisError.message : String(siteAnalysisError)]
+                    };
+                }
             }
             catch (operationsError) {
                 console.error('❌ Daily operations workflow failed:', operationsError);

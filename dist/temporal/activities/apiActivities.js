@@ -5,6 +5,7 @@ exports.createApiResourceActivity = createApiResourceActivity;
 exports.updateApiResourceActivity = updateApiResourceActivity;
 exports.deleteApiResourceActivity = deleteApiResourceActivity;
 exports.sendDailyStandUpNotificationActivity = sendDailyStandUpNotificationActivity;
+exports.sendProjectAnalysisNotificationActivity = sendProjectAnalysisNotificationActivity;
 const apiService_1 = require("../services/apiService");
 /**
  * Activity to fetch data from the API
@@ -61,4 +62,49 @@ async function sendDailyStandUpNotificationActivity(params) {
         throw new Error(`Failed to send daily stand up notification: ${response.error?.message}`);
     }
     return response.data;
+}
+/**
+ * Activity to send project analysis notification
+ */
+async function sendProjectAnalysisNotificationActivity(params) {
+    console.log(`📢 Sending project analysis notification for site: ${params.site_id}`);
+    try {
+        const requestBody = {
+            site_id: params.site_id,
+            insights: params.insights || [],
+            deepResearchResult: params.deepResearchResult,
+            uxAnalysisResult: params.uxAnalysisResult,
+            settingsUpdates: params.settingsUpdates,
+            timestamp: new Date().toISOString()
+        };
+        console.log('📤 Sending project analysis notification:', {
+            site_id: params.site_id,
+            insightsCount: params.insights ? params.insights.length : 0,
+            hasDeepResearch: !!params.deepResearchResult,
+            hasUxAnalysis: !!params.uxAnalysisResult,
+            hasSettingsUpdates: !!params.settingsUpdates,
+            settingsUpdateCount: params.settingsUpdates ? Object.keys(params.settingsUpdates).length : 0
+        });
+        const response = await apiService_1.apiService.post('/api/notifications/projectAnalysis', requestBody);
+        if (!response.success) {
+            console.error('❌ Project analysis notification failed:', response.error);
+            return {
+                success: false,
+                error: response.error?.message || 'Failed to send project analysis notification'
+            };
+        }
+        console.log('✅ Project analysis notification sent successfully');
+        return {
+            success: true,
+            data: response.data
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error('❌ Project analysis notification exception:', errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
 }

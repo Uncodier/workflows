@@ -24,7 +24,7 @@ async function uxAnalysisActivity(request) {
             ...request.additionalData
         };
         console.log('📤 Sending UX analysis request:', JSON.stringify(requestBody, null, 2));
-        const response = await apiService_1.apiService.post('/api/agents/ux/analysis', requestBody);
+        const response = await apiService_1.apiService.post('/api/agents/ux/analyze', requestBody);
         if (!response.success) {
             logger_1.logger.error('❌ UX analysis API call failed', {
                 error: response.error,

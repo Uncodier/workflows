@@ -763,3 +763,62 @@ export async function getSettingsActivity(siteId: string): Promise<GetSettingsRe
     };
   }
 }
+
+export interface UpdateSettingsResult {
+  success: boolean;
+  settings?: any;
+  error?: string;
+}
+
+/**
+ * Activity to update settings information by site_id
+ */
+export async function updateSettingsActivity(siteId: string, updateData: any): Promise<UpdateSettingsResult> {
+  console.log(`🔄 Updating settings information for: ${siteId}`);
+  console.log(`📊 Update data:`, JSON.stringify(updateData, null, 2));
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot update settings information');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, updating settings...');
+    
+    // Update settings for the site
+    const updatedSettings = await supabaseService.updateSiteSettings(siteId, updateData);
+
+    if (!updatedSettings) {
+      console.log(`⚠️ Failed to update settings for site ${siteId}`);
+      return {
+        success: false,
+        error: 'Failed to update settings'
+      };
+    }
+
+    console.log(`✅ Successfully updated settings for site ${siteId}`);
+    console.log(`📊 Updated fields:`, Object.keys(updateData));
+    
+    return {
+      success: true,
+      settings: updatedSettings
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception updating settings for site ${siteId}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}

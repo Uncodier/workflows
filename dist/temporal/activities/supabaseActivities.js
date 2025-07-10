@@ -9,6 +9,8 @@ exports.storeWorkflowResultActivity = storeWorkflowResultActivity;
 exports.createResourceActivity = createResourceActivity;
 exports.updateResourceActivity = updateResourceActivity;
 exports.deleteResourceActivity = deleteResourceActivity;
+exports.checkSiteAnalysisActivity = checkSiteAnalysisActivity;
+const supabaseService_1 = require("../services/supabaseService");
 /**
  * Activity to log workflow execution (temporary console implementation)
  */
@@ -64,4 +66,42 @@ async function updateResourceActivity(id, data) {
  */
 async function deleteResourceActivity(id) {
     console.log('Deleting Resource:', id);
+}
+/**
+ * Check if a site has analysis records
+ */
+async function checkSiteAnalysisActivity(siteId) {
+    console.log(`🔍 Checking if site ${siteId} has analysis records...`);
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️ Database not available, assuming no analysis');
+            return {
+                hasAnalysis: false,
+                count: 0,
+                reason: 'Database not available - assuming needs analysis'
+            };
+        }
+        const analysisStatus = await supabaseService.hasSiteAnalysis(siteId);
+        const reason = analysisStatus.hasAnalysis
+            ? `Site has ${analysisStatus.count} completed analysis record(s), last one from ${analysisStatus.lastAnalysis?.created_at || 'unknown date'}`
+            : 'No completed analysis found - needs initial site analysis';
+        console.log(`📊 Site ${siteId} analysis check: ${analysisStatus.hasAnalysis ? 'HAS ANALYSIS' : 'NEEDS ANALYSIS'}`);
+        console.log(`   Reason: ${reason}`);
+        return {
+            ...analysisStatus,
+            reason
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Error checking site analysis for ${siteId}:`, errorMessage);
+        // In case of error, assume no analysis to be safe and allow scheduling
+        return {
+            hasAnalysis: false,
+            count: 0,
+            reason: `Error checking analysis (${errorMessage}) - assuming needs analysis for safety`
+        };
+    }
 }

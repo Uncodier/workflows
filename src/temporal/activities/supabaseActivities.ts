@@ -1,6 +1,8 @@
 // Temporary implementation without Supabase
 // TODO: Implement actual Supabase integration when credentials are available
 
+import { getSupabaseService } from '../services/supabaseService';
+
 /**
  * Activity to log workflow execution (temporary console implementation)
  */
@@ -80,4 +82,55 @@ export async function updateResourceActivity(id: string, data: Record<string, un
  */
 export async function deleteResourceActivity(id: string): Promise<void> {
   console.log('Deleting Resource:', id);
+}
+
+/**
+ * Check if a site has analysis records
+ */
+export async function checkSiteAnalysisActivity(siteId: string): Promise<{
+  hasAnalysis: boolean;
+  lastAnalysis?: any;
+  count: number;
+  reason: string;
+}> {
+  console.log(`🔍 Checking if site ${siteId} has analysis records...`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    const isConnected = await supabaseService.getConnectionStatus();
+    if (!isConnected) {
+      console.log('⚠️ Database not available, assuming no analysis');
+      return {
+        hasAnalysis: false,
+        count: 0,
+        reason: 'Database not available - assuming needs analysis'
+      };
+    }
+
+    const analysisStatus = await supabaseService.hasSiteAnalysis(siteId);
+    
+    const reason = analysisStatus.hasAnalysis 
+      ? `Site has ${analysisStatus.count} completed analysis record(s), last one from ${analysisStatus.lastAnalysis?.created_at || 'unknown date'}`
+      : 'No completed analysis found - needs initial site analysis';
+    
+    console.log(`📊 Site ${siteId} analysis check: ${analysisStatus.hasAnalysis ? 'HAS ANALYSIS' : 'NEEDS ANALYSIS'}`);
+    console.log(`   Reason: ${reason}`);
+    
+    return {
+      ...analysisStatus,
+      reason
+    };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Error checking site analysis for ${siteId}:`, errorMessage);
+    
+    // In case of error, assume no analysis to be safe and allow scheduling
+    return {
+      hasAnalysis: false,
+      count: 0,
+      reason: `Error checking analysis (${errorMessage}) - assuming needs analysis for safety`
+    };
+  }
 } 
