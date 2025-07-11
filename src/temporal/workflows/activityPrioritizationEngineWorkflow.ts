@@ -114,8 +114,10 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
         operationsExecuted = true;
         console.log('✅ Daily operations workflow completed successfully');
         
-        // Step 2.1: Schedule site analysis for sites that haven't been analyzed yet
+        // Step 2.1: Schedule site analysis for sites that need initial analysis
         console.log('🔍 Step 2.1: Scheduling site analysis for sites that need initial analysis...');
+        console.log('   Note: Site analysis will be scheduled even when daily standups execute immediately');
+        console.log('   This ensures sites get their initial analysis regardless of timing');
         
         try {
           const siteAnalysisResult = await scheduleIndividualSiteAnalysisActivity(
@@ -131,7 +133,7 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           console.log(`   ❌ Failed: ${siteAnalysisResult.failed} sites`);
           
           // Add site analysis results to operations result
-          operationsResult.siteAnalysisScheduling = {
+          (operationsResult as any).siteAnalysisScheduling = {
             scheduled: siteAnalysisResult.scheduled,
             skipped: siteAnalysisResult.skipped,
             failed: siteAnalysisResult.failed,
@@ -141,7 +143,7 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           
         } catch (siteAnalysisError) {
           console.error('❌ Error scheduling site analysis:', siteAnalysisError);
-          operationsResult.siteAnalysisScheduling = {
+          (operationsResult as any).siteAnalysisScheduling = {
             scheduled: 0,
             skipped: 0,
             failed: 1,
@@ -199,6 +201,43 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
         }
         
         operationsExecuted = false; // Not executed now, but scheduled individually
+        
+        // Step 2.2: Now schedule site analysis since daily standups are also scheduled for later
+        console.log('🔍 Step 2.2: Scheduling site analysis for sites that need initial analysis...');
+        console.log('   Both daily standups and site analysis will be scheduled for their appropriate times');
+        
+        try {
+          const siteAnalysisResult = await scheduleIndividualSiteAnalysisActivity(
+            businessHoursAnalysis,
+            {
+              timezone: 'America/Mexico_City'
+            }
+          );
+          
+          console.log(`🔍 Site analysis scheduling completed:`);
+          console.log(`   ✅ Scheduled: ${siteAnalysisResult.scheduled} sites`);
+          console.log(`   ⏭️ Skipped: ${siteAnalysisResult.skipped} sites (already analyzed)`);
+          console.log(`   ❌ Failed: ${siteAnalysisResult.failed} sites`);
+          
+          // Add site analysis results to operations result
+          (operationsResult as any).siteAnalysisScheduling = {
+            scheduled: siteAnalysisResult.scheduled,
+            skipped: siteAnalysisResult.skipped,
+            failed: siteAnalysisResult.failed,
+            results: siteAnalysisResult.results,
+            errors: siteAnalysisResult.errors
+          };
+          
+        } catch (siteAnalysisError) {
+          console.error('❌ Error scheduling site analysis:', siteAnalysisError);
+          (operationsResult as any).siteAnalysisScheduling = {
+            scheduled: 0,
+            skipped: 0,
+            failed: 1,
+            results: [],
+            errors: [siteAnalysisError instanceof Error ? siteAnalysisError.message : String(siteAnalysisError)]
+          };
+        }
         
       } catch (schedulingError) {
         console.error('❌ Error creating individual schedules:', schedulingError);

@@ -61,6 +61,7 @@ async function dailyStandUpWorkflow(options) {
     let growthAnalysisResult = null;
     let wrapUpResult = null;
     let finalCommandId = '';
+    let executionTime = '';
     try {
         console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
         // Get site information to obtain site details
@@ -217,21 +218,32 @@ async function dailyStandUpWorkflow(options) {
                 throw new Error(errorMsg);
             }
             console.log(`📧 Sending daily stand up notification...`);
-            await sendDailyStandUpNotificationActivity({
-                site_id: site_id,
-                subject: wrapUpResult.subject,
-                message: wrapUpResult.message,
-                systemAnalysis: systemAnalysisResult
-            });
-            console.log(`✅ Daily stand up notification sent successfully`);
+            try {
+                await sendDailyStandUpNotificationActivity({
+                    site_id: site_id,
+                    subject: wrapUpResult.subject,
+                    message: wrapUpResult.message,
+                    systemAnalysis: systemAnalysisResult
+                });
+                console.log(`✅ Daily stand up notification sent successfully`);
+            }
+            catch (notificationError) {
+                const errorMsg = `CRITICAL: Failed to send daily stand up notification - workflow must fail: ${notificationError instanceof Error ? notificationError.message : String(notificationError)}`;
+                console.error(`❌ ${errorMsg}`);
+                errors.push(`Notification: ${errorMsg}`);
+                throw new Error(errorMsg); // FAIL the workflow if notification cannot be sent
+            }
         }
         else {
-            console.error(`❌ Wrap up failed: ${wrapUpResult.error}`);
-            errors.push(`Wrap up: ${wrapUpResult.error}`);
+            // CRITICAL: If wrap up fails, we cannot send notification - fail the workflow
+            const errorMsg = `CRITICAL: Wrap up failed, cannot generate notification content - workflow must fail: ${wrapUpResult.error}`;
+            console.error(`❌ ${errorMsg}`);
+            errors.push(`Wrap up: ${errorMsg}`);
+            throw new Error(errorMsg);
         }
-        const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         // If we reach here, notification was sent successfully (or workflow would have failed)
         const notificationSent = true;
+        executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         const result = {
             success: true, // If we reach here, system analysis succeeded and we have command_id
             siteId: site_id,
@@ -288,7 +300,7 @@ async function dailyStandUpWorkflow(options) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ CMO daily stand up workflow failed: ${errorMessage}`);
-        const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+        executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         // Update cron status to indicate failure
         await saveCronStatusActivity({
             siteId: site_id,
@@ -308,30 +320,9 @@ async function dailyStandUpWorkflow(options) {
             input: options,
             error: errorMessage,
         });
-        // Return failed result instead of throwing to provide more information
-        const result = {
-            success: false,
-            siteId: site_id,
-            siteName,
-            siteUrl,
-            command_id: finalCommandId,
-            systemAnalysis: systemAnalysisResult,
-            salesAnalysis: salesAnalysisResult,
-            supportAnalysis: supportAnalysisResult,
-            growthAnalysis: growthAnalysisResult,
-            finalSummary: wrapUpResult?.summary,
-            notificationSent: false,
-            data: {
-                system: systemAnalysisResult,
-                sales: salesAnalysisResult,
-                support: supportAnalysisResult,
-                growth: growthAnalysisResult,
-                wrapUp: wrapUpResult
-            },
-            errors: [...errors, errorMessage],
-            executionTime,
-            completedAt: new Date().toISOString()
-        };
-        return result;
+        // FAIL the workflow completely - do not return failed result, throw the error
+        // The whole point of this workflow is to send the daily standup notification
+        // If that fails, the workflow should fail, not succeed with a failure result
+        throw error;
     }
 }
