@@ -34,7 +34,8 @@ import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 // Configure activity options using centralized timeouts
 const { 
   sendCustomerSupportMessageActivity,
-  processAnalysisDataActivity
+  processAnalysisDataActivity,
+  startLeadAttentionWorkflowActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.CUSTOMER_SUPPORT, // ✅ Using centralized config (5 minutes)
   retry: RETRY_POLICIES.CUSTOMER_SUPPORT, // ✅ Using appropriate retry policy for customer support
@@ -152,6 +153,53 @@ export async function emailCustomerSupportMessageWorkflow(
       // Don't fail the entire workflow if email fails
     }
     
+    // 🔔 Start independent leadAttentionWorkflow if we have a lead_id
+    let leadAttentionWorkflowId: string | undefined;
+    
+    try {
+      // Use lead_id from customer support response, not from input data
+      const leadId = response.data?.lead_id || emailData.analysis_id;
+      
+      if (leadId) {
+        console.log('🔔 Starting independent leadAttentionWorkflow...');
+        console.log(`📋 Lead ID: ${leadId} - will check for assignee_id before sending notification`);
+        console.log(`🎯 Lead source: ${response.data?.lead_id ? 'customer support response' : 'input data'}`);
+        
+        // Extract message content from customer support response
+        const userMessage = response.data?.messages?.user?.content || 
+                           emailData.summary || 
+                           'Customer inquiry';
+        
+        const systemMessage = response.data?.messages?.assistant?.content || 
+                             response.data?.message || 
+                             'Customer support notification';
+        
+        // Start independent workflow (fire and forget - no blocking)
+        const startResult = await startLeadAttentionWorkflowActivity({
+          lead_id: leadId,
+          user_message: userMessage,
+          system_message: systemMessage
+        });
+        
+        if (startResult.success) {
+          leadAttentionWorkflowId = startResult.workflowId;
+          console.log(`✅ Independent leadAttentionWorkflow started: ${leadAttentionWorkflowId}`);
+          console.log(`🚀 Workflow will run independently and check assignee_id`);
+        } else {
+          console.error('❌ Failed to start independent leadAttentionWorkflow:', startResult.error);
+          throw new Error(`Lead attention workflow failed to start: ${startResult.error}`);
+        }
+        
+      } else {
+        console.log('⚠️ No lead_id available for lead attention notification');
+        console.log('🔍 Checked: response.data.lead_id and emailData.analysis_id');
+      }
+      
+    } catch (leadAttentionError) {
+      console.error('❌ Lead attention workflow failed to start - failing entire workflow:', leadAttentionError);
+      throw leadAttentionError; // Re-throw to fail the entire workflow
+    }
+    
     console.log('✅ Email customer support message workflow completed successfully');
     return {
       success: true,
@@ -160,7 +208,8 @@ export async function emailCustomerSupportMessageWorkflow(
         processed: true,
         reason: processResult.reason,
         emailSent,
-        emailWorkflowId
+        emailWorkflowId,
+        leadAttentionWorkflowId
       }
     };
     
@@ -241,6 +290,53 @@ export async function customerSupportMessageWorkflow(
       // Website chat interactions should only use the chat medium unless explicitly requested
       console.log('💬 Website chat completed - no email follow-up needed (chat is the primary communication channel)');
       
+              // 🔔 Start independent leadAttentionWorkflow if we have a lead_id
+        let leadAttentionWorkflowId: string | undefined;
+        
+        try {
+          // Use lead_id from customer support response, not from input data
+          const leadId = response.data?.lead_id || messageData.lead_id || messageData.analysis_id;
+          
+          if (leadId) {
+            console.log('🔔 Starting independent leadAttentionWorkflow...');
+            console.log(`📋 Lead ID: ${leadId} - will check for assignee_id before sending notification`);
+            console.log(`🎯 Lead source: ${response.data?.lead_id ? 'customer support response' : 'input data'}`);
+            
+            // Extract message content from customer support response
+            const userMessage = response.data?.messages?.user?.content || 
+                               messageData.message || 
+                               'Website chat inquiry';
+            
+            const systemMessage = response.data?.messages?.assistant?.content || 
+                                 response.data?.message || 
+                                 'Website chat customer support notification';
+            
+            // Start independent workflow (fire and forget - no blocking)
+            const startResult = await startLeadAttentionWorkflowActivity({
+              lead_id: leadId,
+              user_message: userMessage,
+              system_message: systemMessage
+            });
+            
+            if (startResult.success) {
+              leadAttentionWorkflowId = startResult.workflowId;
+              console.log(`✅ Independent leadAttentionWorkflow started: ${leadAttentionWorkflowId}`);
+              console.log(`🚀 Workflow will run independently and check assignee_id`);
+            } else {
+              console.error('❌ Failed to start independent leadAttentionWorkflow:', startResult.error);
+              throw new Error(`Lead attention workflow failed to start: ${startResult.error}`);
+            }
+            
+          } else {
+            console.log('⚠️ No lead_id available for lead attention notification');
+            console.log('🔍 Checked: response.data.lead_id, messageData.lead_id and messageData.analysis_id');
+          }
+          
+        } catch (leadAttentionError) {
+          console.error('❌ Lead attention workflow failed to start - failing entire workflow:', leadAttentionError);
+          throw leadAttentionError; // Re-throw to fail the entire workflow
+        }
+      
       console.log('✅ Website chat customer support message workflow completed successfully');
       return {
         success: true,
@@ -249,7 +345,8 @@ export async function customerSupportMessageWorkflow(
           processed: true,
           reason: 'Website chat message processed for customer support',
           emailSent: false, // Website chat doesn't send follow-up emails
-          emailWorkflowId: undefined
+          emailWorkflowId: undefined,
+          leadAttentionWorkflowId
         }
       };
     }
@@ -346,6 +443,53 @@ export async function customerSupportMessageWorkflow(
         // Don't fail the entire workflow if WhatsApp fails
       }
       
+              // 🔔 Start independent leadAttentionWorkflow if we have a lead_id
+        let leadAttentionWorkflowId: string | undefined;
+        
+        try {
+          // Use lead_id from customer support response, not from input data
+          const leadId = response.data?.lead_id || emailDataForCS.analysis_id;
+          
+          if (leadId) {
+            console.log('🔔 Starting independent leadAttentionWorkflow...');
+            console.log(`📋 Lead ID: ${leadId} - will check for assignee_id before sending notification`);
+            console.log(`🎯 Lead source: ${response.data?.lead_id ? 'customer support response' : 'input data'}`);
+            
+            // Extract message content from customer support response
+            const userMessage = response.data?.messages?.user?.content || 
+                               whatsappData.messageContent || 
+                               'WhatsApp inquiry';
+            
+            const systemMessage = response.data?.messages?.assistant?.content || 
+                                 response.data?.message || 
+                                 'WhatsApp customer support notification';
+            
+            // Start independent workflow (fire and forget - no blocking)
+            const startResult = await startLeadAttentionWorkflowActivity({
+              lead_id: leadId,
+              user_message: userMessage,
+              system_message: systemMessage
+            });
+            
+            if (startResult.success) {
+              leadAttentionWorkflowId = startResult.workflowId;
+              console.log(`✅ Independent leadAttentionWorkflow started: ${leadAttentionWorkflowId}`);
+              console.log(`🚀 Workflow will run independently and check assignee_id`);
+            } else {
+              console.error('❌ Failed to start independent leadAttentionWorkflow:', startResult.error);
+              throw new Error(`Lead attention workflow failed to start: ${startResult.error}`);
+            }
+            
+          } else {
+            console.log('⚠️ No lead_id available for lead attention notification');
+            console.log('🔍 Checked: response.data.lead_id and emailDataForCS.analysis_id');
+          }
+          
+        } catch (leadAttentionError) {
+          console.error('❌ Lead attention workflow failed to start - failing entire workflow:', leadAttentionError);
+          throw leadAttentionError; // Re-throw to fail the entire workflow
+        }
+      
       console.log('✅ WhatsApp customer support message workflow completed successfully');
       return {
         success: true,
@@ -354,7 +498,8 @@ export async function customerSupportMessageWorkflow(
           processed: true,
           reason: 'WhatsApp message processed for customer support',
           whatsappSent,
-          whatsappWorkflowId
+          whatsappWorkflowId,
+          leadAttentionWorkflowId
         }
       };
       

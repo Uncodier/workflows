@@ -5,6 +5,8 @@
 
 import { apiService } from '../services/apiService';
 import { getSupabaseService } from '../services/supabaseService';
+import { getTemporalClient } from '../client';
+import { temporalConfig } from '../../config/config';
 
 // Lead interfaces
 export interface Lead {
@@ -20,6 +22,7 @@ export interface Lead {
   phone?: string;
   website?: string;
   company_size?: string;
+  assignee_id?: string;
   site_id: string;
   created_at: string;
   updated_at: string;
@@ -30,6 +33,94 @@ export interface GetLeadResult {
   success: boolean;
   lead?: Lead;
   error?: string;
+}
+
+/**
+ * Activity to check if a lead notification was already sent today
+ */
+export async function checkExistingLeadNotificationActivity(request: CheckExistingNotificationRequest): Promise<CheckExistingNotificationResult> {
+  console.log(`🔍 DUPLICATE CHECK: Starting check for existing lead attention notification for lead: ${request.lead_id}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 DUPLICATE CHECK: Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️ DUPLICATE CHECK: Database not available, proceeding with notification (cannot verify duplicates)');
+      return {
+        success: true,
+        exists: false // Assume no notification exists if DB is unavailable
+      };
+    }
+
+    console.log('✅ DUPLICATE CHECK: Database connection confirmed, checking for existing notifications...');
+    
+    // Get today's date in UTC (start and end of day)
+    const today = new Date();
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    
+    console.log(`📅 DUPLICATE CHECK: Checking notifications from ${startOfDay.toISOString()} to ${endOfDay.toISOString()}`);
+    console.log(`📅 DUPLICATE CHECK: Query params - lead_id: ${request.lead_id}, entity_type: 'lead'`);
+    
+    // Query notifications table for this lead_id and today's date
+    // Using the actual table structure: related_entity_id for lead_id and created_at for timestamp
+    const { data: notifications, error } = await (supabaseService as any).client
+      .from('notifications')
+      .select('id, created_at, related_entity_id, related_entity_type')
+      .eq('related_entity_id', request.lead_id)
+      .eq('related_entity_type', 'lead')
+      .gte('created_at', startOfDay.toISOString())
+      .lt('created_at', endOfDay.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    console.log(`📊 DUPLICATE CHECK: Query result - notifications:`, JSON.stringify(notifications, null, 2));
+    console.log(`📊 DUPLICATE CHECK: Query error:`, error);
+
+    if (error) {
+      console.error('❌ DUPLICATE CHECK: Error querying notifications:', error);
+      return {
+        success: false,
+        error: error.message,
+        exists: false
+      };
+    }
+
+    if (notifications && notifications.length > 0) {
+      const lastNotification = notifications[0];
+      console.log(`⚠️ DUPLICATE CHECK: FOUND existing lead attention notification for lead ${request.lead_id}`);
+      console.log(`📅 DUPLICATE CHECK: Last notification created at: ${lastNotification.created_at}`);
+      console.log(`📋 DUPLICATE CHECK: Notification details:`, JSON.stringify(lastNotification, null, 2));
+      
+      return {
+        success: true,
+        exists: true,
+        lastNotification: {
+          sent_at: lastNotification.created_at,
+          notification_id: lastNotification.id
+        }
+      };
+    } else {
+      console.log(`✅ DUPLICATE CHECK: NO existing notifications found for lead ${request.lead_id} today`);
+      return {
+        success: true,
+        exists: false
+      };
+    }
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception checking existing notifications for lead ${request.lead_id}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage,
+      exists: false // Assume no notification exists on error (fail open)
+    };
+  }
 }
 
 /**
@@ -232,6 +323,145 @@ export async function leadResearchActivity(request: LeadResearchRequest): Promis
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Exception executing lead research for lead ${request.lead_id}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+// Lead attention interfaces
+export interface LeadAttentionRequest {
+  lead_id: string;
+  user_message?: string; // User's original message
+  system_message?: string; // System/assistant response
+}
+
+export interface LeadAttentionResult {
+  success: boolean;
+  data?: any;
+  error?: string;
+}
+
+// Check existing notification interfaces
+export interface CheckExistingNotificationRequest {
+  lead_id: string;
+}
+
+export interface CheckExistingNotificationResult {
+  success: boolean;
+  exists: boolean;
+  lastNotification?: {
+    sent_at: string;
+    notification_id: string;
+  };
+  error?: string;
+}
+
+/**
+ * Activity to send lead attention notification via external API
+ * Only sends notification if the lead has an assignee_id
+ */
+export async function leadAttentionActivity(request: LeadAttentionRequest): Promise<LeadAttentionResult> {
+  console.log(`📤 API CALL: Sending lead attention notification for lead: ${request.lead_id}`);
+  console.log(`📤 API CALL: Request details:`, JSON.stringify(request, null, 2));
+  
+  try {
+    // Send the notification to the API (validation already done in workflow)
+    const requestBody = {
+      lead_id: request.lead_id,
+      user_message: request.user_message, // User's original message
+      system_message: request.system_message, // System/assistant response
+    };
+
+    console.log('📤 API CALL: Sending lead attention request to API...');
+    console.log('📤 API CALL: Request body:', JSON.stringify(requestBody, null, 2));
+    
+    const response = await apiService.post('/api/notifications/leadAttention', requestBody);
+    
+    console.log('📤 API CALL: Response:', JSON.stringify(response, null, 2));
+    
+    if (!response.success) {
+      console.error(`❌ API CALL FAILED: API call failed for lead ${request.lead_id}:`, response.error);
+      return {
+        success: false,
+        error: response.error?.message || 'Failed to send lead attention notification'
+      };
+    }
+    
+    console.log(`✅ API CALL SUCCESS: Lead attention notification sent successfully for lead ${request.lead_id}`);
+    
+    return {
+      success: true,
+      data: {
+        notificationSent: true,
+        response: response.data
+      }
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ API CALL EXCEPTION: Exception processing lead attention notification for lead ${request.lead_id}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+// Start Independent Workflow interfaces
+export interface StartLeadAttentionWorkflowRequest {
+  lead_id: string;
+  user_message?: string; // User's original message
+  system_message?: string; // System/assistant response
+}
+
+export interface StartLeadAttentionWorkflowResult {
+  success: boolean;
+  workflowId?: string;
+  error?: string;
+}
+
+/**
+ * Activity to start leadAttentionWorkflow as an independent workflow
+ * Uses Temporal client directly to start the workflow independently (not as child workflow)
+ */
+export async function startLeadAttentionWorkflowActivity(request: StartLeadAttentionWorkflowRequest): Promise<StartLeadAttentionWorkflowResult> {
+  console.log(`🚀 Starting independent leadAttentionWorkflow for lead: ${request.lead_id}`);
+  
+  try {
+    const workflowId = `lead-attention-${request.lead_id}`;
+    
+    // Get Temporal client directly (same pattern used throughout the codebase)
+    const client = await getTemporalClient();
+    
+    console.log('📤 Starting workflow via Temporal client:', {
+      workflowType: 'leadAttentionWorkflow',
+      workflowId,
+      args: [{ lead_id: request.lead_id, user_message: request.user_message, system_message: request.system_message }],
+      taskQueue: temporalConfig.taskQueue
+    });
+    
+    // Start the workflow using Temporal client (fire and forget)
+    const handle = await client.workflow.start('leadAttentionWorkflow', {
+      args: [{ lead_id: request.lead_id, user_message: request.user_message, system_message: request.system_message }],
+      workflowId,
+      taskQueue: temporalConfig.taskQueue,
+    });
+    
+    console.log(`✅ Independent leadAttentionWorkflow started successfully for lead ${request.lead_id}`);
+    console.log(`📋 Workflow ID: ${handle.workflowId}`);
+    
+    return {
+      success: true,
+      workflowId: handle.workflowId,
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception starting independent leadAttentionWorkflow for lead ${request.lead_id}:`, errorMessage);
     
     return {
       success: false,

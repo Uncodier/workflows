@@ -46,3 +46,5 @@ __exportStar(require("./dailyStandUpWorkflow"), exports);
 __exportStar(require("./delayedExecutionWorkflow"), exports);
 __exportStar(require("./leadGenerationWorkflow"), exports);
 __exportStar(require("./analyzeSiteWorkflow"), exports);
+__exportStar(require("./leadAttentionWorkflow"), exports);
+__exportStar(require("./sendNewsletterWorkflow"), exports);

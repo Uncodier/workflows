@@ -11,6 +11,7 @@ import { customerSupportMessageWorkflow, emailCustomerSupportMessageWorkflow } f
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 import { answerWhatsappMessageWorkflow, processWhatsAppMessagesWorkflow } from './answerWhatsappMessageWorkflow';
+import { leadAttentionWorkflow } from './leadAttentionWorkflow';
 
 // Export alias for backward compatibility
 export const whatsappMessageWorkflow = answerWhatsappMessageWorkflow;
@@ -56,6 +57,7 @@ export * from './delayedExecutionWorkflow';
 export * from './leadGenerationWorkflow';
 export * from './analyzeSiteWorkflow';
 export * from './sendNewsletterWorkflow';
+export * from './leadAttentionWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -89,6 +91,7 @@ export const workflows = {
   leadGenerationWorkflow,
   analyzeSiteWorkflow,
   sendNewsletterWorkflow,
+  leadAttentionWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
 };
@@ -125,6 +128,7 @@ export const workflowNames = {
   leadGenerationWorkflow: 'leadGenerationWorkflow',
   analyzeSiteWorkflow: 'analyzeSiteWorkflow',
   sendNewsletterWorkflow: 'sendNewsletterWorkflow',
+  leadAttentionWorkflow: 'leadAttentionWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',
 };

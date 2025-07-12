@@ -35,6 +35,7 @@
     "test:daily-standup-safe": "ts-node src/scripts/safe-test-daily-standup.ts",
     "test:activity-prioritization-dry": "ts-node src/scripts/test-activity-prioritization-dry-run.ts",
     "test:deep-research-fallback": "ts-node src/scripts/test-deep-research-fallback.ts",
+    "test:lead-attention": "ts-node src/scripts/test-lead-attention-workflow.ts",
     "dev:all": "concurrently \"npm run dev\" \"npm run worker:dev\"",
     "build:all": "npm run build && npm run worker:build",
     "start:all": "concurrently \"npm run start\" \"npm run worker:start\"",

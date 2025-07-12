@@ -28,6 +28,7 @@ const customerSupportWorkflow_1 = require("./customerSupportWorkflow");
 const sendEmailFromAgentWorkflow_1 = require("./sendEmailFromAgentWorkflow");
 const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow");
 const answerWhatsappMessageWorkflow_1 = require("./answerWhatsappMessageWorkflow");
+const leadAttentionWorkflow_1 = require("./leadAttentionWorkflow");
 // Export alias for backward compatibility
 exports.whatsappMessageWorkflow = answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow;
 const siteSetupWorkflow_1 = require("./siteSetupWorkflow");
@@ -71,6 +72,7 @@ __exportStar(require("./delayedExecutionWorkflow"), exports);
 __exportStar(require("./leadGenerationWorkflow"), exports);
 __exportStar(require("./analyzeSiteWorkflow"), exports);
 __exportStar(require("./sendNewsletterWorkflow"), exports);
+__exportStar(require("./leadAttentionWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -103,6 +105,7 @@ exports.workflows = {
     leadGenerationWorkflow: leadGenerationWorkflow_1.leadGenerationWorkflow,
     analyzeSiteWorkflow: analyzeSiteWorkflow_1.analyzeSiteWorkflow,
     sendNewsletterWorkflow: sendNewsletterWorkflow_1.sendNewsletterWorkflow,
+    leadAttentionWorkflow: leadAttentionWorkflow_1.leadAttentionWorkflow,
     // Alias for backward compatibility
     whatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
 };
@@ -138,6 +141,7 @@ exports.workflowNames = {
     leadGenerationWorkflow: 'leadGenerationWorkflow',
     analyzeSiteWorkflow: 'analyzeSiteWorkflow',
     sendNewsletterWorkflow: 'sendNewsletterWorkflow',
+    leadAttentionWorkflow: 'leadAttentionWorkflow',
     // Alias for backward compatibility
     whatsappMessageWorkflow: 'whatsappMessageWorkflow',
 };

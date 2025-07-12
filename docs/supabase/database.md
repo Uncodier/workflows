@@ -24,6 +24,11 @@
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
 
+-- ⚠️ CAMBIO ESTRUCTURAL IMPORTANTE (2024-12-19):
+-- Los campos device, browser y location han sido REMOVIDOS de la tabla 'visitors'
+-- y se mantienen únicamente en la tabla 'visitor_sessions'.
+-- Esto permite rastrear múltiples dispositivos/ubicaciones por visitante a través de sus sesiones.
+
 CREATE TABLE public.agent_assets (
   agent_id uuid NOT NULL,
   asset_id uuid NOT NULL,
@@ -511,12 +516,14 @@ CREATE TABLE public.leads (
   company_id uuid,
   attribution jsonb DEFAULT '{}'::jsonb,
   metadata jsonb DEFAULT '{}'::jsonb,
+  assignee_id uuid,
   CONSTRAINT leads_pkey PRIMARY KEY (id),
   CONSTRAINT leads_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id),
   CONSTRAINT leads_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.campaigns(id),
   CONSTRAINT leads_segment_id_fkey FOREIGN KEY (segment_id) REFERENCES public.segments(id),
   CONSTRAINT leads_site_id_fkey FOREIGN KEY (site_id) REFERENCES public.sites(id),
   CONSTRAINT leads_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT leads_assignee_id_fkey FOREIGN KEY (assignee_id) REFERENCES auth.users(id),
   CONSTRAINT fk_command_leads FOREIGN KEY (command_id) REFERENCES public.commands(id)
 );
 CREATE TABLE public.messages (
@@ -972,9 +979,7 @@ CREATE TABLE public.visitors (
   first_utm_campaign text,
   first_utm_term text,
   first_utm_content text,
-  device jsonb,
-  browser jsonb,
-  location jsonb,
+  -- device, browser, location campos removidos - ahora solo en visitor_sessions
   custom_data jsonb,
   lead_id uuid,
   is_identified boolean DEFAULT false,
