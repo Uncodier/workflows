@@ -170,57 +170,84 @@ async function evaluateBusinessHoursForDay(dayOfWeek) {
         console.log(`   - Sites currently in business hours: ${sitesCurrentlyOpen}`);
         console.log(`   - Business hours span: ${openSites.length > 0 ? `${earliestOpenTime} - ${latestCloseTime}` : 'N/A'}`);
         console.log(`   - Should execute now: ${isWithinAnyBusinessHours}`);
-        // Determine execution strategy
-        const shouldExecuteOperations = openSites.length > 0;
+        // NEW: Evaluate both groups separately
+        console.log(`\n🔍 EVALUATING BOTH GROUPS SEPARATELY:`);
+        // Group 1: Sites with business_hours
+        const sitesWithBusinessHoursExecute = openSites.length > 0;
+        console.log(`   Group 1 (sites with business_hours): ${sitesWithBusinessHoursExecute ? 'EXECUTE' : 'SKIP'} (${openSites.length} sites open)`);
+        // Group 2: Sites without business_hours (fallback logic)
+        const sitesWithoutBusinessHours = settings.length - sitesWithBusinessHours.length;
+        const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5; // Restored original logic: Mon-Fri
+        const sitesWithoutBusinessHoursExecute = sitesWithoutBusinessHours > 0 && isWeekday;
+        console.log(`   Group 2 (sites without business_hours): ${sitesWithoutBusinessHoursExecute ? 'EXECUTE' : 'SKIP'} (${sitesWithoutBusinessHours} sites, ${isWeekday ? 'weekday' : 'weekend'})`);
+        // Final decision: Execute if EITHER group should execute
+        const shouldExecuteOperations = sitesWithBusinessHoursExecute || sitesWithoutBusinessHoursExecute;
         let shouldExecuteNow = false;
         let shouldScheduleForLater = false;
         let nextExecutionTime = '';
         let reason;
         if (!shouldExecuteOperations) {
-            if (sitesWithBusinessHours.length > 0) {
-                reason = `Sites with business_hours are closed on ${today}`;
-            }
-            else {
-                // No sites have business_hours, use fallback logic
-                const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
-                return {
-                    shouldExecuteOperations: isWeekday,
-                    reason: isWeekday ? 'Weekday (fallback for sites without business_hours)' : 'Weekend (no business_hours sites open)',
-                    sitesWithBusinessHours: 0,
-                    sitesOpenToday: 0,
-                    openSites: [],
-                    shouldExecuteNow: isWeekday,
-                    shouldScheduleForLater: false
-                };
-            }
+            // Neither group should execute
+            const businessHoursReason = sitesWithBusinessHours.length > 0 ? `Sites with business_hours are closed on ${today}` : 'No sites have business_hours';
+            const fallbackReason = sitesWithoutBusinessHours > 0 ? (isWeekday ? 'Weekday (fallback sites available)' : 'Weekend (no fallback execution)') : 'No sites without business_hours';
+            reason = `${businessHoursReason} and ${fallbackReason}`;
         }
         else {
-            // Sites are open today, but should we execute now or later?
-            if (isWithinAnyBusinessHours) {
-                // We're currently within business hours - execute now
-                shouldExecuteNow = true;
-                shouldScheduleForLater = false;
-                reason = `${sitesCurrentlyOpen} site(s) are currently within business hours`;
-            }
-            else {
-                // Sites are open today but we're outside business hours
-                // Check if we're before or after business hours
-                const [earliestHour, earliestMinute] = earliestOpenTime.split(':').map(Number);
-                const earliestOpenMinutes = earliestHour * 60 + earliestMinute;
-                const currentTimeMinutes = currentHour * 60 + currentMinute;
-                if (currentTimeMinutes < earliestOpenMinutes) {
-                    // We're before business hours - schedule for later
-                    shouldExecuteNow = false;
-                    shouldScheduleForLater = true;
-                    nextExecutionTime = earliestOpenTime;
-                    reason = `${openSites.length} site(s) have business hours on ${today}, but it's too early (opens at ${earliestOpenTime})`;
-                }
-                else {
-                    // We're after business hours - execute now (catch-up mode)
+            // At least one group should execute
+            if (sitesWithBusinessHoursExecute && sitesWithoutBusinessHoursExecute) {
+                // Both groups should execute
+                if (isWithinAnyBusinessHours) {
                     shouldExecuteNow = true;
                     shouldScheduleForLater = false;
-                    reason = `${openSites.length} site(s) have business hours on ${today}, executing in catch-up mode (after hours)`;
+                    reason = `${sitesCurrentlyOpen} site(s) with business_hours are currently open AND ${sitesWithoutBusinessHours} site(s) without business_hours (weekday fallback)`;
                 }
+                else {
+                    // Business hours sites are open but not currently, check timing
+                    const [earliestHour, earliestMinute] = earliestOpenTime.split(':').map(Number);
+                    const earliestOpenMinutes = earliestHour * 60 + earliestMinute;
+                    const currentTimeMinutes = currentHour * 60 + currentMinute;
+                    if (currentTimeMinutes < earliestOpenMinutes) {
+                        shouldExecuteNow = false;
+                        shouldScheduleForLater = true;
+                        nextExecutionTime = earliestOpenTime;
+                        reason = `${openSites.length} site(s) with business_hours open on ${today} but too early (opens at ${earliestOpenTime}) AND ${sitesWithoutBusinessHours} site(s) without business_hours (weekday fallback)`;
+                    }
+                    else {
+                        shouldExecuteNow = true;
+                        shouldScheduleForLater = false;
+                        reason = `${openSites.length} site(s) with business_hours open on ${today} (catch-up mode) AND ${sitesWithoutBusinessHours} site(s) without business_hours (weekday fallback)`;
+                    }
+                }
+            }
+            else if (sitesWithBusinessHoursExecute) {
+                // Only business hours sites should execute
+                if (isWithinAnyBusinessHours) {
+                    shouldExecuteNow = true;
+                    shouldScheduleForLater = false;
+                    reason = `${sitesCurrentlyOpen} site(s) with business_hours are currently open`;
+                }
+                else {
+                    const [earliestHour, earliestMinute] = earliestOpenTime.split(':').map(Number);
+                    const earliestOpenMinutes = earliestHour * 60 + earliestMinute;
+                    const currentTimeMinutes = currentHour * 60 + currentMinute;
+                    if (currentTimeMinutes < earliestOpenMinutes) {
+                        shouldExecuteNow = false;
+                        shouldScheduleForLater = true;
+                        nextExecutionTime = earliestOpenTime;
+                        reason = `${openSites.length} site(s) with business_hours open on ${today}, but too early (opens at ${earliestOpenTime})`;
+                    }
+                    else {
+                        shouldExecuteNow = true;
+                        shouldScheduleForLater = false;
+                        reason = `${openSites.length} site(s) with business_hours open on ${today}, executing in catch-up mode (after hours)`;
+                    }
+                }
+            }
+            else {
+                // Only fallback sites should execute
+                shouldExecuteNow = true;
+                shouldScheduleForLater = false;
+                reason = `${sitesWithoutBusinessHours} site(s) without business_hours (weekday fallback)`;
             }
         }
         console.log(`🎯 FINAL DECISION: ${shouldExecuteOperations ? 'EXECUTE' : 'SKIP'} - ${reason}`);

@@ -44,6 +44,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.callRegionSearchApiActivity = callRegionSearchApiActivity;
 exports.callRegionVenuesApiActivity = callRegionVenuesApiActivity;
 exports.callLeadGenerationApiActivity = callLeadGenerationApiActivity;
+exports.saveLeadsFromDeepResearchActivity = saveLeadsFromDeepResearchActivity;
 exports.createLeadsFromResearchActivity = createLeadsFromResearchActivity;
 exports.convertVenuesToCompanies = convertVenuesToCompanies;
 exports.createCompaniesFromVenuesActivity = createCompaniesFromVenuesActivity;
@@ -240,6 +241,78 @@ async function callLeadGenerationApiActivity(options) {
     }
 }
 /**
+ * Activity to save leads generated from deep research
+ * This is a visible workflow step that occurs after deep research and before moving to next venue
+ */
+async function saveLeadsFromDeepResearchActivity(options) {
+    try {
+        logger_1.logger.info('💾 Starting to save leads from deep research', {
+            site_id: options.site_id,
+            leadsCount: options.leads.length,
+            companyName: options.company?.name,
+            createMode: options.create || false
+        });
+        if (options.leads.length === 0) {
+            logger_1.logger.info('⚠️ No leads to save from deep research', {
+                site_id: options.site_id,
+                companyName: options.company?.name
+            });
+            return {
+                success: true,
+                leadsCreated: 0,
+                leadsValidated: 0,
+                leads: [],
+                validationResults: []
+            };
+        }
+        console.log(`💾 Saving ${options.leads.length} leads from deep research for company: ${options.company?.name}`);
+        // Use the existing createLeadsFromResearchActivity to do the actual work
+        const createLeadsOptions = {
+            site_id: options.site_id,
+            leads: options.leads,
+            create: options.create || false,
+            userId: options.userId,
+            additionalData: {
+                ...options.additionalData,
+                company: options.company,
+                workflowStep: 'save_leads_from_deep_research'
+            }
+        };
+        const result = await createLeadsFromResearchActivity(createLeadsOptions);
+        if (result.success) {
+            logger_1.logger.info('✅ Successfully saved leads from deep research', {
+                site_id: options.site_id,
+                companyName: options.company?.name,
+                leadsCreated: result.leadsCreated,
+                leadsValidated: result.leadsValidated
+            });
+            console.log(`✅ Successfully saved ${result.leadsCreated || 0} leads from deep research for company: ${options.company?.name}`);
+            console.log(`📊 Validation results: ${result.leadsValidated || 0} leads validated`);
+        }
+        else {
+            logger_1.logger.error('❌ Failed to save leads from deep research', {
+                site_id: options.site_id,
+                companyName: options.company?.name,
+                error: result.error,
+                errorsCount: result.errors?.length || 0
+            });
+        }
+        return result;
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger_1.logger.error('❌ Exception saving leads from deep research', {
+            error: errorMessage,
+            site_id: options.site_id,
+            companyName: options.company?.name
+        });
+        return {
+            success: false,
+            error: `Exception saving leads from deep research: ${errorMessage}`
+        };
+    }
+}
+/**
  * Activity to create/validate leads from research results
  */
 async function createLeadsFromResearchActivity(options) {
@@ -336,15 +409,21 @@ function validateLeadData(lead) {
     if (!lead.name || typeof lead.name !== 'string' || lead.name.trim() === '') {
         errors.push('Name is required and must be a non-empty string');
     }
-    if (!lead.email || typeof lead.email !== 'string' || lead.email.trim() === '') {
-        errors.push('Email is required and must be a non-empty string');
+    // Email is optional but if provided, must be valid
+    if (lead.email) {
+        if (typeof lead.email !== 'string' || lead.email.trim() === '') {
+            errors.push('Email must be a non-empty string if provided');
+        }
+        else {
+            // Basic email validation
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(lead.email)) {
+                errors.push('Email must be a valid email address');
+            }
+        }
     }
     else {
-        // Basic email validation
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(lead.email)) {
-            errors.push('Email must be a valid email address');
-        }
+        warnings.push('No email provided - lead may be harder to contact');
     }
     // Optional fields validation
     if (lead.telephone && typeof lead.telephone !== 'string') {
@@ -382,8 +461,8 @@ function validateLeadData(lead) {
  */
 async function createSingleLead(lead, site_id, userId) {
     try {
-        // Import supabase client
-        const supabase = (await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')))).default;
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
         // Prepare lead data for database
         const leadData = {
             name: lead.name,
@@ -400,7 +479,7 @@ async function createSingleLead(lead, site_id, userId) {
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };
-        const { data, error } = await supabase
+        const { data, error } = await supabaseServiceRole
             .from('leads')
             .insert([leadData])
             .select()
@@ -439,12 +518,89 @@ async function createSingleLead(lead, site_id, userId) {
  */
 function convertVenuesToCompanies(venues) {
     const companies = [];
+    // Helper function to map venue types to allowed industry values
+    const mapVenueTypeToIndustry = (types) => {
+        if (!types || types.length === 0)
+            return 'other';
+        const typeMap = {
+            'restaurant': 'hospitality',
+            'food': 'hospitality',
+            'meal_takeaway': 'hospitality',
+            'meal_delivery': 'hospitality',
+            'cafe': 'hospitality',
+            'bar': 'hospitality',
+            'lodging': 'hospitality',
+            'hotel': 'hospitality',
+            'tourist_attraction': 'hospitality',
+            'store': 'retail',
+            'shopping_mall': 'retail',
+            'clothing_store': 'retail',
+            'electronics_store': 'retail',
+            'grocery_or_supermarket': 'retail',
+            'convenience_store': 'retail',
+            'department_store': 'retail',
+            'pharmacy': 'healthcare',
+            'hospital': 'healthcare',
+            'doctor': 'healthcare',
+            'dentist': 'healthcare',
+            'veterinary_care': 'healthcare',
+            'health': 'healthcare',
+            'gym': 'services',
+            'beauty_salon': 'services',
+            'spa': 'services',
+            'lawyer': 'services',
+            'accounting': 'finance',
+            'bank': 'finance',
+            'atm': 'finance',
+            'insurance_agency': 'finance',
+            'real_estate_agency': 'real_estate',
+            'moving_company': 'logistics',
+            'storage': 'logistics',
+            'gas_station': 'logistics',
+            'car_repair': 'services',
+            'car_dealer': 'retail',
+            'school': 'education',
+            'university': 'education',
+            'library': 'education',
+            'church': 'nonprofit',
+            'cemetery': 'nonprofit',
+            'media': 'media',
+            'news': 'media',
+            'entertainment': 'media'
+        };
+        // Find the first matching type
+        for (const type of types) {
+            if (typeMap[type]) {
+                return typeMap[type];
+            }
+        }
+        return 'other';
+    };
+    // Helper function to map employee count to allowed size values
+    const mapEmployeeCountToSize = (count) => {
+        if (!count)
+            return '1-10'; // Default for small businesses
+        if (count <= 10)
+            return '1-10';
+        else if (count <= 50)
+            return '11-50';
+        else if (count <= 200)
+            return '51-200';
+        else if (count <= 500)
+            return '201-500';
+        else if (count <= 1000)
+            return '501-1000';
+        else if (count <= 5000)
+            return '1001-5000';
+        else if (count <= 10000)
+            return '5001-10000';
+        else
+            return '10001+';
+    };
     for (const venue of venues) {
         try {
-            // Extract industry from types
-            const industry = venue.types && venue.types.length > 0
-                ? venue.types.filter(type => type !== 'point_of_interest' && type !== 'establishment')[0] || 'Business'
-                : 'Business';
+            // Map venue types to valid industry
+            const industry = mapVenueTypeToIndustry(venue.types || []);
             // Calculate approximate employees count based on rating and reviews
             let employeesCount = null;
             if (venue.total_ratings && venue.total_ratings > 0) {
@@ -460,6 +616,8 @@ function convertVenuesToCompanies(venues) {
                 else
                     employeesCount = 3;
             }
+            // Map employee count to valid size
+            const size = mapEmployeeCountToSize(employeesCount);
             const company = {
                 name: venue.name,
                 website: venue.website || null,
@@ -469,7 +627,7 @@ function convertVenuesToCompanies(venues) {
                 address: venue.address,
                 phone: venue.phone || venue.international_phone || null,
                 email: null, // Will be populated later through research
-                size: employeesCount ? `${employeesCount} employees` : null,
+                size: size,
                 employees_count: employeesCount,
                 google_maps_url: venue.google_maps_url || null,
                 rating: venue.rating ? parseFloat(venue.rating) : null,
@@ -503,7 +661,6 @@ function convertVenuesToCompanies(venues) {
 async function createCompaniesFromVenuesActivity(options) {
     try {
         logger_1.logger.info('🏢 Starting companies creation from venues', {
-            site_id: options.site_id,
             venuesCount: options.venues.length
         });
         // Convert venues to companies
@@ -514,76 +671,93 @@ async function createCompaniesFromVenuesActivity(options) {
                 companies: [],
             };
         }
-        // Import supabase client
-        const supabase = (await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')))).default;
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
         const createdCompanies = [];
         for (const company of companies) {
             try {
-                // Prepare company data for database
+                // Prepare company data for database (now using properly mapped values)
                 const companyData = {
                     name: company.name,
-                    website: company.website,
-                    industry: company.industry,
-                    description: company.description,
-                    location: company.location,
-                    address: company.address,
-                    phone: company.phone,
-                    email: company.email,
-                    size: company.size,
-                    employees_count: company.employees_count,
-                    google_maps_url: company.google_maps_url,
-                    rating: company.rating,
-                    total_ratings: company.total_ratings,
-                    business_status: company.business_status,
-                    types: company.types,
-                    coordinates: company.coordinates,
-                    opening_hours: company.opening_hours,
-                    amenities: company.amenities,
-                    reviews: company.reviews,
-                    photos: company.photos,
-                    venue_id: company.venue_id,
-                    site_id: options.site_id,
-                    user_id: options.userId || null,
-                    status: 'active',
-                    origin: 'region_venues_api',
+                    website: company.website || null,
+                    industry: company.industry || null,
+                    description: company.description || null,
+                    address: company.address || null,
+                    phone: company.phone || null,
+                    email: company.email || null,
+                    size: company.size || null,
+                    employees_count: company.employees_count || null,
+                    business_hours: company.opening_hours || null,
                     created_at: new Date().toISOString(),
                     updated_at: new Date().toISOString()
                 };
-                // Use upsert to handle duplicates (based on name and location)
-                const { data, error } = await supabase
+                // First, check if company already exists (just by name since site_id doesn't exist)
+                const { data: existingCompany, error: selectError } = await supabaseServiceRole
                     .from('companies')
-                    .upsert(companyData, {
-                    onConflict: 'name,location',
-                    ignoreDuplicates: false
-                })
-                    .select()
-                    .single();
-                if (error) {
-                    logger_1.logger.error('❌ Failed to create/update company in database', {
-                        error: error.message,
-                        site_id: options.site_id,
+                    .select('*')
+                    .eq('name', company.name)
+                    .maybeSingle();
+                if (selectError) {
+                    logger_1.logger.error('❌ Error checking existing company', {
+                        error: selectError.message,
                         companyName: company.name
                     });
-                    continue;
                 }
-                createdCompanies.push(data);
-                logger_1.logger.info(`✅ Company created/updated: ${company.name}`, {
-                    site_id: options.site_id,
-                    companyId: data.id
-                });
+                let result;
+                if (existingCompany) {
+                    // Update existing company
+                    const { data: updateData, error: updateError } = await supabaseServiceRole
+                        .from('companies')
+                        .update({
+                        ...companyData,
+                        updated_at: new Date().toISOString()
+                    })
+                        .eq('id', existingCompany.id)
+                        .select()
+                        .single();
+                    if (updateError) {
+                        logger_1.logger.error('❌ Failed to update existing company', {
+                            error: updateError.message,
+                            companyName: company.name
+                        });
+                        continue;
+                    }
+                    result = updateData;
+                    logger_1.logger.info(`✅ Company updated: ${company.name}`, {
+                        companyId: result.id
+                    });
+                }
+                else {
+                    // Create new company
+                    const { data: insertData, error: insertError } = await supabaseServiceRole
+                        .from('companies')
+                        .insert(companyData)
+                        .select()
+                        .single();
+                    if (insertError) {
+                        logger_1.logger.error('❌ Failed to create new company', {
+                            error: insertError.message,
+                            companyName: company.name
+                        });
+                        continue;
+                    }
+                    result = insertData;
+                    logger_1.logger.info(`✅ Company created: ${company.name}`, {
+                        companyId: result.id
+                    });
+                }
+                createdCompanies.push(result);
             }
             catch (companyError) {
                 const errorMessage = companyError instanceof Error ? companyError.message : String(companyError);
                 logger_1.logger.error('❌ Exception creating company', {
                     error: errorMessage,
-                    site_id: options.site_id,
                     companyName: company.name
                 });
                 continue;
             }
         }
         logger_1.logger.info('✅ Companies creation completed', {
-            site_id: options.site_id,
             totalVenues: options.venues.length,
             companiesCreated: createdCompanies.length
         });
@@ -595,8 +769,7 @@ async function createCompaniesFromVenuesActivity(options) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         logger_1.logger.error('❌ Exception creating companies from venues', {
-            error: errorMessage,
-            site_id: options.site_id
+            error: errorMessage
         });
         return {
             success: false,

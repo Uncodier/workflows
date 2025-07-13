@@ -11,7 +11,7 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, }
     },
 });
 // Import specific lead generation activities
-const { callRegionSearchApiActivity, callRegionVenuesApiActivity, callLeadGenerationApiActivity, createLeadsFromResearchActivity, createCompaniesFromVenuesActivity, } = (0, workflow_1.proxyActivities)({
+const { callRegionSearchApiActivity, callRegionVenuesApiActivity, callLeadGenerationApiActivity, createCompaniesFromVenuesActivity, saveLeadsFromDeepResearchActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes', // Longer timeout for lead generation processes
     retry: {
         maximumAttempts: 3,
@@ -51,30 +51,46 @@ function generateCompaniesDeliverables(): any {
 }
 */
 /**
+ * Clean company data by removing noisy fields like reviews, photos, etc.
+ * to avoid generating noise in deep research
+ */
+function cleanCompanyForDeepResearch(company) {
+    // Create a new object with only the essential fields for deep research
+    return {
+        name: company.name,
+        website: company.website,
+        industry: company.industry,
+        description: company.description,
+        location: company.location,
+        address: company.address,
+        phone: company.phone,
+        email: company.email,
+        size: company.size,
+        employees_count: company.employees_count,
+        google_maps_url: company.google_maps_url,
+        rating: company.rating,
+        total_ratings: company.total_ratings,
+        business_status: company.business_status,
+        coordinates: company.coordinates,
+        // Exclude: reviews, photos, amenities, opening_hours, types, venue_id, _research_timestamp, _research_source
+    };
+}
+/**
  * Generate deliverables structure for employee research
  * Returns structure with employee leads including company information
  */
-function generateEmployeeDeliverables(company) {
+function generateEmployeeDeliverables(_company) {
     return {
-        business: {
-            // Company information (already known from previous research)
-            ...company,
-            // Employee list for this business
-            employees: [
-                {
-                    // Employee personal information
-                    name: null,
-                    telephone: null,
-                    email: null,
-                    position: null,
-                    department: null,
-                    seniority_level: null,
-                    linkedin_url: null,
-                    _research_timestamp: new Date().toISOString(),
-                    _research_source: "employee_research_workflow"
-                }
-            ]
-        }
+        leads: [
+            {
+                // Only employee/lead personal information - NO company data
+                name: "full name of the employee or decision maker",
+                telephone: "direct phone number or mobile contact",
+                email: "professional email address",
+                position: "job title or role in the company",
+                linkedin_url: "LinkedIn profile URL if available"
+            }
+        ]
     };
 }
 /**
@@ -166,9 +182,43 @@ function extractCompaniesFromDeliverables(deliverables: any): CompanyData[] {
 function extractEmployeesFromDeliverables(deliverables) {
     const employees = [];
     try {
-        // Try business.employees structure first (most common from deep research)
-        if (deliverables && deliverables.business && deliverables.business.employees && Array.isArray(deliverables.business.employees)) {
-            console.log(`🔍 Found employees in deliverables.business.employees structure`);
+        // Try direct array structure first (new ultra-simplified format)
+        if (deliverables && Array.isArray(deliverables)) {
+            console.log(`🔍 Found leads in direct array structure (ultra-simplified format)`);
+            for (const leadData of deliverables) {
+                if (leadData && typeof leadData === 'object' && leadData.name) {
+                    employees.push({
+                        name: leadData.name,
+                        telephone: leadData.telephone || leadData.phone || null,
+                        email: leadData.email || null,
+                        company_name: undefined,
+                        address: leadData.address || null,
+                        web: leadData.web || null,
+                        position: leadData.position || leadData.job_title || null
+                    });
+                }
+            }
+        }
+        // Try simplified leads structure (backup)
+        else if (deliverables && deliverables.leads && Array.isArray(deliverables.leads)) {
+            console.log(`🔍 Found leads in deliverables.leads structure (backup format)`);
+            for (const leadData of deliverables.leads) {
+                if (leadData && typeof leadData === 'object' && leadData.name) {
+                    employees.push({
+                        name: leadData.name,
+                        telephone: leadData.telephone || leadData.phone || null,
+                        email: leadData.email || null,
+                        company_name: undefined,
+                        address: leadData.address || null,
+                        web: leadData.web || null,
+                        position: leadData.position || leadData.job_title || null
+                    });
+                }
+            }
+        }
+        // Try business.employees structure (legacy support)
+        else if (deliverables && deliverables.business && deliverables.business.employees && Array.isArray(deliverables.business.employees)) {
+            console.log(`🔍 Found employees in deliverables.business.employees structure (legacy)`);
             const business = deliverables.business;
             for (const employeeData of deliverables.business.employees) {
                 if (employeeData && typeof employeeData === 'object' && employeeData.name) {
@@ -455,8 +505,41 @@ async function leadGenerationWorkflow(options) {
                                         // Step 4b: Call deep research for employees of this company
                                         console.log(`👥 Step 4b: Researching employees for company: ${company.name}`);
                                         const employeeDeliverables = generateEmployeeDeliverables(company);
-                                        // Create search topic for employees
-                                        const employeeSearchTopic = `employees and key contacts at ${company.name}${company.location ? ` in ${company.location}` : ''}`;
+                                        // Create search topic for employees with specific venue address and regional context
+                                        const locationInfo = [];
+                                        // Add specific venue address
+                                        if (company.address) {
+                                            locationInfo.push(company.address);
+                                        }
+                                        // Add regional context if different from venue address
+                                        if (targetCity && !company.address?.toLowerCase().includes(targetCity.toLowerCase())) {
+                                            locationInfo.push(targetCity);
+                                        }
+                                        if (targetRegion && !company.address?.toLowerCase().includes(targetRegion.toLowerCase())) {
+                                            locationInfo.push(targetRegion);
+                                        }
+                                        // Build contact information context
+                                        const contactInfo = [];
+                                        if (company.phone) {
+                                            contactInfo.push(`phone: ${company.phone}`);
+                                        }
+                                        if (company.email) {
+                                            contactInfo.push(`email: ${company.email}`);
+                                        }
+                                        if (company.website) {
+                                            contactInfo.push(`website: ${company.website}`);
+                                        }
+                                        const locationContext = locationInfo.length > 0 ? ` located at ${locationInfo.join(', ')}` : '';
+                                        const contactContext = contactInfo.length > 0 ? ` (Contact info: ${contactInfo.join(', ')})` : '';
+                                        const employeeSearchTopic = `Find individual employees, staff members, key contacts, and decision makers who work at ${company.name}${locationContext}${contactContext}. ONLY find personal information about the employees themselves: their names, email addresses, phone numbers, job titles, and LinkedIn profiles. DO NOT research or provide any company information since we already have that data.`;
+                                        console.log(`🎯 Enhanced research topic for ${company.name}:`);
+                                        console.log(`   "${employeeSearchTopic}"`);
+                                        if (locationInfo.length > 0) {
+                                            console.log(`📍 Specific location context: ${locationInfo.join(' → ')}`);
+                                        }
+                                        if (contactInfo.length > 0) {
+                                            console.log(`📞 Available contact info: ${contactInfo.join(' | ')}`);
+                                        }
                                         const employeeResearchOptions = {
                                             site_id: site_id,
                                             research_topic: employeeSearchTopic,
@@ -464,7 +547,7 @@ async function leadGenerationWorkflow(options) {
                                             deliverables: employeeDeliverables,
                                             additionalData: {
                                                 ...options.additionalData,
-                                                company: company,
+                                                company: cleanCompanyForDeepResearch(company),
                                                 businessTypes: businessTypes,
                                                 leadGenerationResult: companyLeadGenResult,
                                                 researchContext: 'employee_research_workflow',
@@ -490,31 +573,30 @@ async function leadGenerationWorkflow(options) {
                                                 companyResult.leadsGenerated = employeeLeads;
                                                 totalLeadsGenerated += employeeLeads.length;
                                                 console.log(`👥 Generated ${employeeLeads.length} leads for ${company.name}`);
-                                                // Step 4c: Create/validate leads for this company
-                                                if (employeeLeads.length > 0) {
-                                                    console.log(`🔄 Step 4c: Creating/validating ${employeeLeads.length} leads for ${company.name}...`);
-                                                    const createLeadsOptions = {
-                                                        site_id: site_id,
-                                                        leads: employeeLeads,
-                                                        create: options.create || false,
-                                                        userId: options.userId || site.user_id,
-                                                        additionalData: {
-                                                            ...options.additionalData,
-                                                            company: company,
-                                                            businessTypes: businessTypes,
-                                                            workflowId: workflowId
-                                                        }
-                                                    };
-                                                    const leadCreationResult = await createLeadsFromResearchActivity(createLeadsOptions);
-                                                    leadCreationResults.push(leadCreationResult);
-                                                    if (leadCreationResult.success) {
-                                                        console.log(`✅ Lead creation for ${company.name} successful`);
+                                                // Step 4b.5: Save leads from deep research (visible workflow step)
+                                                console.log(`💾 Step 4b.5: Saving ${employeeLeads.length} leads from deep research for ${company.name}...`);
+                                                const saveLeadsResult = await saveLeadsFromDeepResearchActivity({
+                                                    site_id: site_id,
+                                                    leads: employeeLeads,
+                                                    company: cleanCompanyForDeepResearch(company),
+                                                    create: options.create !== false, // Default to true unless explicitly set to false
+                                                    userId: options.userId || site.user_id,
+                                                    additionalData: {
+                                                        ...options.additionalData,
+                                                        businessTypes: businessTypes,
+                                                        workflowId: workflowId,
+                                                        deepResearchCompleted: true
                                                     }
-                                                    else {
-                                                        const errorMsg = `Lead creation for ${company.name} failed: ${leadCreationResult.error}`;
-                                                        console.error(`❌ ${errorMsg}`);
-                                                        companyResult.errors.push(errorMsg);
-                                                    }
+                                                });
+                                                leadCreationResults.push(saveLeadsResult);
+                                                if (saveLeadsResult.success) {
+                                                    console.log(`✅ Successfully saved ${saveLeadsResult.leadsCreated || 0} leads from deep research for ${company.name}`);
+                                                    console.log(`📊 Leads processed: ${saveLeadsResult.leadsValidated || 0} validated, ${saveLeadsResult.leadsCreated || 0} created`);
+                                                }
+                                                else {
+                                                    const errorMsg = `Failed to save leads from deep research for ${company.name}: ${saveLeadsResult.error}`;
+                                                    console.error(`❌ ${errorMsg}`);
+                                                    companyResult.errors.push(errorMsg);
                                                 }
                                             }
                                             else {

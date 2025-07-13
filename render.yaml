@@ -38,6 +38,11 @@ services:
           type: envVarGroup
           name: database-config
           envVarKey: SUPABASE_ANON_KEY
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        fromService:
+          type: envVarGroup
+          name: database-config
+          envVarKey: SUPABASE_SERVICE_ROLE_KEY
 
   # Worker Service - Temporal Worker (Always Running)
   - type: worker
@@ -78,6 +83,11 @@ services:
           type: envVarGroup
           name: database-config
           envVarKey: SUPABASE_ANON_KEY
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        fromService:
+          type: envVarGroup
+          name: database-config
+          envVarKey: SUPABASE_SERVICE_ROLE_KEY
 
 # Environment Variable Groups (Configure in Render Dashboard)
 envVarGroups:
@@ -95,4 +105,6 @@ envVarGroups:
       - key: SUPABASE_URL
         # Set this in Render Dashboard
       - key: SUPABASE_ANON_KEY
-        # Set this in Render Dashboard (encrypted) 
+        # Set this in Render Dashboard (encrypted)
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        # Set this in Render Dashboard (encrypted) - Can bypass RLS 

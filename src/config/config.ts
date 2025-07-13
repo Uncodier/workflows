@@ -14,6 +14,7 @@ interface TemporalConfig {
 interface SupabaseConfig {
   url: string;
   key: string;
+  serviceRoleKey?: string;
 }
 
 interface ApiConfig {
@@ -37,6 +38,7 @@ const temporalConfig: TemporalConfig = {
 const supabaseConfig: SupabaseConfig = {
   url: process.env.SUPABASE_URL || '',
   key: process.env.SUPABASE_KEY || '',
+  serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
 };
 
 const apiConfig: ApiConfig = {

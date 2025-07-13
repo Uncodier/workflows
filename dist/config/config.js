@@ -19,6 +19,7 @@ exports.temporalConfig = temporalConfig;
 const supabaseConfig = {
     url: process.env.SUPABASE_URL || '',
     key: process.env.SUPABASE_KEY || '',
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
 };
 exports.supabaseConfig = supabaseConfig;
 const apiConfig = {
