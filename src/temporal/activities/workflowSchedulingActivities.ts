@@ -1264,10 +1264,11 @@ export async function scheduleIndividualDailyStandUpsActivity(
           console.log(`   ⏰ Will execute in ${delayHours.toFixed(2)} hours`);
         }
         
-        // Create unique workflow ID for this site
-        const workflowId = `daily-standup-timer-${site.id}-${Date.now()}`;
+        // Create unique workflow ID for this site with better uniqueness
+        const uniqueHash = Math.random().toString(36).substring(2, 15); // 13 character random string
+        const dateSpecificId = `daily-standup-timer-${site.id}-${finalLocalDateStr}-${scheduledTime.replace(':', '')}-${uniqueHash}`;
         
-        console.log(`   - Workflow ID: ${workflowId}`);
+        console.log(`   - Workflow ID: ${dateSpecificId}`);
         console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
         
         // Prepare workflow arguments for dailyStandUpWorkflow
@@ -1292,35 +1293,66 @@ export async function scheduleIndividualDailyStandUpsActivity(
             siteName: site.name || `Site ${site.id.substring(0, 8)}`,
             fallbackUsed: !businessHours,
             delayMs,
-            targetTimeUTC: finalTargetUTC.toISOString()
+            targetTimeUTC: finalTargetUTC.toISOString(),
+            workflowVersion: '2.0', // Add version tracking
+            createdAt: new Date().toISOString()
           }
         }];
 
-        // Start the DELAYED workflow instead of creating a schedule
-        await client.workflow.start('delayedExecutionWorkflow', {
-          args: [{
-            delayMs: Math.max(delayMs, 0), // Ensure non-negative delay
-            targetWorkflow: 'dailyStandUpWorkflow',
-            targetArgs: workflowArgs,
-            siteName: site.name || 'Site',
-            scheduledTime: `${scheduledTime} ${siteTimezone}`,
-            executionType: 'timer-based-standup'
-          }],
-          taskQueue: temporalConfig.taskQueue,
-          workflowId: workflowId,
-          workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
-        });
+        // Start the DELAYED workflow with improved error handling
+        try {
+          await client.workflow.start('delayedExecutionWorkflow', {
+            args: [{
+              delayMs: Math.max(delayMs, 0), // Ensure non-negative delay
+              targetWorkflow: 'dailyStandUpWorkflow',
+              targetArgs: workflowArgs,
+              siteName: site.name || 'Site',
+              scheduledTime: `${scheduledTime} ${siteTimezone}`,
+              executionType: 'timer-based-standup'
+            }],
+            taskQueue: temporalConfig.taskQueue,
+            workflowId: dateSpecificId,
+            workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+          });
 
-        console.log(`✅ Successfully scheduled Daily Stand Up with TIMER for ${site.name || 'Site'}`);
-        console.log(`   - Will execute at: ${scheduledTime} ${siteTimezone} on ${finalLocalDateStr}`);
-        console.log(`   - Business hours source: ${businessHoursSource}`);
-        console.log(`   - Using TIMER approach instead of schedule`);
-        
+          console.log(`✅ Successfully scheduled Daily Stand Up with TIMER for ${site.name || 'Site'}`);
+          console.log(`   - Will execute at: ${scheduledTime} ${siteTimezone} on ${finalLocalDateStr}`);
+          console.log(`   - Business hours source: ${businessHoursSource}`);
+          console.log(`   - Using TIMER approach instead of schedule`);
+          
+        } catch (startError) {
+          // If we get a "workflow already started" error, we need to handle it gracefully
+          if (startError instanceof Error && startError.message.includes('Workflow execution already started')) {
+            console.log(`   ⚠️ Workflow already exists for site ${site.id}, this is expected for timer-based workflows`);
+            console.log(`   📋 Existing workflow is likely still running or completed recently`);
+            console.log(`   🔄 This can happen if the activity prioritization engine runs multiple times`);
+            
+            // Instead of failing, we'll consider this a "success" since the workflow is already scheduled
+            // But we'll mark it as a special case in the results
+            results.push({
+              workflowId: dateSpecificId,
+              scheduleId: dateSpecificId,
+              success: true,
+              error: `Workflow already exists - likely duplicate execution detected`
+            });
+            
+            scheduled++; // Count as scheduled since a workflow exists
+            
+            console.log(`   ✅ Handled duplicate workflow gracefully for ${site.name || 'Site'}`);
+            console.log(`   📊 This prevents the "Workflow execution already started" error`);
+            
+            continue; // Skip to next site
+          } else {
+            // Re-throw other errors
+            throw startError;
+          }
+        }
+
         // Update cron status to reflect the scheduled workflow
         const cronUpdate: CronStatusUpdate = {
           siteId: site.id,
-          workflowId: workflowId,
-          scheduleId: workflowId, // Use workflowId as scheduleId for timers
+          workflowId: dateSpecificId,
+          scheduleId: dateSpecificId, // Use dateSpecificId as scheduleId for timers
           activityName: 'dailyStandUpWorkflow-timer',
           status: 'SCHEDULED',
           nextRun: finalTargetUTC.toISOString(),
@@ -1329,8 +1361,8 @@ export async function scheduleIndividualDailyStandUpsActivity(
         await saveCronStatusActivity(cronUpdate);
 
         results.push({
-          workflowId: workflowId,
-          scheduleId: workflowId,
+          workflowId: dateSpecificId,
+          scheduleId: dateSpecificId,
           success: true
         });
         

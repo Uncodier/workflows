@@ -42,14 +42,20 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.callRegionSearchApiActivity = callRegionSearchApiActivity;
+exports.searchLeadsByCompanyCityActivity = searchLeadsByCompanyCityActivity;
 exports.callRegionVenuesApiActivity = callRegionVenuesApiActivity;
 exports.callLeadGenerationApiActivity = callLeadGenerationApiActivity;
 exports.saveLeadsFromDeepResearchActivity = saveLeadsFromDeepResearchActivity;
 exports.createLeadsFromResearchActivity = createLeadsFromResearchActivity;
 exports.convertVenuesToCompanies = convertVenuesToCompanies;
+exports.updateMemoryActivity = updateMemoryActivity;
+exports.findSalesCrmAgentActivity = findSalesCrmAgentActivity;
+exports.updateAgentMemoryWithLeadStatsActivity = updateAgentMemoryWithLeadStatsActivity;
 exports.createCompaniesFromVenuesActivity = createCompaniesFromVenuesActivity;
+exports.upsertVenueFailedActivity = upsertVenueFailedActivity;
 const logger_1 = require("../../lib/logger");
 const apiService_1 = require("../services/apiService");
+const supabaseService_1 = require("../services/supabaseService");
 /**
  * Activity to call the region search API
  */
@@ -77,24 +83,30 @@ async function callRegionSearchApiActivity(options) {
             };
         }
         const data = response.data;
-        // Extract business_types and location data
+        // Extract business_types, location data, and target_segment_id
         const businessTypes = data?.data?.business_types || data?.business_types || data?.businessTypes;
         const targetCity = data?.data?.target_city || data?.target_city || data?.targetCity;
         const targetRegion = data?.data?.target_region || data?.target_region || data?.targetRegion;
+        const targetSegmentId = data?.data?.target_segment_id || data?.target_segment_id || data?.targetSegmentId;
         logger_1.logger.info('✅ Region search API call successful', {
             site_id: options.site_id,
             hasBusinessTypes: !!businessTypes,
             businessTypesCount: Array.isArray(businessTypes) ? businessTypes.length : 0,
             hasTargetCity: !!targetCity,
-            hasTargetRegion: !!targetRegion
+            hasTargetRegion: !!targetRegion,
+            hasTargetSegmentId: !!targetSegmentId
         });
-        return {
+        const result = {
             success: true,
             business_types: businessTypes,
             targetCity,
             targetRegion,
+            target_segment_id: targetSegmentId,
             data: data?.data || data,
         };
+        // Debug: Log the exact result being returned
+        console.log('🔍 Region search API returning:', JSON.stringify(result, null, 2));
+        return result;
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -109,6 +121,136 @@ async function callRegionSearchApiActivity(options) {
     }
 }
 /**
+ * Activity to search leads by company city
+ * Returns company names of leads whose company address contains the specified city
+ * Uses exact Google Maps address data without parsing or guessing
+ */
+async function searchLeadsByCompanyCityActivity(options) {
+    try {
+        logger_1.logger.info('🔍 Starting search for leads by company city and region', {
+            site_id: options.site_id,
+            city: options.city,
+            region: options.region
+        });
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            return {
+                success: false,
+                error: 'Database not connected'
+            };
+        }
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // Search for leads where company address contains the search city
+        // First, try to find leads through their company_id relationship
+        const { data: leadsWithCompanyId, error: leadsError } = await supabaseServiceRole
+            .from('leads')
+            .select(`
+        id,
+        company,
+        company_id,
+        company:company_id (
+          id,
+          name,
+          address
+        )
+      `)
+            .eq('site_id', options.site_id)
+            .not('company_id', 'is', null);
+        if (leadsError) {
+            logger_1.logger.error('❌ Error searching leads by company city', {
+                error: leadsError.message,
+                site_id: options.site_id,
+                city: options.city
+            });
+            return {
+                success: false,
+                error: leadsError.message
+            };
+        }
+        // Also search leads that have company info in the company jsonb field
+        const { data: leadsWithCompanyJson, error: jsonError } = await supabaseServiceRole
+            .from('leads')
+            .select('id, company, company_id')
+            .eq('site_id', options.site_id)
+            .is('company_id', null)
+            .not('company', 'is', null);
+        if (jsonError) {
+            logger_1.logger.error('❌ Error searching leads with company JSON', {
+                error: jsonError.message,
+                site_id: options.site_id
+            });
+            // Continue with company_id results only
+        }
+        const companyNames = new Set();
+        // Process leads with company_id relationship
+        if (leadsWithCompanyId && leadsWithCompanyId.length > 0) {
+            for (const lead of leadsWithCompanyId) {
+                if (lead.company && lead.company.address) {
+                    const companyAddress = lead.company.address;
+                    // ✅ Only check against the full address from Google Maps
+                    // Don't try to extract city/state - just check if target city appears in the address
+                    const fullAddress = companyAddress.full_address || companyAddress.address || '';
+                    // Check if city appears in the full address (case insensitive)
+                    const cityMatches = fullAddress &&
+                        fullAddress.toLowerCase().includes(options.city.toLowerCase());
+                    if (cityMatches) {
+                        companyNames.add(lead.company.name);
+                        console.log(`🔍 Found match: ${lead.company.name} in address: ${fullAddress}`);
+                    }
+                }
+            }
+        }
+        // Process leads with company JSON data
+        if (leadsWithCompanyJson && leadsWithCompanyJson.length > 0) {
+            for (const lead of leadsWithCompanyJson) {
+                if (lead.company && typeof lead.company === 'object') {
+                    const companyData = lead.company;
+                    // ✅ Only check against the full address from Google Maps
+                    // Don't try to parse or guess city/state
+                    const fullAddress = companyData.full_address || companyData.address || '';
+                    // Check if city appears in the full address (case insensitive)
+                    const cityMatches = fullAddress &&
+                        fullAddress.toLowerCase().includes(options.city.toLowerCase());
+                    if (cityMatches && companyData.name) {
+                        companyNames.add(companyData.name);
+                        console.log(`🔍 Found match: ${companyData.name} in address: ${fullAddress}`);
+                    }
+                }
+            }
+        }
+        const companyNamesArray = Array.from(companyNames);
+        logger_1.logger.info('✅ Successfully searched leads by company city', {
+            site_id: options.site_id,
+            city: options.city,
+            companyNamesFound: companyNamesArray.length,
+            companyNames: companyNamesArray,
+            searchMethod: 'contains_city_in_full_address'
+        });
+        console.log(`🔍 Found ${companyNamesArray.length} companies with leads containing city "${options.city}" in their address`);
+        if (companyNamesArray.length > 0) {
+            console.log(`📋 Company names to exclude: ${companyNamesArray.join(', ')}`);
+        }
+        return {
+            success: true,
+            companyNames: companyNamesArray
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger_1.logger.error('❌ Exception searching leads by company city', {
+            error: errorMessage,
+            site_id: options.site_id,
+            city: options.city
+        });
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
  * Activity to call the region venues API
  */
 async function callRegionVenuesApiActivity(options) {
@@ -118,7 +260,9 @@ async function callRegionVenuesApiActivity(options) {
             userId: options.userId,
             searchTerm: options.searchTerm,
             city: options.city,
-            region: options.region
+            region: options.region,
+            maxVenues: options.maxVenues,
+            excludeNamesCount: options.excludeNames?.length || 0
         });
         const requestBody = {
             siteId: options.site_id,
@@ -126,8 +270,9 @@ async function callRegionVenuesApiActivity(options) {
             searchTerm: options.searchTerm,
             city: options.city,
             region: options.region,
-            maxVenues: options.maxVenues || 15,
+            maxVenues: options.maxVenues || 10,
             priority: options.priority || 'high',
+            excludeNames: options.excludeNames || [], // Pass excludeNames to API
             targetAudience: {
                 demographics: 'Business professionals',
                 interests: ['business development', 'lead generation'],
@@ -159,9 +304,9 @@ async function callRegionVenuesApiActivity(options) {
         const data = response.data;
         logger_1.logger.info('✅ Region venues API call successful', {
             site_id: options.site_id,
-            venueCount: data?.venueCount || 0,
-            city: data?.city,
-            region: data?.region
+            hasData: !!data,
+            hasVenues: !!(data?.venues),
+            venuesCount: data?.venues?.length || 0
         });
         return {
             success: true,
@@ -207,25 +352,51 @@ async function callLeadGenerationApiActivity(options) {
             };
         }
         const data = response.data;
+        // Handle different response structures from API
+        let responseData = data;
+        // If it's an array, extract the first element
+        if (Array.isArray(data)) {
+            responseData = data[0];
+        }
+        console.log('🔍 Lead generation API response structure:', {
+            isArray: Array.isArray(data),
+            dataLength: Array.isArray(data) ? data.length : 'not array',
+            hasResponseData: !!responseData,
+            responseSuccess: responseData?.success,
+            hasSearchTopic: !!responseData?.searchTopic,
+            hasData: !!responseData?.data,
+            fullResponse: JSON.stringify(data, null, 2)
+        });
         // Extract search_topic, target_city, and target_region from data
-        const searchTopic = data?.data?.search_topic || data?.search_topic || data?.searchTopic;
-        const targetCity = data?.data?.target_city || data?.target_city || data?.targetCity;
-        const targetRegion = data?.data?.target_region || data?.target_region || data?.targetRegion;
+        const searchTopic = responseData?.data?.search_topic || responseData?.search_topic || responseData?.searchTopic;
+        const targetCity = responseData?.data?.target_city || responseData?.target_city || responseData?.targetCity;
+        const targetRegion = responseData?.data?.target_region || responseData?.target_region || responseData?.targetRegion;
         logger_1.logger.info('✅ Lead generation API call successful', {
             site_id: options.site_id,
             hasSearchTopic: !!searchTopic,
             hasTargetCity: !!targetCity,
             hasTargetRegion: !!targetRegion,
-            hasPrompt: !!data?.prompt,
-            hasData: !!data?.data
+            hasPrompt: !!responseData?.prompt,
+            hasData: !!responseData?.data
         });
+        // Validate that we have the essential data
+        if (!searchTopic) {
+            logger_1.logger.error('❌ Lead generation API response missing searchTopic', {
+                site_id: options.site_id,
+                responseData: JSON.stringify(responseData, null, 2)
+            });
+            return {
+                success: false,
+                error: 'API response missing required searchTopic field'
+            };
+        }
         return {
             success: true,
             searchTopic,
             targetCity,
             targetRegion,
-            prompt: data?.prompt,
-            data: data?.data || data,
+            prompt: responseData?.prompt,
+            data: responseData?.data || responseData,
         };
     }
     catch (error) {
@@ -266,12 +437,14 @@ async function saveLeadsFromDeepResearchActivity(options) {
             };
         }
         console.log(`💾 Saving ${options.leads.length} leads from deep research for company: ${options.company?.name}`);
+        console.log(`🔗 Company ID for leads: ${options.company?.id || 'NOT PROVIDED'}`);
         // Use the existing createLeadsFromResearchActivity to do the actual work
         const createLeadsOptions = {
             site_id: options.site_id,
             leads: options.leads,
             create: options.create || false,
             userId: options.userId,
+            segment_id: options.segment_id,
             additionalData: {
                 ...options.additionalData,
                 company: options.company,
@@ -342,7 +515,7 @@ async function createLeadsFromResearchActivity(options) {
                     leadsValidated++;
                     // If create mode is enabled, create the lead
                     if (options.create) {
-                        const createResult = await createSingleLead(lead, options.site_id, options.userId);
+                        const createResult = await createSingleLead(lead, options.site_id, options.userId, options.additionalData?.company?.id, options.segment_id);
                         if (createResult.success) {
                             leadsCreated++;
                             logger_1.logger.info(`✅ Lead created successfully: ${lead.name || lead.email}`, {
@@ -368,6 +541,30 @@ async function createLeadsFromResearchActivity(options) {
             catch (leadError) {
                 const leadErrorMessage = leadError instanceof Error ? leadError.message : String(leadError);
                 errors.push(`Exception processing lead ${index}: ${leadErrorMessage}`);
+            }
+        }
+        // Update agent memory with lead generation statistics if leads were created successfully
+        if (options.create && leadsCreated > 0 && options.additionalData) {
+            const { targetCity, targetRegion } = options.additionalData;
+            if (targetCity && targetRegion) {
+                try {
+                    const updateMemoryResult = await updateMemoryActivity({
+                        siteId: options.site_id,
+                        city: targetCity,
+                        region: targetRegion,
+                        segmentId: options.segment_id,
+                        leadsCount: leadsCreated
+                    });
+                    if (updateMemoryResult.success) {
+                        console.log(`✅ Agent memory updated with ${leadsCreated} leads`);
+                    }
+                    else {
+                        console.error(`❌ Failed to update agent memory: ${updateMemoryResult.error}`);
+                    }
+                }
+                catch (memoryError) {
+                    console.error(`❌ Exception updating agent memory:`, memoryError);
+                }
             }
         }
         const result = {
@@ -409,21 +606,19 @@ function validateLeadData(lead) {
     if (!lead.name || typeof lead.name !== 'string' || lead.name.trim() === '') {
         errors.push('Name is required and must be a non-empty string');
     }
-    // Email is optional but if provided, must be valid
-    if (lead.email) {
-        if (typeof lead.email !== 'string' || lead.email.trim() === '') {
-            errors.push('Email must be a non-empty string if provided');
-        }
-        else {
-            // Basic email validation
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!emailRegex.test(lead.email)) {
-                errors.push('Email must be a valid email address');
-            }
-        }
+    // At least email OR telephone is required
+    const hasEmail = lead.email && lead.email !== null && typeof lead.email === 'string' && lead.email.trim() !== '';
+    const hasPhone = lead.telephone && lead.telephone !== null && typeof lead.telephone === 'string' && lead.telephone.trim() !== '';
+    if (!hasEmail && !hasPhone) {
+        errors.push('Lead must have at least email or telephone contact information');
     }
-    else {
-        warnings.push('No email provided - lead may be harder to contact');
+    // Email validation if provided
+    if (hasEmail) {
+        // Basic email validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(lead.email)) {
+            errors.push('Email must be a valid email address');
+        }
     }
     // Optional fields validation
     if (lead.telephone && typeof lead.telephone !== 'string') {
@@ -459,7 +654,9 @@ function validateLeadData(lead) {
 /**
  * Create a single lead in the database
  */
-async function createSingleLead(lead, site_id, userId) {
+async function createSingleLead(lead, site_id, userId, companyId, // Add company_id parameter
+segmentId // Add segment_id parameter
+) {
     try {
         // Import supabase service role client (bypasses RLS)
         const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
@@ -468,17 +665,35 @@ async function createSingleLead(lead, site_id, userId) {
             name: lead.name,
             email: lead.email,
             phone: lead.telephone || null,
-            company_name: lead.company_name || null,
-            address: lead.address || null,
-            website: lead.web || null,
+            company: lead.company_name ? {
+                name: lead.company_name,
+                website: lead.web || null
+            } : (lead.web ? { website: lead.web } : {}), // Store company info in company jsonb field
+            company_id: companyId || null, // Add company_id to lead data
+            segment_id: segmentId || null, // Add segment_id to lead data
+            address: lead.address ? { full_address: lead.address } : {}, // Store address exactly as provided
             position: lead.position || null,
             site_id: site_id,
             user_id: userId || null,
             status: 'new',
             origin: 'lead_generation_workflow',
+            metadata: {}, // Keep metadata empty for now
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };
+        // Log company_id and segment_id assignment for debugging
+        if (companyId) {
+            console.log(`🔗 Assigning company_id ${companyId} to lead ${lead.name || lead.email}`);
+        }
+        else {
+            console.log(`⚠️ No company_id provided for lead ${lead.name || lead.email}`);
+        }
+        if (segmentId) {
+            console.log(`🎯 Assigning segment_id ${segmentId} to lead ${lead.name || lead.email}`);
+        }
+        else {
+            console.log(`⚠️ No segment_id provided for lead ${lead.name || lead.email}`);
+        }
         const { data, error } = await supabaseServiceRole
             .from('leads')
             .insert([leadData])
@@ -488,13 +703,19 @@ async function createSingleLead(lead, site_id, userId) {
             logger_1.logger.error('❌ Failed to create lead in database', {
                 error: error.message,
                 site_id,
-                leadEmail: lead.email
+                leadEmail: lead.email,
+                companyId
             });
             return {
                 success: false,
                 error: error.message
             };
         }
+        logger_1.logger.info('✅ Lead created successfully with company_id', {
+            leadId: data.id,
+            leadEmail: lead.email,
+            companyId: companyId || 'none'
+        });
         return {
             success: true,
             leadId: data.id
@@ -505,7 +726,8 @@ async function createSingleLead(lead, site_id, userId) {
         logger_1.logger.error('❌ Exception creating lead in database', {
             error: errorMessage,
             site_id,
-            leadEmail: lead.email
+            leadEmail: lead.email,
+            companyId
         });
         return {
             success: false,
@@ -648,21 +870,369 @@ function convertVenuesToCompanies(venues) {
             };
             companies.push(company);
         }
-        catch (error) {
-            console.error(`⚠️ Error converting venue ${venue.name} to company:`, error);
+        catch {
         }
     }
-    console.log(`📊 Converted ${companies.length} venues to companies`);
     return companies;
+}
+/**
+ * Activity to update agent memory with lead generation statistics
+ * This is a visible workflow step that consolidates the entire memory update process
+ */
+async function updateMemoryActivity(options) {
+    try {
+        console.log(`🧠 Starting agent memory update for ${options.leadsCount} leads in ${options.city}, ${options.region}`);
+        // Find Sales/CRM specialist agent for the site
+        const agentResult = await findSalesCrmAgentActivity(options.siteId);
+        if (!agentResult.success || !agentResult.agent) {
+            const errorMsg = `No Sales/CRM specialist agent found: ${agentResult.error}`;
+            console.error(`❌ ${errorMsg}`);
+            return {
+                success: false,
+                error: errorMsg
+            };
+        }
+        const agent = agentResult.agent;
+        console.log(`✅ Found agent: ${agent.name} (${agent.role}) - ID: ${agent.id}`);
+        // Update agent memory with lead statistics
+        const updateMemoryResult = await updateAgentMemoryWithLeadStatsActivity({
+            siteId: options.siteId,
+            agentId: agent.id,
+            city: options.city,
+            region: options.region,
+            segmentId: options.segmentId,
+            leadsCount: options.leadsCount
+        });
+        if (updateMemoryResult.success) {
+            console.log(`✅ Agent memory successfully updated with ${options.leadsCount} leads`);
+            console.log(`📊 Memory updated for: ${options.city}, ${options.region}`);
+            console.log(`🎯 Lead generation context: Generated ${options.leadsCount} employee leads for companies in ${options.city}, ${options.region}`);
+            if (options.segmentId) {
+                console.log(`🎯 Segment-specific data updated: ${options.segmentId}`);
+            }
+        }
+        else {
+            console.error(`❌ Failed to update agent memory: ${updateMemoryResult.error}`);
+        }
+        return updateMemoryResult;
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception in updateMemoryActivity: ${errorMessage}`);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to find Sales/CRM specialist agent for a site
+ */
+async function findSalesCrmAgentActivity(siteId) {
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            return {
+                success: false,
+                error: 'Database not connected'
+            };
+        }
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // Try to find Sales/CRM specialist agent with multiple search strategies
+        // First, try exact match for "Sales/CRM Specialist"
+        let { data: agents, error } = await supabaseServiceRole
+            .from('agents')
+            .select('*')
+            .eq('site_id', siteId)
+            .eq('status', 'active')
+            .eq('role', 'Sales/CRM Specialist')
+            .limit(1);
+        // If no exact match, try pattern searches
+        if ((!agents || agents.length === 0) && !error) {
+            const { data: patternAgents, error: patternError } = await supabaseServiceRole
+                .from('agents')
+                .select('*')
+                .eq('site_id', siteId)
+                .eq('status', 'active')
+                .or('role.ilike.%sales%,role.ilike.%crm%,role.ilike.%specialist%')
+                .limit(1);
+            if (patternError) {
+                error = patternError;
+            }
+            else {
+                agents = patternAgents;
+            }
+        }
+        // If still no agents found, try broader search
+        if ((!agents || agents.length === 0) && !error) {
+            const { data: allAgents, error: allError } = await supabaseServiceRole
+                .from('agents')
+                .select('*')
+                .eq('site_id', siteId)
+                .eq('status', 'active')
+                .limit(5);
+            if (allError) {
+                error = allError;
+            }
+            else {
+                agents = allAgents;
+                // Use the first active agent if no specific Sales/CRM agent found
+                if (agents && agents.length > 0) {
+                    agents = [agents[0]];
+                    console.log(`✅ Using first active agent: ${agents[0].name} (${agents[0].role})`);
+                }
+            }
+        }
+        if (error) {
+            console.error(`❌ Error finding Sales/CRM agent:`, error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+        if (!agents || agents.length === 0) {
+            return {
+                success: false,
+                error: 'No Sales/CRM specialist agent found'
+            };
+        }
+        const agent = agents[0];
+        return {
+            success: true,
+            agent: agent
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception finding Sales/CRM agent:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to update agent memory with lead generation statistics
+ */
+async function updateAgentMemoryWithLeadStatsActivity(options) {
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            return {
+                success: false,
+                error: 'Database not connected'
+            };
+        }
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // First, get the current agent memory
+        const { data: currentMemory, error: getError } = await supabaseServiceRole
+            .from('agent_memories')
+            .select('*')
+            .eq('agent_id', options.agentId)
+            .eq('type', 'lead_generation')
+            .eq('key', 'lead_generation')
+            .order('created_at', { ascending: false })
+            .limit(1);
+        if (getError) {
+            console.error(`❌ Error getting current agent memory:`, getError);
+            return {
+                success: false,
+                error: getError.message
+            };
+        }
+        // Initialize leads data structure
+        let leadsData = {};
+        if (currentMemory && currentMemory.length > 0) {
+            // Use existing data structure
+            leadsData = currentMemory[0].data || {};
+        }
+        else {
+            // Initialize with default structure
+            leadsData = {
+                currentCityIndex: 0,
+                targetCity: options.city,
+                usedCities: [options.city],
+                usedRegions: {},
+                lastUpdated: new Date().toISOString(),
+                totalCitiesAvailable: 30,
+                leads: {}
+            };
+        }
+        // Ensure leads structure exists
+        if (!leadsData.leads) {
+            leadsData.leads = {};
+        }
+        // Update city structure
+        if (!leadsData.leads[options.city]) {
+            leadsData.leads[options.city] = {};
+        }
+        // Update region structure
+        if (!leadsData.leads[options.city][options.region]) {
+            leadsData.leads[options.city][options.region] = {
+                count: 0
+            };
+        }
+        // Update counts
+        leadsData.leads[options.city][options.region].count += options.leadsCount;
+        // Update segment-specific counts if segment_id is provided
+        if (options.segmentId) {
+            if (!leadsData.leads[options.city][options.region][options.segmentId]) {
+                leadsData.leads[options.city][options.region][options.segmentId] = {
+                    count: 0
+                };
+            }
+            leadsData.leads[options.city][options.region][options.segmentId].count += options.leadsCount;
+        }
+        // Update used cities and regions
+        if (!leadsData.usedCities.includes(options.city)) {
+            leadsData.usedCities.push(options.city);
+        }
+        if (!leadsData.usedRegions[options.city]) {
+            leadsData.usedRegions[options.city] = [];
+        }
+        if (!leadsData.usedRegions[options.city].includes(options.region)) {
+            leadsData.usedRegions[options.city].push(options.region);
+        }
+        // Update lastUpdated
+        leadsData.lastUpdated = new Date().toISOString();
+        console.log(`💾 Saving leads data with structure:`, {
+            city: options.city,
+            region: options.region,
+            segmentId: options.segmentId,
+            leadsCount: options.leadsCount,
+            hasLeadsObject: !!leadsData.leads
+        });
+        // Calculate total leads generated (existing + new)
+        const existingTotalLeads = currentMemory?.[0]?.metadata?.total_leads_generated || 0;
+        const newTotalLeads = existingTotalLeads + options.leadsCount;
+        // Preserve existing metadata and merge with new information
+        const existingMetadata = currentMemory?.[0]?.metadata || {};
+        const generationHistory = existingMetadata.generation_history || [];
+        // Add current generation to history
+        generationHistory.push({
+            timestamp: new Date().toISOString(),
+            city: options.city,
+            region: options.region,
+            segment_id: options.segmentId,
+            leads_generated: options.leadsCount,
+            lead_type: 'employee_contacts',
+            generation_method: 'deep_research_workflow',
+            description: `Generated ${options.leadsCount} employee leads for companies in ${options.city}, ${options.region}${options.segmentId ? ` (segment: ${options.segmentId})` : ''}`
+        });
+        // Create the memory object to save
+        const memoryData = {
+            agent_id: options.agentId,
+            user_id: options.siteId, // Use site_id as user_id for site-level memories
+            type: 'lead_generation',
+            key: 'lead_generation',
+            data: leadsData,
+            metadata: {
+                ...existingMetadata, // Preserve existing metadata
+                last_lead_generation: new Date().toISOString(),
+                total_leads_generated: newTotalLeads, // ✅ Accumulate total instead of overwriting
+                city: options.city,
+                region: options.region,
+                segment_id: options.segmentId,
+                generation_history: generationHistory, // ✅ Track detailed history
+                latest_generation: {
+                    timestamp: new Date().toISOString(),
+                    city: options.city,
+                    region: options.region,
+                    segment_id: options.segmentId,
+                    leads_generated: options.leadsCount,
+                    lead_type: 'employee_contacts',
+                    generation_method: 'deep_research_workflow',
+                    description: `Generated ${options.leadsCount} employee leads for companies in ${options.city}, ${options.region}${options.segmentId ? ` (segment: ${options.segmentId})` : ''}`
+                }
+            },
+            updated_at: new Date().toISOString(),
+            last_accessed: new Date().toISOString(),
+            access_count: (currentMemory?.[0]?.access_count || 0) + 1
+        };
+        let saveError = null;
+        if (currentMemory && currentMemory.length > 0) {
+            // Update existing memory
+            const { error: updateError } = await supabaseServiceRole
+                .from('agent_memories')
+                .update(memoryData)
+                .eq('id', currentMemory[0].id);
+            if (updateError) {
+                console.error(`❌ Error updating existing agent memory:`, updateError);
+                saveError = updateError;
+            }
+            else {
+                console.log(`✅ Updated existing agent memory record`);
+            }
+        }
+        else {
+            // Create new memory
+            const { error: insertError } = await supabaseServiceRole
+                .from('agent_memories')
+                .insert([memoryData]);
+            if (insertError) {
+                console.error(`❌ Error creating new agent memory:`, insertError);
+                saveError = insertError;
+            }
+            else {
+                console.log(`✅ Created new agent memory record`);
+            }
+        }
+        if (saveError) {
+            return {
+                success: false,
+                error: saveError.message
+            };
+        }
+        console.log(`✅ Successfully updated agent memory with lead statistics`);
+        console.log(`📊 Updated counts - City: ${options.city}, Region: ${options.region}, Leads: +${options.leadsCount}`);
+        console.log(`📈 Total leads accumulated: ${existingTotalLeads} → ${newTotalLeads} (+${options.leadsCount})`);
+        console.log(`🎯 Lead generation context: Generated ${options.leadsCount} employee leads for companies in ${options.city}, ${options.region}`);
+        if (options.segmentId) {
+            console.log(`🎯 Segment-specific count updated for segment: ${options.segmentId}`);
+        }
+        return {
+            success: true
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception updating agent memory:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Helper function to safely store venue address data from Google Maps
+ * Only saves data that comes clearly from Google Maps, no parsing or guessing
+ */
+function createVenueAddressObject(addressString, coordinates) {
+    if (!addressString)
+        return {};
+    // ✅ Only save the exact address string from Google Maps
+    // Don't try to parse or guess city, state, country, zipcode
+    const addressObject = {
+        full_address: addressString, // Store the complete address as received from Google Maps
+    };
+    // ✅ Only add coordinates if they come clearly from Google Maps
+    if (coordinates && coordinates.lat && coordinates.lng) {
+        addressObject.coordinates = {
+            lat: coordinates.lat,
+            lng: coordinates.lng
+        };
+    }
+    return addressObject;
 }
 /**
  * Create companies with upsert functionality
  */
 async function createCompaniesFromVenuesActivity(options) {
     try {
-        logger_1.logger.info('🏢 Starting companies creation from venues', {
-            venuesCount: options.venues.length
-        });
         // Convert venues to companies
         const companies = convertVenuesToCompanies(options.venues);
         if (companies.length === 0) {
@@ -676,13 +1246,15 @@ async function createCompaniesFromVenuesActivity(options) {
         const createdCompanies = [];
         for (const company of companies) {
             try {
+                // Create the address object using only Google Maps data
+                const addressJson = createVenueAddressObject(company.address, company.coordinates);
                 // Prepare company data for database (now using properly mapped values)
                 const companyData = {
                     name: company.name,
                     website: company.website || null,
                     industry: company.industry || null,
                     description: company.description || null,
-                    address: company.address || null,
+                    address: addressJson, // ✅ Storing only Google Maps address data without parsing
                     phone: company.phone || null,
                     email: company.email || null,
                     size: company.size || null,
@@ -724,7 +1296,8 @@ async function createCompaniesFromVenuesActivity(options) {
                     }
                     result = updateData;
                     logger_1.logger.info(`✅ Company updated: ${company.name}`, {
-                        companyId: result.id
+                        companyId: result.id,
+                        hasAddressJson: !!addressJson && Object.keys(addressJson).length > 0
                     });
                 }
                 else {
@@ -743,7 +1316,8 @@ async function createCompaniesFromVenuesActivity(options) {
                     }
                     result = insertData;
                     logger_1.logger.info(`✅ Company created: ${company.name}`, {
-                        companyId: result.id
+                        companyId: result.id,
+                        hasAddressJson: !!addressJson && Object.keys(addressJson).length > 0
                     });
                 }
                 createdCompanies.push(result);
@@ -768,8 +1342,106 @@ async function createCompaniesFromVenuesActivity(options) {
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        logger_1.logger.error('❌ Exception creating companies from venues', {
+        return {
+            success: false,
             error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to upsert failed venue names in system_memories
+ * This is used when deep research doesn't produce results to track venues that failed
+ */
+async function upsertVenueFailedActivity(options) {
+    try {
+        const { site_id, city, region, venueName, userId } = options;
+        logger_1.logger.info('🔄 Starting venue failed upsert', {
+            siteId: site_id,
+            city,
+            region,
+            venueName,
+            userId
+        });
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            return {
+                success: false,
+                error: 'Database not connected'
+            };
+        }
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // Create the key in format 'city:region' or just 'city' if no region
+        const key = region ? `${city}:${region}` : city;
+        // First, get existing data to append the new venue name
+        const { data: existingData } = await supabaseServiceRole
+            .from('system_memories')
+            .select('data')
+            .eq('site_id', site_id)
+            .eq('system_type', 'venue_failed_names')
+            .eq('key', key)
+            .single();
+        let excludedNames = [];
+        if (existingData && existingData.data && existingData.data.excludedNames) {
+            excludedNames = existingData.data.excludedNames;
+        }
+        // Add the new venue name if it's not already in the list
+        if (!excludedNames.includes(venueName)) {
+            excludedNames.push(venueName);
+        }
+        // Prepare the data object
+        const dataObject = {
+            excludedNames: excludedNames
+        };
+        // Prepare the metadata object
+        const metadataObject = {
+            source: 'venue_search',
+            auto_generated: true
+        };
+        // Execute the upsert using direct SQL as per the provided query
+        const { error: upsertError } = await supabaseServiceRole
+            .from('system_memories')
+            .upsert({
+            site_id: site_id,
+            system_type: 'venue_failed_names',
+            key: key,
+            data: dataObject,
+            metadata: metadataObject,
+            updated_at: new Date().toISOString(),
+            last_accessed: new Date().toISOString(),
+            access_count: 0,
+            expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // 7 days from now
+        }, {
+            onConflict: 'site_id,system_type,key'
+        });
+        if (upsertError) {
+            logger_1.logger.error('❌ Failed to upsert venue failed memory', {
+                error: upsertError.message,
+                siteId: site_id,
+                key,
+                venueName
+            });
+            return {
+                success: false,
+                error: `Failed to upsert venue failed memory: ${upsertError.message}`
+            };
+        }
+        logger_1.logger.info('✅ Venue failed memory upserted successfully', {
+            siteId: site_id,
+            key,
+            venueName,
+            totalExcludedNames: excludedNames.length
+        });
+        return {
+            success: true
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger_1.logger.error('❌ Error in upsertVenueFailedActivity', {
+            error: errorMessage,
+            options
         });
         return {
             success: false,

@@ -45,8 +45,14 @@ export async function delayedExecutionWorkflow(
     // Execute the target workflow
     console.log(`🚀 Starting ${targetWorkflow} for ${siteName || 'site'}`);
     
+    // Generate a more unique ID for the child workflow to prevent conflicts
+    const uniqueHash = Math.random().toString(36).substring(2, 15);
+    const childWorkflowId = `${targetWorkflow}-executed-${Date.now()}-${uniqueHash}`;
+    
+    console.log(`   - Child workflow ID: ${childWorkflowId}`);
+    
     const targetResult = await executeChild(targetWorkflow, {
-      workflowId: `${targetWorkflow}-executed-${Date.now()}`,
+      workflowId: childWorkflowId,
       args: targetArgs,
     });
 

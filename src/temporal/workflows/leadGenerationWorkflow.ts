@@ -28,12 +28,18 @@ const {
   callLeadGenerationApiActivity,
   createCompaniesFromVenuesActivity,
   saveLeadsFromDeepResearchActivity,
+  searchLeadsByCompanyCityActivity,
+  updateMemoryActivity,
+  upsertVenueFailedActivity,
 } = proxyActivities<{
   callRegionSearchApiActivity: (options: RegionSearchApiOptions) => Promise<any>;
   callRegionVenuesApiActivity: (options: any) => Promise<any>;
   callLeadGenerationApiActivity: (options: LeadGenerationApiOptions) => Promise<any>;
   createCompaniesFromVenuesActivity: (options: any) => Promise<any>;
   saveLeadsFromDeepResearchActivity: (options: any) => Promise<any>;
+  searchLeadsByCompanyCityActivity: (options: { site_id: string; city: string; region?: string; userId?: string }) => Promise<{ success: boolean; companyNames?: string[]; error?: string }>;
+  updateMemoryActivity: (options: { siteId: string; city: string; region: string; segmentId?: string; leadsCount: number }) => Promise<{ success: boolean; error?: string }>;
+  upsertVenueFailedActivity: (options: { site_id: string; city: string; region?: string; venueName: string; userId?: string }) => Promise<{ success: boolean; error?: string }>;
 }>({
   startToCloseTimeout: '10 minutes', // Longer timeout for lead generation processes
   retry: {
@@ -135,6 +141,7 @@ function generateCompaniesDeliverables(): any {
 function cleanCompanyForDeepResearch(company: CompanyData): any {
   // Create a new object with only the essential fields for deep research
   return {
+    id: company.id, // ✅ PRESERVE company ID for lead linking
     name: company.name,
     website: company.website,
     industry: company.industry,
@@ -444,6 +451,7 @@ export async function leadGenerationWorkflow(
   let enhancedSearchTopic = '';
   let targetCity = '';
   let targetRegion = '';
+  let segmentId = '';
   let venuesResult: any = null;
   let venuesFound: VenueData[] = [];
   let companiesCreated: CompanyData[] = [];
@@ -487,6 +495,9 @@ export async function leadGenerationWorkflow(
     
     regionSearchResult = await callRegionSearchApiActivity(regionSearchOptions);
     
+    // Debug: Log the complete regionSearchResult
+    console.log('🔍 Region search result received:', JSON.stringify(regionSearchResult, null, 2));
+    
     if (!regionSearchResult.success) {
       const warningMsg = `Region search API call failed: ${regionSearchResult.error}, proceeding with generic search`;
       console.warn(`⚠️ ${warningMsg}`);
@@ -496,14 +507,43 @@ export async function leadGenerationWorkflow(
       businessTypes = regionSearchResult.business_types || [];
       targetCity = regionSearchResult.targetCity || '';
       targetRegion = regionSearchResult.targetRegion || '';
+      segmentId = regionSearchResult.target_segment_id || '';
       
       console.log(`✅ Region search API call successful`);
       console.log(`🔍 Business types received: ${businessTypes.length}`);
       console.log(`🏙️ Target city: "${targetCity || 'Not specified'}"`);
       console.log(`🌍 Target region: "${targetRegion || 'Not specified'}"`);
+      console.log(`🎯 Segment ID: "${segmentId || 'Not specified'}"`);
     }
 
-    console.log(`🏢 Step 3: Calling region venues API to find businesses...`);
+    // Step 2.5: Search for existing leads by company city to exclude them
+    let excludeNames: string[] = [];
+    if (targetCity) {
+      console.log(`🔍 Step 2.5: Searching for existing leads in city: ${targetCity}...`);
+      
+      const searchLeadsResult = await searchLeadsByCompanyCityActivity({
+        site_id: site_id,
+        city: targetCity,
+        // Exclude region from search as it won't match database data
+        userId: options.userId || site.user_id
+      });
+      
+      if (searchLeadsResult.success && searchLeadsResult.companyNames) {
+        excludeNames = searchLeadsResult.companyNames;
+        console.log(`✅ Found ${excludeNames.length} existing companies to exclude in ${targetCity}`);
+        if (excludeNames.length > 0) {
+          console.log(`📋 Companies to exclude: ${excludeNames.join(', ')}`);
+        }
+      } else {
+        const warningMsg = `Failed to search existing leads by city: ${searchLeadsResult.error}`;
+        console.warn(`⚠️ ${warningMsg}`);
+        errors.push(warningMsg);
+      }
+    } else {
+      console.log(`⚠️ No target city available, skipping existing leads search`);
+    }
+
+
     
     // Validate and handle empty business types
     if (!businessTypes || businessTypes.length === 0) {
@@ -546,8 +586,9 @@ export async function leadGenerationWorkflow(
         searchTerm: enhancedSearchTopic,
         city: targetCity || '',
         region: targetRegion || '',
-        maxVenues: 15,
+        maxVenues: 10,
         priority: 'high',
+        excludeNames: excludeNames, // Exclude companies that already have leads
         additionalData: {
           ...options.additionalData,
           regionSearchResult: regionSearchResult,
@@ -562,11 +603,11 @@ export async function leadGenerationWorkflow(
       
       if (venuesResult.success && venuesResult.data && venuesResult.data.venues) {
         venuesFound = venuesResult.data.venues;
-        console.log(`✅ Region venues API call successful - Found ${venuesFound.length} venues`);
+  
         
         // Step 3a: Create companies from venues
         if (venuesFound.length > 0) {
-          console.log(`🏢 Step 3a: Creating companies from ${venuesFound.length} venues...`);
+
           
           const companiesCreateResult = await createCompaniesFromVenuesActivity({
             site_id: site_id,
@@ -619,8 +660,17 @@ export async function leadGenerationWorkflow(
                   const companyLeadGenResult = await callLeadGenerationApiActivity(companyLeadGenOptions);
                   companyResult.leadGenerationResult = companyLeadGenResult;
                   
-                  if (companyLeadGenResult.success) {
+                  console.log(`🔍 Lead generation result for ${company.name}:`, {
+                    success: companyLeadGenResult.success,
+                    hasSearchTopic: !!companyLeadGenResult.searchTopic,
+                    searchTopicLength: companyLeadGenResult.searchTopic?.length || 0,
+                    hasError: !!companyLeadGenResult.error,
+                    error: companyLeadGenResult.error
+                  });
+                  
+                  if (companyLeadGenResult.success && companyLeadGenResult.searchTopic) {
                     console.log(`✅ Lead generation for ${company.name} successful`);
+                    console.log(`🔍 Search topic received: "${companyLeadGenResult.searchTopic}"`);
                     
                     // Step 4b: Call deep research for employees of this company
                     console.log(`👥 Step 4b: Researching employees for company: ${company.name}`);
@@ -630,18 +680,47 @@ export async function leadGenerationWorkflow(
                     // Create search topic for employees with specific venue address and regional context
                     const locationInfo = [];
                     
-                    // Add specific venue address
-                    if (company.address) {
-                      locationInfo.push(company.address);
-                    }
-                    
-                    // Add regional context if different from venue address
-                    if (targetCity && !company.address?.toLowerCase().includes(targetCity.toLowerCase())) {
-                      locationInfo.push(targetCity);
-                    }
-                    
-                    if (targetRegion && !company.address?.toLowerCase().includes(targetRegion.toLowerCase())) {
-                      locationInfo.push(targetRegion);
+                    try {
+                      // Add specific venue address
+                      if (company.address) {
+                        // Handle both string and object address formats
+                        const addressString = typeof company.address === 'string' 
+                          ? company.address 
+                          : `${company.address.street || ''} ${company.address.city || ''} ${company.address.state || ''}`.trim();
+                        
+                        if (addressString) {
+                          locationInfo.push(addressString);
+                        }
+                      }
+                      
+                      // Add regional context if different from venue address
+                      if (targetCity) {
+                        const companyAddressString = typeof company.address === 'string' 
+                          ? company.address 
+                          : (company.address?.city || company.address?.street || '');
+                        
+                        if (!companyAddressString || !companyAddressString.toLowerCase().includes(targetCity.toLowerCase())) {
+                          locationInfo.push(targetCity);
+                        }
+                      }
+                      
+                      if (targetRegion) {
+                        const companyAddressString = typeof company.address === 'string' 
+                          ? company.address 
+                          : (company.address?.state || company.address?.city || company.address?.street || '');
+                        
+                        if (!companyAddressString || !companyAddressString.toLowerCase().includes(targetRegion.toLowerCase())) {
+                          locationInfo.push(targetRegion);
+                        }
+                      }
+                    } catch (addressError) {
+                      const addressErrorMessage = addressError instanceof Error ? addressError.message : String(addressError);
+                      console.error(`❌ Error processing company address for ${company.name}: ${addressErrorMessage}`);
+                      console.error(`🔍 Company address data:`, JSON.stringify(company.address, null, 2));
+                      
+                      // Continue with basic location info
+                      if (targetCity) locationInfo.push(targetCity);
+                      if (targetRegion) locationInfo.push(targetRegion);
                     }
                     
                     // Build contact information context
@@ -669,6 +748,8 @@ export async function leadGenerationWorkflow(
                     if (contactInfo.length > 0) {
                       console.log(`📞 Available contact info: ${contactInfo.join(' | ')}`);
                     }
+                    
+                    console.log(`🚀 Starting deep research workflow for ${company.name}...`);
                     
                     const employeeResearchOptions: DeepResearchOptions = {
                       site_id: site_id,
@@ -710,6 +791,27 @@ export async function leadGenerationWorkflow(
                         
                         console.log(`👥 Generated ${employeeLeads.length} leads for ${company.name}`);
                         
+                        // Step 4b.4: If no leads generated, save venue as failed in system_memories
+                        if (employeeLeads.length === 0) {
+                          console.log(`📝 Step 4b.4: No leads generated for ${company.name}, saving venue as failed...`);
+                          
+                          const upsertResult = await upsertVenueFailedActivity({
+                            site_id: site_id,
+                            city: targetCity,
+                            region: targetRegion,
+                            venueName: company.name,
+                            userId: options.userId || site.user_id
+                          });
+                          
+                          if (upsertResult.success) {
+                            console.log(`✅ Successfully saved failed venue ${company.name} to system_memories`);
+                          } else {
+                            const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
+                            console.warn(`⚠️ ${warningMsg}`);
+                            // Don't add to errors since this is not critical for the main workflow
+                          }
+                        }
+                        
                         // Step 4b.5: Save leads from deep research (visible workflow step)
                         console.log(`💾 Step 4b.5: Saving ${employeeLeads.length} leads from deep research for ${company.name}...`);
                         
@@ -719,9 +821,12 @@ export async function leadGenerationWorkflow(
                           company: cleanCompanyForDeepResearch(company),
                           create: options.create !== false, // Default to true unless explicitly set to false
                           userId: options.userId || site.user_id,
+                          segment_id: segmentId, // Add segment_id from regionSearch (extracted from target_segment_id)
                           additionalData: {
                             ...options.additionalData,
                             businessTypes: businessTypes,
+                            targetCity: targetCity,
+                            targetRegion: targetRegion,
                             workflowId: workflowId,
                             deepResearchCompleted: true
                           }
@@ -732,6 +837,29 @@ export async function leadGenerationWorkflow(
                         if (saveLeadsResult.success) {
                           console.log(`✅ Successfully saved ${saveLeadsResult.leadsCreated || 0} leads from deep research for ${company.name}`);
                           console.log(`📊 Leads processed: ${saveLeadsResult.leadsValidated || 0} validated, ${saveLeadsResult.leadsCreated || 0} created`);
+                          
+                          // Step 4b.6: Update agent memory with lead statistics (visible workflow step)
+                          if (saveLeadsResult.leadsCreated && saveLeadsResult.leadsCreated > 0 && targetCity && targetRegion) {
+                            console.log(`🧠 Step 4b.6: Updating agent memory with ${saveLeadsResult.leadsCreated} leads...`);
+                            
+                            const updateMemoryResult = await updateMemoryActivity({
+                              siteId: site_id,
+                              city: targetCity,
+                              region: targetRegion,
+                              segmentId: segmentId,
+                              leadsCount: saveLeadsResult.leadsCreated
+                            });
+                            
+                            if (updateMemoryResult.success) {
+                              console.log(`✅ Agent memory successfully updated for ${company.name}`);
+                            } else {
+                              const warningMsg = `Failed to update agent memory for ${company.name}: ${updateMemoryResult.error}`;
+                              console.warn(`⚠️ ${warningMsg}`);
+                              // Don't add to errors since this is not critical for the main workflow
+                            }
+                          } else {
+                            console.log(`ℹ️ Skipping memory update: no leads created or missing location data`);
+                          }
                         } else {
                           const errorMsg = `Failed to save leads from deep research for ${company.name}: ${saveLeadsResult.error}`;
                           console.error(`❌ ${errorMsg}`);
@@ -739,28 +867,128 @@ export async function leadGenerationWorkflow(
                         }
                       } else {
                         console.log(`⚠️ No employee deliverables found for ${company.name}`);
+                        
+                        // Step 4b.4: No deliverables found, save venue as failed in system_memories
+                        console.log(`📝 Step 4b.4: No deliverables found for ${company.name}, saving venue as failed...`);
+                        
+                        const upsertResult = await upsertVenueFailedActivity({
+                          site_id: site_id,
+                          city: targetCity,
+                          region: targetRegion,
+                          venueName: company.name,
+                          userId: options.userId || site.user_id
+                        });
+                        
+                        if (upsertResult.success) {
+                          console.log(`✅ Successfully saved failed venue ${company.name} to system_memories`);
+                        } else {
+                          const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
+                          console.warn(`⚠️ ${warningMsg}`);
+                          // Don't add to errors since this is not critical for the main workflow
+                        }
                       }
                     } else {
                       const errorMsg = `Employee research for ${company.name} failed: ${employeeResearchResult.error}`;
                       console.error(`❌ ${errorMsg}`);
                       companyResult.errors.push(errorMsg);
+                      
+                      // Step 4b.4: Employee research failed, save venue as failed in system_memories
+                      console.log(`📝 Step 4b.4: Employee research failed for ${company.name}, saving venue as failed...`);
+                      
+                      const upsertResult = await upsertVenueFailedActivity({
+                        site_id: site_id,
+                        city: targetCity,
+                        region: targetRegion,
+                        venueName: company.name,
+                        userId: options.userId || site.user_id
+                      });
+                      
+                      if (upsertResult.success) {
+                        console.log(`✅ Successfully saved failed venue ${company.name} to system_memories`);
+                      } else {
+                        const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
+                        console.warn(`⚠️ ${warningMsg}`);
+                        // Don't add to errors since this is not critical for the main workflow
+                      }
+                    }
+                  } else if (companyLeadGenResult.success && !companyLeadGenResult.searchTopic) {
+                    const errorMsg = `Lead generation for ${company.name} succeeded but no search topic received`;
+                    console.error(`❌ ${errorMsg}`);
+                    console.error(`🔍 Lead generation result:`, JSON.stringify(companyLeadGenResult, null, 2));
+                    companyResult.errors.push(errorMsg);
+                    
+                    // Step 4b.4: Lead generation succeeded but no search topic, save venue as failed
+                    console.log(`📝 Step 4b.4: No search topic received for ${company.name}, saving venue as failed...`);
+                    
+                    const upsertResult = await upsertVenueFailedActivity({
+                      site_id: site_id,
+                      city: targetCity,
+                      region: targetRegion,
+                      venueName: company.name,
+                      userId: options.userId || site.user_id
+                    });
+                    
+                    if (upsertResult.success) {
+                      console.log(`✅ Successfully saved failed venue ${company.name} to system_memories`);
+                    } else {
+                      const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
+                      console.warn(`⚠️ ${warningMsg}`);
+                      // Don't add to errors since this is not critical for the main workflow
                     }
                   } else {
                     const errorMsg = `Lead generation for ${company.name} failed: ${companyLeadGenResult.error}`;
                     console.error(`❌ ${errorMsg}`);
                     companyResult.errors.push(errorMsg);
+                    
+                    // Step 4b.4: Lead generation failed, save venue as failed in system_memories
+                    console.log(`📝 Step 4b.4: Lead generation failed for ${company.name}, saving venue as failed...`);
+                    
+                    const upsertResult = await upsertVenueFailedActivity({
+                      site_id: site_id,
+                      city: targetCity,
+                      region: targetRegion,
+                      venueName: company.name,
+                      userId: options.userId || site.user_id
+                    });
+                    
+                    if (upsertResult.success) {
+                      console.log(`✅ Successfully saved failed venue ${company.name} to system_memories`);
+                    } else {
+                      const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
+                      console.warn(`⚠️ ${warningMsg}`);
+                      // Don't add to errors since this is not critical for the main workflow
+                    }
                   }
                 } catch (companyError) {
                   const errorMessage = companyError instanceof Error ? companyError.message : String(companyError);
                   console.error(`❌ Error processing company ${company.name}: ${errorMessage}`);
                   companyResult.errors.push(errorMessage);
+                  
+                  // Step 4b.4: Company processing failed, save venue as failed in system_memories
+                  console.log(`📝 Step 4b.4: Company processing failed for ${company.name}, saving venue as failed...`);
+                  
+                  const upsertResult = await upsertVenueFailedActivity({
+                    site_id: site_id,
+                    city: targetCity,
+                    region: targetRegion,
+                    venueName: company.name,
+                    userId: options.userId || site.user_id
+                  });
+                  
+                  if (upsertResult.success) {
+                    console.log(`✅ Successfully saved failed venue ${company.name} to system_memories`);
+                  } else {
+                    const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
+                    console.warn(`⚠️ ${warningMsg}`);
+                    // Don't add to errors since this is not critical for the main workflow
+                  }
                 }
                 
                 companyResults.push(companyResult);
                 console.log(`📊 Completed processing company ${i + 1}/${companiesCreated.length}: ${company.name}`);
               }
             } else {
-              console.log(`⚠️ No companies created from venues`);
+              console.log(`⚠️ No companies processed for lead generation`);
             }
           } else {
             const errorMsg = `Companies creation failed: ${companiesCreateResult.error}`;
@@ -777,7 +1005,7 @@ export async function leadGenerationWorkflow(
       }
     } catch (venuesError) {
       const errorMessage = venuesError instanceof Error ? venuesError.message : String(venuesError);
-      console.error(`❌ Region venues API call failed: ${errorMessage}`);
+      console.error(`❌ Exception in region venues processing: ${errorMessage}`);
       errors.push(`Region venues API error: ${errorMessage}`);
     }
 
@@ -810,7 +1038,7 @@ export async function leadGenerationWorkflow(
     console.log(`   - Business types received: ${businessTypes.length}`);
     console.log(`   - Enhanced search topic: ${enhancedSearchTopic}`);
     console.log(`   - Target location: ${targetCity && targetRegion ? `${targetCity}, ${targetRegion}` : targetCity || targetRegion || 'Not specified'}`);
-    console.log(`   - Venues found: ${venuesFound.length}`);
+    
     console.log(`   - Companies created: ${companiesCreated.length}`);
     console.log(`   - Companies processed: ${companyResults.length}`);
     console.log(`   - Total leads generated: ${totalLeadsGenerated}`);

@@ -416,7 +416,10 @@ async function deepResearchWorkflow(options) {
                     userId: options.userId || site.user_id,
                     additionalData: options.additionalData,
                     deliverables: enhancedDeliverables, // Use enhanced deliverables instead of options.deliverables
-                    command_id: commandId // Pass command_id for workflow consolidation
+                    command_id: commandId, // Pass command_id for workflow consolidation
+                    data: {
+                        research_topic: research_topic
+                    }
                 };
                 if (commandId) {
                     console.log(`🔗 Using command_id for final analysis consolidation: ${commandId}`);
