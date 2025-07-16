@@ -1513,58 +1513,84 @@ function parseGoogleMapsAddress(addressString: string, targetCity?: string): any
       parsed.state = parts[parts.length - 2];
     }
     
-    // Look for city and zip code in the middle parts
-    let cityFound = false;
-    let zipFound = false;
-    const address1Parts: string[] = [];
+    // ✅ FIXED: New approach - first find where zip code and city are, then everything before goes to address1
+    let zipPartIndex = -1;
+    let cityPartIndex = -1;
     
+    // First pass: identify which parts contain zip code
     for (let i = 0; i < parts.length - 2; i++) {
       const part = parts[i];
-      
-      // Check if this part contains a number that could be a zip code
       const zipMatch = part.match(/\b(\d{4,6})\b/);
-      if (zipMatch && !zipFound) {
+      if (zipMatch && zipPartIndex === -1) {
         parsed.zip = zipMatch[1];
-        zipFound = true;
+        zipPartIndex = i;
         
-        // The rest of this part (after removing zip) could be part of city
+        // Check if the remaining part after removing zip contains city info
         const remainingPart = part.replace(zipMatch[0], '').trim();
-        if (remainingPart && !cityFound) {
-          // Check if target_city matches this remaining part
-          if (targetCity && remainingPart.toLowerCase().includes(targetCity.toLowerCase())) {
-            parsed.city = targetCity; // Always use target_city
-            cityFound = true;
-          } else {
-            parsed.city = targetCity || remainingPart; // Prioritize target_city
-            cityFound = true;
-          }
+        if (remainingPart) {
+          cityPartIndex = i; // City is in the same part as zip
         }
-      } else if (!cityFound && targetCity) {
-        // Check if this part matches target_city
-        if (part.toLowerCase().includes(targetCity.toLowerCase())) {
-          parsed.city = targetCity; // Always use target_city
-          cityFound = true;
-        } else {
-          // This part goes to address1
-          address1Parts.push(part);
-        }
-      } else if (!cityFound) {
-        // If no target_city, check if this looks like a city name (no numbers)
-        if (!/\d/.test(part) && part.length > 2) {
-          parsed.city = part;
-          cityFound = true;
-        } else {
-          address1Parts.push(part);
-        }
-      } else {
-        // After city is found, remaining parts go to address1
-        address1Parts.push(part);
+        break;
       }
     }
     
-    // Always ensure we use target_city if provided
+    // Second pass: identify city if not found with zip
+    if (cityPartIndex === -1) {
+      for (let i = 0; i < parts.length - 2; i++) {
+        const part = parts[i];
+        
+        // Skip the zip part since we already processed it
+        if (i === zipPartIndex) continue;
+        
+        if (targetCity && part.toLowerCase().includes(targetCity.toLowerCase())) {
+          cityPartIndex = i;
+          break;
+        } else if (!targetCity && !/\d/.test(part) && part.length > 2) {
+          // If no target_city, find a part that looks like a city name (no numbers)
+          cityPartIndex = i;
+          break;
+        }
+      }
+    }
+    
+    // ✅ FIXED: Everything BEFORE the zip/city parts goes to address1
+    const address1Parts: string[] = [];
+    const maxIndex = Math.max(zipPartIndex, cityPartIndex);
+    
+    for (let i = 0; i < Math.min(maxIndex === -1 ? parts.length - 2 : maxIndex, parts.length - 2); i++) {
+      // Skip if this is the zip part and we extracted city from elsewhere
+      if (i === zipPartIndex && cityPartIndex !== zipPartIndex) {
+        // Just the part before zip code in this segment
+        const part = parts[i];
+        const zipMatch = part.match(/\b(\d{4,6})\b/);
+        if (zipMatch) {
+          const beforeZip = part.substring(0, part.indexOf(zipMatch[0])).trim();
+          if (beforeZip) {
+            address1Parts.push(beforeZip);
+          }
+        }
+      } else if (i !== cityPartIndex) {
+        // This part goes entirely to address1
+        address1Parts.push(parts[i]);
+      }
+    }
+    
+    // Handle city assignment
     if (targetCity) {
-      parsed.city = targetCity;
+      parsed.city = targetCity; // Always use target_city if provided
+    } else if (cityPartIndex !== -1) {
+      if (cityPartIndex === zipPartIndex) {
+        // City is in the same part as zip code
+        const part = parts[cityPartIndex];
+        const zipMatch = part.match(/\b(\d{4,6})\b/);
+        if (zipMatch) {
+          const remainingPart = part.replace(zipMatch[0], '').trim();
+          parsed.city = remainingPart || null;
+        }
+      } else {
+        // City is in a separate part
+        parsed.city = parts[cityPartIndex];
+      }
     }
     
     // Build address1 from collected parts
