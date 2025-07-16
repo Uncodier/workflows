@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activityPrioritizationEngineWorkflow = activityPrioritizationEngineWorkflow;
 const workflow_1 = require("@temporalio/workflow");
-const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity, scheduleIndividualSiteAnalysisActivity } = (0, workflow_1.proxyActivities)({
+const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity, scheduleIndividualSiteAnalysisActivity, scheduleIndividualLeadGenerationActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes',
 });
 /**
@@ -120,6 +120,36 @@ async function activityPrioritizationEngineWorkflow() {
                         errors: [siteAnalysisError instanceof Error ? siteAnalysisError.message : String(siteAnalysisError)]
                     };
                 }
+                // Step 2.1.1: Schedule lead generation for 1 hour after daily standups
+                console.log('🔥 Step 2.1.1: Scheduling lead generation for 1 hour after daily standups...');
+                console.log('   Lead generation will execute 1 hour after daily standups complete');
+                try {
+                    const leadGenerationResult = await scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, {
+                        timezone: 'America/Mexico_City'
+                    });
+                    console.log(`🔥 Lead generation scheduling completed:`);
+                    console.log(`   ✅ Scheduled: ${leadGenerationResult.scheduled} sites`);
+                    console.log(`   ⏭️ Skipped: ${leadGenerationResult.skipped} sites`);
+                    console.log(`   ❌ Failed: ${leadGenerationResult.failed} sites`);
+                    // Add lead generation results to operations result
+                    operationsResult.leadGenerationScheduling = {
+                        scheduled: leadGenerationResult.scheduled,
+                        skipped: leadGenerationResult.skipped,
+                        failed: leadGenerationResult.failed,
+                        results: leadGenerationResult.results,
+                        errors: leadGenerationResult.errors
+                    };
+                }
+                catch (leadGenerationError) {
+                    console.error('❌ Error scheduling lead generation:', leadGenerationError);
+                    operationsResult.leadGenerationScheduling = {
+                        scheduled: 0,
+                        skipped: 0,
+                        failed: 1,
+                        results: [],
+                        errors: [leadGenerationError instanceof Error ? leadGenerationError.message : String(leadGenerationError)]
+                    };
+                }
             }
             catch (operationsError) {
                 console.error('❌ Daily operations workflow failed:', operationsError);
@@ -194,6 +224,52 @@ async function activityPrioritizationEngineWorkflow() {
                         errors: [siteAnalysisError instanceof Error ? siteAnalysisError.message : String(siteAnalysisError)]
                     };
                 }
+                // Step 2.2.1: Schedule lead generation for 1 hour after daily standups
+                console.log('🔥 Step 2.2.1: Scheduling lead generation for 1 hour after daily standups...');
+                console.log('   Both daily standups and lead generation will be scheduled for their appropriate times');
+                try {
+                    const leadGenerationResult = await scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, {
+                        timezone: 'America/Mexico_City'
+                    });
+                    console.log(`🔥 Lead generation scheduling completed:`);
+                    console.log(`   ✅ Scheduled: ${leadGenerationResult.scheduled} sites`);
+                    console.log(`   ⏭️ Skipped: ${leadGenerationResult.skipped} sites`);
+                    console.log(`   ❌ Failed: ${leadGenerationResult.failed} sites`);
+                    // Add lead generation results to operations result (merge with existing leadGenerationScheduling if exists)
+                    if (!operationsResult.leadGenerationScheduling) {
+                        operationsResult.leadGenerationScheduling = {
+                            scheduled: leadGenerationResult.scheduled,
+                            skipped: leadGenerationResult.skipped,
+                            failed: leadGenerationResult.failed,
+                            results: leadGenerationResult.results,
+                            errors: leadGenerationResult.errors
+                        };
+                    }
+                    else {
+                        // Merge results if leadGenerationScheduling already exists
+                        operationsResult.leadGenerationScheduling.scheduled += leadGenerationResult.scheduled;
+                        operationsResult.leadGenerationScheduling.skipped += leadGenerationResult.skipped;
+                        operationsResult.leadGenerationScheduling.failed += leadGenerationResult.failed;
+                        operationsResult.leadGenerationScheduling.results.push(...leadGenerationResult.results);
+                        operationsResult.leadGenerationScheduling.errors.push(...leadGenerationResult.errors);
+                    }
+                }
+                catch (leadGenerationError) {
+                    console.error('❌ Error scheduling lead generation:', leadGenerationError);
+                    if (!operationsResult.leadGenerationScheduling) {
+                        operationsResult.leadGenerationScheduling = {
+                            scheduled: 0,
+                            skipped: 0,
+                            failed: 1,
+                            results: [],
+                            errors: [leadGenerationError instanceof Error ? leadGenerationError.message : String(leadGenerationError)]
+                        };
+                    }
+                    else {
+                        operationsResult.leadGenerationScheduling.failed += 1;
+                        operationsResult.leadGenerationScheduling.errors.push(leadGenerationError instanceof Error ? leadGenerationError.message : String(leadGenerationError));
+                    }
+                }
             }
             catch (schedulingError) {
                 console.error('❌ Error creating individual schedules:', schedulingError);
@@ -222,6 +298,13 @@ async function activityPrioritizationEngineWorkflow() {
         if (operationsResult?.individualSchedules) {
             console.log(`   Individual schedules created: ${operationsResult.individualSchedules}`);
             console.log(`   Approach: ${operationsResult.approach || 'individual-site-schedules'}`);
+        }
+        if (operationsResult?.siteAnalysisScheduling) {
+            console.log(`   Site analysis scheduled: ${operationsResult.siteAnalysisScheduling.scheduled} sites`);
+        }
+        if (operationsResult?.leadGenerationScheduling) {
+            console.log(`   Lead generation scheduled: ${operationsResult.leadGenerationScheduling.scheduled} sites`);
+            console.log(`   🔥 Lead generation will execute 1 hour after daily standups`);
         }
         console.log(`   Total execution time: ${executionTime}`);
         console.log('   Role: Decision maker and orchestrator with business hours respect');

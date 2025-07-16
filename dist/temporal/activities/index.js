@@ -36,7 +36,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.checkSiteAnalysisActivity = exports.deleteResourceActivity = exports.updateResourceActivity = exports.createResourceActivity = exports.storeWorkflowResultActivity = exports.fetchConfigurationActivity = exports.trackApiCallActivity = exports.logWorkflowExecutionActivity = exports.scheduleIndividualSiteAnalysisActivity = exports.scheduleIndividualDailyStandUpsActivity = exports.scheduleDailyOperationsWorkflowActivity = exports.executeDailyStandUpWorkflowsActivity = exports.activities = void 0;
+exports.checkSiteAnalysisActivity = exports.deleteResourceActivity = exports.updateResourceActivity = exports.createResourceActivity = exports.storeWorkflowResultActivity = exports.fetchConfigurationActivity = exports.trackApiCallActivity = exports.logWorkflowExecutionActivity = exports.scheduleIndividualLeadGenerationActivity = exports.scheduleIndividualSiteAnalysisActivity = exports.scheduleIndividualDailyStandUpsActivity = exports.scheduleDailyOperationsWorkflowActivity = exports.executeDailyStandUpWorkflowsActivity = exports.activities = void 0;
 // Export all activities
 __exportStar(require("./supabaseActivities"), exports);
 __exportStar(require("./apiActivities"), exports);
@@ -112,6 +112,7 @@ Object.defineProperty(exports, "executeDailyStandUpWorkflowsActivity", { enumera
 Object.defineProperty(exports, "scheduleDailyOperationsWorkflowActivity", { enumerable: true, get: function () { return workflowSchedulingActivities_1.scheduleDailyOperationsWorkflowActivity; } });
 Object.defineProperty(exports, "scheduleIndividualDailyStandUpsActivity", { enumerable: true, get: function () { return workflowSchedulingActivities_1.scheduleIndividualDailyStandUpsActivity; } });
 Object.defineProperty(exports, "scheduleIndividualSiteAnalysisActivity", { enumerable: true, get: function () { return workflowSchedulingActivities_1.scheduleIndividualSiteAnalysisActivity; } });
+Object.defineProperty(exports, "scheduleIndividualLeadGenerationActivity", { enumerable: true, get: function () { return workflowSchedulingActivities_1.scheduleIndividualLeadGenerationActivity; } });
 var supabaseActivities_1 = require("./supabaseActivities");
 Object.defineProperty(exports, "logWorkflowExecutionActivity", { enumerable: true, get: function () { return supabaseActivities_1.logWorkflowExecutionActivity; } });
 Object.defineProperty(exports, "trackApiCallActivity", { enumerable: true, get: function () { return supabaseActivities_1.trackApiCallActivity; } });

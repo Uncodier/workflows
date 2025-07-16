@@ -53,6 +53,8 @@ exports.findSalesCrmAgentActivity = findSalesCrmAgentActivity;
 exports.updateAgentMemoryWithLeadStatsActivity = updateAgentMemoryWithLeadStatsActivity;
 exports.createCompaniesFromVenuesActivity = createCompaniesFromVenuesActivity;
 exports.upsertVenueFailedActivity = upsertVenueFailedActivity;
+exports.notifyNewLeadsActivity = notifyNewLeadsActivity;
+exports.determineMaxVenuesActivity = determineMaxVenuesActivity;
 const logger_1 = require("../../lib/logger");
 const apiService_1 = require("../services/apiService");
 const supabaseService_1 = require("../services/supabaseService");
@@ -567,6 +569,15 @@ async function createLeadsFromResearchActivity(options) {
                 }
             }
         }
+        // Collect lead names for notification (only for successfully created leads)
+        const createdLeadNames = [];
+        if (options.create && leadsCreated > 0) {
+            for (const validationResult of validationResults) {
+                if (validationResult.valid && validationResult.lead.name) {
+                    createdLeadNames.push(validationResult.lead.name);
+                }
+            }
+        }
         const result = {
             success: errors.length === 0 || leadsValidated > 0,
             leadsCreated,
@@ -575,12 +586,19 @@ async function createLeadsFromResearchActivity(options) {
             errors: errors.length > 0 ? errors : undefined,
             validationResults
         };
+        // Note: Notification is now sent at the workflow level to consolidate all leads
+        // Individual lead notifications are disabled to avoid duplicates
+        if (options.create && createdLeadNames.length > 0) {
+            console.log(`📝 Leads created: ${createdLeadNames.length} (notification will be sent at workflow completion)`);
+            console.log(`📋 Lead names: ${createdLeadNames.join(', ')}`);
+        }
         logger_1.logger.info(`📊 Lead creation/validation completed`, {
             site_id: options.site_id,
             leadsValidated,
             leadsCreated,
             errorsCount: errors.length,
-            createMode: options.create || false
+            createMode: options.create || false,
+            notificationSent: createdLeadNames.length > 0
         });
         return result;
     }
@@ -738,7 +756,7 @@ segmentId // Add segment_id parameter
 /**
  * Convert venues to companies format
  */
-function convertVenuesToCompanies(venues) {
+function convertVenuesToCompanies(venues, targetCity) {
     const companies = [];
     // Helper function to map venue types to allowed industry values
     const mapVenueTypeToIndustry = (types) => {
@@ -847,6 +865,7 @@ function convertVenuesToCompanies(venues) {
                 description: venue.description || null,
                 location: venue.address,
                 address: venue.address,
+                city: targetCity || null, // ✅ Always use target_city from research topic
                 phone: venue.phone || venue.international_phone || null,
                 email: null, // Will be populated later through research
                 size: size,
@@ -1208,33 +1227,133 @@ async function updateAgentMemoryWithLeadStatsActivity(options) {
     }
 }
 /**
- * Helper function to safely store venue address data from Google Maps
- * Only saves data that comes clearly from Google Maps, no parsing or guessing
+ * Helper function to parse Google Maps address format
+ * Example: "Agustín Arroyo Chagoyan 501, Alameda, 38050 Celaya, Gto., Mexico"
+ * Returns: { address1: "Agustín Arroyo Chagoyan 501, Alameda", city: "Celaya", state: "Gto.", country: "Mexico", zip: "38050" }
  */
-function createVenueAddressObject(addressString, coordinates) {
+function parseGoogleMapsAddress(addressString, targetCity) {
     if (!addressString)
         return {};
-    // ✅ Only save the exact address string from Google Maps
-    // Don't try to parse or guess city, state, country, zipcode
-    const addressObject = {
-        full_address: addressString, // Store the complete address as received from Google Maps
-    };
-    // ✅ Only add coordinates if they come clearly from Google Maps
+    try {
+        // Split the address by commas
+        const parts = addressString.split(',').map(part => part.trim());
+        if (parts.length < 2) {
+            // If we can't parse, just store the full address
+            return {
+                full_address: addressString,
+                address1: addressString,
+                city: targetCity || null, // Always use target_city if available
+            };
+        }
+        // Initialize result object
+        const parsed = {
+            full_address: addressString
+        };
+        // Last part is typically country
+        if (parts.length >= 1) {
+            parsed.country = parts[parts.length - 1];
+        }
+        // Second to last is typically state/region (if we have enough parts)
+        if (parts.length >= 2) {
+            parsed.state = parts[parts.length - 2];
+        }
+        // Look for city and zip code in the middle parts
+        let cityFound = false;
+        let zipFound = false;
+        const address1Parts = [];
+        for (let i = 0; i < parts.length - 2; i++) {
+            const part = parts[i];
+            // Check if this part contains a number that could be a zip code
+            const zipMatch = part.match(/\b(\d{4,6})\b/);
+            if (zipMatch && !zipFound) {
+                parsed.zip = zipMatch[1];
+                zipFound = true;
+                // The rest of this part (after removing zip) could be part of city
+                const remainingPart = part.replace(zipMatch[0], '').trim();
+                if (remainingPart && !cityFound) {
+                    // Check if target_city matches this remaining part
+                    if (targetCity && remainingPart.toLowerCase().includes(targetCity.toLowerCase())) {
+                        parsed.city = targetCity; // Always use target_city
+                        cityFound = true;
+                    }
+                    else {
+                        parsed.city = targetCity || remainingPart; // Prioritize target_city
+                        cityFound = true;
+                    }
+                }
+            }
+            else if (!cityFound && targetCity) {
+                // Check if this part matches target_city
+                if (part.toLowerCase().includes(targetCity.toLowerCase())) {
+                    parsed.city = targetCity; // Always use target_city
+                    cityFound = true;
+                }
+                else {
+                    // This part goes to address1
+                    address1Parts.push(part);
+                }
+            }
+            else if (!cityFound) {
+                // If no target_city, check if this looks like a city name (no numbers)
+                if (!/\d/.test(part) && part.length > 2) {
+                    parsed.city = part;
+                    cityFound = true;
+                }
+                else {
+                    address1Parts.push(part);
+                }
+            }
+            else {
+                // After city is found, remaining parts go to address1
+                address1Parts.push(part);
+            }
+        }
+        // Always ensure we use target_city if provided
+        if (targetCity) {
+            parsed.city = targetCity;
+        }
+        // Build address1 from collected parts
+        if (address1Parts.length > 0) {
+            parsed.address1 = address1Parts.join(', ');
+        }
+        console.log(`🗺️ Parsed address: "${addressString}" → ${JSON.stringify(parsed)}`);
+        return parsed;
+    }
+    catch (error) {
+        console.error(`❌ Error parsing address: ${addressString}`, error);
+        // Fallback: return basic structure with target_city
+        return {
+            full_address: addressString,
+            address1: addressString,
+            city: targetCity || null,
+        };
+    }
+}
+/**
+ * Helper function to safely store venue address data from Google Maps
+ * Now includes intelligent parsing of address components while preserving full address
+ */
+function createVenueAddressObject(addressString, coordinates, targetCity) {
+    if (!addressString)
+        return {};
+    // Parse the Google Maps address format
+    const parsedAddress = parseGoogleMapsAddress(addressString, targetCity);
+    // Add coordinates if available
     if (coordinates && coordinates.lat && coordinates.lng) {
-        addressObject.coordinates = {
+        parsedAddress.coordinates = {
             lat: coordinates.lat,
             lng: coordinates.lng
         };
     }
-    return addressObject;
+    return parsedAddress;
 }
 /**
  * Create companies with upsert functionality
  */
 async function createCompaniesFromVenuesActivity(options) {
     try {
-        // Convert venues to companies
-        const companies = convertVenuesToCompanies(options.venues);
+        // Convert venues to companies with target_city
+        const companies = convertVenuesToCompanies(options.venues, options.targetCity);
         if (companies.length === 0) {
             return {
                 success: true,
@@ -1246,8 +1365,8 @@ async function createCompaniesFromVenuesActivity(options) {
         const createdCompanies = [];
         for (const company of companies) {
             try {
-                // Create the address object using only Google Maps data
-                const addressJson = createVenueAddressObject(company.address, company.coordinates);
+                // Create the address object using Google Maps data with intelligent parsing
+                const addressJson = createVenueAddressObject(company.address, company.coordinates, options.targetCity);
                 // Prepare company data for database (now using properly mapped values)
                 const companyData = {
                     name: company.name,
@@ -1446,6 +1565,180 @@ async function upsertVenueFailedActivity(options) {
         return {
             success: false,
             error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to notify about new leads generated using external API
+ */
+async function notifyNewLeadsActivity(options) {
+    try {
+        logger_1.logger.info('📢 Starting new leads notification', {
+            site_id: options.site_id,
+            leadNamesCount: options.leadNames.length,
+            userId: options.userId
+        });
+        if (options.leadNames.length === 0) {
+            logger_1.logger.info('⚠️ No lead names to notify, skipping notification', {
+                site_id: options.site_id
+            });
+            return {
+                success: true
+            };
+        }
+        const requestBody = {
+            site_id: options.site_id,
+            names: options.leadNames,
+            userId: options.userId,
+            timestamp: new Date().toISOString(),
+            ...options.additionalData
+        };
+        console.log('📤 Sending new leads notification:', JSON.stringify(requestBody, null, 2));
+        const response = await apiService_1.apiService.post('/api/notifications/newLeadsAlert', requestBody);
+        if (!response.success) {
+            logger_1.logger.error('❌ New leads notification API call failed', {
+                error: response.error,
+                site_id: options.site_id,
+                leadNamesCount: options.leadNames.length
+            });
+            return {
+                success: false,
+                error: response.error?.message || 'Failed to send new leads notification'
+            };
+        }
+        logger_1.logger.info('✅ New leads notification sent successfully', {
+            site_id: options.site_id,
+            leadNamesCount: options.leadNames.length,
+            leadNames: options.leadNames
+        });
+        console.log(`✅ Successfully notified about ${options.leadNames.length} new leads: ${options.leadNames.join(', ')}`);
+        return {
+            success: true
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger_1.logger.error('❌ New leads notification exception', {
+            error: errorMessage,
+            site_id: options.site_id,
+            leadNamesCount: options.leadNames.length
+        });
+        return {
+            success: false,
+            error: `Notification exception: ${errorMessage}`
+        };
+    }
+}
+/**
+ * Activity to determine maximum venues based on billing plan and channel configuration
+ * Rules:
+ * - 1 venue if free plan (no channels configured in settings)
+ * - 2 venues if free plan but has at least one channel configured
+ * - 10 venues for startup plan
+ * - 30 venues for enterprise plan
+ */
+async function determineMaxVenuesActivity(options) {
+    try {
+        logger_1.logger.info('🔢 Starting max venues determination', {
+            site_id: options.site_id,
+            userId: options.userId
+        });
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            return {
+                success: false,
+                error: 'Database not connected'
+            };
+        }
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // Get billing information for the site
+        const { data: billingData, error: billingError } = await supabaseServiceRole
+            .from('billing')
+            .select('plan')
+            .eq('site_id', options.site_id)
+            .single();
+        if (billingError) {
+            logger_1.logger.error('❌ Error fetching billing data', {
+                error: billingError.message,
+                site_id: options.site_id
+            });
+            return {
+                success: false,
+                error: `Failed to fetch billing data: ${billingError.message}`
+            };
+        }
+        // Get settings to check channel configuration
+        const { data: settingsData, error: settingsError } = await supabaseServiceRole
+            .from('settings')
+            .select('channels')
+            .eq('site_id', options.site_id)
+            .single();
+        if (settingsError) {
+            logger_1.logger.error('❌ Error fetching settings data', {
+                error: settingsError.message,
+                site_id: options.site_id
+            });
+            return {
+                success: false,
+                error: `Failed to fetch settings data: ${settingsError.message}`
+            };
+        }
+        const plan = billingData?.plan || 'free';
+        const channels = settingsData?.channels || {};
+        // Check if channels are configured (non-empty object with at least one enabled channel)
+        const hasChannels = channels && typeof channels === 'object' && Object.keys(channels).length > 0 &&
+            Object.values(channels).some((channel) => channel && typeof channel === 'object' && channel.enabled === true);
+        let maxVenues = 1; // Default for free plan without channels
+        // Apply business logic for venue limits
+        switch (plan.toLowerCase()) {
+            case 'free':
+            case 'commission': // ✅ Commission plan treated as free plan
+                maxVenues = hasChannels ? 2 : 1;
+                break;
+            case 'startup':
+                maxVenues = 10;
+                break;
+            case 'enterprise':
+                maxVenues = 30;
+                break;
+            default:
+                // For any unknown plan, treat as free without channels
+                maxVenues = 1;
+                logger_1.logger.warn('⚠️ Unknown billing plan, defaulting to 1 venue', {
+                    site_id: options.site_id,
+                    plan: plan
+                });
+                break;
+        }
+        logger_1.logger.info('✅ Max venues determined successfully', {
+            site_id: options.site_id,
+            plan: plan,
+            hasChannels: hasChannels,
+            maxVenues: maxVenues,
+            channelsConfigured: Object.keys(channels).length
+        });
+        console.log(`📊 Venue limits determined for site ${options.site_id}:`);
+        console.log(`   💳 Billing plan: ${plan}`);
+        console.log(`   📡 Channels configured: ${hasChannels ? 'Yes' : 'No'} (${Object.keys(channels).length} total)`);
+        console.log(`   🏢 Max venues allowed: ${maxVenues}`);
+        return {
+            success: true,
+            maxVenues: maxVenues,
+            plan: plan,
+            hasChannels: hasChannels
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger_1.logger.error('❌ Exception determining max venues', {
+            error: errorMessage,
+            site_id: options.site_id
+        });
+        return {
+            success: false,
+            error: `Exception determining max venues: ${errorMessage}`
         };
     }
 }

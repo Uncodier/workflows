@@ -11,7 +11,7 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, }
     },
 });
 // Import specific lead generation activities
-const { callRegionSearchApiActivity, callRegionVenuesApiActivity, callLeadGenerationApiActivity, createCompaniesFromVenuesActivity, saveLeadsFromDeepResearchActivity, searchLeadsByCompanyCityActivity, updateMemoryActivity, upsertVenueFailedActivity, } = (0, workflow_1.proxyActivities)({
+const { callRegionSearchApiActivity, callRegionVenuesApiActivity, callLeadGenerationApiActivity, createCompaniesFromVenuesActivity, saveLeadsFromDeepResearchActivity, searchLeadsByCompanyCityActivity, updateMemoryActivity, upsertVenueFailedActivity, determineMaxVenuesActivity, notifyNewLeadsActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes', // Longer timeout for lead generation processes
     retry: {
         maximumAttempts: 3,
@@ -462,6 +462,20 @@ async function leadGenerationWorkflow(options) {
             ? `${businessTypeNames.join(', ')} in ${geographicInfo.join(', ')}`
             : businessTypeNames.join(', ');
         console.log(`🔍 Enhanced search topic: "${enhancedSearchTopic}"`);
+        // Step 2b: Determine maximum venues based on billing plan
+        console.log(`🔢 Determining venue limits based on billing plan...`);
+        const maxVenuesResult = await determineMaxVenuesActivity({
+            site_id: site_id,
+            userId: options.userId || site.user_id
+        });
+        let maxVenues = 1; // Default fallback
+        if (maxVenuesResult.success && maxVenuesResult.maxVenues) {
+            maxVenues = maxVenuesResult.maxVenues;
+            console.log(`✅ Venue limits determined: ${maxVenues} venues (Plan: ${maxVenuesResult.plan}, Channels: ${maxVenuesResult.hasChannels ? 'Yes' : 'No'})`);
+        }
+        else {
+            console.log(`⚠️ Failed to determine venue limits, using default: ${maxVenues} venues. Error: ${maxVenuesResult.error}`);
+        }
         // Call region venues API to find businesses
         try {
             const regionVenuesOptions = {
@@ -470,7 +484,7 @@ async function leadGenerationWorkflow(options) {
                 searchTerm: enhancedSearchTopic,
                 city: targetCity || '',
                 region: targetRegion || '',
-                maxVenues: 10,
+                maxVenues: maxVenues, // ✅ Use dynamically determined venue limit
                 priority: 'high',
                 excludeNames: excludeNames, // Exclude companies that already have leads
                 additionalData: {
@@ -479,7 +493,9 @@ async function leadGenerationWorkflow(options) {
                     businessTypes: businessTypes,
                     enhancedSearchTopic: enhancedSearchTopic,
                     siteName: siteName,
-                    siteUrl: siteUrl
+                    siteUrl: siteUrl,
+                    billingPlan: maxVenuesResult.plan, // Include billing plan info
+                    hasChannels: maxVenuesResult.hasChannels // Include channel info
                 }
             };
             venuesResult = await callRegionVenuesApiActivity(regionVenuesOptions);
@@ -491,6 +507,7 @@ async function leadGenerationWorkflow(options) {
                         site_id: site_id,
                         venues: venuesFound,
                         userId: options.userId || site.user_id,
+                        targetCity: targetCity, // ✅ Pass target_city for address parsing and company.city field
                         additionalData: {
                             ...options.additionalData,
                             venuesResult: venuesResult,
@@ -882,6 +899,60 @@ async function leadGenerationWorkflow(options) {
         console.log(`   - Companies processed: ${companyResults.length}`);
         console.log(`   - Total leads generated: ${totalLeadsGenerated}`);
         console.log(`   - Lead creation results: ${leadCreationResults.length}`);
+        // Step Final: Send notification for all leads generated in this workflow
+        if (totalLeadsGenerated > 0) {
+            console.log(`📢 Step Final: Sending notification for ${totalLeadsGenerated} leads generated...`);
+            // Collect all successfully created lead names from company results
+            const allLeadNames = [];
+            for (const companyResult of companyResults) {
+                if (companyResult.leadsGenerated && Array.isArray(companyResult.leadsGenerated)) {
+                    for (const lead of companyResult.leadsGenerated) {
+                        if (lead.name) {
+                            allLeadNames.push(lead.name);
+                        }
+                    }
+                }
+            }
+            if (allLeadNames.length > 0) {
+                try {
+                    const notificationResult = await notifyNewLeadsActivity({
+                        site_id: site_id,
+                        leadNames: allLeadNames,
+                        userId: options.userId || site.user_id,
+                        additionalData: {
+                            source: 'lead_generation_workflow',
+                            workflowStep: 'workflow_completion_notification',
+                            siteName: siteName,
+                            siteUrl: siteUrl,
+                            targetCity: targetCity,
+                            targetRegion: targetRegion,
+                            businessTypes: businessTypes,
+                            companiesProcessed: companyResults.length,
+                            executionTime: executionTime,
+                            workflowId: workflowId
+                        }
+                    });
+                    if (notificationResult.success) {
+                        console.log(`✅ Successfully sent notification for ${allLeadNames.length} leads: ${allLeadNames.join(', ')}`);
+                    }
+                    else {
+                        console.error(`❌ Failed to send notification: ${notificationResult.error}`);
+                        errors.push(`Notification failed: ${notificationResult.error}`);
+                    }
+                }
+                catch (notificationError) {
+                    const errorMessage = notificationError instanceof Error ? notificationError.message : String(notificationError);
+                    console.error(`❌ Exception sending notification: ${errorMessage}`);
+                    errors.push(`Notification exception: ${errorMessage}`);
+                }
+            }
+            else {
+                console.log(`⚠️ No lead names found for notification despite ${totalLeadsGenerated} leads generated`);
+            }
+        }
+        else {
+            console.log(`ℹ️ No leads generated, skipping notification`);
+        }
         // Update cron status to indicate successful completion
         await saveCronStatusActivity({
             siteId: site_id,

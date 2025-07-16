@@ -1678,6 +1678,259 @@ export async function scheduleIndividualSiteAnalysisActivity(
   }
 }
 
+/**
+ * Schedule Lead Generation Workflows for individual sites using TIMERS
+ * Creates delayed workflow executions for sites that need lead generation
+ * Uses Temporal timers instead of schedules for one-time executions
+ * EXECUTES 1 HOUR AFTER DAILY STANDUP to generate leads after standup analysis
+ */
+export async function scheduleIndividualLeadGenerationActivity(
+  businessHoursAnalysis: any,
+  options: { timezone?: string } = {}
+): Promise<{
+  scheduled: number;
+  skipped: number;
+  failed: number;
+  results: ScheduleWorkflowResult[];
+  errors: string[];
+}> {
+  const { timezone = 'America/Mexico_City' } = options;
+  
+  console.log(`🔥 Scheduling individual Lead Generation workflows using TIMERS`);
+  console.log(`   - Default timezone: ${timezone}`);
+  console.log(`   - Sites with business_hours: ${businessHoursAnalysis.openSites?.length || 0}`);
+  
+  const results: ScheduleWorkflowResult[] = [];
+  const errors: string[] = [];
+  let scheduled = 0;
+  const skipped = 0;
+  let failed = 0;
+
+  try {
+    const client = await getTemporalClient();
+    const supabaseService = getSupabaseService();
+    
+    // Get ALL sites from database
+    const allSites = await supabaseService.fetchSites();
+    console.log(`   - Total sites in database: ${allSites.length}`);
+    
+    if (!allSites || allSites.length === 0) {
+      console.log('⚠️ No sites found in database');
+      return { scheduled: 0, skipped: 0, failed: 0, results: [], errors: [] };
+    }
+
+    // Create a map of sites with business hours for quick lookup
+    const sitesWithBusinessHours = new Map();
+    if (businessHoursAnalysis.openSites) {
+      businessHoursAnalysis.openSites.forEach((site: any) => {
+        sitesWithBusinessHours.set(site.siteId, site.businessHours);
+      });
+    }
+    
+    // Process ALL sites (both with and without business_hours)
+    for (const site of allSites as any[]) {
+      try {
+        console.log(`\n🔥 Processing site for Lead Generation: ${site.name || 'Unnamed'} (${site.id})`);
+        
+        // Check if this site has business_hours
+        const businessHours = sitesWithBusinessHours.get(site.id);
+        
+        let scheduledTime: string;
+        let siteTimezone: string;
+        let businessHoursSource: string;
+        
+        if (businessHours) {
+          // Site HAS business_hours - use them
+          scheduledTime = businessHours.open; // e.g., "09:00"
+          siteTimezone = businessHours.timezone || timezone;
+          businessHoursSource = 'database-configured';
+          console.log(`   ✅ Has business_hours: ${businessHours.open} - ${businessHours.close} ${siteTimezone}`);
+        } else {
+          // Site DOES NOT have business_hours - use fallback
+          scheduledTime = "09:00"; // Default fallback time
+          siteTimezone = timezone; // Default timezone
+          businessHoursSource = 'fallback-default';
+          console.log(`   ⚠️ No business_hours found - using FALLBACK: ${scheduledTime} ${siteTimezone}`);
+        }
+        
+        // Parse the original daily standup time
+        const [hours, minutes] = scheduledTime.split(':').map(Number);
+        
+        // Calculate lead generation time (1 hour after daily standup)
+        let leadGenHour = hours + 1;
+        if (leadGenHour >= 24) {
+          leadGenHour = 0; // Wrap to next day if needed
+        }
+        
+        const leadGenScheduledTime = `${leadGenHour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        
+        console.log(`   - Original daily standup time: ${scheduledTime}`);
+        console.log(`   - Lead generation time (1h later): ${leadGenScheduledTime}`);
+        console.log(`   - Timezone: ${siteTimezone}`);
+        console.log(`   - Business hours source: ${businessHoursSource}`);
+        
+        const nowUTC = new Date();
+        const timezoneOffset = siteTimezone === 'America/Mexico_City' ? 6 : 0;
+        
+        // Calculate current time in site's timezone
+        const nowLocal = new Date(nowUTC.getTime() - (timezoneOffset * 60 * 60 * 1000));
+        
+        // Create target time for "today" in site's timezone using lead generation time
+        const targetLocalToday = new Date(nowLocal);
+        targetLocalToday.setUTCHours(leadGenHour, minutes, 0, 0);
+        
+        // Check if target time already passed in site's timezone
+        const targetAlreadyPassed = targetLocalToday <= nowLocal;
+        
+        // Determine final target date (today or tomorrow in site's timezone)
+        let finalTargetLocal: Date;
+        
+        if (targetAlreadyPassed) {
+          finalTargetLocal = new Date(targetLocalToday);
+          finalTargetLocal.setUTCDate(finalTargetLocal.getUTCDate() + 1);
+          console.log(`   ⏰ Target time already passed, scheduling for TOMORROW`);
+        } else {
+          finalTargetLocal = targetLocalToday;
+          console.log(`   ⏰ Target time hasn't passed, scheduling for TODAY`);
+        }
+        
+        const finalLocalDateStr = finalTargetLocal.toISOString().split('T')[0];
+        const finalTargetUTC = new Date(finalTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
+        
+        console.log(`   - Final target: ${finalTargetLocal.getUTCHours().toString().padStart(2, '0')}:${finalTargetLocal.getUTCMinutes().toString().padStart(2, '0')} ${siteTimezone} on ${finalLocalDateStr}`);
+        console.log(`   - Final target UTC: ${finalTargetUTC.toISOString()}`);
+        
+        // Calculate delay in milliseconds from now
+        const now = new Date();
+        const delayMs = finalTargetUTC.getTime() - now.getTime();
+        
+        if (delayMs <= 0) {
+          console.log(`   ⚠️ Target time is in the past, executing immediately`);
+        } else {
+          const delayHours = delayMs / (1000 * 60 * 60);
+          console.log(`   ⏰ Will execute in ${delayHours.toFixed(2)} hours`);
+        }
+        
+        // Create unique workflow ID for this site's lead generation
+        const uniqueHash = Math.random().toString(36).substring(2, 15);
+        const workflowId = `lead-generation-timer-${site.id}-${finalLocalDateStr}-${leadGenScheduledTime.replace(':', '')}-${uniqueHash}`;
+        
+        console.log(`   - Workflow ID: ${workflowId}`);
+        console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
+        
+        // Prepare workflow arguments for leadGenerationWorkflow
+        const workflowArgs = [{
+          site_id: site.id,
+          userId: site.user_id,
+          create: true, // Actually create leads (not just validation)
+          additionalData: {
+            scheduledBy: 'activityPrioritizationEngine-leadGeneration',
+            executeReason: `post-standup-lead-generation-${businessHoursSource}-${leadGenScheduledTime}`,
+            scheduleType: `lead-generation-${businessHoursSource}`,
+            scheduleTime: `${leadGenScheduledTime} ${siteTimezone}`,
+            executionDay: finalLocalDateStr,
+            timezone: siteTimezone,
+            executionMode: 'timer-delayed-lead-generation',
+            businessHours: businessHours || { 
+              open: scheduledTime, 
+              close: '18:00', 
+              enabled: true, 
+              timezone: siteTimezone, 
+              source: businessHoursSource 
+            },
+            siteName: site.name || `Site ${site.id.substring(0, 8)}`,
+            fallbackUsed: !businessHours,
+            delayMs,
+            targetTimeUTC: finalTargetUTC.toISOString(),
+            leadGenerationType: 'post-standup-lead-generation',
+            originalDailyStandupTime: scheduledTime,
+            leadGenExecutesOneHourLater: true,
+            executesAfterDailyStandup: true
+          }
+        }];
+
+        // Start the DELAYED workflow for lead generation
+        await client.workflow.start('delayedExecutionWorkflow', {
+          args: [{
+            delayMs: Math.max(delayMs, 0), // Ensure non-negative delay
+            targetWorkflow: 'leadGenerationWorkflow',
+            targetArgs: workflowArgs,
+            siteName: site.name || 'Site',
+            scheduledTime: `${leadGenScheduledTime} ${siteTimezone}`,
+            executionType: 'timer-based-lead-generation'
+          }],
+          taskQueue: temporalConfig.taskQueue,
+          workflowId: workflowId,
+          workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+        });
+
+        console.log(`✅ Successfully scheduled Lead Generation with TIMER for ${site.name || 'Site'}`);
+        console.log(`   - Will execute at: ${leadGenScheduledTime} ${siteTimezone} on ${finalLocalDateStr} (1h after daily standup)`);
+        console.log(`   - Daily standup time: ${scheduledTime} ${siteTimezone}`);
+        console.log(`   - Business hours source: ${businessHoursSource}`);
+        console.log(`   - Using TIMER approach for one-time lead generation`);
+        console.log(`   - 🔥 EXECUTES 1 HOUR AFTER DAILY STANDUP`);
+        
+        // Update cron status to reflect the scheduled workflow
+        const cronUpdate: CronStatusUpdate = {
+          siteId: site.id,
+          workflowId: workflowId,
+          scheduleId: workflowId, // Use workflowId as scheduleId for timers
+          activityName: 'leadGenerationWorkflow',
+          status: 'SCHEDULED',
+          nextRun: finalTargetUTC.toISOString(),
+        };
+        
+        await saveCronStatusActivity(cronUpdate);
+
+        results.push({
+          workflowId: workflowId,
+          scheduleId: workflowId,
+          success: true
+        });
+        
+        scheduled++;
+
+      } catch (siteError) {
+        const errorMessage = siteError instanceof Error ? siteError.message : String(siteError);
+        console.error(`❌ Failed to schedule Lead Generation for site ${site.id}: ${errorMessage}`);
+        
+        errors.push(`Site ${site.id}: ${errorMessage}`);
+        failed++;
+        
+        results.push({
+          workflowId: `failed-${site.id}-${Date.now()}`,
+          scheduleId: `failed-${site.id}-${Date.now()}`,
+          success: false,
+          error: errorMessage
+        });
+      }
+    }
+
+    console.log(`\n📊 Individual Lead Generation TIMER scheduling completed:`);
+    console.log(`   ✅ Scheduled: ${scheduled} sites`);
+    console.log(`   ⏭️ Skipped: ${skipped} sites`);
+    console.log(`   ❌ Failed: ${failed} sites`);
+    console.log(`   🎯 Using TIMER-based approach for reliable one-time execution`);
+    console.log(`   📅 Each site will execute at their specific business hours PLUS 1 HOUR`);
+    console.log(`   🔥 EXECUTES 1 HOUR AFTER DAILY STANDUP to generate leads after standup analysis`);
+
+    return { scheduled, skipped, failed, results, errors };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Failed to schedule individual Lead Generation: ${errorMessage}`);
+    
+    return {
+      scheduled: 0,
+      skipped: 0,
+      failed: 1,
+      results: [],
+      errors: [errorMessage]
+    };
+  }
+}
+
 
 
 

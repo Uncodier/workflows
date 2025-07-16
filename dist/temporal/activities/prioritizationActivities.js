@@ -213,9 +213,23 @@ async function evaluateBusinessHoursForDay(dayOfWeek) {
                         reason = `${openSites.length} site(s) with business_hours open on ${today} but too early (opens at ${earliestOpenTime}) AND ${sitesWithoutBusinessHours} site(s) without business_hours (weekday fallback)`;
                     }
                     else {
-                        shouldExecuteNow = true;
-                        shouldScheduleForLater = false;
-                        reason = `${openSites.length} site(s) with business_hours open on ${today} (catch-up mode) AND ${sitesWithoutBusinessHours} site(s) without business_hours (weekday fallback)`;
+                        // We're after business hours - check if it's too late for catch-up mode
+                        const [latestHour, latestMinute] = latestCloseTime.split(':').map(Number);
+                        const latestCloseMinutes = latestHour * 60 + latestMinute;
+                        const hoursSinceClose = (currentTimeMinutes - latestCloseMinutes) / 60;
+                        if (hoursSinceClose <= 6) {
+                            // Execute in catch-up mode (within 6 hours after close)
+                            shouldExecuteNow = true;
+                            shouldScheduleForLater = false;
+                            reason = `${openSites.length} site(s) with business_hours open on ${today} (catch-up mode: ${hoursSinceClose.toFixed(1)}h after close) AND ${sitesWithoutBusinessHours} site(s) without business_hours (weekday fallback)`;
+                        }
+                        else {
+                            // Too late for catch-up, schedule for next business day
+                            shouldExecuteNow = false;
+                            shouldScheduleForLater = true;
+                            nextExecutionTime = earliestOpenTime;
+                            reason = `${openSites.length} site(s) with business_hours open on ${today}, but too late for catch-up (${hoursSinceClose.toFixed(1)}h after close) - scheduling for next business day AND ${sitesWithoutBusinessHours} site(s) without business_hours`;
+                        }
                     }
                 }
             }
@@ -237,9 +251,24 @@ async function evaluateBusinessHoursForDay(dayOfWeek) {
                         reason = `${openSites.length} site(s) with business_hours open on ${today}, but too early (opens at ${earliestOpenTime})`;
                     }
                     else {
-                        shouldExecuteNow = true;
-                        shouldScheduleForLater = false;
-                        reason = `${openSites.length} site(s) with business_hours open on ${today}, executing in catch-up mode (after hours)`;
+                        // We're after business hours - check if it's too late for catch-up mode
+                        const [latestHour, latestMinute] = latestCloseTime.split(':').map(Number);
+                        const latestCloseMinutes = latestHour * 60 + latestMinute;
+                        const currentTimeMinutes = currentHour * 60 + currentMinute;
+                        const hoursSinceClose = (currentTimeMinutes - latestCloseMinutes) / 60;
+                        if (hoursSinceClose <= 6) {
+                            // Execute in catch-up mode (within 6 hours after close)
+                            shouldExecuteNow = true;
+                            shouldScheduleForLater = false;
+                            reason = `${openSites.length} site(s) with business_hours open on ${today}, executing in catch-up mode (${hoursSinceClose.toFixed(1)}h after close)`;
+                        }
+                        else {
+                            // Too late for catch-up, schedule for next business day
+                            shouldExecuteNow = false;
+                            shouldScheduleForLater = true;
+                            nextExecutionTime = earliestOpenTime;
+                            reason = `${openSites.length} site(s) with business_hours open on ${today}, but too late for catch-up (${hoursSinceClose.toFixed(1)}h after close) - scheduling for next business day`;
+                        }
                     }
                 }
             }
