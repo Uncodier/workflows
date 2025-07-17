@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendEmailFromAgentActivity = sendEmailFromAgentActivity;
+exports.syncSentEmailsActivity = syncSentEmailsActivity;
 const apiService_1 = require("../services/apiService");
 /**
  * Activity to send email via agent API
@@ -41,5 +42,45 @@ async function sendEmailFromAgentActivity(params) {
     catch (error) {
         console.error('❌ Email sending failed:', error);
         throw new Error(`Email sending failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+/**
+ * Activity to sync sent emails via API
+ */
+async function syncSentEmailsActivity(params) {
+    console.log('📨 Syncing sent emails:', {
+        site_id: params.site_id,
+        limit: params.limit || 10,
+        since_date: params.since_date || 'not specified'
+    });
+    try {
+        const requestBody = {
+            site_id: params.site_id,
+            limit: params.limit || 10,
+            ...(params.since_date && { since_date: params.since_date })
+        };
+        console.log('📤 Sending sync sent emails request:', JSON.stringify(requestBody, null, 2));
+        const response = await apiService_1.apiService.post('/api/agents/email/sync', requestBody);
+        if (!response.success) {
+            console.error('❌ Sent emails sync failed:', response.error);
+            return {
+                success: false,
+                error: response.error?.message || 'Failed to sync sent emails'
+            };
+        }
+        console.log('✅ Sent emails sync completed successfully');
+        console.log('📊 Sync response data:', JSON.stringify(response.data, null, 2));
+        return {
+            success: true,
+            data: response.data
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error('❌ Sent emails sync failed:', errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
     }
 }

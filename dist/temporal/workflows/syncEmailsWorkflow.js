@@ -4,7 +4,7 @@ exports.syncEmailsWorkflow = syncEmailsWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, analyzeEmailsActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, analyzeEmailsActivity, syncSentEmailsActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes',
     retry: {
         maximumAttempts: 3,
@@ -63,39 +63,18 @@ async function syncEmailsWorkflow(options) {
         }
         console.log(`✅ Configuration validated for ${options.provider} provider`);
         console.log(`📬 Step 2: Connecting to ${options.provider} email server...`);
-        // Simulate connection to email provider
-        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
         console.log(`✅ Connected to ${options.provider} email server`);
-        console.log(`📥 Step 3: Fetching emails since ${validation.since.toISOString()}...`);
-        // Simulate email fetching with batching
-        const batches = Math.ceil(100 / validation.batchSize); // Simulate 100 emails total
-        let totalEmails = 0;
-        const processedBatches = [];
-        for (let batch = 1; batch <= batches; batch++) {
-            console.log(`📦 Processing batch ${batch}/${batches} (batch size: ${validation.batchSize})`);
-            // Simulate batch processing
-            await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second per batch
-            const batchEmails = Math.min(validation.batchSize, 100 - totalEmails);
-            totalEmails += batchEmails;
-            processedBatches.push({
-                batch,
-                emailsProcessed: batchEmails,
-                timestamp: new Date().toISOString()
-            });
-            console.log(`✅ Batch ${batch} completed: ${batchEmails} emails processed`);
-        }
-        console.log(`💾 Step 4: Storing sync results...`);
-        // Simulate storing results
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log(`📥 Step 3: Email sync preparation completed`);
+        console.log(`💾 Step 4: Ready to process emails with real activities...`);
         const result = {
             success: true,
             provider: options.provider,
             userId: userId,
             siteId,
-            syncedEmails: totalEmails,
-            batchesProcessed: processedBatches.length,
-            batches: processedBatches,
-            syncDuration: '~6 seconds',
+            syncedEmails: 0, // Will be updated by real activities
+            batchesProcessed: 0, // Will be updated by real activities  
+            batches: [], // Will be updated by real activities
+            syncDuration: 'real-time',
             syncedAt: new Date().toISOString(),
             nextSyncRecommended: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour from now
             errors: [],
@@ -180,8 +159,29 @@ async function syncEmailsWorkflow(options) {
                 error: analysisErrorMessage
             };
         }
+        // Step 6: Sync Sent Emails  
+        console.log(`📨 Step 6: Syncing sent emails to update lead status...`);
+        try {
+            const syncSentEmailsRequest = {
+                site_id: siteId,
+                limit: 20, // Sync last 20 sent emails
+                since_date: validation.since.toISOString()
+            };
+            const syncSentResponse = await syncSentEmailsActivity(syncSentEmailsRequest);
+            if (syncSentResponse.success) {
+                console.log(`✅ Sent emails sync completed successfully`);
+                console.log(`📊 Sync results:`, JSON.stringify(syncSentResponse.data, null, 2));
+            }
+            else {
+                console.log(`⚠️ Sent emails sync failed: ${syncSentResponse.error}`);
+            }
+        }
+        catch (syncError) {
+            const syncErrorMessage = syncError instanceof Error ? syncError.message : String(syncError);
+            console.log(`⚠️ Sent emails sync error: ${syncErrorMessage}`);
+        }
         console.log(`🎉 Email sync completed successfully!`);
-        console.log(`📊 Results: ${totalEmails} emails synced in ${processedBatches.length} batches`);
+        console.log(`📊 Results: Email sync activities completed successfully`);
         if (result.analysisResult?.success) {
             console.log(`🤖 AI Analysis: ${result.analysisResult.emailCount} emails processed, ${result.analysisResult.analysisCount} analyzed (Command: ${result.analysisResult.commandId})`);
         }
