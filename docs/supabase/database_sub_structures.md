@@ -2,6 +2,35 @@
 
 This document explains the JSONb field structures used in the Market Fit application database. These fields store complex nested data in JSON format within PostgreSQL.
 
+## ⚠️ Cambios Estructurales Importantes
+
+### Migración de Campos de Tracking: `visitors` → `visitor_sessions`
+
+**Fecha de cambio:** 2024-12-19
+
+Los campos `device`, `browser` y `location` han sido **removidos de la tabla `visitors`** y se mantienen únicamente en la tabla `visitor_sessions`. 
+
+**Razón del cambio:**
+- Un visitante puede tener múltiples sesiones desde diferentes dispositivos
+- Permite rastrear cambios de ubicación (viajes, VPN)
+- Reduce duplicación de datos y mejora la granularidad del tracking
+
+**Migración de datos:**
+- Los datos existentes en `visitors.device/browser/location` deben consultarse desde `visitor_sessions`
+- Para obtener el dispositivo/ubicación "principal" de un visitante, usar la sesión más reciente o la primera sesión
+
+**Impacto en consultas:**
+```sql
+-- ❌ ANTERIOR (Ya no funciona)
+SELECT device FROM visitors WHERE id = 'visitor_id';
+
+-- ✅ NUEVO (Usar visitor_sessions)
+SELECT device FROM visitor_sessions 
+WHERE visitor_id = 'visitor_id' 
+ORDER BY started_at DESC 
+LIMIT 1;
+```
+
 ## Table of Contents
 - [Leads JSONb Fields](#leads-jsonb-fields)
 - [Segments JSONb Fields](#segments-jsonb-fields)
@@ -604,6 +633,53 @@ Brand identity and design system information.
   }
 }
 ```
+
+### `customer_journey` (jsonb)
+Customer journey configuration with metrics, actions, and tactics for each stage.
+
+**Default:** `{"awareness": {"metrics": [], "actions": [], "tactics": []}, "consideration": {"metrics": [], "actions": [], "tactics": []}, "decision": {"metrics": [], "actions": [], "tactics": []}, "purchase": {"metrics": [], "actions": [], "tactics": []}, "retention": {"metrics": [], "actions": [], "tactics": []}, "referral": {"metrics": [], "actions": [], "tactics": []}}`
+
+**Structure:**
+```json
+{
+  "awareness": {
+    "metrics": ["Website traffic", "Brand mentions", "Impressions", "Social media reach"],
+    "actions": ["Content marketing", "SEO optimization", "Social media ads", "PR campaigns"],
+    "tactics": ["Blog posts", "Video content", "Infographics", "Influencer partnerships"]
+  },
+  "consideration": {
+    "metrics": ["Product page views", "Demo requests", "Comparison views", "Reviews read"],
+    "actions": ["Product demos", "Free trials", "Case studies", "Competitor comparison"],
+    "tactics": ["Sales presentations", "ROI calculators", "Customer testimonials", "Feature comparisons"]
+  },
+  "decision": {
+    "metrics": ["Quote requests", "Sales meetings", "Proposal views", "Decision timeline"],
+    "actions": ["Sales calls", "Proposal creation", "Contract negotiation", "Decision support"],
+    "tactics": ["Personalized proposals", "Pricing options", "Implementation plans", "Risk mitigation"]
+  },
+  "purchase": {
+    "metrics": ["Conversion rate", "Cart abandonment", "Purchase value", "Payment completion"],
+    "actions": ["Checkout optimization", "Payment options", "Security badges", "Limited offers"],
+    "tactics": ["Discount codes", "Free shipping", "Money-back guarantee", "Multiple payment methods"]
+  },
+  "retention": {
+    "metrics": ["Repeat purchases", "Churn rate", "Usage frequency", "Support tickets"],
+    "actions": ["Onboarding", "Customer support", "Product updates", "Loyalty programs"],
+    "tactics": ["Welcome series", "Progress tracking", "Feature tutorials", "Reward systems"]
+  },
+  "referral": {
+    "metrics": ["Referrals", "Reviews", "Social shares", "NPS score"],
+    "actions": ["Referral programs", "Review requests", "Community building", "VIP experiences"],
+    "tactics": ["Referral bonuses", "Ambassador programs", "User-generated content", "Exclusive events"]
+  }
+}
+```
+
+**Usage Notes:**
+- Each stage contains three types of data: metrics (what to measure), actions (what to do), and tactics (how to do it)
+- Arrays can be empty if no configuration is set for that category
+- Users can customize these lists through the Customer Journey settings tab
+- This data is used throughout the system to guide marketing automation and analytics
 
 ### `press_releases` (jsonb)
 Company press releases and news.
@@ -1322,56 +1398,85 @@ Payment installments and history.
 
 ## Visitor Sessions JSONb Fields
 
-### `device` (jsonb)
-Device information for the visitor session.
+> **Nota importante:** Los campos `device`, `browser` y `location` se almacenan únicamente en la tabla `visitor_sessions`, no en la tabla `visitors`. Esto permite rastrear cambios de dispositivo, navegador y ubicación a lo largo de múltiples sesiones del mismo visitante.
 
-**Structure:**
+### `device` (jsonb)
+**Tabla:** `visitor_sessions` únicamente
+**Descripción:** Información del dispositivo para la sesión específica del visitante. Se detecta automáticamente desde el User-Agent y se enriquece con datos del cliente.
+
+**Detección automática desde IP:** No aplicable
+**Detección automática desde User-Agent:** ✅ Sí
+
+**Estructura:**
 ```json
 {
-  "type": "desktop",
-  "brand": "Apple",
-  "model": "MacBook Pro",
-  "os": "macOS",
-  "os_version": "14.0",
-  "screen_resolution": "1920x1080",
-  "color_depth": 24,
-  "pixel_ratio": 2.0
+  "type": "desktop|mobile|tablet",
+  "screen_size": "1920x1080",
+  "os": {
+    "name": "macOS|Windows|Linux|Android|iOS",
+    "version": "14.0"
+  },
+  "touch_support": false
 }
 ```
+
+**Campos obligatorios:**
+- `type`: Tipo de dispositivo detectado automáticamente
+
+**Campos opcionales:**
+- `screen_size`: Resolución de pantalla si está disponible
+- `os`: Sistema operativo y versión
+- `touch_support`: Soporte táctil (inferido del tipo de dispositivo)
 
 ### `browser` (jsonb)
-Browser information for the visitor session.
+**Tabla:** `visitor_sessions` únicamente
+**Descripción:** Información del navegador para la sesión específica. Se detecta automáticamente desde el User-Agent y headers HTTP.
 
-**Structure:**
+**Detección automática desde User-Agent:** ✅ Sí
+**Detección automática desde Headers:** ✅ Sí (idioma)
+
+**Estructura:**
 ```json
 {
-  "name": "Chrome",
-  "version": "91.0.4472.124",
-  "engine": "Blink",
-  "language": "en-US",
-  "timezone": "America/New_York",
-  "plugins": ["PDF Viewer", "Chrome PDF Plugin"],
-  "cookies_enabled": true,
-  "javascript_enabled": true
+  "name": "Chrome|Firefox|Safari|Edge|Opera",
+  "version": "119.0.6045.105",
+  "language": "es-ES"
 }
 ```
+
+**Campos obligatorios:**
+- `name`: Nombre del navegador detectado automáticamente
+
+**Campos opcionales:**
+- `version`: Versión del navegador
+- `language`: Idioma preferido extraído de Accept-Language
 
 ### `location` (jsonb)
-Geographic location information.
+**Tabla:** `visitor_sessions` únicamente
+**Descripción:** Información de geolocalización basada en la IP del visitante. Se obtiene automáticamente usando el servicio ipapi.co.
 
-**Structure:**
+**Detección automática desde IP:** ✅ Sí (usando ipapi.co)
+**Timeout:** 3 segundos máximo
+**IPs excluidas:** Locales (127.0.0.1, 192.168.x.x, 10.x.x.x, 172.x.x.x)
+
+**Estructura:**
 ```json
 {
-  "country": "United States",
-  "country_code": "US",
-  "region": "California",
-  "city": "San Francisco",
-  "latitude": 37.7749,
-  "longitude": -122.4194,
-  "timezone": "America/Los_Angeles",
-  "isp": "Comcast Cable"
+  "country": "Spain",
+  "region": "Madrid",
+  "city": "Madrid"
 }
 ```
+
+**Campos opcionales:**
+- `country`: País detectado por IP
+- `region`: Región/Estado detectado por IP  
+- `city`: Ciudad detectada por IP
+
+**Notas técnicas:**
+- Si la IP es local o el servicio falla, los campos quedan vacíos
+- No bloquea la respuesta gracias al timeout de 3s
+- Se actualiza en cada nueva sesión, permitiendo rastrear movimiento geográfico
 
 ### `performance` (jsonb)
 Performance and loading metrics.

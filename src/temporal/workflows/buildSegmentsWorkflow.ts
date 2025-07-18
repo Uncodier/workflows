@@ -173,7 +173,7 @@ export async function buildSegmentsWorkflow(
     if (generalSegmentsSuccess && segments.length > 0) {
       try {
         // Extract segment IDs from the analysis response for the ICP workflow
-        const segmentIds = analysis?.data?.segment_ids || [];
+        const segmentIds = analysis?.segment_ids || analysis?.data?.segment_ids || [];
         
         if (segmentIds.length > 0) {
           console.log(`📋 Using ${segmentIds.length} segment IDs for robust ICP analysis: ${segmentIds.join(', ')}`);

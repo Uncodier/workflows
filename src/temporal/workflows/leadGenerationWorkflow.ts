@@ -91,6 +91,8 @@ export interface LeadGenerationResult {
   }>;
   totalLeadsGenerated?: number;
   leadCreationResults?: any[];       // Results from lead creation/validation
+  retryWorkflowStarted?: boolean;    // Whether a retry workflow was started
+  retryWorkflowId?: string;          // ID of the retry workflow if started
   errors: string[];
   executionTime: string;
   completedAt: string;
@@ -269,44 +271,82 @@ function extractCompaniesFromDeliverables(deliverables: any): CompanyData[] {
 */
 
 /**
- * Extract employees from deep research deliverables
+ * Normalize name for duplicate detection
+ */
+function normalizeName(name: string): string {
+  return name.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Validate if telephone is obfuscated with asterisks
+ */
+function isPhoneObfuscated(phone: string | null): boolean {
+  if (!phone) return false;
+  // Check if phone contains asterisks or is mostly asterisks
+  return phone.includes('*') || phone.includes('***') || /^\*+$/.test(phone.trim());
+}
+
+/**
+ * Extract employees from deep research deliverables with validation
  */
 function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
   const employees: LeadData[] = [];
+  const seenNames = new Set<string>(); // Track processed names to avoid duplicates
+  let duplicatesSkipped = 0;
+  let obfuscatedPhonesSkipped = 0;
+  
+  /**
+   * Validate and add employee if valid
+   */
+  function validateAndAddEmployee(leadData: any, businessData?: any): void {
+    if (!leadData || typeof leadData !== 'object' || !leadData.name) {
+      return;
+    }
+
+    const normalizedName = normalizeName(leadData.name);
+    
+    // Validation 1: Check for duplicate names
+    if (seenNames.has(normalizedName)) {
+      console.log(`🔄 Skipping duplicate lead: ${leadData.name}`);
+      duplicatesSkipped++;
+      return;
+    }
+
+    const telephone = leadData.telephone || leadData.phone || null;
+    
+    // Validation 2: Check for obfuscated phone numbers
+    if (telephone && isPhoneObfuscated(telephone)) {
+      console.log(`📞 Skipping lead with obfuscated phone: ${leadData.name} (${telephone})`);
+      obfuscatedPhonesSkipped++;
+      return;
+    }
+
+    // All validations passed, add the lead
+    seenNames.add(normalizedName);
+    employees.push({
+      name: leadData.name,
+      telephone: telephone,
+      email: leadData.email || null,
+      company_name: businessData?.name || leadData.company?.name || leadData.company_name || undefined,
+      address: leadData.address || businessData?.location || businessData?.address || null,
+      web: businessData?.website || leadData.company?.website || leadData.web || null,
+      position: leadData.position || leadData.job_title || null
+    });
+  }
   
   try {
     // Try direct array structure first (new ultra-simplified format)
     if (deliverables && Array.isArray(deliverables)) {
       console.log(`🔍 Found leads in direct array structure (ultra-simplified format)`);
       for (const leadData of deliverables) {
-        if (leadData && typeof leadData === 'object' && leadData.name) {
-          employees.push({
-            name: leadData.name,
-            telephone: leadData.telephone || leadData.phone || null,
-            email: leadData.email || null,
-            company_name: undefined,
-            address: leadData.address || null,
-            web: leadData.web || null,
-            position: leadData.position || leadData.job_title || null
-          });
-        }
+        validateAndAddEmployee(leadData);
       }
     }
     // Try simplified leads structure (backup)
     else if (deliverables && deliverables.leads && Array.isArray(deliverables.leads)) {
       console.log(`🔍 Found leads in deliverables.leads structure (backup format)`);
       for (const leadData of deliverables.leads) {
-        if (leadData && typeof leadData === 'object' && leadData.name) {
-          employees.push({
-            name: leadData.name,
-            telephone: leadData.telephone || leadData.phone || null,
-            email: leadData.email || null,
-            company_name: undefined,
-            address: leadData.address || null,
-            web: leadData.web || null,
-            position: leadData.position || leadData.job_title || null
-          });
-        }
+        validateAndAddEmployee(leadData);
       }
     }
     // Try business.employees structure (legacy support)
@@ -314,54 +354,21 @@ function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
       console.log(`🔍 Found employees in deliverables.business.employees structure (legacy)`);
       const business = deliverables.business;
       for (const employeeData of deliverables.business.employees) {
-        if (employeeData && typeof employeeData === 'object' && employeeData.name) {
-          // Only require name, email can be null
-          employees.push({
-            name: employeeData.name,
-            telephone: employeeData.telephone || employeeData.phone || null,
-            email: employeeData.email || null, // Allow null emails
-            company_name: business.name || null,
-            address: employeeData.address || business.location || business.address || null,
-            web: business.website || null,
-            position: employeeData.position || employeeData.job_title || null
-          });
-        }
+        validateAndAddEmployee(employeeData, business);
       }
     }
     // Try lead.employees structure (legacy support)
     else if (deliverables && deliverables.lead && deliverables.lead.employees && Array.isArray(deliverables.lead.employees)) {
       console.log(`🔍 Found employees in deliverables.lead.employees structure (legacy)`);
       for (const employeeData of deliverables.lead.employees) {
-        if (employeeData && typeof employeeData === 'object' && employeeData.name) {
-          // Only require name, email can be null
-          employees.push({
-            name: employeeData.name,
-            telephone: employeeData.telephone || employeeData.phone || null,
-            email: employeeData.email || null, // Allow null emails
-            company_name: employeeData.company?.name || null,
-            address: employeeData.address || employeeData.company?.location || null,
-            web: employeeData.company?.website || null,
-            position: employeeData.position || employeeData.job_title || null
-          });
-        }
+        validateAndAddEmployee(employeeData);
       }
     }
     // Try direct employees structure
     else if (deliverables && deliverables.employees && Array.isArray(deliverables.employees)) {
       console.log(`🔍 Found employees in deliverables.employees structure`);
       for (const employeeData of deliverables.employees) {
-        if (employeeData && typeof employeeData === 'object' && employeeData.name) {
-          // Only require name, email can be null
-          employees.push({
-            name: employeeData.name,
-            telephone: employeeData.telephone || employeeData.phone || null,
-            email: employeeData.email || null, // Allow null emails
-            company_name: employeeData.company?.name || null,
-            address: employeeData.address || employeeData.company?.location || null,
-            web: employeeData.company?.website || null,
-            position: employeeData.position || employeeData.job_title || null
-          });
-        }
+        validateAndAddEmployee(employeeData);
       }
     }
     // Alternative structure fallbacks
@@ -377,18 +384,7 @@ function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
       for (const possibleArray of possibleEmployeeArrays) {
         if (Array.isArray(possibleArray)) {
           for (const item of possibleArray) {
-            if (item && item.name) {
-              // Only require name, email can be null
-              employees.push({
-                name: item.name,
-                telephone: item.telephone || item.phone || null,
-                email: item.email || null, // Allow null emails
-                company_name: item.company?.name || item.company_name || null,
-                address: item.address || null,
-                web: item.company?.website || item.web || null,
-                position: item.position || item.job_title || null
-              });
-            }
+            validateAndAddEmployee(item);
           }
           break; // Use first valid array found
         }
@@ -398,7 +394,14 @@ function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
     console.error('⚠️ Error extracting employees from deliverables:', error);
   }
   
-  console.log(`📊 Extracted ${employees.length} employees from deliverables`);
+  console.log(`📊 Extracted ${employees.length} valid employees from deliverables`);
+  if (duplicatesSkipped > 0) {
+    console.log(`🔄 Skipped ${duplicatesSkipped} duplicate leads by name`);
+  }
+  if (obfuscatedPhonesSkipped > 0) {
+    console.log(`📞 Skipped ${obfuscatedPhonesSkipped} leads with obfuscated phone numbers`);
+  }
+  
   return employees;
 }
 
@@ -462,6 +465,8 @@ export async function leadGenerationWorkflow(
   const companyResults: any[] = [];
   let totalLeadsGenerated = 0;
   const leadCreationResults: any[] = [];
+  let retryWorkflowStarted = false;
+  let retryWorkflowId = '';
   let siteName = '';
   let siteUrl = '';
 
@@ -1049,6 +1054,8 @@ export async function leadGenerationWorkflow(
       companyResults,
       totalLeadsGenerated,
       leadCreationResults,
+      retryWorkflowStarted,
+      retryWorkflowId: retryWorkflowStarted ? retryWorkflowId : undefined,
       errors,
       executionTime,
       completedAt: new Date().toISOString()
@@ -1065,6 +1072,10 @@ export async function leadGenerationWorkflow(
     console.log(`   - Companies processed: ${companyResults.length}`);
     console.log(`   - Total leads generated: ${totalLeadsGenerated}`);
     console.log(`   - Lead creation results: ${leadCreationResults.length}`);
+    
+    if (retryWorkflowStarted) {
+      console.log(`   - Retry workflow started: ${retryWorkflowId} (reason: no leads found)`);
+    }
 
     // Step Final: Send notification for all leads generated in this workflow
     if (totalLeadsGenerated > 0) {
@@ -1117,7 +1128,41 @@ export async function leadGenerationWorkflow(
         console.log(`⚠️ No lead names found for notification despite ${totalLeadsGenerated} leads generated`);
       }
     } else {
-      console.log(`ℹ️ No leads generated, skipping notification`);
+      console.log(`ℹ️ No leads generated, starting retry workflow...`);
+      
+      // Step Retry: If no valid leads found, automatically start a new workflow execution
+      try {
+        console.log(`🔄 Step Retry: Starting new lead generation workflow for site ${site_id} (no leads found)...`);
+        
+        const retryOptions: LeadGenerationOptions = {
+          ...options,
+          additionalData: {
+            ...options.additionalData,
+            retryReason: 'no_leads_found',
+            originalWorkflowId: workflowId,
+            originalExecutionTime: executionTime,
+            retriedAt: new Date().toISOString()
+          }
+        };
+        
+        const retryWorkflowHandle = await startChild(leadGenerationWorkflow, {
+          args: [retryOptions],
+          workflowId: `lead-generation-retry-${site_id}-${Date.now()}`,
+        });
+        
+        retryWorkflowStarted = true;
+        retryWorkflowId = retryWorkflowHandle.workflowId;
+        
+        console.log(`✅ Successfully started retry workflow: ${retryWorkflowHandle.workflowId}`);
+        
+        // Don't await the result to avoid blocking this workflow completion
+        // The retry workflow will run independently
+        
+      } catch (retryError) {
+        const errorMessage = retryError instanceof Error ? retryError.message : String(retryError);
+        console.error(`❌ Failed to start retry workflow: ${errorMessage}`);
+        errors.push(`Retry workflow failed: ${errorMessage}`);
+      }
     }
 
     // Update cron status to indicate successful completion
@@ -1185,6 +1230,8 @@ export async function leadGenerationWorkflow(
       companyResults,
       totalLeadsGenerated,
       leadCreationResults,
+      retryWorkflowStarted,
+      retryWorkflowId: retryWorkflowStarted ? retryWorkflowId : undefined,
       errors: [...errors, errorMessage],
       executionTime,
       completedAt: new Date().toISOString()
