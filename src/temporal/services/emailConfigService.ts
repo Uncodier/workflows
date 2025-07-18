@@ -11,6 +11,7 @@ export interface EmailConfig {
   outgoingPort: string;
   incomingServer: string;
   outgoingServer: string;
+  status?: string; // Added status field to track email config status
 }
 
 export interface EmailValidationResult {
@@ -22,6 +23,8 @@ export interface EmailValidationResult {
 export class EmailConfigService {
   /**
    * Validate email configuration for a site
+   * Modified to ignore password validation since passwords are stored encrypted elsewhere
+   * Also checks that status is not "error"
    */
   static validateEmailConfig(emailConfig?: EmailConfig): EmailValidationResult {
     const errors: string[] = [];
@@ -42,6 +45,15 @@ export class EmailConfigService {
       };
     }
 
+    // Check if email status indicates an error
+    if (emailConfig.status === 'error') {
+      return { 
+        isValid: false, 
+        reason: 'Email configuration has error status',
+        errors: ['Email configuration status is "error"']
+      };
+    }
+
     // Validate email address
     if (!emailConfig.email || !emailConfig.email.trim()) {
       errors.push('Email address is missing');
@@ -49,10 +61,7 @@ export class EmailConfigService {
       errors.push('Email address format is invalid');
     }
 
-    // Validate password
-    if (!emailConfig.password || !emailConfig.password.trim()) {
-      errors.push('Email password is missing');
-    }
+    // Skip password validation - passwords are stored encrypted elsewhere, not in settings.channel
 
     // Validate servers
     if (!emailConfig.incomingServer || !emailConfig.incomingServer.trim()) {
@@ -90,7 +99,7 @@ export class EmailConfigService {
 
   /**
    * Extract email configuration from settings data
-   * Looks for settings.channels.email structure
+   * Looks for settings.channels.email structure and extracts status
    */
   static extractEmailConfigFromSettings(settings: any): EmailConfig | null {
     try {
@@ -119,11 +128,13 @@ export class EmailConfigService {
         outgoingServer: emailChannel.outgoingServer || '',
         incomingPort: emailChannel.incomingPort || '993',
         outgoingPort: emailChannel.outgoingPort || '587',
+        status: emailChannel.status || undefined, // Extract status field
       };
 
       console.log(`📧 Extracted email config for ${emailConfig.email}:`, {
         email: emailConfig.email,
         enabled: emailConfig.enabled,
+        status: emailConfig.status,
         incomingServer: emailConfig.incomingServer,
         incomingPort: emailConfig.incomingPort,
         outgoingServer: emailConfig.outgoingServer,

@@ -48,3 +48,4 @@ __exportStar(require("./leadGenerationWorkflow"), exports);
 __exportStar(require("./analyzeSiteWorkflow"), exports);
 __exportStar(require("./leadAttentionWorkflow"), exports);
 __exportStar(require("./sendNewsletterWorkflow"), exports);
+__exportStar(require("./dailyProspectionWorkflow"), exports);

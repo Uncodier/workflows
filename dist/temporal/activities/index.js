@@ -60,6 +60,7 @@ __exportStar(require("./cmoActivities"), exports);
 __exportStar(require("./leadGenerationActivities"), exports);
 __exportStar(require("./uxActivities"), exports);
 __exportStar(require("./newsletterActivities"), exports);
+__exportStar(require("./dailyProspectionActivities"), exports);
 // Bundle all activities for the worker
 const supabaseActivities = __importStar(require("./supabaseActivities"));
 const apiActivities = __importStar(require("./apiActivities"));
@@ -83,6 +84,7 @@ const cmoActivities = __importStar(require("./cmoActivities"));
 const leadGenerationActivities = __importStar(require("./leadGenerationActivities"));
 const uxActivities = __importStar(require("./uxActivities"));
 const newsletterActivities = __importStar(require("./newsletterActivities"));
+const dailyProspectionActivities = __importStar(require("./dailyProspectionActivities"));
 exports.activities = {
     ...supabaseActivities,
     ...apiActivities,
@@ -106,6 +108,7 @@ exports.activities = {
     ...leadGenerationActivities,
     ...uxActivities,
     ...newsletterActivities,
+    ...dailyProspectionActivities,
 };
 var workflowSchedulingActivities_1 = require("./workflowSchedulingActivities");
 Object.defineProperty(exports, "executeDailyStandUpWorkflowsActivity", { enumerable: true, get: function () { return workflowSchedulingActivities_1.executeDailyStandUpWorkflowsActivity; } });

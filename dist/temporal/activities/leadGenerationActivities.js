@@ -47,6 +47,7 @@ exports.callRegionVenuesApiActivity = callRegionVenuesApiActivity;
 exports.callLeadGenerationApiActivity = callLeadGenerationApiActivity;
 exports.saveLeadsFromDeepResearchActivity = saveLeadsFromDeepResearchActivity;
 exports.createLeadsFromResearchActivity = createLeadsFromResearchActivity;
+exports.createSingleLead = createSingleLead;
 exports.convertVenuesToCompanies = convertVenuesToCompanies;
 exports.updateMemoryActivity = updateMemoryActivity;
 exports.findSalesCrmAgentActivity = findSalesCrmAgentActivity;
@@ -526,7 +527,23 @@ async function createLeadsFromResearchActivity(options) {
                             });
                         }
                         else {
-                            errors.push(`Failed to create lead ${lead.name || lead.email}: ${createResult.error}`);
+                            // Check if error is due to duplicate (expected behavior)
+                            if (createResult.error && createResult.error.includes('already exists')) {
+                                console.log(`🔄 Skipping duplicate lead: ${lead.name || lead.email} - ${createResult.error}`);
+                                logger_1.logger.info(`🔄 Duplicate lead skipped: ${lead.name || lead.email}`, {
+                                    site_id: options.site_id,
+                                    reason: createResult.error
+                                });
+                                // Don't count as error since duplicates are expected and handled
+                            }
+                            else {
+                                // This is a real error (database issues, etc.)
+                                errors.push(`Failed to create lead ${lead.name || lead.email}: ${createResult.error}`);
+                                logger_1.logger.error(`❌ Failed to create lead: ${lead.name || lead.email}`, {
+                                    site_id: options.site_id,
+                                    error: createResult.error
+                                });
+                            }
                         }
                     }
                     else {
@@ -678,7 +695,79 @@ segmentId // Add segment_id parameter
     try {
         // Import supabase service role client (bypasses RLS)
         const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
-        // Prepare lead data for database
+        // ✅ STEP 1: Check for duplicate leads by name and email
+        console.log(`🔍 Checking for duplicate leads: name="${lead.name}", email="${lead.email || 'none'}"`);
+        let duplicateQuery = supabaseServiceRole
+            .from('leads')
+            .select('id, name, email, phone')
+            .eq('site_id', site_id);
+        // Check for duplicates by name (always required)
+        duplicateQuery = duplicateQuery.eq('name', lead.name);
+        // Also check by email if provided
+        if (lead.email) {
+            // Use OR condition: same name OR same email (both for same site)
+            const { data: duplicateLeads, error: duplicateError } = await supabaseServiceRole
+                .from('leads')
+                .select('id, name, email, phone')
+                .eq('site_id', site_id)
+                .or(`name.eq.${lead.name},email.eq.${lead.email}`);
+            if (duplicateError) {
+                logger_1.logger.error('❌ Error checking for duplicate leads', {
+                    error: duplicateError.message,
+                    site_id,
+                    leadName: lead.name,
+                    leadEmail: lead.email
+                });
+                // Continue with creation despite error (fail open)
+            }
+            else if (duplicateLeads && duplicateLeads.length > 0) {
+                const duplicate = duplicateLeads[0];
+                const duplicateReason = duplicate.name === lead.name ? 'name' : 'email';
+                console.log(`⚠️ Duplicate lead found by ${duplicateReason}: ${duplicate.name} (${duplicate.email || 'no email'}) - ID: ${duplicate.id}`);
+                logger_1.logger.warn('🔄 Skipping duplicate lead creation', {
+                    site_id,
+                    existingLeadId: duplicate.id,
+                    existingName: duplicate.name,
+                    existingEmail: duplicate.email,
+                    newName: lead.name,
+                    newEmail: lead.email,
+                    duplicateReason
+                });
+                return {
+                    success: false,
+                    error: `Lead already exists with same ${duplicateReason}: ${duplicate.name}${duplicate.email ? ` (${duplicate.email})` : ''}`
+                };
+            }
+        }
+        else {
+            // Only check by name if no email provided
+            const { data: duplicateLeads, error: duplicateError } = await duplicateQuery;
+            if (duplicateError) {
+                logger_1.logger.error('❌ Error checking for duplicate leads by name', {
+                    error: duplicateError.message,
+                    site_id,
+                    leadName: lead.name
+                });
+                // Continue with creation despite error (fail open)
+            }
+            else if (duplicateLeads && duplicateLeads.length > 0) {
+                const duplicate = duplicateLeads[0];
+                console.log(`⚠️ Duplicate lead found by name: ${duplicate.name} - ID: ${duplicate.id}`);
+                logger_1.logger.warn('🔄 Skipping duplicate lead creation', {
+                    site_id,
+                    existingLeadId: duplicate.id,
+                    existingName: duplicate.name,
+                    newName: lead.name,
+                    duplicateReason: 'name'
+                });
+                return {
+                    success: false,
+                    error: `Lead already exists with same name: ${duplicate.name}`
+                };
+            }
+        }
+        console.log(`✅ No duplicates found, proceeding with lead creation`);
+        // ✅ STEP 2: Prepare lead data for database
         const leadData = {
             name: lead.name,
             email: lead.email,
@@ -712,6 +801,7 @@ segmentId // Add segment_id parameter
         else {
             console.log(`⚠️ No segment_id provided for lead ${lead.name || lead.email}`);
         }
+        // ✅ STEP 3: Insert the lead
         const { data, error } = await supabaseServiceRole
             .from('leads')
             .insert([leadData])

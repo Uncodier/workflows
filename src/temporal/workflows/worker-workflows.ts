@@ -29,4 +29,5 @@ export * from './delayedExecutionWorkflow';
 export * from './leadGenerationWorkflow';
 export * from './analyzeSiteWorkflow';
 export * from './leadAttentionWorkflow';
-export * from './sendNewsletterWorkflow'; 
+export * from './sendNewsletterWorkflow';
+export * from './dailyProspectionWorkflow'; 

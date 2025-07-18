@@ -29,6 +29,7 @@ import { delayedExecutionWorkflow } from './delayedExecutionWorkflow';
 import { leadGenerationWorkflow } from './leadGenerationWorkflow';
 import { analyzeSiteWorkflow } from './analyzeSiteWorkflow';
 import { sendNewsletterWorkflow } from './sendNewsletterWorkflow';
+import { dailyProspectionWorkflow } from './dailyProspectionWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -58,6 +59,7 @@ export * from './leadGenerationWorkflow';
 export * from './analyzeSiteWorkflow';
 export * from './sendNewsletterWorkflow';
 export * from './leadAttentionWorkflow';
+export * from './dailyProspectionWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -92,6 +94,7 @@ export const workflows = {
   analyzeSiteWorkflow,
   sendNewsletterWorkflow,
   leadAttentionWorkflow,
+  dailyProspectionWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
 };
@@ -129,6 +132,7 @@ export const workflowNames = {
   analyzeSiteWorkflow: 'analyzeSiteWorkflow',
   sendNewsletterWorkflow: 'sendNewsletterWorkflow',
   leadAttentionWorkflow: 'leadAttentionWorkflow',
+  dailyProspectionWorkflow: 'dailyProspectionWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',
 };
