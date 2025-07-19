@@ -1,5 +1,4 @@
 import { getSupabaseService } from '../temporal/services/supabaseService';
-import { scheduleIndividualDailyStandUpsActivity } from '../temporal/activities/workflowSchedulingActivities';
 
 /**
  * Test script to verify business hours filtering fix
