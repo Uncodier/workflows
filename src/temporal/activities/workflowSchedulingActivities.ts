@@ -1145,8 +1145,10 @@ export async function scheduleDailyOperationsWorkflowActivity(
 
 /**
  * Schedule Daily Stand Up Workflows for individual sites using TIMERS
- * Creates delayed workflow executions for each site based on their specific business hours
+ * Creates delayed workflow executions for sites with business_hours OR weekday fallback
  * Uses Temporal timers instead of schedules for one-time executions
+ * WEEKEND RESTRICTION: sites without business_hours are skipped on weekends (Fri/Sat)
+ * WEEKDAY FALLBACK: sites without business_hours use 09:00 fallback (Sun-Thu)
  */
 export async function scheduleIndividualDailyStandUpsActivity(
   businessHoursAnalysis: any,
@@ -1189,7 +1191,16 @@ export async function scheduleIndividualDailyStandUpsActivity(
       });
     }
     
-    // Process ALL sites (both with and without business_hours)
+    // Determine if fallback should be used based on day of week
+    const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
+    const isWeekend = currentDay === 5 || currentDay === 6; // Friday = 5, Saturday = 6
+    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
+    
+    console.log(`   - Current day: ${dayName} (${currentDay})`);
+    console.log(`   - Is weekend: ${isWeekend}`);
+    console.log(`   - Fallback policy: ${isWeekend ? 'NO FALLBACK (weekend)' : 'FALLBACK ALLOWED (weekday)'}`);
+    
+    // Process sites with different logic for weekends vs weekdays
     for (const site of allSites as any[]) {
       try {
         console.log(`\n📋 Processing site: ${site.name || 'Unnamed'} (${site.id})`);
@@ -1207,12 +1218,16 @@ export async function scheduleIndividualDailyStandUpsActivity(
           siteTimezone = businessHours.timezone || timezone;
           businessHoursSource = 'database-configured';
           console.log(`   ✅ Has business_hours: ${businessHours.open} - ${businessHours.close} ${siteTimezone}`);
-        } else {
-          // Site DOES NOT have business_hours - use fallback
+        } else if (!isWeekend) {
+          // Site DOES NOT have business_hours - use fallback ONLY on weekdays
           scheduledTime = "09:00"; // Default fallback time
           siteTimezone = timezone; // Default timezone
-          businessHoursSource = 'fallback-default';
-          console.log(`   ⚠️ No business_hours found - using FALLBACK: ${scheduledTime} ${siteTimezone}`);
+          businessHoursSource = 'fallback-weekday';
+          console.log(`   ⚠️ No business_hours found - using WEEKDAY FALLBACK: ${scheduledTime} ${siteTimezone}`);
+        } else {
+          // Weekend: NO fallback for sites without business_hours
+          console.log(`   ⏭️ SKIPPING - No business_hours configured and weekend (no fallback)`);
+          continue;
         }
         
         console.log(`   - Scheduled time: ${scheduledTime}`);
@@ -1407,9 +1422,11 @@ export async function scheduleIndividualDailyStandUpsActivity(
 
 /**
  * Schedule Site Analysis Workflows for individual sites using TIMERS
- * Creates delayed workflow executions for sites that haven't had their initial analysis
+ * Creates delayed workflow executions for sites with business_hours OR weekday fallback
+ * AND that haven't had their initial analysis
  * Uses Temporal timers instead of schedules for one-time executions
- * Only runs for sites that haven't been analyzed before (checks cron_status)
+ * WEEKEND RESTRICTION: sites without business_hours are skipped on weekends (Fri/Sat)
+ * WEEKDAY FALLBACK: sites without business_hours use 09:00 fallback (Sun-Thu)
  * EXECUTES 1 HOUR BEFORE DAILY STANDUP to prepare analysis data
  */
 export async function scheduleIndividualSiteAnalysisActivity(
@@ -1455,10 +1472,34 @@ export async function scheduleIndividualSiteAnalysisActivity(
       });
     }
     
-    // Process ALL sites (both with and without business_hours)
+    // Determine if fallback should be used based on day of week
+    const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
+    const isWeekend = currentDay === 5 || currentDay === 6; // Friday = 5, Saturday = 6
+    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
+    
+    console.log(`   - Current day: ${dayName} (${currentDay})`);
+    console.log(`   - Is weekend: ${isWeekend}`);
+    console.log(`   - Fallback policy: ${isWeekend ? 'NO FALLBACK (weekend)' : 'FALLBACK ALLOWED (weekday)'}`);
+    
+    // Process sites with different logic for weekends vs weekdays
     for (const site of allSites as any[]) {
       try {
         console.log(`\n🔍 Processing site analysis for: ${site.name || 'Unnamed'} (${site.id})`);
+        
+        // Check if this site has business_hours first
+        const businessHours = sitesWithBusinessHours.get(site.id);
+        
+        if (!businessHours && isWeekend) {
+          console.log(`   ⏭️ SKIPPING - No business_hours configured and weekend (no fallback)`);
+          skipped++;
+          results.push({
+            workflowId: `skipped-${site.id}`,
+            scheduleId: `skipped-${site.id}`,
+            success: true,
+            error: `Skipped: No business_hours configured and weekend (no fallback)`
+          });
+          continue;
+        }
         
         // Check if this site has already been analyzed using the analysis table
         const analysisStatus = await checkSiteAnalysisActivity(site.id);
@@ -1481,9 +1522,6 @@ export async function scheduleIndividualSiteAnalysisActivity(
         
         console.log(`   ✅ NEEDS ANALYSIS - ${analysisStatus.reason}`);
         
-        // Check if this site has business_hours
-        const businessHours = sitesWithBusinessHours.get(site.id);
-        
         let scheduledTime: string;
         let siteTimezone: string;
         let businessHoursSource: string;
@@ -1495,11 +1533,11 @@ export async function scheduleIndividualSiteAnalysisActivity(
           businessHoursSource = 'database-configured';
           console.log(`   ✅ Has business_hours: ${businessHours.open} - ${businessHours.close} ${siteTimezone}`);
         } else {
-          // Site DOES NOT have business_hours - use fallback
+          // Site DOES NOT have business_hours - use weekday fallback
           scheduledTime = "09:00"; // Default fallback time
           siteTimezone = timezone; // Default timezone
-          businessHoursSource = 'fallback-default';
-          console.log(`   ⚠️ No business_hours found - using FALLBACK: ${scheduledTime} ${siteTimezone}`);
+          businessHoursSource = 'fallback-weekday';
+          console.log(`   ⚠️ No business_hours found - using WEEKDAY FALLBACK: ${scheduledTime} ${siteTimezone}`);
         }
         
         // Parse the target time and subtract 1 hour for site analysis
@@ -1680,8 +1718,10 @@ export async function scheduleIndividualSiteAnalysisActivity(
 
 /**
  * Schedule Lead Generation Workflows for individual sites using TIMERS
- * Creates delayed workflow executions for sites that need lead generation
+ * Creates delayed workflow executions for sites with business_hours OR weekday fallback
  * Uses Temporal timers instead of schedules for one-time executions
+ * WEEKEND RESTRICTION: sites without business_hours are skipped on weekends (Fri/Sat)
+ * WEEKDAY FALLBACK: sites without business_hours use 09:00 fallback (Sun-Thu)
  * EXECUTES 1 HOUR AFTER DAILY STANDUP to generate leads after standup analysis
  */
 export async function scheduleIndividualLeadGenerationActivity(
@@ -1727,7 +1767,16 @@ export async function scheduleIndividualLeadGenerationActivity(
       });
     }
     
-    // Process ALL sites (both with and without business_hours)
+    // Determine if fallback should be used based on day of week
+    const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
+    const isWeekend = currentDay === 5 || currentDay === 6; // Friday = 5, Saturday = 6
+    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
+    
+    console.log(`   - Current day: ${dayName} (${currentDay})`);
+    console.log(`   - Is weekend: ${isWeekend}`);
+    console.log(`   - Fallback policy: ${isWeekend ? 'NO FALLBACK (weekend)' : 'FALLBACK ALLOWED (weekday)'}`);
+    
+    // Process sites with different logic for weekends vs weekdays
     for (const site of allSites as any[]) {
       try {
         console.log(`\n🔥 Processing site for Lead Generation: ${site.name || 'Unnamed'} (${site.id})`);
@@ -1745,12 +1794,16 @@ export async function scheduleIndividualLeadGenerationActivity(
           siteTimezone = businessHours.timezone || timezone;
           businessHoursSource = 'database-configured';
           console.log(`   ✅ Has business_hours: ${businessHours.open} - ${businessHours.close} ${siteTimezone}`);
-        } else {
-          // Site DOES NOT have business_hours - use fallback
+        } else if (!isWeekend) {
+          // Site DOES NOT have business_hours - use fallback ONLY on weekdays
           scheduledTime = "09:00"; // Default fallback time
           siteTimezone = timezone; // Default timezone
-          businessHoursSource = 'fallback-default';
-          console.log(`   ⚠️ No business_hours found - using FALLBACK: ${scheduledTime} ${siteTimezone}`);
+          businessHoursSource = 'fallback-weekday';
+          console.log(`   ⚠️ No business_hours found - using WEEKDAY FALLBACK: ${scheduledTime} ${siteTimezone}`);
+        } else {
+          // Weekend: NO fallback for sites without business_hours
+          console.log(`   ⏭️ SKIPPING - No business_hours configured and weekend (no fallback)`);
+          continue;
         }
         
         // Parse the original daily standup time

@@ -16,6 +16,8 @@ const {
  * Now considers business_hours from database for smarter scheduling
  * If YES → executes dailyOperationsWorkflow
  * Now includes time-aware logic to prevent execution outside business hours
+ * WEEKEND RESTRICTION: Only schedules sites with business_hours on weekends (Fri/Sat)
+ * WEEKDAY FALLBACK: Sites without business_hours use 09:00 fallback (Sun-Thu)
  */
 export async function activityPrioritizationEngineWorkflow(): Promise<{
   shouldExecute: boolean;
