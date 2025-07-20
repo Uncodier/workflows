@@ -470,6 +470,71 @@ export async function startLeadAttentionWorkflowActivity(request: StartLeadAtten
   }
 }
 
+// Start Lead Follow-Up Workflow interfaces
+export interface StartLeadFollowUpWorkflowRequest {
+  lead_id: string;
+  site_id: string;
+  userId?: string;
+  additionalData?: any;
+}
+
+export interface StartLeadFollowUpWorkflowResult {
+  success: boolean;
+  workflowId?: string;
+  error?: string;
+}
+
+/**
+ * Activity to start leadFollowUpWorkflow as an independent workflow
+ * Uses Temporal client directly to start the workflow independently (not as child workflow)
+ */
+export async function startLeadFollowUpWorkflowActivity(request: StartLeadFollowUpWorkflowRequest): Promise<StartLeadFollowUpWorkflowResult> {
+  console.log(`🚀 Starting independent leadFollowUpWorkflow for lead: ${request.lead_id}`);
+  
+  try {
+    const workflowId = `lead-follow-up-${request.lead_id}-${request.site_id}-${Date.now()}`;
+    
+    // Get Temporal client directly (same pattern used throughout the codebase)
+    const client = await getTemporalClient();
+    
+    console.log('📤 Starting leadFollowUpWorkflow via Temporal client:', {
+      workflowType: 'leadFollowUpWorkflow',
+      workflowId,
+      args: [{ lead_id: request.lead_id, site_id: request.site_id, userId: request.userId, additionalData: request.additionalData }],
+      taskQueue: temporalConfig.taskQueue
+    });
+    
+    // Start the workflow using Temporal client (fire and forget)
+    const handle = await client.workflow.start('leadFollowUpWorkflow', {
+      args: [{ 
+        lead_id: request.lead_id, 
+        site_id: request.site_id, 
+        userId: request.userId, 
+        additionalData: request.additionalData 
+      }],
+      workflowId,
+      taskQueue: temporalConfig.taskQueue,
+    });
+    
+    console.log(`✅ Independent leadFollowUpWorkflow started successfully for lead ${request.lead_id}`);
+    console.log(`📋 Workflow ID: ${handle.workflowId}`);
+    
+    return {
+      success: true,
+      workflowId: handle.workflowId,
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception starting independent leadFollowUpWorkflow for lead ${request.lead_id}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
 /**
  * Activity to save lead follow-up logs via API
  */

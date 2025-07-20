@@ -3,14 +3,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.dailyProspectionWorkflow = dailyProspectionWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 // Import specific daily prospection activities
-const { getProspectionLeadsActivity, createAwarenessTaskActivity, updateLeadProspectionStatusActivity, } = (0, workflow_1.proxyActivities)({
+const { getProspectionLeadsActivity, createAwarenessTaskActivity, updateLeadProspectionStatusActivity, sendLeadsToSalesAgentActivity, assignPriorityLeadsActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes', // Longer timeout for prospection processes
     retry: {
         maximumAttempts: 3,
     },
 });
 // Import general activities
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, startLeadFollowUpWorkflowActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes',
     retry: {
         maximumAttempts: 3,
@@ -61,6 +61,11 @@ async function dailyProspectionWorkflow(options) {
     let prospectionCriteria = null;
     let siteName = '';
     let siteUrl = '';
+    let salesAgentResponse = null;
+    let selectedLeads = [];
+    let leadsPriority = null;
+    let assignedLeads = [];
+    let notificationResults = [];
     try {
         console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
         // Get site information to obtain site details
@@ -97,6 +102,60 @@ async function dailyProspectionWorkflow(options) {
         leadsFound = leads.length;
         prospectionCriteria = prospectionLeadsResult.criteria;
         console.log(`✅ Found ${leadsFound} leads for prospection`);
+        // Step 2.5: Send leads to sales agent for selection and prioritization
+        if (leadsFound > 0) {
+            console.log(`🎯 Step 2.5: Sending leads to sales agent for selection and prioritization...`);
+            const salesAgentResult = await sendLeadsToSalesAgentActivity({
+                site_id: site_id,
+                leads: leads,
+                userId: options.userId || site.user_id,
+                additionalData: {
+                    ...options.additionalData,
+                    siteName: siteName,
+                    siteUrl: siteUrl,
+                    workflowId: workflowId
+                }
+            });
+            if (salesAgentResult.success) {
+                salesAgentResponse = salesAgentResult.response;
+                selectedLeads = salesAgentResult.selectedLeads || [];
+                leadsPriority = salesAgentResult.priority;
+                console.log(`✅ Sales agent processed ${leads.length} leads and selected ${selectedLeads.length} for prioritization`);
+                // Step 2.6: Assign priority leads based on sales agent response
+                console.log(`📋 Step 2.6: Assigning priority leads based on sales agent recommendations...`);
+                const assignmentResult = await assignPriorityLeadsActivity({
+                    site_id: site_id,
+                    salesAgentResponse: salesAgentResponse,
+                    userId: options.userId || site.user_id,
+                    additionalData: {
+                        ...options.additionalData,
+                        siteName: siteName,
+                        siteUrl: siteUrl,
+                        workflowId: workflowId
+                    }
+                });
+                if (assignmentResult.success) {
+                    assignedLeads = assignmentResult.assignedLeads || [];
+                    notificationResults = assignmentResult.notificationResults || [];
+                    console.log(`✅ Lead assignment completed: ${assignedLeads.length} leads assigned`);
+                    console.log(`📧 Notifications sent: ${notificationResults.filter(r => r.success).length}/${notificationResults.length} successful`);
+                }
+                else {
+                    const errorMsg = `Lead assignment failed: ${assignmentResult.error}`;
+                    console.error(`❌ ${errorMsg}`);
+                    errors.push(errorMsg);
+                    console.log(`⚠️ Continuing with prospection despite assignment failure`);
+                }
+            }
+            else {
+                const errorMsg = `Sales agent processing failed: ${salesAgentResult.error}`;
+                console.error(`❌ ${errorMsg}`);
+                errors.push(errorMsg);
+                // Continue with all leads if sales agent fails
+                selectedLeads = leads;
+                console.log(`⚠️ Continuing with all ${leads.length} leads due to sales agent failure`);
+            }
+        }
         if (leadsFound === 0) {
             console.log(`ℹ️ No leads found for prospection - workflow completed successfully`);
             const result = {
@@ -110,6 +169,11 @@ async function dailyProspectionWorkflow(options) {
                 tasksCreated: 0,
                 statusUpdated: 0,
                 prospectionResults: [],
+                salesAgentResponse,
+                selectedLeads,
+                leadsPriority,
+                assignedLeads,
+                notificationResults,
                 errors,
                 executionTime: `${((Date.now() - startTime) / 1000).toFixed(2)}s`,
                 completedAt: new Date().toISOString()
@@ -133,14 +197,19 @@ async function dailyProspectionWorkflow(options) {
             });
             return result;
         }
+        // Use selected leads from sales agent, or fall back to all leads if no selection
+        const leadsToSelect = selectedLeads.length > 0 ? selectedLeads : leads;
         // Limit the number of leads to process if specified
-        const leadsToProcess = maxLeads ? leads.slice(0, maxLeads) : leads;
+        const leadsToProcess = maxLeads ? leadsToSelect.slice(0, maxLeads) : leadsToSelect;
         leadsProcessed = leadsToProcess.length;
-        if (maxLeads && leads.length > maxLeads) {
-            console.log(`⚠️ Processing only first ${maxLeads} leads out of ${leads.length} found`);
-            errors.push(`Limited processing to ${maxLeads} leads (${leads.length} total found)`);
+        if (maxLeads && leadsToSelect.length > maxLeads) {
+            console.log(`⚠️ Processing only first ${maxLeads} leads out of ${leadsToSelect.length} selected by sales agent`);
+            errors.push(`Limited processing to ${maxLeads} leads (${leadsToSelect.length} total selected)`);
         }
         console.log(`👥 Step 3: Processing ${leadsProcessed} leads for prospection...`);
+        console.log(`   - Total leads found: ${leadsFound}`);
+        console.log(`   - Selected by sales agent: ${selectedLeads.length}`);
+        console.log(`   - Final leads to process: ${leadsProcessed}`);
         // Process each lead
         for (let i = 0; i < leadsToProcess.length; i++) {
             const lead = leadsToProcess[i];
@@ -232,10 +301,91 @@ async function dailyProspectionWorkflow(options) {
             tasksCreated,
             statusUpdated,
             prospectionResults,
+            salesAgentResponse,
+            selectedLeads,
+            leadsPriority,
+            assignedLeads,
+            notificationResults,
             errors,
             executionTime,
             completedAt: new Date().toISOString()
         };
+        // Step 7: Start follow-up workflows for leads not assigned to humans
+        console.log(`🔄 Step 7: Starting follow-up workflows for unassigned leads...`);
+        // Identify leads that were NOT assigned to humans
+        const assignedLeadIds = assignedLeads.map((lead) => lead.id || lead.lead_id);
+        const unassignedLeads = leadsToProcess.filter((lead) => !assignedLeadIds.includes(lead.id));
+        console.log(`📊 Follow-up analysis:`);
+        console.log(`   - Total leads processed: ${leadsToProcess.length}`);
+        console.log(`   - Leads assigned to humans: ${assignedLeads.length}`);
+        console.log(`   - Leads requiring follow-up: ${unassignedLeads.length}`);
+        const followUpResults = [];
+        let followUpWorkflowsStarted = 0;
+        if (unassignedLeads.length > 0) {
+            console.log(`🚀 Starting lead follow-up workflows for ${unassignedLeads.length} unassigned leads...`);
+            for (const lead of unassignedLeads) {
+                try {
+                    console.log(`📞 Starting follow-up workflow for lead: ${lead.name || lead.email} (ID: ${lead.id})`);
+                    const followUpResult = await startLeadFollowUpWorkflowActivity({
+                        lead_id: lead.id,
+                        site_id: site_id,
+                        userId: options.userId || site.user_id,
+                        additionalData: {
+                            triggeredBy: 'dailyProspectionWorkflow',
+                            reason: 'lead_not_assigned_to_human',
+                            prospectionDate: new Date().toISOString(),
+                            originalWorkflowId: workflowId,
+                            leadInfo: {
+                                name: lead.name,
+                                email: lead.email,
+                                company: lead.company
+                            }
+                        }
+                    });
+                    if (followUpResult.success) {
+                        followUpWorkflowsStarted++;
+                        console.log(`✅ Follow-up workflow started for ${lead.name || lead.email}: ${followUpResult.workflowId}`);
+                        followUpResults.push({
+                            lead_id: lead.id,
+                            lead_name: lead.name || lead.email,
+                            success: true,
+                            workflowId: followUpResult.workflowId
+                        });
+                    }
+                    else {
+                        const errorMsg = `Failed to start follow-up workflow for ${lead.name || lead.email}: ${followUpResult.error}`;
+                        console.error(`❌ ${errorMsg}`);
+                        errors.push(errorMsg);
+                        followUpResults.push({
+                            lead_id: lead.id,
+                            lead_name: lead.name || lead.email,
+                            success: false,
+                            error: followUpResult.error
+                        });
+                    }
+                }
+                catch (followUpError) {
+                    const errorMessage = followUpError instanceof Error ? followUpError.message : String(followUpError);
+                    const errorMsg = `Exception starting follow-up workflow for ${lead.name || lead.email}: ${errorMessage}`;
+                    console.error(`❌ ${errorMsg}`);
+                    errors.push(errorMsg);
+                    followUpResults.push({
+                        lead_id: lead.id,
+                        lead_name: lead.name || lead.email,
+                        success: false,
+                        error: errorMessage
+                    });
+                }
+            }
+            console.log(`✅ Follow-up workflows completed: ${followUpWorkflowsStarted}/${unassignedLeads.length} started successfully`);
+        }
+        else {
+            console.log(`ℹ️ No follow-up workflows needed (all leads were assigned to humans or no leads processed)`);
+        }
+        // Update result with follow-up information
+        result.followUpWorkflowsStarted = followUpWorkflowsStarted;
+        result.followUpResults = followUpResults;
+        result.unassignedLeads = unassignedLeads;
         console.log(`🎉 Daily prospection workflow completed successfully!`);
         console.log(`📊 Summary: Daily prospection for site ${siteName} completed in ${executionTime}`);
         console.log(`   - Site: ${siteName} (${siteUrl})`);
@@ -243,6 +393,10 @@ async function dailyProspectionWorkflow(options) {
         console.log(`   - Leads processed: ${leadsProcessed}`);
         console.log(`   - Tasks created: ${tasksCreated}`);
         console.log(`   - Status updated: ${statusUpdated}`);
+        console.log(`   - Leads assigned: ${assignedLeads.length}`);
+        console.log(`   - Notifications sent: ${notificationResults.filter(r => r.success).length}/${notificationResults.length}`);
+        console.log(`   - Follow-up workflows started: ${followUpWorkflowsStarted}/${unassignedLeads.length}`);
+        console.log(`   - Unassigned leads (auto follow-up): ${unassignedLeads.length}`);
         if (errors.length > 0) {
             console.log(`   - Errors encountered: ${errors.length}`);
             errors.forEach((error, index) => {
@@ -303,6 +457,15 @@ async function dailyProspectionWorkflow(options) {
             tasksCreated,
             statusUpdated,
             prospectionResults,
+            salesAgentResponse,
+            selectedLeads,
+            leadsPriority,
+            assignedLeads,
+            notificationResults,
+            // Add follow-up fields with default values for error case
+            followUpWorkflowsStarted: 0,
+            followUpResults: [],
+            unassignedLeads: [],
             errors: [...errors, errorMessage],
             executionTime,
             completedAt: new Date().toISOString()

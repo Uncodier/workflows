@@ -650,8 +650,7 @@ async function leadGenerationWorkflow(options) {
                                             if (empDeliverables) {
                                                 const employeeLeads = extractEmployeesFromDeliverables(empDeliverables);
                                                 companyResult.leadsGenerated = employeeLeads;
-                                                totalLeadsGenerated += employeeLeads.length;
-                                                console.log(`👥 Generated ${employeeLeads.length} leads for ${company.name}`);
+                                                console.log(`👥 Extracted ${employeeLeads.length} potential leads for ${company.name}`);
                                                 // Step 4b.4: If no leads generated, save venue as failed in system_memories
                                                 if (employeeLeads.length === 0) {
                                                     console.log(`📝 Step 4b.4: No leads generated for ${company.name}, saving venue as failed...`);
@@ -693,33 +692,76 @@ async function leadGenerationWorkflow(options) {
                                                 if (saveLeadsResult.success) {
                                                     console.log(`✅ Successfully saved ${saveLeadsResult.leadsCreated || 0} leads from deep research for ${company.name}`);
                                                     console.log(`📊 Leads processed: ${saveLeadsResult.leadsValidated || 0} validated, ${saveLeadsResult.leadsCreated || 0} created`);
-                                                    // Step 4b.6: Update agent memory with lead statistics (visible workflow step)
-                                                    if (saveLeadsResult.leadsCreated && saveLeadsResult.leadsCreated > 0 && targetCity && targetRegion) {
-                                                        console.log(`🧠 Step 4b.6: Updating agent memory with ${saveLeadsResult.leadsCreated} leads...`);
-                                                        const updateMemoryResult = await updateMemoryActivity({
-                                                            siteId: site_id,
+                                                    // Update total leads generated counter with successfully created leads
+                                                    if (saveLeadsResult.leadsCreated && saveLeadsResult.leadsCreated > 0) {
+                                                        totalLeadsGenerated += saveLeadsResult.leadsCreated;
+                                                        console.log(`✅ Successfully created ${saveLeadsResult.leadsCreated} valid leads for ${company.name}`);
+                                                    }
+                                                    // Check if no leads were actually created due to validation failures
+                                                    if (saveLeadsResult.leadsCreated === 0) {
+                                                        console.log(`📝 Step 4b.4.1: No valid leads created for ${company.name} (validation failures), saving venue as failed...`);
+                                                        const upsertResult = await upsertVenueFailedActivity({
+                                                            site_id: site_id,
                                                             city: targetCity,
                                                             region: targetRegion,
-                                                            segmentId: segmentId,
-                                                            leadsCount: saveLeadsResult.leadsCreated
+                                                            venueName: company.name,
+                                                            userId: options.userId || site.user_id
                                                         });
-                                                        if (updateMemoryResult.success) {
-                                                            console.log(`✅ Agent memory successfully updated for ${company.name}`);
+                                                        if (upsertResult.success) {
+                                                            console.log(`✅ Successfully saved failed venue ${company.name} to system_memories (validation failures)`);
                                                         }
                                                         else {
-                                                            const warningMsg = `Failed to update agent memory for ${company.name}: ${updateMemoryResult.error}`;
+                                                            const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
                                                             console.warn(`⚠️ ${warningMsg}`);
                                                             // Don't add to errors since this is not critical for the main workflow
                                                         }
                                                     }
                                                     else {
-                                                        console.log(`ℹ️ Skipping memory update: no leads created or missing location data`);
+                                                        // Step 4b.6: Update agent memory with lead statistics (visible workflow step)
+                                                        if (targetCity && targetRegion) {
+                                                            console.log(`🧠 Step 4b.6: Updating agent memory with ${saveLeadsResult.leadsCreated} leads...`);
+                                                            const updateMemoryResult = await updateMemoryActivity({
+                                                                siteId: site_id,
+                                                                city: targetCity,
+                                                                region: targetRegion,
+                                                                segmentId: segmentId,
+                                                                leadsCount: saveLeadsResult.leadsCreated
+                                                            });
+                                                            if (updateMemoryResult.success) {
+                                                                console.log(`✅ Agent memory successfully updated for ${company.name}`);
+                                                            }
+                                                            else {
+                                                                const warningMsg = `Failed to update agent memory for ${company.name}: ${updateMemoryResult.error}`;
+                                                                console.warn(`⚠️ ${warningMsg}`);
+                                                                // Don't add to errors since this is not critical for the main workflow
+                                                            }
+                                                        }
+                                                        else {
+                                                            console.log(`ℹ️ Skipping memory update: missing location data`);
+                                                        }
                                                     }
                                                 }
                                                 else {
                                                     const errorMsg = `Failed to save leads from deep research for ${company.name}: ${saveLeadsResult.error}`;
                                                     console.error(`❌ ${errorMsg}`);
                                                     companyResult.errors.push(errorMsg);
+                                                    // Step 4b.4.2: Save leads processing failed, save venue as failed in system_memories
+                                                    console.log(`📝 Step 4b.4.2: Save leads processing failed for ${company.name}, saving venue as failed...`);
+                                                    const upsertResult = await upsertVenueFailedActivity({
+                                                        site_id: site_id,
+                                                        city: targetCity,
+                                                        region: targetRegion,
+                                                        venueName: company.name,
+                                                        userId: options.userId || site.user_id
+                                                    });
+                                                    if (upsertResult.success) {
+                                                        console.log(`✅ Successfully saved failed venue ${company.name} to system_memories (save processing failed)`);
+                                                    }
+                                                    else {
+                                                        const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
+                                                        console.warn(`⚠️ ${warningMsg}`);
+                                                        // Don't add to errors since this is not critical for the main workflow
+                                                    }
                                                 }
                                             }
                                             else {
