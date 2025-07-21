@@ -6,6 +6,7 @@ const {
   scheduleIndividualDailyStandUpsActivity,
   scheduleIndividualSiteAnalysisActivity,
   scheduleIndividualLeadGenerationActivity,
+  scheduleIndividualDailyProspectionActivity,
   executeDailyProspectionWorkflowsActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '10 minutes',
@@ -282,37 +283,38 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
         
         operationsExecuted = false; // Not executed now, but scheduled individually
         
-        // Step 2.1: Execute daily prospection workflow (since schedules are created)
-        console.log('🎯 Step 2.1: Executing daily prospection workflow for scheduled sites...');
-        console.log('   Daily prospection will execute now for sites that are scheduled for later');
-        console.log('   This allows prospection to run even when standups are scheduled');
+        // Step 2.1: Schedule daily prospection workflow for later execution (using timers)
+        console.log('🎯 Step 2.1: Scheduling daily prospection workflow for later execution...');
+        console.log('   Daily prospection will be scheduled for 2 hours after daily standups');
+        console.log('   This ensures prospection runs after standups and lead generation complete');
         
         try {
-          const dailyProspectionResult = await executeDailyProspectionWorkflowsActivity({
-            dryRun: false,  // PRODUCTION: Actually execute workflows
-            testMode: false, // PRODUCTION: Full production mode
-            businessHoursAnalysis, // PASS business hours analysis for filtering
-            hoursThreshold: 48, // Look for leads older than 48 hours
-            maxLeads: 50 // Limit to 50 leads per site
-          });
+          const dailyProspectionSchedulingResult = await scheduleIndividualDailyProspectionActivity(
+            businessHoursAnalysis,
+            {
+              timezone: 'America/Mexico_City',
+              hoursThreshold: 48, // Look for leads older than 48 hours
+              maxLeads: 50 // Limit to 50 leads per site
+            }
+          );
           
-          console.log(`🎯 Daily prospection workflows execution completed:`);
-          console.log(`   ✅ Prospection executed: ${dailyProspectionResult.scheduled} sites`);
-          console.log(`   ⏭️ Skipped: ${dailyProspectionResult.skipped} sites`);
-          console.log(`   ❌ Failed: ${dailyProspectionResult.failed} sites`);
+          console.log(`🎯 Daily prospection scheduling completed:`);
+          console.log(`   ✅ Scheduled: ${dailyProspectionSchedulingResult.scheduled} sites`);
+          console.log(`   ⏭️ Skipped: ${dailyProspectionSchedulingResult.skipped} sites`);
+          console.log(`   ❌ Failed: ${dailyProspectionSchedulingResult.failed} sites`);
           
-          // Add daily prospection results to operations result
-          (operationsResult as any).dailyProspectionExecution = {
-            scheduled: dailyProspectionResult.scheduled,
-            skipped: dailyProspectionResult.skipped,
-            failed: dailyProspectionResult.failed,
-            results: dailyProspectionResult.results,
-            errors: dailyProspectionResult.errors
+          // Add daily prospection scheduling results to operations result
+          (operationsResult as any).dailyProspectionScheduling = {
+            scheduled: dailyProspectionSchedulingResult.scheduled,
+            skipped: dailyProspectionSchedulingResult.skipped,
+            failed: dailyProspectionSchedulingResult.failed,
+            results: dailyProspectionSchedulingResult.results,
+            errors: dailyProspectionSchedulingResult.errors
           };
           
         } catch (dailyProspectionError) {
-          console.error('❌ Error executing daily prospection workflows:', dailyProspectionError);
-          (operationsResult as any).dailyProspectionExecution = {
+          console.error('❌ Error scheduling daily prospection workflows:', dailyProspectionError);
+          (operationsResult as any).dailyProspectionScheduling = {
             scheduled: 0,
             skipped: 0,
             failed: 1,
@@ -441,6 +443,10 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
     if (operationsResult?.dailyProspectionExecution) {
       console.log(`   Daily prospection executed: ${operationsResult.dailyProspectionExecution.scheduled} sites`);
       console.log(`   🎯 Daily prospection follows after daily standups`);
+    }
+    if (operationsResult?.dailyProspectionScheduling) {
+      console.log(`   Daily prospection scheduled: ${operationsResult.dailyProspectionScheduling.scheduled} sites`);
+      console.log(`   🎯 Daily prospection will execute 2 hours after daily standups`);
     }
     if (operationsResult?.siteAnalysisScheduling) {
       console.log(`   Site analysis scheduled: ${operationsResult.siteAnalysisScheduling.scheduled} sites`);

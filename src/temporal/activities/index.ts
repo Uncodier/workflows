@@ -82,6 +82,7 @@ export {
   scheduleIndividualDailyStandUpsActivity,
   scheduleIndividualSiteAnalysisActivity,
   scheduleIndividualLeadGenerationActivity,
+  scheduleIndividualDailyProspectionActivity,
   executeDailyProspectionWorkflowsActivity
 } from './workflowSchedulingActivities'; 
 

@@ -2282,6 +2282,276 @@ async function executeDailyProspectionWorkflow(
   }
 }
 
+/**
+ * Schedule Daily Prospection Workflows for individual sites using TIMERS
+ * Creates delayed workflow executions for sites with business_hours OR weekday fallback
+ * Uses Temporal timers instead of schedules for one-time executions
+ * WEEKEND RESTRICTION: sites without business_hours are skipped on weekends (Fri/Sat)
+ * WEEKDAY FALLBACK: sites without business_hours use 09:00 fallback (Sun-Thu)
+ * EXECUTES 2 HOURS AFTER DAILY STANDUP to process leads after standup and lead generation
+ */
+export async function scheduleIndividualDailyProspectionActivity(
+  businessHoursAnalysis: any,
+  options: { 
+    timezone?: string;
+    hoursThreshold?: number;
+    maxLeads?: number;
+  } = {}
+): Promise<{
+  scheduled: number;
+  skipped: number;
+  failed: number;
+  results: ScheduleWorkflowResult[];
+  errors: string[];
+}> {
+  const { timezone = 'America/Mexico_City', hoursThreshold = 48, maxLeads = 50 } = options;
+  
+  console.log(`🎯 Scheduling individual Daily Prospection workflows using TIMERS`);
+  console.log(`   - Default timezone: ${timezone}`);
+  console.log(`   - Sites with business_hours: ${businessHoursAnalysis.openSites?.length || 0}`);
+  console.log(`   - Hours threshold: ${hoursThreshold} hours`);
+  console.log(`   - Max leads per site: ${maxLeads}`);
+  
+  const results: ScheduleWorkflowResult[] = [];
+  const errors: string[] = [];
+  let scheduled = 0;
+  const skipped = 0;
+  let failed = 0;
+
+  try {
+    const client = await getTemporalClient();
+    const supabaseService = getSupabaseService();
+    
+    // Get ALL sites from database
+    const allSites = await supabaseService.fetchSites();
+    console.log(`   - Total sites in database: ${allSites.length}`);
+    
+    if (!allSites || allSites.length === 0) {
+      console.log('⚠️ No sites found in database');
+      return { scheduled: 0, skipped: 0, failed: 0, results: [], errors: [] };
+    }
+
+    // Create a map of sites with business hours for quick lookup
+    const sitesWithBusinessHours = new Map();
+    if (businessHoursAnalysis.openSites) {
+      businessHoursAnalysis.openSites.forEach((site: any) => {
+        sitesWithBusinessHours.set(site.siteId, site.businessHours);
+      });
+    }
+    
+    // Determine if fallback should be used based on day of week
+    const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
+    const isWeekend = currentDay === 5 || currentDay === 6; // Friday = 5, Saturday = 6
+    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
+    
+    console.log(`   - Current day: ${dayName} (${currentDay})`);
+    console.log(`   - Is weekend: ${isWeekend}`);
+    console.log(`   - Fallback policy: ${isWeekend ? 'NO FALLBACK (weekend)' : 'FALLBACK ALLOWED (weekday)'}`);
+    
+    // Process sites with different logic for weekends vs weekdays
+    for (const site of allSites as any[]) {
+      try {
+        console.log(`\n🎯 Processing site for Daily Prospection: ${site.name || 'Unnamed'} (${site.id})`);
+        
+        // Check if this site has business_hours
+        const businessHours = sitesWithBusinessHours.get(site.id);
+        
+        let scheduledTime: string;
+        let siteTimezone: string;
+        let businessHoursSource: string;
+        
+        if (businessHours) {
+          // Site HAS business_hours - use them
+          scheduledTime = businessHours.open; // e.g., "09:00"
+          siteTimezone = businessHours.timezone || timezone;
+          businessHoursSource = 'database-configured';
+          console.log(`   ✅ Has business_hours: ${businessHours.open} - ${businessHours.close} ${siteTimezone}`);
+        } else if (!isWeekend) {
+          // Site DOES NOT have business_hours - use fallback ONLY on weekdays
+          scheduledTime = "09:00"; // Default fallback time
+          siteTimezone = timezone; // Default timezone
+          businessHoursSource = 'fallback-weekday';
+          console.log(`   ⚠️ No business_hours found - using WEEKDAY FALLBACK: ${scheduledTime} ${siteTimezone}`);
+        } else {
+          // Weekend: NO fallback for sites without business_hours
+          console.log(`   ⏭️ SKIPPING - No business_hours configured and weekend (no fallback)`);
+          continue;
+        }
+        
+        // Parse the original daily standup time
+        const [hours, minutes] = scheduledTime.split(':').map(Number);
+        
+        // Calculate daily prospection time (2 hours after daily standup)
+        let prospectionHour = hours + 2;
+        if (prospectionHour >= 24) {
+          prospectionHour = prospectionHour - 24; // Wrap to next day if needed
+        }
+        
+        const prospectionScheduledTime = `${prospectionHour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        
+        console.log(`   - Original daily standup time: ${scheduledTime} ${siteTimezone}`);
+        console.log(`   - Daily prospection time: ${prospectionScheduledTime} ${siteTimezone} (2 hours after standup)`);
+        console.log(`   - Business hours source: ${businessHoursSource}`);
+        
+        // Parse the target prospection time
+        const [prospectionHours, prospectionMinutes] = prospectionScheduledTime.split(':').map(Number);
+        
+        const nowUTC = new Date();
+        const timezoneOffset = siteTimezone === 'America/Mexico_City' ? 6 : 0;
+        
+        // Calculate current time in site's timezone
+        const nowLocal = new Date(nowUTC.getTime() - (timezoneOffset * 60 * 60 * 1000));
+        
+        // Create target time for "today" in site's timezone
+        const targetLocalToday = new Date(nowLocal);
+        targetLocalToday.setUTCHours(prospectionHours, prospectionMinutes, 0, 0);
+        
+        // Check if target time already passed in site's timezone
+        const targetAlreadyPassed = targetLocalToday <= nowLocal;
+        
+        // Determine final target date (today or tomorrow in site's timezone)
+        let finalTargetLocal: Date;
+        
+        if (targetAlreadyPassed) {
+          finalTargetLocal = new Date(targetLocalToday);
+          finalTargetLocal.setUTCDate(finalTargetLocal.getUTCDate() + 1);
+          console.log(`   ⏰ Target time already passed, scheduling for TOMORROW`);
+        } else {
+          finalTargetLocal = targetLocalToday;
+          console.log(`   ⏰ Target time hasn't passed, scheduling for TODAY`);
+        }
+        
+        const finalLocalDateStr = finalTargetLocal.toISOString().split('T')[0];
+        const finalTargetUTC = new Date(finalTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
+        
+        console.log(`   - Final target: ${finalTargetLocal.getUTCHours().toString().padStart(2, '0')}:${finalTargetLocal.getUTCMinutes().toString().padStart(2, '0')} ${siteTimezone} on ${finalLocalDateStr}`);
+        console.log(`   - Final target UTC: ${finalTargetUTC.toISOString()}`);
+        
+        // Calculate delay in milliseconds from now
+        const now = new Date();
+        const delayMs = finalTargetUTC.getTime() - now.getTime();
+        
+        if (delayMs <= 0) {
+          console.log(`   ⚠️ Target time is in the past, executing immediately`);
+        } else {
+          const delayHours = delayMs / (1000 * 60 * 60);
+          console.log(`   ⏰ Will execute in ${delayHours.toFixed(2)} hours`);
+        }
+        
+        // Create unique workflow ID for this site
+        const uniqueHash = Math.random().toString(36).substring(2, 15);
+        const workflowId = `daily-prospection-timer-${site.id}-${finalLocalDateStr}-${prospectionScheduledTime.replace(':', '')}-${uniqueHash}`;
+        
+        console.log(`   - Workflow ID: ${workflowId}`);
+        console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
+        
+        // Prepare workflow arguments for dailyProspectionWorkflow
+        const workflowArgs = [{
+          site_id: site.id,
+          userId: site.user_id,
+          hoursThreshold,
+          maxLeads,
+          createTasks: true,
+          updateStatus: false,
+          additionalData: {
+            scheduledBy: 'activityPrioritizationEngine-dailyProspection',
+            executeReason: `post-standup-daily-prospection-${businessHoursSource}-${prospectionScheduledTime}`,
+            scheduleType: `daily-prospection-${businessHoursSource}`,
+            scheduleTime: `${prospectionScheduledTime} ${siteTimezone}`,
+            executionDay: finalLocalDateStr,
+            timezone: siteTimezone,
+            executionMode: 'timer-delayed-daily-prospection',
+            businessHours: businessHours || { 
+              open: scheduledTime, 
+              close: '18:00', 
+              enabled: true, 
+              timezone: siteTimezone, 
+              source: businessHoursSource 
+            },
+            siteName: site.name || `Site ${site.id.substring(0, 8)}`,
+            fallbackUsed: !businessHours,
+            delayMs,
+            targetTimeUTC: finalTargetUTC.toISOString(),
+            prospectionType: 'post-standup-daily-prospection',
+            originalDailyStandupTime: scheduledTime,
+            prospectionExecutesTwoHoursLater: true,
+            executesAfterDailyStandup: true,
+            executesAfterLeadGeneration: true,
+            hoursThreshold,
+            maxLeads
+          }
+        }];
+
+        // Start the DELAYED workflow for daily prospection
+        await client.workflow.start('delayedExecutionWorkflow', {
+          args: [{
+            delayMs: Math.max(delayMs, 0), // Ensure non-negative delay
+            targetWorkflow: 'dailyProspectionWorkflow',
+            targetArgs: workflowArgs,
+            siteName: site.name || 'Site',
+            scheduledTime: `${prospectionScheduledTime} ${siteTimezone}`,
+            executionType: 'timer-based-daily-prospection'
+          }],
+          taskQueue: temporalConfig.taskQueue,
+          workflowId: workflowId,
+          workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+        });
+
+        console.log(`✅ Successfully scheduled Daily Prospection with TIMER for ${site.name || 'Site'}`);
+        console.log(`   - Will execute at: ${prospectionScheduledTime} ${siteTimezone} on ${finalLocalDateStr}`);
+        console.log(`   - Business hours source: ${businessHoursSource}`);
+        console.log(`   - Original daily standup: ${scheduledTime} ${siteTimezone}`);
+        console.log(`   - Daily prospection: ${prospectionScheduledTime} ${siteTimezone} (2 hours after standup)`);
+        console.log(`   - Execution order: DailyStandup → LeadGeneration (+1hr) → DailyProspection (+2hr)`);
+        console.log(`   - 🎯 Using TIMER approach for reliable delayed execution`);
+        
+        results.push({
+          workflowId: workflowId,
+          scheduleId: workflowId,
+          success: true
+        });
+        
+        scheduled++;
+
+      } catch (siteError) {
+        const errorMessage = siteError instanceof Error ? siteError.message : String(siteError);
+        console.error(`❌ Failed to schedule Daily Prospection for site ${site.id}: ${errorMessage}`);
+        
+        errors.push(`Site ${site.id}: ${errorMessage}`);
+        failed++;
+        
+        results.push({
+          workflowId: `failed-${site.id}-${Date.now()}`,
+          scheduleId: `failed-${site.id}-${Date.now()}`,
+          success: false,
+          error: errorMessage
+        });
+      }
+    }
+
+    console.log(`\n📊 Individual Daily Prospection TIMER scheduling completed:`);
+    console.log(`   ✅ Scheduled: ${scheduled} sites`);
+    console.log(`   ❌ Failed: ${failed} sites`);
+    console.log(`   🎯 Using TIMER-based approach for reliable one-time execution`);
+    console.log(`   📅 Each site will execute at their specific business hours PLUS 2 HOURS`);
+    console.log(`   🎯 EXECUTES 2 HOURS AFTER DAILY STANDUP to process leads after standup and lead generation`);
+
+    return { scheduled, skipped, failed, results, errors };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Failed to schedule individual Daily Prospection: ${errorMessage}`);
+    
+    return {
+      scheduled: 0,
+      skipped: 0,
+      failed: 1,
+      results: [],
+      errors: [errorMessage]
+    };
+  }
+}
+
 
 
 

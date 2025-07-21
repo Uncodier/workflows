@@ -169,6 +169,82 @@ export async function leadFollowUpWorkflow(
       });
     }
 
+    // Early validation: Check if messages are available for sending
+    const messages = response?.messages || {};
+    const lead = response?.lead || {};
+    const emailMessage = messages.email?.message;
+    const whatsappMessage = messages.whatsapp?.message;
+    
+    if (!emailMessage && !whatsappMessage) {
+      console.log(`⚠️ No follow-up messages found in response - skipping message sending workflow`);
+      console.log(`📝 Available data: lead=${!!lead}, messages=${!!messages}, emailMsg=${!!emailMessage}, whatsappMsg=${!!whatsappMessage}`);
+      
+      // Save logs without message sending
+      if (response) {
+        console.log(`📝 Step 3: Saving lead follow-up logs to database...`);
+        
+        const saveLogsResult = await saveLeadFollowUpLogsActivity({
+          siteId: site_id,
+          leadId: lead_id,
+          userId: options.userId || site.user_id,
+          data: response
+        });
+        
+        if (!saveLogsResult.success) {
+          const errorMsg = `Failed to save lead follow-up logs: ${saveLogsResult.error}`;
+          console.error(`⚠️ ${errorMsg}`);
+          errors.push(errorMsg);
+        } else {
+          console.log(`✅ Lead follow-up logs saved successfully`);
+        }
+      }
+
+      // Complete workflow without sending messages
+      const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+      const result: LeadFollowUpResult = {
+        success: true,
+        leadId: lead_id,
+        siteId: site_id,
+        siteName,
+        siteUrl,
+        followUpActions,
+        nextSteps,
+        data: response,
+        messageSent: undefined, // No message was sent
+        errors: [...errors, 'No follow-up messages available for sending'],
+        executionTime,
+        completedAt: new Date().toISOString()
+      };
+
+      console.log(`🎉 Lead follow-up workflow completed (no messages to send)!`);
+      console.log(`📊 Summary: Lead ${lead_id} follow-up completed for ${siteName} in ${executionTime}`);
+      console.log(`⚠️ No follow-up messages were sent - no content available`);
+
+      // Update cron status to indicate successful completion
+      await saveCronStatusActivity({
+        siteId: site_id,
+        workflowId,
+        scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+        activityName: 'leadFollowUpWorkflow',
+        status: 'COMPLETED',
+        lastRun: new Date().toISOString()
+      });
+
+      // Log successful completion
+      await logWorkflowExecutionActivity({
+        workflowId,
+        workflowType: 'leadFollowUpWorkflow',
+        status: 'COMPLETED',
+        input: options,
+        output: result,
+      });
+
+      return result;
+    }
+
+    console.log(`✅ Follow-up messages found - proceeding with message sending workflow`);
+    console.log(`📧 Email message: ${!!emailMessage}, 📱 WhatsApp message: ${!!whatsappMessage}`);
+
     // Step 3: Save lead follow-up logs to database
     if (response) {
       console.log(`📝 Step 3: Saving lead follow-up logs to database...`);
