@@ -3,12 +3,14 @@ import type { Activities } from '../activities';
 
 // Import specific daily prospection activities
 const {
+  validateCommunicationChannelsActivity,
   getProspectionLeadsActivity,
   createAwarenessTaskActivity,
   updateLeadProspectionStatusActivity,
   sendLeadsToSalesAgentActivity,
   assignPriorityLeadsActivity,
 } = proxyActivities<{
+  validateCommunicationChannelsActivity: (options: any) => Promise<any>;
   getProspectionLeadsActivity: (options: any) => Promise<any>;
   createAwarenessTaskActivity: (options: any) => Promise<any>;
   updateLeadProspectionStatusActivity: (options: any) => Promise<any>;
@@ -141,6 +143,78 @@ export async function dailyProspectionWorkflow(
   let notificationResults: any[] = [];
 
   try {
+    console.log(`📡 Step 0: Validating communication channels for ${site_id}...`);
+    
+    // Validate that the site has email or WhatsApp channels configured
+    const channelsValidation = await validateCommunicationChannelsActivity({
+      site_id: site_id
+    });
+    
+    if (!channelsValidation.success) {
+      const errorMsg = `Failed to validate communication channels: ${channelsValidation.error}`;
+      console.error(`❌ ${errorMsg}`);
+      errors.push(errorMsg);
+      throw new Error(errorMsg);
+    }
+    
+    if (!channelsValidation.hasAnyChannel) {
+      const errorMsg = `No communication channels (email or WhatsApp) are configured and enabled for site ${site_id}. Prospection requires at least one communication channel to send follow-up messages.`;
+      console.error(`❌ ${errorMsg}`);
+      errors.push(errorMsg);
+      
+      // Return early failure instead of throwing to provide detailed information
+      const result: DailyProspectionResult = {
+        success: false,
+        siteId: site_id,
+        siteName: '',
+        siteUrl: '',
+        prospectionCriteria: undefined,
+        leadsFound: 0,
+        leadsProcessed: 0,
+        tasksCreated: 0,
+        statusUpdated: 0,
+        prospectionResults: [],
+        salesAgentResponse: null,
+        selectedLeads: [],
+        leadsPriority: null,
+        assignedLeads: [],
+        notificationResults: [],
+        followUpWorkflowsStarted: 0,
+        followUpResults: [],
+        unassignedLeads: [],
+        errors: [errorMsg],
+        executionTime: `${((Date.now() - startTime) / 1000).toFixed(2)}s`,
+        completedAt: new Date().toISOString()
+      };
+      
+      // Update cron status to indicate validation failure
+      await saveCronStatusActivity({
+        siteId: site_id,
+        workflowId,
+        scheduleId: `daily-prospection-${site_id}`,
+        activityName: 'dailyProspectionWorkflow',
+        status: 'FAILED',
+        lastRun: new Date().toISOString(),
+        errorMessage: errorMsg,
+        retryCount: 1
+      });
+      
+      // Log workflow execution failure
+      await logWorkflowExecutionActivity({
+        workflowId,
+        workflowType: 'dailyProspectionWorkflow',
+        status: 'FAILED',
+        input: options,
+        error: errorMsg,
+      });
+      
+      return result;
+    }
+    
+    console.log(`✅ Communication channels validated successfully:`);
+    console.log(`   - Email channel: ${channelsValidation.hasEmailChannel ? 'Available' : 'Not configured'}`);
+    console.log(`   - WhatsApp channel: ${channelsValidation.hasWhatsappChannel ? 'Available' : 'Not configured'}`);
+
     console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
     
     // Get site information to obtain site details

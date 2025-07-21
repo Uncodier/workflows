@@ -193,6 +193,16 @@ function isPhoneObfuscated(phone) {
     return phone.includes('*') || phone.includes('***') || /^\*+$/.test(phone.trim());
 }
 /**
+ * Validate if email is obfuscated with asterisks
+ */
+function isEmailObfuscated(email) {
+    if (!email)
+        return false;
+    // Check if email contains asterisks in the local part (before @)
+    // Examples: c******@domain.com, john***@example.com, ***@domain.com
+    return email.includes('*') && email.includes('@');
+}
+/**
  * Extract employees from deep research deliverables with validation
  */
 function extractEmployeesFromDeliverables(deliverables) {
@@ -200,6 +210,7 @@ function extractEmployeesFromDeliverables(deliverables) {
     const seenNames = new Set(); // Track processed names to avoid duplicates
     let duplicatesSkipped = 0;
     let obfuscatedPhonesSkipped = 0;
+    let obfuscatedEmailsSkipped = 0;
     /**
      * Validate and add employee if valid
      */
@@ -215,10 +226,17 @@ function extractEmployeesFromDeliverables(deliverables) {
             return;
         }
         const telephone = leadData.telephone || leadData.phone || null;
+        const email = leadData.email || null;
         // Validation 2: Check for obfuscated phone numbers
         if (telephone && isPhoneObfuscated(telephone)) {
             console.log(`📞 Skipping lead with obfuscated phone: ${leadData.name} (${telephone})`);
             obfuscatedPhonesSkipped++;
+            return;
+        }
+        // Validation 3: Check for obfuscated email addresses
+        if (email && isEmailObfuscated(email)) {
+            console.log(`📧 Skipping lead with obfuscated email: ${leadData.name} (${email})`);
+            obfuscatedEmailsSkipped++;
             return;
         }
         // All validations passed, add the lead
@@ -226,7 +244,7 @@ function extractEmployeesFromDeliverables(deliverables) {
         employees.push({
             name: leadData.name,
             telephone: telephone,
-            email: leadData.email || null,
+            email: email,
             company_name: businessData?.name || leadData.company?.name || leadData.company_name || undefined,
             address: leadData.address || businessData?.location || businessData?.address || null,
             web: businessData?.website || leadData.company?.website || leadData.web || null,
@@ -298,6 +316,9 @@ function extractEmployeesFromDeliverables(deliverables) {
     }
     if (obfuscatedPhonesSkipped > 0) {
         console.log(`📞 Skipped ${obfuscatedPhonesSkipped} leads with obfuscated phone numbers`);
+    }
+    if (obfuscatedEmailsSkipped > 0) {
+        console.log(`📧 Skipped ${obfuscatedEmailsSkipped} leads with obfuscated email addresses`);
     }
     return employees;
 }

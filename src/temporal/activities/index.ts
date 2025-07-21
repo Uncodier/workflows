@@ -81,7 +81,8 @@ export {
   scheduleDailyOperationsWorkflowActivity,
   scheduleIndividualDailyStandUpsActivity,
   scheduleIndividualSiteAnalysisActivity,
-  scheduleIndividualLeadGenerationActivity
+  scheduleIndividualLeadGenerationActivity,
+  executeDailyProspectionWorkflowsActivity
 } from './workflowSchedulingActivities'; 
 
 export {

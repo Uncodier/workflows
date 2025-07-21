@@ -3,6 +3,39 @@
  * Lead and Company Activities
  * Activities for managing leads and companies
  */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkExistingLeadNotificationActivity = checkExistingLeadNotificationActivity;
 exports.getLeadActivity = getLeadActivity;
@@ -15,6 +48,9 @@ exports.saveLeadFollowUpLogsActivity = saveLeadFollowUpLogsActivity;
 exports.updateLeadActivity = updateLeadActivity;
 exports.getCompanyActivity = getCompanyActivity;
 exports.upsertCompanyActivity = upsertCompanyActivity;
+exports.updateConversationStatusAfterFollowUpActivity = updateConversationStatusAfterFollowUpActivity;
+exports.validateMessageAndConversationActivity = validateMessageAndConversationActivity;
+exports.updateMessageStatusToSentActivity = updateMessageStatusToSentActivity;
 const apiService_1 = require("../services/apiService");
 const supabaseService_1 = require("../services/supabaseService");
 const client_1 = require("../client");
@@ -372,14 +408,12 @@ async function startLeadFollowUpWorkflowActivity(request) {
 async function saveLeadFollowUpLogsActivity(request) {
     console.log(`📝 Saving lead follow-up logs for lead ${request.leadId} on site ${request.siteId}`);
     try {
-        // Extract the nested data fields to flatten them at root level
-        const { success, data: nestedData } = request.data;
+        // Flatten the data fields directly to root level
         const requestBody = {
             siteId: request.siteId,
             leadId: request.leadId,
             userId: request.userId,
-            success,
-            ...nestedData // Flatten the nested data fields (messages, lead, command_ids) to root
+            ...request.data // Flatten the data fields (messages, lead, command_ids) directly to root
         };
         console.log('📤 Sending lead follow-up logs:', JSON.stringify(requestBody, null, 2));
         const response = await apiService_1.apiService.post('/api/agents/sales/leadFollowUp/logs', requestBody);
@@ -517,6 +551,416 @@ async function upsertCompanyActivity(companyData) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Exception upserting company:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to update conversation status to active after successful lead follow-up
+ * This is a specific activity for post follow-up conversation activation
+ */
+async function updateConversationStatusAfterFollowUpActivity(request) {
+    console.log(`💬 Activating conversation after successful lead follow-up...`);
+    console.log(`📋 Lead ID: ${request.lead_id}, Site ID: ${request.site_id}`);
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot update conversation status');
+            return {
+                success: false,
+                error: 'Database not available'
+            };
+        }
+        console.log('✅ Database connection confirmed, searching for conversation...');
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // First, try to find the conversation ID if not provided
+        let conversationId = request.conversation_id;
+        if (!conversationId) {
+            console.log(`🔍 No conversation ID provided, searching for conversation by lead_id...`);
+            // Look for conversation_id in response data
+            if (request.response_data) {
+                conversationId = request.response_data.conversation_id ||
+                    request.response_data.lead?.conversation_id;
+            }
+            // Look in additional data
+            if (!conversationId && request.additional_data) {
+                conversationId = request.additional_data.conversation_id;
+            }
+            // If still no conversation ID, try to find it by lead_id
+            if (!conversationId) {
+                console.log(`🔍 Searching for conversation by lead_id in database...`);
+                const { data: conversation, error: findError } = await supabaseServiceRole
+                    .from('conversations')
+                    .select('id')
+                    .eq('lead_id', request.lead_id)
+                    .eq('site_id', request.site_id)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .single();
+                if (findError && findError.code !== 'PGRST116') { // PGRST116 = no rows returned
+                    console.error(`❌ Error searching for conversation:`, findError);
+                    return {
+                        success: false,
+                        error: `Failed to search for conversation: ${findError.message}`
+                    };
+                }
+                if (conversation) {
+                    conversationId = conversation.id;
+                    console.log(`✅ Found conversation by lead_id: ${conversationId}`);
+                }
+            }
+        }
+        if (!conversationId) {
+            console.log(`⚠️ No conversation found for lead ${request.lead_id} - this is normal for some follow-ups`);
+            return {
+                success: true, // Don't fail the workflow for missing conversation
+                error: 'No conversation found to update'
+            };
+        }
+        console.log(`📝 Updating conversation ${conversationId} status to 'active'...`);
+        const updateData = {
+            status: 'active',
+            updated_at: new Date().toISOString(),
+            last_message_at: new Date().toISOString() // Update last message time
+        };
+        const { data, error } = await supabaseServiceRole
+            .from('conversations')
+            .update(updateData)
+            .eq('id', conversationId)
+            .eq('site_id', request.site_id) // Additional security filter
+            .select()
+            .single();
+        if (error) {
+            console.error(`❌ Error updating conversation ${conversationId}:`, error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+        if (!data) {
+            return {
+                success: false,
+                error: `Conversation ${conversationId} not found or update failed`
+            };
+        }
+        console.log(`✅ Successfully activated conversation ${conversationId} after lead follow-up`);
+        console.log(`💬 Conversation is now active and ready for new interactions`);
+        return {
+            success: true,
+            conversation_id: conversationId
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception updating conversation status after follow-up:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to validate that message and conversation exist before sending follow-up
+ * This validates both conversation and message integrity before proceeding with sending
+ */
+async function validateMessageAndConversationActivity(request) {
+    console.log(`🔍 Validating message and conversation existence before follow-up...`);
+    console.log(`📋 Lead ID: ${request.lead_id}, Site ID: ${request.site_id}`);
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot validate message and conversation');
+            return {
+                success: false,
+                error: 'Database not available',
+                conversation_exists: false,
+                message_exists: false
+            };
+        }
+        console.log('✅ Database connection confirmed, validating existence...');
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // Step 1: Find conversation ID if not provided
+        let conversationId = request.response_data?.conversation_id ||
+            request.response_data?.lead?.conversation_id ||
+            request.additional_data?.conversation_id;
+        let conversationExists = false;
+        if (!conversationId) {
+            console.log(`🔍 No conversation ID provided, searching by lead_id...`);
+            const { data: conversation, error: findError } = await supabaseServiceRole
+                .from('conversations')
+                .select('id, status, custom_data, updated_at, last_message_at, created_at')
+                .eq('lead_id', request.lead_id)
+                .eq('site_id', request.site_id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single();
+            if (findError && findError.code !== 'PGRST116') {
+                console.error(`❌ Error searching for conversation:`, findError);
+                return {
+                    success: false,
+                    error: `Failed to search for conversation: ${findError.message}`,
+                    conversation_exists: false,
+                    message_exists: false
+                };
+            }
+            if (conversation) {
+                conversationId = conversation.id;
+                conversationExists = true;
+                console.log(`✅ Found conversation by lead_id and reloaded from database:`);
+                console.log(`   - Conversation ID: ${conversationId}`);
+                console.log(`   - Status: ${conversation.status}`);
+                console.log(`   - Created: ${conversation.created_at}`);
+                console.log(`   - Last updated: ${conversation.updated_at}`);
+                console.log(`   - Last message: ${conversation.last_message_at}`);
+                console.log(`   - Custom data:`, conversation.custom_data);
+            }
+        }
+        else {
+            console.log(`🔍 Validating provided conversation ID: ${conversationId}...`);
+            const { data: conversation, error: validateError } = await supabaseServiceRole
+                .from('conversations')
+                .select('id, status, custom_data, updated_at, last_message_at')
+                .eq('id', conversationId)
+                .eq('site_id', request.site_id)
+                .single();
+            if (validateError) {
+                console.error(`❌ Conversation ${conversationId} not found or invalid:`, validateError);
+                conversationExists = false;
+            }
+            else {
+                conversationExists = true;
+                console.log(`✅ Conversation ${conversationId} exists and reloaded from database:`);
+                console.log(`   - Status: ${conversation.status}`);
+                console.log(`   - Last updated: ${conversation.updated_at}`);
+                console.log(`   - Last message: ${conversation.last_message_at}`);
+                console.log(`   - Custom data:`, conversation.custom_data);
+            }
+        }
+        // Step 2: Validate message if message_id provided
+        let messageExists = false;
+        const messageId = request.message_id || request.response_data?.message_id;
+        if (messageId && conversationId) {
+            console.log(`🔍 Validating message ID: ${messageId}...`);
+            const { data: message, error: messageError } = await supabaseServiceRole
+                .from('messages')
+                .select('id, custom_data')
+                .eq('id', messageId)
+                .eq('conversation_id', conversationId)
+                .single();
+            if (messageError) {
+                console.error(`❌ Message ${messageId} not found:`, messageError);
+                messageExists = false;
+            }
+            else {
+                messageExists = true;
+                console.log(`✅ Message ${messageId} exists in conversation`);
+                console.log(`📊 Message custom_data:`, message.custom_data);
+            }
+        }
+        else {
+            console.log(`⚠️ No message ID provided for validation - skipping message check`);
+            messageExists = true; // Don't fail validation for missing message ID
+        }
+        // Step 3: Final validation result
+        const validationSuccess = conversationExists; // Message is optional
+        if (validationSuccess) {
+            console.log(`✅ Validation successful - ready for follow-up message sending`);
+            if (conversationId) {
+                console.log(`💬 Conversation ${conversationId} is ready for new messages`);
+            }
+            if (messageId && messageExists) {
+                console.log(`📝 Message ${messageId} exists and can be updated`);
+            }
+        }
+        else {
+            console.log(`❌ Validation failed - cannot proceed with follow-up`);
+            console.log(`   - Conversation exists: ${conversationExists}`);
+            console.log(`   - Message exists: ${messageExists}`);
+        }
+        return {
+            success: validationSuccess,
+            conversation_id: conversationId,
+            message_id: messageId,
+            conversation_exists: conversationExists,
+            message_exists: messageExists,
+            error: validationSuccess ? undefined : 'Validation failed - required entities do not exist'
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception validating message and conversation:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage,
+            conversation_exists: false,
+            message_exists: false
+        };
+    }
+}
+/**
+ * Activity to update message status from pending to sent after successful follow-up delivery
+ * Updates the custom_data field in the messages table
+ */
+async function updateMessageStatusToSentActivity(request) {
+    console.log(`📝 Updating message status to 'sent' after follow-up delivery...`);
+    console.log(`📋 Message ID: ${request.message_id}, Channel: ${request.delivery_channel}, Success: ${request.delivery_success}`);
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot update message status');
+            return {
+                success: false,
+                error: 'Database not available'
+            };
+        }
+        console.log('✅ Database connection confirmed, updating message status...');
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        let messageId = request.message_id;
+        // If no message_id provided, try to find the most recent message in the conversation
+        if (!messageId && request.conversation_id) {
+            console.log(`🔍 No message ID provided, searching for recent message in conversation...`);
+            const { data: recentMessage, error: findError } = await supabaseServiceRole
+                .from('messages')
+                .select('id, custom_data')
+                .eq('conversation_id', request.conversation_id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single();
+            if (findError && findError.code !== 'PGRST116') {
+                console.error(`❌ Error finding recent message:`, findError);
+                return {
+                    success: false,
+                    error: `Failed to find recent message: ${findError.message}`
+                };
+            }
+            if (recentMessage) {
+                messageId = recentMessage.id;
+                console.log(`✅ Found recent message: ${messageId}`);
+            }
+        }
+        if (!messageId) {
+            console.log(`⚠️ No message found to update - this is normal for some follow-ups`);
+            return {
+                success: true, // Don't fail the workflow for missing message
+                error: 'No message found to update'
+            };
+        }
+        console.log(`📝 Reloading and updating message ${messageId} status...`);
+        console.log(`🔄 Reloading message from database to ensure current state...`);
+        // Reload the complete message from database to ensure we have the latest state
+        // This is important because 2+ hours may have passed since the workflow started
+        const { data: currentMessage, error: getCurrentError } = await supabaseServiceRole
+            .from('messages')
+            .select('id, conversation_id, content, role, custom_data, created_at, updated_at')
+            .eq('id', messageId)
+            .single();
+        if (getCurrentError) {
+            console.error(`❌ Error reloading current message data:`, getCurrentError);
+            return {
+                success: false,
+                error: `Failed to reload message: ${getCurrentError.message}`
+            };
+        }
+        console.log(`✅ Message reloaded from database:`);
+        console.log(`   - Message ID: ${currentMessage.id}`);
+        console.log(`   - Conversation ID: ${currentMessage.conversation_id}`);
+        console.log(`   - Role: ${currentMessage.role}`);
+        console.log(`   - Created: ${currentMessage.created_at}`);
+        console.log(`   - Last Updated: ${currentMessage.updated_at}`);
+        console.log(`   - Current custom_data:`, JSON.stringify(currentMessage.custom_data, null, 2));
+        // Verify the message still belongs to the correct conversation (security check)
+        if (request.conversation_id && currentMessage.conversation_id !== request.conversation_id) {
+            console.error(`❌ Message ${messageId} conversation mismatch:`);
+            console.error(`   - Expected: ${request.conversation_id}`);
+            console.error(`   - Actual: ${currentMessage.conversation_id}`);
+            return {
+                success: false,
+                error: 'Message conversation mismatch - possible data corruption'
+            };
+        }
+        // Check if message was already processed by another workflow
+        const currentCustomData = currentMessage.custom_data || {};
+        const currentStatus = currentCustomData.status;
+        const alreadyProcessed = currentCustomData.follow_up?.processed;
+        if (alreadyProcessed && currentStatus === 'sent') {
+            console.log(`⚠️ Message ${messageId} was already processed and marked as 'sent'`);
+            console.log(`   - Current status: ${currentStatus}`);
+            console.log(`   - Processed at: ${currentCustomData.follow_up?.processed_at}`);
+            console.log(`   - Skipping duplicate processing`);
+            return {
+                success: true,
+                updated_message_id: messageId,
+                error: 'Message already processed'
+            };
+        }
+        if (currentStatus && currentStatus !== 'pending' && currentStatus !== 'sent') {
+            console.log(`⚠️ Message ${messageId} has unexpected status: ${currentStatus}`);
+            console.log(`   - Expected: 'pending' or 'sent'`);
+            console.log(`   - Proceeding with update anyway`);
+        }
+        // Prepare updated custom_data, preserving existing fields
+        const targetStatus = request.delivery_success ? 'sent' : 'failed';
+        console.log(`📝 Updating message status from '${currentStatus || 'undefined'}' to '${targetStatus}'`);
+        const updatedCustomData = {
+            ...currentCustomData,
+            status: targetStatus,
+            delivery: {
+                channel: request.delivery_channel,
+                success: request.delivery_success,
+                timestamp: new Date().toISOString(),
+                details: request.delivery_details || {}
+            },
+            follow_up: {
+                processed: true,
+                processed_at: new Date().toISOString(),
+                lead_id: request.lead_id,
+                site_id: request.site_id
+            }
+        };
+        // Update message with new status
+        const { data, error } = await supabaseServiceRole
+            .from('messages')
+            .update({
+            custom_data: updatedCustomData,
+            updated_at: new Date().toISOString()
+        })
+            .eq('id', messageId)
+            .select()
+            .single();
+        if (error) {
+            console.error(`❌ Error updating message ${messageId}:`, error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+        if (!data) {
+            return {
+                success: false,
+                error: `Message ${messageId} not found or update failed`
+            };
+        }
+        console.log(`✅ Successfully updated message ${messageId} status to '${targetStatus}'`);
+        console.log(`📊 Message now marked as processed via ${request.delivery_channel}`);
+        return {
+            success: true,
+            updated_message_id: messageId
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception updating message status:`, errorMessage);
         return {
             success: false,
             error: errorMessage

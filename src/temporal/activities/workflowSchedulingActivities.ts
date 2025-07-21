@@ -1984,6 +1984,304 @@ export async function scheduleIndividualLeadGenerationActivity(
   }
 }
 
+/**
+ * Execute daily prospection workflows for sites after daily standups
+ * 
+ * @param options.dryRun - If true, only simulates execution without running real workflows
+ * @param options.testMode - If true, adds safety checks and limits to prevent production issues
+ * @param options.maxSites - Maximum number of sites to process (useful for testing)
+ * @param options.businessHoursAnalysis - Business hours analysis for filtering sites
+ * @param options.hoursThreshold - Hours threshold for lead age (default 48)
+ * @param options.maxLeads - Maximum leads per site (default 50)
+ */
+export async function executeDailyProspectionWorkflowsActivity(
+  options: { 
+    dryRun?: boolean; 
+    testMode?: boolean; 
+    maxSites?: number;
+    businessHoursAnalysis?: any;
+    hoursThreshold?: number;
+    maxLeads?: number;
+  } = {}
+): Promise<{
+  scheduled: number;
+  skipped: number;
+  failed: number;
+  results: ScheduleWorkflowResult[];
+  errors: string[];
+  testInfo?: any;
+}> {
+  console.log('🎯 Starting Daily Prospection workflow execution...');
+  
+  const { businessHoursAnalysis, hoursThreshold = 48, maxLeads = 50 } = options;
+  
+  if (businessHoursAnalysis) {
+    console.log('📋 BUSINESS HOURS FILTERING ENABLED:');
+    console.log(`   - Sites with business_hours: ${businessHoursAnalysis.sitesWithBusinessHours}`);
+    console.log(`   - Sites open today: ${businessHoursAnalysis.sitesOpenToday}`);
+    console.log(`   - Will execute prospection for filtered sites only`);
+  } else {
+    console.log('📋 FALLBACK MODE - No business hours filtering:');
+    console.log('   - Will execute prospection for all sites (legacy behavior)');
+  }
+  
+  // Safety checks for test mode
+  if (options.testMode) {
+    console.log('🧪 TEST MODE ENABLED - Extra safety checks activated');
+    options.dryRun = true; // Force dry run in test mode
+    options.maxSites = options.maxSites || 3; // Limit to 3 sites max in test mode
+  }
+  
+  if (options.dryRun) {
+    console.log('🔬 DRY RUN MODE - No real prospection workflows will be executed');
+  }
+  
+  const results: ScheduleWorkflowResult[] = [];
+  const errors: string[] = [];
+  let scheduled = 0;
+  let failed = 0;
+  let skipped = 0;
+  
+  try {
+    console.log('📊 Getting sites for daily prospection...');
+    
+    // Check database availability
+    const supabaseService = getSupabaseService();
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️ Database not available, cannot execute daily prospection workflows');
+      return {
+        scheduled: 0,
+        skipped: 0,
+        failed: 1,
+        results: [],
+        errors: ['Database not available']
+      };
+    }
+
+    console.log('✅ Database connection confirmed, fetching sites...');
+    
+    // Import supabase service role client
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    let sitesQuery = supabaseServiceRole
+      .from('sites')
+      .select('id, name, url, user_id, business_hours')
+      .eq('active', true);
+
+    // Apply site limit for testing
+    if (options.maxSites && options.maxSites > 0) {
+      console.log(`⚠️ Limiting to ${options.maxSites} sites for testing`);
+      sitesQuery = sitesQuery.limit(options.maxSites);
+    }
+
+    const { data: allSites, error: sitesError } = await sitesQuery;
+
+    if (sitesError) {
+      console.error('❌ Error fetching sites:', sitesError);
+      return {
+        scheduled: 0,
+        skipped: 0,
+        failed: 1,
+        results: [],
+        errors: [`Error fetching sites: ${sitesError.message}`]
+      };
+    }
+
+    if (!allSites || allSites.length === 0) {
+      console.log('ℹ️ No sites found for daily prospection');
+      return {
+        scheduled: 0,
+        skipped: 0,
+        failed: 0,
+        results: [],
+        errors: []
+      };
+    }
+
+    console.log(`📋 Found ${allSites.length} total sites`);
+
+    // Filter sites based on business hours analysis if available
+    let sitesToProcess = allSites;
+    
+    if (businessHoursAnalysis && businessHoursAnalysis.openSites && businessHoursAnalysis.openSites.length > 0) {
+      const openSiteIds = businessHoursAnalysis.openSites.map((site: any) => site.siteId);
+      sitesToProcess = allSites.filter(site => openSiteIds.includes(site.id));
+      
+      console.log(`🔍 Business hours filtering applied:`);
+      console.log(`   - Total sites: ${allSites.length}`);
+      console.log(`   - Sites with active business hours today: ${sitesToProcess.length}`);
+      console.log(`   - Skipped sites (outside business hours): ${allSites.length - sitesToProcess.length}`);
+      
+      skipped = allSites.length - sitesToProcess.length;
+    } else {
+      console.log(`📋 No business hours filtering - processing all ${allSites.length} sites`);
+    }
+
+    if (sitesToProcess.length === 0) {
+      console.log('ℹ️ No sites to process after business hours filtering');
+      return {
+        scheduled: 0,
+        skipped: allSites.length,
+        failed: 0,
+        results: [],
+        errors: []
+      };
+    }
+
+    console.log(`🚀 Processing ${sitesToProcess.length} sites for daily prospection...`);
+
+    // Process each site
+    for (const site of sitesToProcess) {
+      try {
+        console.log(`🎯 Processing site: ${site.name} (${site.id})`);
+        
+        const prospectionResult = await executeDailyProspectionWorkflow(site, {
+          executeReason: businessHoursAnalysis ? 'business-hours-triggered' : 'scheduled-execution',
+          scheduleType: businessHoursAnalysis ? 'business-hours' : 'standard',
+          businessHoursAnalysis: businessHoursAnalysis,
+          scheduledBy: 'activityPrioritizationEngine',
+          hoursThreshold,
+          maxLeads,
+          dryRun: options.dryRun
+        });
+        
+        results.push(prospectionResult);
+        
+        if (prospectionResult.success) {
+          scheduled++;
+          console.log(`✅ Daily prospection workflow started for ${site.name}`);
+        } else {
+          failed++;
+          console.error(`❌ Failed to start daily prospection workflow for ${site.name}: ${prospectionResult.error}`);
+          if (prospectionResult.error) {
+            errors.push(`${site.name}: ${prospectionResult.error}`);
+          }
+        }
+        
+      } catch (siteError) {
+        failed++;
+        const errorMessage = siteError instanceof Error ? siteError.message : String(siteError);
+        console.error(`❌ Error processing site ${site.name}: ${errorMessage}`);
+        errors.push(`${site.name}: ${errorMessage}`);
+        
+        results.push({
+          workflowId: `daily-prospection-${site.id}-failed`,
+          scheduleId: 'failed',
+          success: false,
+          error: errorMessage
+        });
+      }
+    }
+
+    console.log('📊 Daily prospection workflow execution completed:');
+    console.log(`   ✅ Successful: ${scheduled}`);
+    console.log(`   ❌ Failed: ${failed}`);
+    console.log(`   ⏭️ Skipped: ${skipped}`);
+    
+    return {
+      scheduled,
+      skipped,
+      failed,
+      results,
+      errors,
+      testInfo: options.testMode ? {
+        mode: options.dryRun ? 'DRY_RUN' : 'TEST',
+        maxSites: options.maxSites,
+        hoursThreshold,
+        maxLeads,
+        duration: 'N/A'
+      } : undefined
+    };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('❌ Fatal error in executeDailyProspectionWorkflowsActivity:', errorMessage);
+    
+    return {
+      scheduled: 0,
+      skipped: 0,
+      failed: 1,
+      results: [],
+      errors: [errorMessage]
+    };
+  }
+}
+
+/**
+ * Execute daily prospection workflow for a single site
+ */
+async function executeDailyProspectionWorkflow(
+  site: any, 
+  executionOptions: {
+    executeReason: string;
+    scheduleType: string;
+    businessHoursAnalysis?: any;
+    scheduledBy: string;
+    hoursThreshold?: number;
+    maxLeads?: number;
+    dryRun?: boolean;
+  }
+): Promise<ScheduleWorkflowResult> {
+  const workflowId = `daily-prospection-${site.id}-${Date.now()}`;
+
+  try {
+    // If dry run, just simulate the execution
+    if (executionOptions.dryRun) {
+      console.log(`🧪 DRY RUN - Simulating daily prospection workflow for ${site.name}`);
+      return { 
+        workflowId, 
+        scheduleId: executionOptions.scheduleType, 
+        success: true 
+      };
+    }
+
+    const client = await getTemporalClient();
+    
+    console.log(`🚀 Executing Daily Prospection workflow for ${site.name}`);
+    console.log(`   Schedule type: ${executionOptions.scheduleType}`);
+    console.log(`   Execute reason: ${executionOptions.executeReason}`);
+    console.log(`   Hours threshold: ${executionOptions.hoursThreshold || 48} hours`);
+    console.log(`   Max leads: ${executionOptions.maxLeads || 50}`);
+    
+    const handle = await client.workflow.start('dailyProspectionWorkflow', {
+      args: [{
+        site_id: site.id,
+        userId: site.user_id,
+        hoursThreshold: executionOptions.hoursThreshold || 48,
+        maxLeads: executionOptions.maxLeads || 50,
+        createTasks: true,
+        updateStatus: false,
+        additionalData: {
+          scheduledBy: executionOptions.scheduledBy,
+          executeReason: executionOptions.executeReason,
+          scheduleType: executionOptions.scheduleType,
+          scheduleTime: executionOptions.scheduleType === 'business-hours' ? 'business-hours-based' : 'immediate',
+          executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+          timezone: 'UTC',
+          executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
+          businessHoursAnalysis: executionOptions.businessHoursAnalysis,
+          triggeredBy: 'activityPrioritizationEngine',
+          followsAfter: 'dailyStandUpWorkflow'
+        }
+      }],
+      taskQueue: temporalConfig.taskQueue,
+      workflowId: workflowId,
+    });
+    
+    console.log(`✅ Daily Prospection workflow started for ${site.name}`);
+    console.log(`   Workflow ID: ${handle.workflowId}`);
+    
+    return { workflowId, scheduleId: executionOptions.scheduleType, success: true };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Failed to execute Daily Prospection workflow for ${site.name}: ${errorMessage}`);
+    return { workflowId, scheduleId: executionOptions.scheduleType, success: false, error: errorMessage };
+  }
+}
+
 
 
 

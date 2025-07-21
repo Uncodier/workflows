@@ -31,6 +31,21 @@ export interface DailyProspectionOptions {
   additionalData?: any;
 }
 
+// New interfaces for communication channels validation
+export interface ValidateCommunicationChannelsParams {
+  site_id: string;
+}
+
+export interface ValidateCommunicationChannelsResult {
+  success: boolean;
+  hasEmailChannel: boolean;
+  hasWhatsappChannel: boolean;
+  hasAnyChannel: boolean;
+  emailConfig?: any;
+  whatsappConfig?: any;
+  error?: string;
+}
+
 export interface GetProspectionLeadsResult {
   success: boolean;
   leads: ProspectionLead[];
@@ -59,6 +74,124 @@ export interface CreateAwarenessTaskResult {
   task?: any;
   taskId?: string;
   error?: string;
+}
+
+/**
+ * Activity to validate communication channels (email or WhatsApp) are configured for a site
+ */
+export async function validateCommunicationChannelsActivity(
+  params: ValidateCommunicationChannelsParams
+): Promise<ValidateCommunicationChannelsResult> {
+  console.log(`📡 Validating communication channels for site: ${params.site_id}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot validate communication channels');
+      return {
+        success: false,
+        hasEmailChannel: false,
+        hasWhatsappChannel: false,
+        hasAnyChannel: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, fetching settings...');
+    
+    // Get settings for the site
+    const settings = await supabaseService.fetchCompleteSettings([params.site_id]);
+    
+    if (!settings || settings.length === 0) {
+      console.log('⚠️  No settings found for site');
+      return {
+        success: true,
+        hasEmailChannel: false,
+        hasWhatsappChannel: false,
+        hasAnyChannel: false,
+        error: 'No settings found for site'
+      };
+    }
+
+    const siteSettings = settings[0];
+    const channels = siteSettings.channels || [];
+    
+    console.log(`🔍 Found ${channels.length} channel configurations`);
+    
+    // Check for email configuration
+    const emailConfig = channels.find((channel: any) => 
+      channel.type === 'email' && channel.enabled === true
+    );
+    
+    // Check for WhatsApp configuration
+    const whatsappConfig = channels.find((channel: any) => 
+      channel.type === 'whatsapp' && channel.enabled === true
+    );
+    
+    const hasEmailChannel = !!emailConfig;
+    const hasWhatsappChannel = !!whatsappConfig;
+    const hasAnyChannel = hasEmailChannel || hasWhatsappChannel;
+    
+    console.log(`📊 Channel validation results:`);
+    console.log(`   - Email enabled: ${hasEmailChannel ? '✅' : '❌'}`);
+    console.log(`   - WhatsApp enabled: ${hasWhatsappChannel ? '✅' : '❌'}`);
+    console.log(`   - Any channel available: ${hasAnyChannel ? '✅' : '❌'}`);
+    
+    if (!hasAnyChannel) {
+      console.log('❌ No communication channels (email or WhatsApp) are configured and enabled');
+      
+      // Send notification about missing channel configuration
+      console.log('📤 Sending channels setup required notification...');
+      try {
+        const notificationResponse = await apiService.post('/api/notifications/channelsSetupRequired', {
+          site_id: params.site_id
+        });
+        
+        if (notificationResponse.success) {
+          console.log('✅ Channels setup notification sent successfully');
+        } else {
+          console.error('❌ Failed to send channels setup notification:', notificationResponse.error);
+        }
+      } catch (notificationError) {
+        const errorMessage = notificationError instanceof Error ? notificationError.message : String(notificationError);
+        console.error('❌ Exception sending channels setup notification:', errorMessage);
+      }
+      
+      return {
+        success: true,
+        hasEmailChannel: false,
+        hasWhatsappChannel: false,
+        hasAnyChannel: false,
+        error: 'No communication channels (email or WhatsApp) are configured and enabled'
+      };
+    }
+
+    console.log('✅ Communication channels validation completed successfully');
+    return {
+      success: true,
+      hasEmailChannel,
+      hasWhatsappChannel,
+      hasAnyChannel,
+      emailConfig: hasEmailChannel ? emailConfig : undefined,
+      whatsappConfig: hasWhatsappChannel ? whatsappConfig : undefined
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('❌ Exception validating communication channels:', errorMessage);
+    
+    return {
+      success: false,
+      hasEmailChannel: false,
+      hasWhatsappChannel: false,
+      hasAnyChannel: false,
+      error: errorMessage
+    };
+  }
 }
 
 /**

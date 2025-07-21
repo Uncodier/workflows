@@ -287,6 +287,16 @@ function isPhoneObfuscated(phone: string | null): boolean {
 }
 
 /**
+ * Validate if email is obfuscated with asterisks
+ */
+function isEmailObfuscated(email: string | null): boolean {
+  if (!email) return false;
+  // Check if email contains asterisks in the local part (before @)
+  // Examples: c******@domain.com, john***@example.com, ***@domain.com
+  return email.includes('*') && email.includes('@');
+}
+
+/**
  * Extract employees from deep research deliverables with validation
  */
 function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
@@ -294,6 +304,7 @@ function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
   const seenNames = new Set<string>(); // Track processed names to avoid duplicates
   let duplicatesSkipped = 0;
   let obfuscatedPhonesSkipped = 0;
+  let obfuscatedEmailsSkipped = 0;
   
   /**
    * Validate and add employee if valid
@@ -313,6 +324,7 @@ function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
     }
 
     const telephone = leadData.telephone || leadData.phone || null;
+    const email = leadData.email || null;
     
     // Validation 2: Check for obfuscated phone numbers
     if (telephone && isPhoneObfuscated(telephone)) {
@@ -321,12 +333,19 @@ function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
       return;
     }
 
+    // Validation 3: Check for obfuscated email addresses
+    if (email && isEmailObfuscated(email)) {
+      console.log(`📧 Skipping lead with obfuscated email: ${leadData.name} (${email})`);
+      obfuscatedEmailsSkipped++;
+      return;
+    }
+
     // All validations passed, add the lead
     seenNames.add(normalizedName);
     employees.push({
       name: leadData.name,
       telephone: telephone,
-      email: leadData.email || null,
+      email: email,
       company_name: businessData?.name || leadData.company?.name || leadData.company_name || undefined,
       address: leadData.address || businessData?.location || businessData?.address || null,
       web: businessData?.website || leadData.company?.website || leadData.web || null,
@@ -400,6 +419,9 @@ function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
   }
   if (obfuscatedPhonesSkipped > 0) {
     console.log(`📞 Skipped ${obfuscatedPhonesSkipped} leads with obfuscated phone numbers`);
+  }
+  if (obfuscatedEmailsSkipped > 0) {
+    console.log(`📧 Skipped ${obfuscatedEmailsSkipped} leads with obfuscated email addresses`);
   }
   
   return employees;

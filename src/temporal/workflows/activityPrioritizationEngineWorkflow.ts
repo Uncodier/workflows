@@ -5,7 +5,8 @@ const {
   evaluateBusinessHoursForDay, 
   scheduleIndividualDailyStandUpsActivity,
   scheduleIndividualSiteAnalysisActivity,
-  scheduleIndividualLeadGenerationActivity 
+  scheduleIndividualLeadGenerationActivity,
+  executeDailyProspectionWorkflowsActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '10 minutes',
 });
@@ -18,6 +19,7 @@ const {
  * Now includes time-aware logic to prevent execution outside business hours
  * WEEKEND RESTRICTION: Only schedules sites with business_hours on weekends (Fri/Sat)
  * WEEKDAY FALLBACK: Sites without business_hours use 09:00 fallback (Sun-Thu)
+ * AFTER DAILY STANDUPS: Executes dailyProspectionWorkflow for lead prospection
  */
 export async function activityPrioritizationEngineWorkflow(): Promise<{
   shouldExecute: boolean;
@@ -117,8 +119,46 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
         operationsExecuted = true;
         console.log('✅ Daily operations workflow completed successfully');
         
-        // Step 2.1: Schedule site analysis for sites that need initial analysis
-        console.log('🔍 Step 2.1: Scheduling site analysis for sites that need initial analysis...');
+        // Step 2.1: Execute daily prospection workflow after daily standups
+        console.log('🎯 Step 2.1: Executing daily prospection workflow after daily standups...');
+        console.log('   Daily prospection will process leads after standups complete');
+        
+        try {
+          const dailyProspectionResult = await executeDailyProspectionWorkflowsActivity({
+            dryRun: false,  // PRODUCTION: Actually execute workflows
+            testMode: false, // PRODUCTION: Full production mode
+            businessHoursAnalysis, // PASS business hours analysis for filtering
+            hoursThreshold: 48, // Look for leads older than 48 hours
+            maxLeads: 50 // Limit to 50 leads per site
+          });
+          
+          console.log(`🎯 Daily prospection workflows execution completed:`);
+          console.log(`   ✅ Prospection executed: ${dailyProspectionResult.scheduled} sites`);
+          console.log(`   ⏭️ Skipped: ${dailyProspectionResult.skipped} sites`);
+          console.log(`   ❌ Failed: ${dailyProspectionResult.failed} sites`);
+          
+          // Add daily prospection results to operations result
+          (operationsResult as any).dailyProspectionExecution = {
+            scheduled: dailyProspectionResult.scheduled,
+            skipped: dailyProspectionResult.skipped,
+            failed: dailyProspectionResult.failed,
+            results: dailyProspectionResult.results,
+            errors: dailyProspectionResult.errors
+          };
+          
+        } catch (dailyProspectionError) {
+          console.error('❌ Error executing daily prospection workflows:', dailyProspectionError);
+          (operationsResult as any).dailyProspectionExecution = {
+            scheduled: 0,
+            skipped: 0,
+            failed: 1,
+            results: [],
+            errors: [dailyProspectionError instanceof Error ? dailyProspectionError.message : String(dailyProspectionError)]
+          };
+        }
+        
+        // Step 2.2: Schedule site analysis for sites that need initial analysis
+        console.log('🔍 Step 2.2: Scheduling site analysis for sites that need initial analysis...');
         console.log('   Note: Site analysis will be scheduled even when daily standups execute immediately');
         console.log('   This ensures sites get their initial analysis regardless of timing');
         
@@ -155,8 +195,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           };
         }
         
-        // Step 2.1.1: Schedule lead generation for 1 hour after daily standups
-        console.log('🔥 Step 2.1.1: Scheduling lead generation for 1 hour after daily standups...');
+        // Step 2.3: Schedule lead generation for 1 hour after daily standups
+        console.log('🔥 Step 2.3: Scheduling lead generation for 1 hour after daily standups...');
         console.log('   Lead generation will execute 1 hour after daily standups complete');
         
         try {
@@ -242,6 +282,45 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
         
         operationsExecuted = false; // Not executed now, but scheduled individually
         
+        // Step 2.1: Execute daily prospection workflow (since schedules are created)
+        console.log('🎯 Step 2.1: Executing daily prospection workflow for scheduled sites...');
+        console.log('   Daily prospection will execute now for sites that are scheduled for later');
+        console.log('   This allows prospection to run even when standups are scheduled');
+        
+        try {
+          const dailyProspectionResult = await executeDailyProspectionWorkflowsActivity({
+            dryRun: false,  // PRODUCTION: Actually execute workflows
+            testMode: false, // PRODUCTION: Full production mode
+            businessHoursAnalysis, // PASS business hours analysis for filtering
+            hoursThreshold: 48, // Look for leads older than 48 hours
+            maxLeads: 50 // Limit to 50 leads per site
+          });
+          
+          console.log(`🎯 Daily prospection workflows execution completed:`);
+          console.log(`   ✅ Prospection executed: ${dailyProspectionResult.scheduled} sites`);
+          console.log(`   ⏭️ Skipped: ${dailyProspectionResult.skipped} sites`);
+          console.log(`   ❌ Failed: ${dailyProspectionResult.failed} sites`);
+          
+          // Add daily prospection results to operations result
+          (operationsResult as any).dailyProspectionExecution = {
+            scheduled: dailyProspectionResult.scheduled,
+            skipped: dailyProspectionResult.skipped,
+            failed: dailyProspectionResult.failed,
+            results: dailyProspectionResult.results,
+            errors: dailyProspectionResult.errors
+          };
+          
+        } catch (dailyProspectionError) {
+          console.error('❌ Error executing daily prospection workflows:', dailyProspectionError);
+          (operationsResult as any).dailyProspectionExecution = {
+            scheduled: 0,
+            skipped: 0,
+            failed: 1,
+            results: [],
+            errors: [dailyProspectionError instanceof Error ? dailyProspectionError.message : String(dailyProspectionError)]
+          };
+        }
+        
         // Step 2.2: Now schedule site analysis since daily standups are also scheduled for later
         console.log('🔍 Step 2.2: Scheduling site analysis for sites that need initial analysis...');
         console.log('   Both daily standups and site analysis will be scheduled for their appropriate times');
@@ -279,8 +358,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           };
         }
         
-        // Step 2.2.1: Schedule lead generation for 1 hour after daily standups
-        console.log('🔥 Step 2.2.1: Scheduling lead generation for 1 hour after daily standups...');
+        // Step 2.3: Schedule lead generation for 1 hour after daily standups
+        console.log('🔥 Step 2.3: Scheduling lead generation for 1 hour after daily standups...');
         console.log('   Both daily standups and lead generation will be scheduled for their appropriate times');
         
         try {
@@ -359,6 +438,10 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
       console.log(`   Individual schedules created: ${operationsResult.individualSchedules}`);
       console.log(`   Approach: ${operationsResult.approach || 'individual-site-schedules'}`);
     }
+    if (operationsResult?.dailyProspectionExecution) {
+      console.log(`   Daily prospection executed: ${operationsResult.dailyProspectionExecution.scheduled} sites`);
+      console.log(`   🎯 Daily prospection follows after daily standups`);
+    }
     if (operationsResult?.siteAnalysisScheduling) {
       console.log(`   Site analysis scheduled: ${operationsResult.siteAnalysisScheduling.scheduled} sites`);
     }
@@ -367,7 +450,7 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
       console.log(`   🔥 Lead generation will execute 1 hour after daily standups`);
     }
     console.log(`   Total execution time: ${executionTime}`);
-    console.log('   Role: Decision maker and orchestrator with business hours respect');
+    console.log('   Role: Decision maker and orchestrator with business hours respect + lead prospection');
     
     return {
       shouldExecute,

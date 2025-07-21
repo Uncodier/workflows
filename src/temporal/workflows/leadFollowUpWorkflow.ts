@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, sleep } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 // Define the activity interface and options
@@ -10,6 +10,9 @@ const {
   saveLeadFollowUpLogsActivity,
   sendEmailFromAgentActivity,
   sendWhatsAppFromAgentActivity,
+  updateConversationStatusAfterFollowUpActivity,
+  validateMessageAndConversationActivity,
+  updateMessageStatusToSentActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
   retry: {
@@ -99,6 +102,7 @@ export async function leadFollowUpWorkflow(
   let siteUrl = '';
   let response: any = null;
   let messageSent: { channel: 'email' | 'whatsapp'; recipient: string; success: boolean; messageId?: string } | undefined;
+  let validationResult: any = null;
 
   try {
     console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
@@ -173,7 +177,7 @@ export async function leadFollowUpWorkflow(
         siteId: site_id,
         leadId: lead_id,
         userId: options.userId || site.user_id,
-        ...response
+        data: response
       });
       
       if (!saveLogsResult.success) {
@@ -186,9 +190,40 @@ export async function leadFollowUpWorkflow(
       }
     }
 
-    // Step 4: Send follow-up message based on channel
+    // Step 3.5: Validate message and conversation existence before proceeding
+    console.log(`🔍 Step 3.5: Validating message and conversation existence...`);
+    
+    validationResult = await validateMessageAndConversationActivity({
+      lead_id: lead_id,
+      site_id: site_id,
+      response_data: response,
+      additional_data: options.additionalData,
+      message_id: options.additionalData?.message_id
+    });
+    
+    if (!validationResult.success) {
+      const errorMsg = `Validation failed: ${validationResult.error}`;
+      console.error(`❌ ${errorMsg}`);
+      errors.push(errorMsg);
+      console.log(`⚠️ Proceeding with follow-up despite validation issues`);
+    } else {
+      console.log(`✅ Validation successful - entities exist and are ready`);
+      if (validationResult.conversation_id) {
+        console.log(`💬 Conversation ${validationResult.conversation_id} validated`);
+      }
+      if (validationResult.message_id) {
+        console.log(`📝 Message ${validationResult.message_id} validated`);
+      }
+    }
+
+    // Step 4: Wait 2 hours before sending follow-up message
     if (response && response.messages && response.lead) {
-      console.log(`📤 Step 4: Sending follow-up message based on communication channel...`);
+      console.log(`⏰ Step 4: Waiting 2 hours before sending follow-up message...`);
+      
+      // Wait 2 hours before sending the message
+      await sleep('2 hours');
+      
+      console.log(`📤 Step 4.1: Now sending follow-up message based on communication channel...`);
       
       try {
         const responseData = response; // response is already the response data
@@ -294,6 +329,68 @@ export async function leadFollowUpWorkflow(
         errors.push(`Failed to send follow-up message: ${errorMessage}`);
         // Note: We don't throw here as the main operation was successful
       }
+    }
+
+    // Step 4.5: Update message status to 'sent' after successful delivery
+    if (messageSent && messageSent.success) {
+      console.log(`📝 Step 4.5: Updating message status to 'sent'...`);
+      
+      const messageUpdateResult = await updateMessageStatusToSentActivity({
+        message_id: validationResult?.message_id,
+        conversation_id: validationResult?.conversation_id,
+        lead_id: lead_id,
+        site_id: site_id,
+        delivery_channel: messageSent.channel,
+        delivery_success: true,
+        delivery_details: {
+          recipient: messageSent.recipient,
+          message_id: messageSent.messageId,
+          timestamp: new Date().toISOString()
+        }
+      });
+      
+      if (messageUpdateResult.success) {
+        if (messageUpdateResult.updated_message_id) {
+          console.log(`✅ Message ${messageUpdateResult.updated_message_id} status updated to 'sent'`);
+        } else {
+          console.log(`✅ Message status update completed (no message to update)`);
+        }
+      } else {
+        const errorMsg = `Failed to update message status: ${messageUpdateResult.error}`;
+        console.error(`⚠️ ${errorMsg}`);
+        errors.push(errorMsg);
+        // Note: We don't throw here as the main operation was successful
+      }
+    } else {
+      console.log(`⚠️ Skipping message status update - no successful delivery`);
+    }
+
+    // Step 5: Activate conversation after successful follow-up
+    if (messageSent && messageSent.success) {
+      console.log(`💬 Step 5: Activating conversation after successful lead follow-up...`);
+      console.log(`🔍 Searching for conversation associated with lead ${lead_id}...`);
+      
+      const conversationUpdateResult = await updateConversationStatusAfterFollowUpActivity({
+        lead_id: lead_id,
+        site_id: site_id,
+        response_data: response,
+        additional_data: options.additionalData
+      });
+      
+      if (conversationUpdateResult.success) {
+        if (conversationUpdateResult.conversation_id) {
+          console.log(`✅ Successfully activated conversation ${conversationUpdateResult.conversation_id}`);
+        } else {
+          console.log(`✅ Conversation activation completed (no conversation found)`);
+        }
+      } else {
+        const errorMsg = `Failed to activate conversation: ${conversationUpdateResult.error}`;
+        console.error(`⚠️ ${errorMsg}`);
+        errors.push(errorMsg);
+        // Note: We don't throw here as the main operation was successful
+      }
+    } else {
+      console.log(`⚠️ Skipping conversation activation - no successful message delivery`);
     }
 
     const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
