@@ -7,6 +7,7 @@ import { apiService } from '../services/apiService';
 
 export interface EmailData {
     summary: string;
+  original_text?: string; // Texto original del email si está disponible
   original_subject?: string;
       contact_info: {
         name: string | null;
@@ -100,7 +101,7 @@ export async function sendCustomerSupportMessageActivity(
   if (emailData.contact_info && typeof emailData.contact_info === 'object') {
     // EmailData format
     console.log('📧 Processing EmailData format');
-    message = emailData.summary || 'Customer support interaction from analysis';
+    message = emailData.original_text || emailData.summary || 'Customer support interaction from analysis';
     site_id = emailData.site_id;
     user_id = emailData.user_id;
     conversation_id = emailData.conversation_id;

@@ -134,6 +134,7 @@ async function emailCustomerSupportMessageWorkflow(emailData, baseParams) {
                 console.log(`🎯 Lead source: ${response.data?.lead_id ? 'customer support response' : 'input data'}`);
                 // Extract message content from customer support response
                 const userMessage = response.data?.messages?.user?.content ||
+                    emailData.original_text ||
                     emailData.summary ||
                     'Customer inquiry';
                 const systemMessage = response.data?.messages?.assistant?.content ||

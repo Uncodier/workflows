@@ -167,6 +167,7 @@ export async function emailCustomerSupportMessageWorkflow(
         
         // Extract message content from customer support response
         const userMessage = response.data?.messages?.user?.content || 
+                           emailData.original_text || 
                            emailData.summary || 
                            'Customer inquiry';
         

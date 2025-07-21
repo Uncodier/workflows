@@ -24,7 +24,7 @@ baseParams) {
     if (emailData.contact_info && typeof emailData.contact_info === 'object') {
         // EmailData format
         console.log('📧 Processing EmailData format');
-        message = emailData.summary || 'Customer support interaction from analysis';
+        message = emailData.original_text || emailData.summary || 'Customer support interaction from analysis';
         site_id = emailData.site_id;
         user_id = emailData.user_id;
         conversation_id = emailData.conversation_id;

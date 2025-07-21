@@ -118,22 +118,56 @@ export async function validateCommunicationChannelsActivity(
     }
 
     const siteSettings = settings[0];
-    const channels = siteSettings.channels || [];
+    const channels = siteSettings.channels || {};
     
-    console.log(`🔍 Found ${channels.length} channel configurations`);
+    console.log(`🔍 Checking channel configurations for channels:`, channels);
     
-    // Check for email configuration
-    const emailConfig = channels.find((channel: any) => 
-      channel.type === 'email' && channel.enabled === true
-    );
+    let hasEmailChannel = false;
+    let hasWhatsappChannel = false;
+    let emailConfig = null;
+    let whatsappConfig = null;
     
-    // Check for WhatsApp configuration
-    const whatsappConfig = channels.find((channel: any) => 
-      channel.type === 'whatsapp' && channel.enabled === true
-    );
-    
-    const hasEmailChannel = !!emailConfig;
-    const hasWhatsappChannel = !!whatsappConfig;
+    // Handle different channel structure formats
+    if (Array.isArray(channels)) {
+      // Array format: channels is an array of channel objects
+      console.log(`📋 Processing channels as array with ${channels.length} configurations`);
+      
+      emailConfig = channels.find((channel: any) => 
+        channel.type === 'email' && channel.enabled === true
+      );
+      
+      whatsappConfig = channels.find((channel: any) => 
+        channel.type === 'whatsapp' && channel.enabled === true
+      );
+      
+      hasEmailChannel = !!emailConfig;
+      hasWhatsappChannel = !!whatsappConfig;
+      
+    } else if (typeof channels === 'object' && channels !== null) {
+      // Object format: channels.email.enabled, channels.whatsapp.enabled
+      console.log(`📋 Processing channels as object structure`);
+      
+      // Check email configuration
+      if (channels.email && typeof channels.email === 'object') {
+        hasEmailChannel = channels.email.enabled === true;
+        if (hasEmailChannel) {
+          emailConfig = channels.email;
+        }
+        console.log(`   - Email enabled: ${hasEmailChannel}`, channels.email);
+      }
+      
+      // Check WhatsApp configuration  
+      if (channels.whatsapp && typeof channels.whatsapp === 'object') {
+        hasWhatsappChannel = channels.whatsapp.enabled === true;
+        if (hasWhatsappChannel) {
+          whatsappConfig = channels.whatsapp;
+        }
+        console.log(`   - WhatsApp enabled: ${hasWhatsappChannel}`, channels.whatsapp);
+      }
+      
+    } else {
+      console.log(`⚠️  Channels configuration is neither array nor object:`, typeof channels);
+    }
     const hasAnyChannel = hasEmailChannel || hasWhatsappChannel;
     
     console.log(`📊 Channel validation results:`);
