@@ -31,7 +31,7 @@ const timeouts_1 = require("../config/timeouts");
 //   }
 // }
 // Configure activity options using centralized timeouts
-const { sendCustomerSupportMessageActivity, processAnalysisDataActivity, startLeadAttentionWorkflowActivity } = (0, workflow_1.proxyActivities)({
+const { sendCustomerSupportMessageActivity, processAnalysisDataActivity, startLeadAttentionWorkflowActivity, updateTaskStatusToCompletedActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: timeouts_1.ACTIVITY_TIMEOUTS.CUSTOMER_SUPPORT, // ✅ Using centralized config (5 minutes)
     retry: timeouts_1.RETRY_POLICIES.CUSTOMER_SUPPORT, // ✅ Using appropriate retry policy for customer support
 });
@@ -122,6 +122,45 @@ async function emailCustomerSupportMessageWorkflow(emailData, baseParams) {
         catch (emailError) {
             console.error('❌ Email workflow failed, but customer support was successful:', emailError);
             // Don't fail the entire workflow if email fails
+        }
+        // Mark first_contact task as completed after successful email delivery
+        if (emailSent) {
+            console.log(`📝 Marking first_contact task as completed after successful email delivery...`);
+            try {
+                // Use lead_id from customer support response or fallback to analysis_id
+                const leadId = response.data?.lead_id || emailData.analysis_id;
+                if (leadId) {
+                    const taskUpdateResult = await updateTaskStatusToCompletedActivity({
+                        lead_id: leadId,
+                        site_id: emailData.site_id,
+                        stage: 'awareness', // First contact tasks are typically in awareness stage
+                        status: 'completed',
+                        notes: `Task completed after successful email delivery via emailCustomerSupportMessageWorkflow`
+                    });
+                    if (taskUpdateResult.success) {
+                        if (taskUpdateResult.updated_task_id) {
+                            console.log(`✅ First_contact task ${taskUpdateResult.updated_task_id} marked as completed`);
+                        }
+                        else {
+                            console.log(`✅ First_contact task completion update completed (${taskUpdateResult.task_found ? 'no task to update' : 'no task found'})`);
+                        }
+                    }
+                    else {
+                        console.error(`⚠️ Failed to mark first_contact task as completed: ${taskUpdateResult.error}`);
+                        // Note: We don't throw here as the main operation was successful
+                    }
+                }
+                else {
+                    console.log(`⚠️ No lead_id available for task completion update`);
+                }
+            }
+            catch (taskError) {
+                console.error('❌ Task completion update failed:', taskError);
+                // Don't fail the entire workflow if task update fails
+            }
+        }
+        else {
+            console.log(`⚠️ Skipping first_contact task completion - no successful email delivery`);
         }
         // 🔔 Start independent leadAttentionWorkflow if we have a lead_id
         let leadAttentionWorkflowId;
@@ -363,6 +402,45 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
             catch (whatsappError) {
                 console.error('❌ WhatsApp workflow failed, but customer support was successful:', whatsappError);
                 // Don't fail the entire workflow if WhatsApp fails
+            }
+            // Mark first_contact task as completed after successful WhatsApp delivery
+            if (whatsappSent) {
+                console.log(`📝 Marking first_contact task as completed after successful WhatsApp delivery...`);
+                try {
+                    // Use lead_id from customer support response or fallback to analysis_id
+                    const leadId = response.data?.lead_id || emailDataForCS.analysis_id;
+                    if (leadId) {
+                        const taskUpdateResult = await updateTaskStatusToCompletedActivity({
+                            lead_id: leadId,
+                            site_id: emailDataForCS.site_id,
+                            stage: 'awareness', // First contact tasks are typically in awareness stage
+                            status: 'completed',
+                            notes: `Task completed after successful WhatsApp delivery via customerSupportMessageWorkflow`
+                        });
+                        if (taskUpdateResult.success) {
+                            if (taskUpdateResult.updated_task_id) {
+                                console.log(`✅ First_contact task ${taskUpdateResult.updated_task_id} marked as completed`);
+                            }
+                            else {
+                                console.log(`✅ First_contact task completion update completed (${taskUpdateResult.task_found ? 'no task to update' : 'no task found'})`);
+                            }
+                        }
+                        else {
+                            console.error(`⚠️ Failed to mark first_contact task as completed: ${taskUpdateResult.error}`);
+                            // Note: We don't throw here as the main operation was successful
+                        }
+                    }
+                    else {
+                        console.log(`⚠️ No lead_id available for task completion update`);
+                    }
+                }
+                catch (taskError) {
+                    console.error('❌ Task completion update failed:', taskError);
+                    // Don't fail the entire workflow if task update fails
+                }
+            }
+            else {
+                console.log(`⚠️ Skipping first_contact task completion - no successful WhatsApp delivery`);
             }
             // 🔔 Start independent leadAttentionWorkflow if we have a lead_id
             let leadAttentionWorkflowId;

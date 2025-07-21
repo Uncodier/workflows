@@ -2,13 +2,47 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.leadFollowUpWorkflow = leadFollowUpWorkflow;
 const workflow_1 = require("@temporalio/workflow");
+const leadResearchWorkflow_1 = require("./leadResearchWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, sendEmailFromAgentActivity, sendWhatsAppFromAgentActivity, updateConversationStatusAfterFollowUpActivity, validateMessageAndConversationActivity, updateMessageStatusToSentActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, sendEmailFromAgentActivity, sendWhatsAppFromAgentActivity, updateConversationStatusAfterFollowUpActivity, validateMessageAndConversationActivity, updateMessageStatusToSentActivity, updateTaskStatusToCompletedActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
     retry: {
         maximumAttempts: 3,
     },
 });
+/**
+ * Verifica si un lead necesita investigación antes del follow-up
+ * Un lead necesita investigación si:
+ * 1. Es de origen 'lead_generation_workflow'
+ * 2. No tiene notas o las notas están vacías
+ * 3. No tiene metadata o la metadata está vacía
+ */
+function shouldExecuteLeadResearch(leadInfo) {
+    // Verificar si es de origen lead_generation_workflow
+    if (leadInfo.origin !== 'lead_generation_workflow') {
+        console.log(`📋 Lead origin is '${leadInfo.origin}', not 'lead_generation_workflow' - skipping research`);
+        return false;
+    }
+    // Verificar si tiene notas
+    const hasNotes = leadInfo.notes && typeof leadInfo.notes === 'string' && leadInfo.notes.trim() !== '';
+    // Verificar si tiene metadata
+    const hasMetadata = leadInfo.metadata &&
+        typeof leadInfo.metadata === 'object' &&
+        Object.keys(leadInfo.metadata).length > 0;
+    console.log(`📋 Lead research check for lead ${leadInfo.id}:`);
+    console.log(`   - Origin: ${leadInfo.origin}`);
+    console.log(`   - Has notes: ${hasNotes} (${leadInfo.notes ? `"${leadInfo.notes.substring(0, 50)}..."` : 'null/empty'})`);
+    console.log(`   - Has metadata: ${hasMetadata} (${hasMetadata ? Object.keys(leadInfo.metadata).length : 0} keys)`);
+    // Si no tiene notas NI metadata, necesita investigación
+    const needsResearch = !hasNotes && !hasMetadata;
+    if (needsResearch) {
+        console.log(`✅ Lead ${leadInfo.id} needs research - missing both notes and metadata`);
+    }
+    else {
+        console.log(`❌ Lead ${leadInfo.id} does not need research - has ${hasNotes ? 'notes' : ''}${hasNotes && hasMetadata ? ' and ' : ''}${hasMetadata ? 'metadata' : ''}`);
+    }
+    return needsResearch;
+}
 /**
  * Workflow to execute lead follow-up
  *
@@ -70,7 +104,68 @@ async function leadFollowUpWorkflow(options) {
         siteName = site.name;
         siteUrl = site.url;
         console.log(`✅ Retrieved site information: ${siteName} (${siteUrl})`);
-        console.log(`📞 Step 2: Executing lead follow-up for lead ${lead_id}...`);
+        console.log(`👤 Step 2: Getting lead information and checking if research is needed...`);
+        // Get lead information from database to check origin, notes, and metadata
+        const leadResult = await getLeadActivity(lead_id);
+        if (!leadResult.success) {
+            const errorMsg = `Failed to get lead information: ${leadResult.error}`;
+            console.error(`❌ ${errorMsg}`);
+            errors.push(errorMsg);
+            throw new Error(errorMsg);
+        }
+        const leadInfo = leadResult.lead;
+        console.log(`✅ Retrieved lead information: ${leadInfo.name || leadInfo.email}`);
+        console.log(`📋 Lead details:`);
+        console.log(`   - Name: ${leadInfo.name || 'N/A'}`);
+        console.log(`   - Email: ${leadInfo.email || 'N/A'}`);
+        console.log(`   - Origin: ${leadInfo.origin || 'N/A'}`);
+        console.log(`   - Has notes: ${leadInfo.notes ? 'Yes' : 'No'}`);
+        console.log(`   - Has metadata: ${leadInfo.metadata && Object.keys(leadInfo.metadata).length > 0 ? 'Yes' : 'No'}`);
+        // Check if lead needs research before follow-up
+        if (shouldExecuteLeadResearch(leadInfo)) {
+            console.log(`🔍 Step 2.1: Executing lead research before follow-up...`);
+            try {
+                const leadResearchOptions = {
+                    lead_id: lead_id,
+                    site_id: site_id,
+                    userId: options.userId || site.user_id,
+                    additionalData: {
+                        ...options.additionalData,
+                        executedBeforeFollowUp: true,
+                        followUpWorkflowId: workflowId,
+                        researchReason: 'missing_notes_and_metadata',
+                        originalLeadInfo: leadInfo
+                    }
+                };
+                console.log(`🚀 Starting lead research workflow as child process...`);
+                const leadResearchHandle = await (0, workflow_1.startChild)(leadResearchWorkflow_1.leadResearchWorkflow, {
+                    args: [leadResearchOptions],
+                    workflowId: `lead-research-followup-${lead_id}-${site_id}-${Date.now()}`,
+                });
+                const leadResearchResult = await leadResearchHandle.result();
+                if (leadResearchResult.success) {
+                    console.log(`✅ Lead research completed successfully before follow-up`);
+                    console.log(`📊 Research results:`);
+                    console.log(`   - Lead information enriched: Yes`);
+                    console.log(`   - Deep research executed: ${leadResearchResult.deepResearchResult ? 'Yes' : 'No'}`);
+                    console.log(`   - Lead segmentation executed: ${leadResearchResult.leadSegmentationResult ? 'Yes' : 'No'}`);
+                    console.log(`   - Execution time: ${leadResearchResult.executionTime}`);
+                }
+                else {
+                    console.error(`⚠️ Lead research failed, but continuing with follow-up: ${leadResearchResult.errors.join(', ')}`);
+                    errors.push(`Lead research failed: ${leadResearchResult.errors.join(', ')}`);
+                }
+            }
+            catch (researchError) {
+                const errorMessage = researchError instanceof Error ? researchError.message : String(researchError);
+                console.error(`⚠️ Exception during lead research, but continuing with follow-up: ${errorMessage}`);
+                errors.push(`Lead research exception: ${errorMessage}`);
+            }
+        }
+        else {
+            console.log(`⏭️ Skipping lead research - lead does not meet criteria`);
+        }
+        console.log(`📞 Step 3: Executing lead follow-up for lead ${lead_id}...`);
         // Prepare lead follow-up request
         const followUpRequest = {
             lead_id: lead_id,
@@ -117,7 +212,7 @@ async function leadFollowUpWorkflow(options) {
             console.log(`📝 Available data: lead=${!!lead}, messages=${!!messages}, emailMsg=${!!emailMessage}, whatsappMsg=${!!whatsappMessage}`);
             // Save logs without message sending
             if (response) {
-                console.log(`📝 Step 3: Saving lead follow-up logs to database...`);
+                console.log(`📝 Step 4: Saving lead follow-up logs to database...`);
                 const saveLogsResult = await saveLeadFollowUpLogsActivity({
                     siteId: site_id,
                     leadId: lead_id,
@@ -173,9 +268,9 @@ async function leadFollowUpWorkflow(options) {
         }
         console.log(`✅ Follow-up messages found - proceeding with message sending workflow`);
         console.log(`📧 Email message: ${!!emailMessage}, 📱 WhatsApp message: ${!!whatsappMessage}`);
-        // Step 3: Save lead follow-up logs to database
+        // Step 4: Save lead follow-up logs to database
         if (response) {
-            console.log(`📝 Step 3: Saving lead follow-up logs to database...`);
+            console.log(`📝 Step 4: Saving lead follow-up logs to database...`);
             const saveLogsResult = await saveLeadFollowUpLogsActivity({
                 siteId: site_id,
                 leadId: lead_id,
@@ -192,8 +287,8 @@ async function leadFollowUpWorkflow(options) {
                 console.log(`✅ Lead follow-up logs saved successfully`);
             }
         }
-        // Step 3.5: Validate message and conversation existence before proceeding
-        console.log(`🔍 Step 3.5: Validating message and conversation existence...`);
+        // Step 4.5: Validate message and conversation existence before proceeding
+        console.log(`🔍 Step 4.5: Validating message and conversation existence...`);
         validationResult = await validateMessageAndConversationActivity({
             lead_id: lead_id,
             site_id: site_id,
@@ -216,12 +311,12 @@ async function leadFollowUpWorkflow(options) {
                 console.log(`📝 Message ${validationResult.message_id} validated`);
             }
         }
-        // Step 4: Wait 2 hours before sending follow-up message
+        // Step 5: Wait 2 hours before sending follow-up message
         if (response && response.messages && response.lead) {
-            console.log(`⏰ Step 4: Waiting 2 hours before sending follow-up message...`);
+            console.log(`⏰ Step 5: Waiting 2 hours before sending follow-up message...`);
             // Wait 2 hours before sending the message
             await (0, workflow_1.sleep)('2 hours');
-            console.log(`📤 Step 4.1: Now sending follow-up message based on communication channel...`);
+            console.log(`📤 Step 5.1: Now sending follow-up message based on communication channel...`);
             try {
                 const responseData = response; // response is already the response data
                 const messages = responseData.messages || {};
@@ -313,6 +408,34 @@ async function leadFollowUpWorkflow(options) {
                         errors.push('Messages available but delivery failed');
                     }
                 }
+                // Step 5.2: Mark first_contact task as completed after successful message delivery
+                if (emailSent || whatsappSent) {
+                    console.log(`📝 Step 5.2: Marking first_contact task as completed after successful message delivery...`);
+                    const taskUpdateResult = await updateTaskStatusToCompletedActivity({
+                        lead_id: lead_id,
+                        site_id: site_id,
+                        stage: 'awareness', // First contact tasks are typically in awareness stage
+                        status: 'completed',
+                        notes: `Task completed after successful ${emailSent ? 'email' : 'WhatsApp'} message delivery via leadFollowUpWorkflow`
+                    });
+                    if (taskUpdateResult.success) {
+                        if (taskUpdateResult.updated_task_id) {
+                            console.log(`✅ First_contact task ${taskUpdateResult.updated_task_id} marked as completed`);
+                        }
+                        else {
+                            console.log(`✅ First_contact task completion update completed (${taskUpdateResult.task_found ? 'no task to update' : 'no task found'})`);
+                        }
+                    }
+                    else {
+                        const errorMsg = `Failed to mark first_contact task as completed: ${taskUpdateResult.error}`;
+                        console.error(`⚠️ ${errorMsg}`);
+                        errors.push(errorMsg);
+                        // Note: We don't throw here as the main operation was successful
+                    }
+                }
+                else {
+                    console.log(`⚠️ Skipping first_contact task completion - no successful message delivery`);
+                }
             }
             catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
@@ -321,9 +444,9 @@ async function leadFollowUpWorkflow(options) {
                 // Note: We don't throw here as the main operation was successful
             }
         }
-        // Step 4.5: Update message status to 'sent' after successful delivery
+        // Step 5.5: Update message status to 'sent' after successful delivery
         if (messageSent && messageSent.success) {
-            console.log(`📝 Step 4.5: Updating message status to 'sent'...`);
+            console.log(`📝 Step 5.5: Updating message status to 'sent'...`);
             const messageUpdateResult = await updateMessageStatusToSentActivity({
                 message_id: validationResult?.message_id,
                 conversation_id: validationResult?.conversation_id,
@@ -355,9 +478,9 @@ async function leadFollowUpWorkflow(options) {
         else {
             console.log(`⚠️ Skipping message status update - no successful delivery`);
         }
-        // Step 5: Activate conversation after successful follow-up
+        // Step 6: Activate conversation after successful follow-up
         if (messageSent && messageSent.success) {
-            console.log(`💬 Step 5: Activating conversation after successful lead follow-up...`);
+            console.log(`💬 Step 6: Activating conversation after successful lead follow-up...`);
             console.log(`🔍 Searching for conversation associated with lead ${lead_id}...`);
             const conversationUpdateResult = await updateConversationStatusAfterFollowUpActivity({
                 lead_id: lead_id,

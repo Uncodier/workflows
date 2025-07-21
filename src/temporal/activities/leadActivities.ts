@@ -1266,3 +1266,157 @@ export async function updateMessageStatusToSentActivity(request: {
     };
   }
 } 
+
+export interface UpdateTaskStatusRequest {
+  task_id?: string;
+  lead_id: string;
+  site_id: string;
+  stage?: 'awareness' | 'consideration' | 'decision' | 'purchase' | 'retention' | 'referral';
+  status: 'completed' | 'in_progress' | 'pending' | 'failed';
+  completed_date?: string;
+  notes?: string;
+}
+
+export interface UpdateTaskStatusResult {
+  success: boolean;
+  error?: string;
+  updated_task_id?: string;
+  task_found?: boolean;
+}
+
+/**
+ * Activity to update task status (typically to mark first_contact tasks as completed)
+ * Can find task by task_id or by lead_id + site_id + stage combination
+ */
+export async function updateTaskStatusToCompletedActivity(request: UpdateTaskStatusRequest): Promise<UpdateTaskStatusResult> {
+  console.log(`📝 Updating task status for lead: ${request.lead_id}`);
+  console.log(`📋 Task ID: ${request.task_id || 'will search by lead_id'}, Status: ${request.status}, Stage: ${request.stage || 'any'}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot update task status');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, updating task status...');
+    
+    // Import supabase service role client (bypasses RLS)
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    let taskId = request.task_id;
+    
+    // If no task_id provided, try to find the task by lead_id + site_id + stage
+    if (!taskId) {
+      console.log(`🔍 No task ID provided, searching for task by lead_id and stage...`);
+      
+      let query = supabaseServiceRole
+        .from('tasks')
+        .select('id, status, stage, title')
+        .eq('lead_id', request.lead_id)
+        .eq('site_id', request.site_id);
+
+      // Add stage filter if provided (typically 'awareness' for first_contact)
+      if (request.stage) {
+        query = query.eq('stage', request.stage);
+      }
+
+      // Order by created_at to get the most recent task
+      query = query.order('created_at', { ascending: false }).limit(1);
+
+      const { data: taskData, error: findError } = await query.single();
+
+      if (findError && findError.code !== 'PGRST116') {
+        console.error(`❌ Error finding task:`, findError);
+        return {
+          success: false,
+          error: `Failed to find task: ${findError.message}`
+        };
+      }
+
+      if (taskData) {
+        taskId = taskData.id;
+        console.log(`✅ Found task: ${taskId} (${taskData.stage}) - ${taskData.title}`);
+        console.log(`   Current status: ${taskData.status}`);
+      }
+    }
+
+    if (!taskId) {
+      console.log(`⚠️ No task found to update for lead ${request.lead_id} with stage ${request.stage || 'any'}`);
+      return {
+        success: true, // Don't fail the workflow for missing task
+        error: 'No task found to update',
+        task_found: false
+      };
+    }
+
+    console.log(`📝 Updating task ${taskId} status to '${request.status}'...`);
+
+    // Prepare update data
+    const updateData: any = {
+      status: request.status,
+      updated_at: new Date().toISOString()
+    };
+
+    // If marking as completed, set completed_date
+    if (request.status === 'completed') {
+      updateData.completed_date = request.completed_date || new Date().toISOString();
+    }
+
+    // Add notes if provided
+    if (request.notes) {
+      updateData.notes = request.notes;
+    }
+
+    // Update the task
+    const { data, error } = await supabaseServiceRole
+      .from('tasks')
+      .update(updateData)
+      .eq('id', taskId)
+      .eq('site_id', request.site_id) // Additional security filter
+      .select()
+      .single();
+
+    if (error) {
+      console.error(`❌ Error updating task ${taskId}:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+
+    if (!data) {
+      return {
+        success: false,
+        error: `Task ${taskId} not found or update failed`
+      };
+    }
+
+    console.log(`✅ Successfully updated task ${taskId} status to '${request.status}'`);
+    if (request.status === 'completed') {
+      console.log(`🎉 Task marked as completed at: ${updateData.completed_date}`);
+    }
+    
+    return {
+      success: true,
+      updated_task_id: taskId,
+      task_found: true
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception updating task status:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+} 

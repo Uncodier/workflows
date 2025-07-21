@@ -344,20 +344,109 @@ export async function getProspectionLeadsActivity(
     );
     
     // Filter out leads that already have awareness tasks
-    const prospectionLeads = candidateLeads.filter(
+    const leadsWithoutAwarenessTasks = candidateLeads.filter(
       lead => !leadsWithAwarenessTasks.has(lead.id)
     );
+    
+    console.log(`📋 After awareness task filtering: ${leadsWithoutAwarenessTasks.length} leads available`);
+    
+    // 🔒 ASSIGNEE_ID VALIDATION: Filter leads by assignee_id and company rules
+    console.log(`🔒 Applying assignee_id validation rules...`);
+    
+    // Step 1: Group leads by company
+    const leadsGroupedByCompany = new Map<string, any[]>();
+    const leadsWithoutCompany: any[] = [];
+    
+    leadsWithoutAwarenessTasks.forEach(lead => {
+      const companyId = lead.company_id;
+      const companyName = lead.company?.name;
+      
+      // Use company_id as primary key, fallback to company.name, then to 'no-company' group
+      let companyKey = 'no-company';
+      if (companyId) {
+        companyKey = `id:${companyId}`;
+      } else if (companyName) {
+        companyKey = `name:${companyName.toLowerCase().trim()}`;
+      }
+      
+      if (companyKey === 'no-company') {
+        leadsWithoutCompany.push(lead);
+      } else {
+        if (!leadsGroupedByCompany.has(companyKey)) {
+          leadsGroupedByCompany.set(companyKey, []);
+        }
+        leadsGroupedByCompany.get(companyKey)!.push(lead);
+      }
+    });
+    
+    console.log(`📊 Company grouping results:`);
+    console.log(`   - Companies with leads: ${leadsGroupedByCompany.size}`);
+    console.log(`   - Leads without company: ${leadsWithoutCompany.length}`);
+    
+    // Step 2: Filter companies - exclude companies where ANY lead has assignee_id
+    const validCompanyLeads: any[] = [];
+    const excludedCompanies: string[] = [];
+    const excludedCompanyLeadsCount = { total: 0, withAssignee: 0 };
+    
+    for (const [companyKey, companyLeads] of leadsGroupedByCompany) {
+      const leadsWithAssignee = companyLeads.filter(lead => lead.assignee_id);
+      
+      if (leadsWithAssignee.length > 0) {
+        // Exclude entire company if ANY lead has assignee_id
+        excludedCompanies.push(companyKey);
+        excludedCompanyLeadsCount.total += companyLeads.length;
+        excludedCompanyLeadsCount.withAssignee += leadsWithAssignee.length;
+        
+        const companyName = companyKey.startsWith('id:') ? 
+          companyLeads[0]?.company?.name || 'Unknown' : 
+          companyKey.replace('name:', '');
+        
+        console.log(`❌ Excluding company "${companyName}" (${companyLeads.length} leads) - ${leadsWithAssignee.length} lead(s) have assignee_id`);
+      } else {
+        // Include all leads from this company (none have assignee_id)
+        validCompanyLeads.push(...companyLeads);
+        
+        const companyName = companyKey.startsWith('id:') ? 
+          companyLeads[0]?.company?.name || 'Unknown' : 
+          companyKey.replace('name:', '');
+        
+        console.log(`✅ Including company "${companyName}" (${companyLeads.length} leads) - no assignee_id found`);
+      }
+    }
+    
+    // Step 3: Filter individual leads without company - exclude those with assignee_id
+    const validIndividualLeads = leadsWithoutCompany.filter(lead => !lead.assignee_id);
+    const excludedIndividualLeads = leadsWithoutCompany.filter(lead => lead.assignee_id);
+    
+    if (excludedIndividualLeads.length > 0) {
+      console.log(`❌ Excluding ${excludedIndividualLeads.length} individual leads with assignee_id`);
+    }
+    
+    if (validIndividualLeads.length > 0) {
+      console.log(`✅ Including ${validIndividualLeads.length} individual leads without assignee_id`);
+    }
+    
+    // Step 4: Combine all valid leads
+    const prospectionLeads = [...validCompanyLeads, ...validIndividualLeads];
+    
+    console.log(`🔒 Assignee_id validation completed:`);
+    console.log(`   - Original leads (after awareness filter): ${leadsWithoutAwarenessTasks.length}`);
+    console.log(`   - Companies excluded: ${excludedCompanies.length} (${excludedCompanyLeadsCount.total} leads)`);
+    console.log(`   - Individual leads excluded: ${excludedIndividualLeads.length}`);
+    console.log(`   - Final leads for prospection: ${prospectionLeads.length}`);
     
     console.log(`✅ Successfully identified ${prospectionLeads.length} leads for prospection`);
     console.log(`   - Total candidates: ${candidateLeads.length}`);
     console.log(`   - With awareness tasks: ${leadsWithAwarenessTasks.size}`);
+    console.log(`   - Excluded by assignee_id rules: ${leadsWithoutAwarenessTasks.length - prospectionLeads.length}`);
     console.log(`   - Available for prospection: ${prospectionLeads.length}`);
     
     if (prospectionLeads.length > 0) {
       console.log(`📋 Prospection leads summary:`);
       prospectionLeads.forEach((lead, index) => {
         const daysOld = Math.floor((new Date().getTime() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24));
-        console.log(`   ${index + 1}. ${lead.name || lead.email} (${daysOld} days old)`);
+        const companyInfo = lead.company?.name ? ` (${lead.company.name})` : '';
+        console.log(`   ${index + 1}. ${lead.name || lead.email}${companyInfo} (${daysOld} days old)`);
       });
     }
     
