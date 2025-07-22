@@ -37,7 +37,8 @@
     "test-lead-invalidation": "npx tsx src/scripts/test-lead-invalidation-workflow.ts",
     "monitor-workflows": "npx tsx src/scripts/monitor-workflow-versions.ts",
     "render:start": "node api/worker.js",
-    "render:init": "npx tsx src/scripts/initialize-render.ts"
+    "render:init": "npx tsx src/scripts/initialize-render.ts",
+    "render:startup:compiled": "node dist/scripts/render-startup.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",
