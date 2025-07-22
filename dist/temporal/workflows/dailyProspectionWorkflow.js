@@ -17,6 +17,90 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, s
     },
 });
 /**
+ * Filter leads based on available communication channels
+ * Only includes leads that have contact info compatible with enabled channels
+ */
+function filterLeadsByAvailableChannels(leads, channelsValidation) {
+    const { hasEmailChannel, hasWhatsappChannel } = channelsValidation;
+    const warnings = [];
+    if (!hasEmailChannel && !hasWhatsappChannel) {
+        return {
+            filteredLeads: [],
+            filteringInfo: {
+                hasEmailChannel: false,
+                hasWhatsappChannel: false,
+                leadsWithEmail: 0,
+                leadsWithPhone: 0,
+                leadsWithBoth: 0,
+                leadsWithNeither: 0,
+                leadsFilteredOut: leads.length
+            },
+            warnings: ['No communication channels available - all leads filtered out']
+        };
+    }
+    let leadsWithEmail = 0;
+    let leadsWithPhone = 0;
+    let leadsWithBoth = 0;
+    let leadsWithNeither = 0;
+    let leadsFilteredOut = 0;
+    const filteredLeads = leads.filter((lead) => {
+        const hasEmail = lead.email && typeof lead.email === 'string' && lead.email.trim() !== '';
+        const hasPhone = lead.phone && typeof lead.phone === 'string' && lead.phone.trim() !== '';
+        // Count contact info types
+        if (hasEmail && hasPhone) {
+            leadsWithBoth++;
+        }
+        else if (hasEmail) {
+            leadsWithEmail++;
+        }
+        else if (hasPhone) {
+            leadsWithPhone++;
+        }
+        else {
+            leadsWithNeither++;
+        }
+        // Filter logic: lead must have at least one channel that matches site's enabled channels
+        const canContactViaEmail = hasEmail && hasEmailChannel;
+        const canContactViaWhatsapp = hasPhone && hasWhatsappChannel;
+        const shouldInclude = canContactViaEmail || canContactViaWhatsapp;
+        if (!shouldInclude) {
+            leadsFilteredOut++;
+            const contactInfo = [];
+            if (hasEmail)
+                contactInfo.push('email');
+            if (hasPhone)
+                contactInfo.push('phone');
+            if (contactInfo.length === 0)
+                contactInfo.push('no contact info');
+            console.log(`🚫 Filtering out lead ${lead.name || lead.email || lead.id}: has ${contactInfo.join(' & ')} but site only supports ${hasEmailChannel ? 'email' : ''}${hasEmailChannel && hasWhatsappChannel ? ' & ' : ''}${hasWhatsappChannel ? 'WhatsApp' : ''}`);
+        }
+        return shouldInclude;
+    });
+    const filteringInfo = {
+        hasEmailChannel,
+        hasWhatsappChannel,
+        leadsWithEmail,
+        leadsWithPhone,
+        leadsWithBoth,
+        leadsWithNeither,
+        leadsFilteredOut
+    };
+    // Add warnings for common filtering scenarios
+    if (leadsFilteredOut > 0) {
+        warnings.push(`${leadsFilteredOut} lead(s) filtered out due to incompatible contact channels`);
+    }
+    if (leadsWithNeither > 0) {
+        warnings.push(`${leadsWithNeither} lead(s) had no contact information (email or phone)`);
+    }
+    if (!hasEmailChannel && leadsWithEmail > 0) {
+        warnings.push(`${leadsWithEmail} lead(s) had email but email channel is not enabled`);
+    }
+    if (!hasWhatsappChannel && leadsWithPhone > 0) {
+        warnings.push(`${leadsWithPhone} lead(s) had phone but WhatsApp channel is not enabled`);
+    }
+    return { filteredLeads, filteringInfo, warnings };
+}
+/**
  * Daily Prospection Workflow
  *
  * Este workflow ejecuta la prospección diaria:
@@ -66,6 +150,18 @@ async function dailyProspectionWorkflow(options) {
     let leadsPriority = null;
     let assignedLeads = [];
     let notificationResults = [];
+    // Channel filtering variables
+    let leadsFiltered = 0;
+    let leads = [];
+    let filteringInfo = {
+        hasEmailChannel: false,
+        hasWhatsappChannel: false,
+        leadsWithEmail: 0,
+        leadsWithPhone: 0,
+        leadsWithBoth: 0,
+        leadsWithNeither: 0,
+        leadsFilteredOut: 0
+    };
     try {
         console.log(`📡 Step 0: Validating communication channels for ${site_id}...`);
         // Validate that the site has email or WhatsApp channels configured
@@ -161,12 +257,33 @@ async function dailyProspectionWorkflow(options) {
             errors.push(errorMsg);
             throw new Error(errorMsg);
         }
-        const leads = prospectionLeadsResult.leads || [];
-        leadsFound = leads.length;
+        const rawLeads = prospectionLeadsResult.leads || [];
+        leadsFound = rawLeads.length;
         prospectionCriteria = prospectionLeadsResult.criteria;
-        console.log(`✅ Found ${leadsFound} leads for prospection`);
+        console.log(`✅ Found ${leadsFound} raw leads for prospection`);
+        // Step 2.1: Filter leads by available communication channels
+        console.log(`🔍 Step 2.1: Filtering leads by available communication channels...`);
+        const { filteredLeads, filteringInfo: channelFilteringInfo, warnings } = filterLeadsByAvailableChannels(rawLeads, channelsValidation);
+        // Update variables that are declared at workflow scope
+        filteringInfo = channelFilteringInfo;
+        leads = filteredLeads;
+        leadsFiltered = filteredLeads.length;
+        const leadsFilteredOut = leadsFound - leadsFiltered;
+        console.log(`📊 Channel filtering results:`);
+        console.log(`   - Original leads found: ${leadsFound}`);
+        console.log(`   - Leads after filtering: ${leadsFiltered}`);
+        console.log(`   - Leads filtered out: ${leadsFilteredOut}`);
+        console.log(`   - Leads with email only: ${filteringInfo.leadsWithEmail}`);
+        console.log(`   - Leads with phone only: ${filteringInfo.leadsWithPhone}`);
+        console.log(`   - Leads with both: ${filteringInfo.leadsWithBoth}`);
+        console.log(`   - Leads with neither: ${filteringInfo.leadsWithNeither}`);
+        // Add filtering warnings to errors array
+        warnings.forEach(warning => {
+            console.log(`⚠️ Channel filtering warning: ${warning}`);
+            errors.push(warning);
+        });
         // Step 2.5: Send leads to sales agent for selection and prioritization
-        if (leadsFound > 0) {
+        if (leadsFiltered > 0) {
             console.log(`🎯 Step 2.5: Sending leads to sales agent for selection and prioritization...`);
             const salesAgentResult = await sendLeadsToSalesAgentActivity({
                 site_id: site_id,
@@ -219,15 +336,16 @@ async function dailyProspectionWorkflow(options) {
                 console.log(`⚠️ Continuing with all ${leads.length} leads due to sales agent failure`);
             }
         }
-        if (leadsFound === 0) {
-            console.log(`ℹ️ No leads found for prospection - workflow completed successfully`);
+        if (leadsFiltered === 0) {
+            const reason = leadsFound === 0 ? 'No leads found for prospection' : 'All leads filtered out due to incompatible communication channels';
+            console.log(`ℹ️ ${reason} - workflow completed successfully`);
             const result = {
                 success: true,
                 siteId: site_id,
                 siteName,
                 siteUrl,
                 prospectionCriteria,
-                leadsFound: 0,
+                leadsFound,
                 leadsProcessed: 0,
                 tasksCreated: 0,
                 statusUpdated: 0,
@@ -237,6 +355,9 @@ async function dailyProspectionWorkflow(options) {
                 leadsPriority,
                 assignedLeads,
                 notificationResults,
+                leadsFiltered,
+                filteredLeads: leads,
+                channelFilteringInfo: filteringInfo,
                 errors,
                 executionTime: `${((Date.now() - startTime) / 1000).toFixed(2)}s`,
                 completedAt: new Date().toISOString()
@@ -369,6 +490,9 @@ async function dailyProspectionWorkflow(options) {
             leadsPriority,
             assignedLeads,
             notificationResults,
+            leadsFiltered,
+            filteredLeads: leads,
+            channelFilteringInfo: filteringInfo,
             errors,
             executionTime,
             completedAt: new Date().toISOString()
@@ -453,6 +577,7 @@ async function dailyProspectionWorkflow(options) {
         console.log(`📊 Summary: Daily prospection for site ${siteName} completed in ${executionTime}`);
         console.log(`   - Site: ${siteName} (${siteUrl})`);
         console.log(`   - Leads found: ${leadsFound}`);
+        console.log(`   - Leads after channel filtering: ${leadsFiltered} (${leadsFound - leadsFiltered} filtered out)`);
         console.log(`   - Leads processed: ${leadsProcessed}`);
         console.log(`   - Tasks created: ${tasksCreated}`);
         console.log(`   - Status updated: ${statusUpdated}`);
@@ -529,6 +654,10 @@ async function dailyProspectionWorkflow(options) {
             followUpWorkflowsStarted: 0,
             followUpResults: [],
             unassignedLeads: [],
+            // Add channel filtering fields
+            leadsFiltered,
+            filteredLeads: leads,
+            channelFilteringInfo: filteringInfo,
             errors: [...errors, errorMessage],
             executionTime,
             completedAt: new Date().toISOString()

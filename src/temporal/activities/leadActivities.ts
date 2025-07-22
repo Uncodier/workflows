@@ -1250,6 +1250,30 @@ export async function updateMessageStatusToSentActivity(request: {
 
     console.log(`✅ Successfully updated message ${messageId} status to '${targetStatus}'`);
     console.log(`📊 Message now marked as processed via ${request.delivery_channel}`);
+
+    // Update lead status to 'contacted' when message is successfully sent
+    if (request.delivery_success && targetStatus === 'sent') {
+      console.log(`👤 Updating lead ${request.lead_id} status to 'contacted' after successful message delivery...`);
+      
+      const leadUpdateData = {
+        status: 'contacted',
+        updated_at: new Date().toISOString(),
+        last_contact: new Date().toISOString()
+      };
+
+      const { error: leadError } = await supabaseServiceRole
+        .from('leads')
+        .update(leadUpdateData)
+        .eq('id', request.lead_id)
+        .eq('site_id', request.site_id);
+
+      if (leadError) {
+        console.error(`❌ Warning: Failed to update lead status to 'contacted':`, leadError);
+        // Don't fail the entire operation for lead update failure
+      } else {
+        console.log(`✅ Successfully updated lead ${request.lead_id} status to 'contacted'`);
+      }
+    }
     
     return {
       success: true,
@@ -1403,6 +1427,30 @@ export async function updateTaskStatusToCompletedActivity(request: UpdateTaskSta
     if (request.status === 'completed') {
       console.log(`🎉 Task marked as completed at: ${updateData.completed_date}`);
     }
+
+    // Update lead status to 'contacted' when task is completed
+    if (request.status === 'completed') {
+      console.log(`👤 Updating lead ${request.lead_id} status to 'contacted' after task completion...`);
+      
+      const leadUpdateData = {
+        status: 'contacted',
+        updated_at: new Date().toISOString(),
+        last_contact: new Date().toISOString()
+      };
+
+      const { error: leadError } = await supabaseServiceRole
+        .from('leads')
+        .update(leadUpdateData)
+        .eq('id', request.lead_id)
+        .eq('site_id', request.site_id);
+
+      if (leadError) {
+        console.error(`❌ Warning: Failed to update lead status to 'contacted':`, leadError);
+        // Don't fail the entire operation for lead update failure
+      } else {
+        console.log(`✅ Successfully updated lead ${request.lead_id} status to 'contacted'`);
+      }
+    }
     
     return {
       success: true,
@@ -1413,6 +1461,307 @@ export async function updateTaskStatusToCompletedActivity(request: UpdateTaskSta
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Exception updating task status:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+} 
+
+/**
+ * Activity to invalidate a lead by removing site_id and adding invalidation metadata
+ */
+export async function invalidateLeadActivity(request: {
+  lead_id: string;
+  original_site_id: string;
+  reason: string;
+  failed_contact?: {
+    telephone?: string;
+    email?: string;
+  };
+  userId?: string;
+  shared_with_lead_id?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  console.log(`🚫 Invalidating lead ${request.lead_id} - reason: ${request.reason}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot invalidate lead');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, invalidating lead...');
+    
+    // Import supabase service role client (bypasses RLS)
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    // Prepare invalidation metadata
+    const invalidationMetadata: any = {
+      invalidated: true,
+      invalidated_at: new Date().toISOString(),
+      invalidation_reason: request.reason,
+      original_site_id: request.original_site_id,
+      pending_revalidation: true,
+      failed_contact: request.failed_contact || {},
+      invalidated_by_user_id: request.userId,
+    };
+
+    // If this is a shared contact invalidation, add reference
+    if (request.shared_with_lead_id) {
+      invalidationMetadata.shared_with_lead_id = request.shared_with_lead_id;
+    }
+
+    // Update lead: remove site_id and add invalidation metadata
+    const updateData = {
+      site_id: null, // Remove site_id to "invalidate" the lead
+      metadata: invalidationMetadata,
+      status: 'invalidated',
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabaseServiceRole
+      .from('leads')
+      .update(updateData)
+      .eq('id', request.lead_id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error(`❌ Error invalidating lead ${request.lead_id}:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+
+    if (!data) {
+      return {
+        success: false,
+        error: `Lead ${request.lead_id} not found or update failed`
+      };
+    }
+
+    console.log(`✅ Successfully invalidated lead ${request.lead_id}`);
+    console.log(`📝 Invalidation metadata added to lead`);
+    
+    return {
+      success: true
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception invalidating lead ${request.lead_id}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * Activity to find leads that share the same contact information
+ */
+export async function findLeadsBySharedContactActivity(request: {
+  email?: string;
+  telephone?: string;
+  exclude_lead_id?: string;
+  site_id?: string;
+}): Promise<{ success: boolean; leads?: any[]; error?: string }> {
+  console.log(`🔍 Finding leads with shared contact information...`);
+  console.log(`📧 Email: ${request.email || 'N/A'}`);
+  console.log(`📞 Phone: ${request.telephone || 'N/A'}`);
+  console.log(`🚫 Excluding lead: ${request.exclude_lead_id || 'N/A'}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot search for shared leads');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, searching for shared contact leads...');
+    
+    // Import supabase service role client (bypasses RLS)
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    if (!request.email && !request.telephone) {
+      console.log('⚠️ No contact information provided for search');
+      return {
+        success: true,
+        leads: []
+      };
+    }
+
+    let query = supabaseServiceRole
+      .from('leads')
+      .select('id, name, email, phone, site_id, status, metadata');
+
+    // Build OR condition for shared contact
+    const orConditions: string[] = [];
+    
+    if (request.email) {
+      orConditions.push(`email.eq.${request.email}`);
+    }
+    
+    if (request.telephone) {
+      orConditions.push(`phone.eq.${request.telephone}`);
+    }
+
+    if (orConditions.length > 0) {
+      query = query.or(orConditions.join(','));
+    }
+
+    // Exclude the original lead if specified
+    if (request.exclude_lead_id) {
+      query = query.neq('id', request.exclude_lead_id);
+    }
+
+    // Only search within the same site if specified
+    if (request.site_id) {
+      query = query.eq('site_id', request.site_id);
+    }
+
+    // Only include active leads (not already invalidated)
+    query = query.neq('status', 'invalidated');
+
+    const { data: leads, error } = await query;
+
+    if (error) {
+      console.error(`❌ Error searching for shared contact leads:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+
+    console.log(`✅ Found ${leads?.length || 0} leads with shared contact information`);
+    
+    if (leads && leads.length > 0) {
+      console.log('📋 Shared contact leads:');
+      leads.forEach((lead, index) => {
+        console.log(`   ${index + 1}. ${lead.name || lead.email} (${lead.id}) - Site: ${lead.site_id}`);
+      });
+    }
+    
+    return {
+      success: true,
+      leads: leads || []
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception searching for shared contact leads:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * Activity to update lead invalidation metadata
+ * This can be used for additional metadata updates after invalidation
+ */
+export async function updateLeadInvalidationMetadataActivity(request: {
+  lead_id: string;
+  additional_metadata: any;
+}): Promise<{ success: boolean; error?: string }> {
+  console.log(`📝 Updating invalidation metadata for lead ${request.lead_id}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot update lead metadata');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, updating lead metadata...');
+    
+    // Import supabase service role client (bypasses RLS)
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    // First get current metadata
+    const { data: currentLead, error: fetchError } = await supabaseServiceRole
+      .from('leads')
+      .select('metadata')
+      .eq('id', request.lead_id)
+      .single();
+
+    if (fetchError) {
+      console.error(`❌ Error fetching current lead metadata:`, fetchError);
+      return {
+        success: false,
+        error: fetchError.message
+      };
+    }
+
+    // Merge with additional metadata
+    const updatedMetadata = {
+      ...currentLead.metadata || {},
+      ...request.additional_metadata,
+      metadata_updated_at: new Date().toISOString()
+    };
+
+    // Update lead metadata
+    const { data, error } = await supabaseServiceRole
+      .from('leads')
+      .update({
+        metadata: updatedMetadata,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', request.lead_id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error(`❌ Error updating lead metadata:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+
+    if (!data) {
+      return {
+        success: false,
+        error: `Lead ${request.lead_id} not found or update failed`
+      };
+    }
+
+    console.log(`✅ Successfully updated invalidation metadata for lead ${request.lead_id}`);
+    
+    return {
+      success: true
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception updating lead invalidation metadata:`, errorMessage);
     
     return {
       success: false,

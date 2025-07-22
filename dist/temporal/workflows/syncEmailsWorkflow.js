@@ -4,7 +4,7 @@ exports.syncEmailsWorkflow = syncEmailsWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, analyzeEmailsActivity, syncSentEmailsActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, analyzeEmailsActivity, syncSentEmailsActivity, deliveryStatusActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes',
     retry: {
         maximumAttempts: 3,
@@ -179,6 +179,25 @@ async function syncEmailsWorkflow(options) {
         catch (syncError) {
             const syncErrorMessage = syncError instanceof Error ? syncError.message : String(syncError);
             console.log(`⚠️ Sent emails sync error: ${syncErrorMessage}`);
+        }
+        // Step 7: Check Email Delivery Status
+        console.log(`📋 Step 7: Checking email delivery status...`);
+        try {
+            const deliveryStatusRequest = {
+                site_id: siteId
+            };
+            const deliveryStatusResponse = await deliveryStatusActivity(deliveryStatusRequest);
+            if (deliveryStatusResponse.success) {
+                console.log(`✅ Email delivery status check completed successfully`);
+                console.log(`📊 Delivery status results:`, JSON.stringify(deliveryStatusResponse.data, null, 2));
+            }
+            else {
+                console.log(`⚠️ Email delivery status check failed: ${deliveryStatusResponse.error}`);
+            }
+        }
+        catch (deliveryError) {
+            const deliveryErrorMessage = deliveryError instanceof Error ? deliveryError.message : String(deliveryError);
+            console.log(`⚠️ Email delivery status check error: ${deliveryErrorMessage}`);
         }
         console.log(`🎉 Email sync completed successfully!`);
         console.log(`📊 Results: Email sync activities completed successfully`);

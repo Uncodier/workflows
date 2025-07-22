@@ -30,4 +30,5 @@ export * from './leadGenerationWorkflow';
 export * from './analyzeSiteWorkflow';
 export * from './leadAttentionWorkflow';
 export * from './sendNewsletterWorkflow';
-export * from './dailyProspectionWorkflow'; 
+export * from './dailyProspectionWorkflow';
+export * from './leadInvalidationWorkflow'; 

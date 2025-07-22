@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.leadFollowUpWorkflow = leadFollowUpWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const leadResearchWorkflow_1 = require("./leadResearchWorkflow");
+const leadInvalidationWorkflow_1 = require("./leadInvalidationWorkflow");
 // Define the activity interface and options
 const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, sendEmailFromAgentActivity, sendWhatsAppFromAgentActivity, updateConversationStatusAfterFollowUpActivity, validateMessageAndConversationActivity, updateMessageStatusToSentActivity, updateTaskStatusToCompletedActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
@@ -10,6 +11,49 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, g
         maximumAttempts: 3,
     },
 });
+/**
+ * Format Spanish phone numbers to international format
+ * Converts "663 211 22 33" to "+34663211233"
+ */
+function formatSpanishPhoneNumber(phone) {
+    if (!phone || typeof phone !== 'string') {
+        return phone;
+    }
+    // Remove all spaces, dashes, parentheses, and other non-digit characters except +
+    const cleanPhone = phone.replace(/[^\d+]/g, '');
+    // If already has + at start, assume it's international format
+    if (cleanPhone.startsWith('+')) {
+        return cleanPhone;
+    }
+    // If starts with 34, assume it's Spanish with country code but missing +
+    if (cleanPhone.startsWith('34') && cleanPhone.length === 11) {
+        return '+' + cleanPhone;
+    }
+    // If it's 9 digits starting with 6 or 7, it's likely a Spanish mobile number
+    if (cleanPhone.length === 9 && (cleanPhone.startsWith('6') || cleanPhone.startsWith('7'))) {
+        return '+34' + cleanPhone;
+    }
+    // If it's 9 digits starting with 9, it's likely a Spanish landline
+    if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
+        return '+34' + cleanPhone;
+    }
+    // For any other 9-digit number, assume it's Spanish
+    if (cleanPhone.length === 9) {
+        return '+34' + cleanPhone;
+    }
+    // For 10-digit numbers starting with 6 or 7 (likely Spanish mobile with extra digit)
+    if (cleanPhone.length === 10 && (cleanPhone.startsWith('6') || cleanPhone.startsWith('7'))) {
+        // For numbers like 6632112233, treat as Spanish mobile
+        return '+34' + cleanPhone;
+    }
+    // For other cases, try to add +34 if it looks like it could be Spanish
+    if (cleanPhone.length <= 9 && cleanPhone.length >= 7) {
+        return '+34' + cleanPhone;
+    }
+    // Return as-is if we can't determine format
+    console.log(`⚠️ Unable to format phone number: ${phone} -> ${cleanPhone}`);
+    return cleanPhone;
+}
 /**
  * Verifica si un lead necesita investigación antes del follow-up
  * Un lead necesita investigación si:
@@ -104,66 +148,78 @@ async function leadFollowUpWorkflow(options) {
         siteName = site.name;
         siteUrl = site.url;
         console.log(`✅ Retrieved site information: ${siteName} (${siteUrl})`);
-        console.log(`👤 Step 2: Getting lead information and checking if research is needed...`);
-        // Get lead information from database to check origin, notes, and metadata
-        const leadResult = await getLeadActivity(lead_id);
-        if (!leadResult.success) {
-            const errorMsg = `Failed to get lead information: ${leadResult.error}`;
-            console.error(`❌ ${errorMsg}`);
-            errors.push(errorMsg);
-            throw new Error(errorMsg);
-        }
-        const leadInfo = leadResult.lead;
-        console.log(`✅ Retrieved lead information: ${leadInfo.name || leadInfo.email}`);
-        console.log(`📋 Lead details:`);
-        console.log(`   - Name: ${leadInfo.name || 'N/A'}`);
-        console.log(`   - Email: ${leadInfo.email || 'N/A'}`);
-        console.log(`   - Origin: ${leadInfo.origin || 'N/A'}`);
-        console.log(`   - Has notes: ${leadInfo.notes ? 'Yes' : 'No'}`);
-        console.log(`   - Has metadata: ${leadInfo.metadata && Object.keys(leadInfo.metadata).length > 0 ? 'Yes' : 'No'}`);
-        // Check if lead needs research before follow-up
-        if (shouldExecuteLeadResearch(leadInfo)) {
-            console.log(`🔍 Step 2.1: Executing lead research before follow-up...`);
-            try {
-                const leadResearchOptions = {
-                    lead_id: lead_id,
-                    site_id: site_id,
-                    userId: options.userId || site.user_id,
-                    additionalData: {
-                        ...options.additionalData,
-                        executedBeforeFollowUp: true,
-                        followUpWorkflowId: workflowId,
-                        researchReason: 'missing_notes_and_metadata',
-                        originalLeadInfo: leadInfo
+        // Use versioning to handle the non-deterministic change
+        // TODO: Remove this patch after all existing workflows complete (estimated: 30 days after deployment)
+        const shouldGetLeadInfo = (0, workflow_1.patched)('add-lead-info-check-v1');
+        // Deprecate the patch after some time to encourage cleanup
+        (0, workflow_1.deprecatePatch)('add-lead-info-check-v1');
+        let leadInfo = null;
+        if (shouldGetLeadInfo) {
+            console.log(`👤 Step 2: Getting lead information and checking if research is needed...`);
+            // Get lead information from database to check origin, notes, and metadata
+            const leadResult = await getLeadActivity(lead_id);
+            if (!leadResult.success) {
+                const errorMsg = `Failed to get lead information: ${leadResult.error}`;
+                console.error(`❌ ${errorMsg}`);
+                errors.push(errorMsg);
+                throw new Error(errorMsg);
+            }
+            leadInfo = leadResult.lead;
+            console.log(`✅ Retrieved lead information: ${leadInfo.name || leadInfo.email}`);
+            console.log(`📋 Lead details:`);
+            console.log(`   - Name: ${leadInfo.name || 'N/A'}`);
+            console.log(`   - Email: ${leadInfo.email || 'N/A'}`);
+            console.log(`   - Origin: ${leadInfo.origin || 'N/A'}`);
+            console.log(`   - Has notes: ${leadInfo.notes ? 'Yes' : 'No'}`);
+            console.log(`   - Has metadata: ${leadInfo.metadata && Object.keys(leadInfo.metadata).length > 0 ? 'Yes' : 'No'}`);
+            // Check if lead needs research before follow-up
+            if (shouldExecuteLeadResearch(leadInfo)) {
+                console.log(`🔍 Step 2.1: Executing lead research before follow-up...`);
+                try {
+                    const leadResearchOptions = {
+                        lead_id: lead_id,
+                        site_id: site_id,
+                        userId: options.userId || site.user_id,
+                        additionalData: {
+                            ...options.additionalData,
+                            executedBeforeFollowUp: true,
+                            followUpWorkflowId: workflowId,
+                            researchReason: 'missing_notes_and_metadata',
+                            originalLeadInfo: leadInfo
+                        }
+                    };
+                    console.log(`🚀 Starting lead research workflow as child process...`);
+                    const leadResearchHandle = await (0, workflow_1.startChild)(leadResearchWorkflow_1.leadResearchWorkflow, {
+                        args: [leadResearchOptions],
+                        workflowId: `lead-research-followup-${lead_id}-${site_id}-${Date.now()}`,
+                    });
+                    const leadResearchResult = await leadResearchHandle.result();
+                    if (leadResearchResult.success) {
+                        console.log(`✅ Lead research completed successfully before follow-up`);
+                        console.log(`📊 Research results:`);
+                        console.log(`   - Lead information enriched: Yes`);
+                        console.log(`   - Deep research executed: ${leadResearchResult.deepResearchResult ? 'Yes' : 'No'}`);
+                        console.log(`   - Lead segmentation executed: ${leadResearchResult.leadSegmentationResult ? 'Yes' : 'No'}`);
+                        console.log(`   - Execution time: ${leadResearchResult.executionTime}`);
                     }
-                };
-                console.log(`🚀 Starting lead research workflow as child process...`);
-                const leadResearchHandle = await (0, workflow_1.startChild)(leadResearchWorkflow_1.leadResearchWorkflow, {
-                    args: [leadResearchOptions],
-                    workflowId: `lead-research-followup-${lead_id}-${site_id}-${Date.now()}`,
-                });
-                const leadResearchResult = await leadResearchHandle.result();
-                if (leadResearchResult.success) {
-                    console.log(`✅ Lead research completed successfully before follow-up`);
-                    console.log(`📊 Research results:`);
-                    console.log(`   - Lead information enriched: Yes`);
-                    console.log(`   - Deep research executed: ${leadResearchResult.deepResearchResult ? 'Yes' : 'No'}`);
-                    console.log(`   - Lead segmentation executed: ${leadResearchResult.leadSegmentationResult ? 'Yes' : 'No'}`);
-                    console.log(`   - Execution time: ${leadResearchResult.executionTime}`);
+                    else {
+                        console.error(`⚠️ Lead research failed, but continuing with follow-up: ${leadResearchResult.errors.join(', ')}`);
+                        errors.push(`Lead research failed: ${leadResearchResult.errors.join(', ')}`);
+                    }
                 }
-                else {
-                    console.error(`⚠️ Lead research failed, but continuing with follow-up: ${leadResearchResult.errors.join(', ')}`);
-                    errors.push(`Lead research failed: ${leadResearchResult.errors.join(', ')}`);
+                catch (researchError) {
+                    const errorMessage = researchError instanceof Error ? researchError.message : String(researchError);
+                    console.error(`⚠️ Exception during lead research, but continuing with follow-up: ${errorMessage}`);
+                    errors.push(`Lead research exception: ${errorMessage}`);
                 }
             }
-            catch (researchError) {
-                const errorMessage = researchError instanceof Error ? researchError.message : String(researchError);
-                console.error(`⚠️ Exception during lead research, but continuing with follow-up: ${errorMessage}`);
-                errors.push(`Lead research exception: ${errorMessage}`);
+            else {
+                console.log(`⏭️ Skipping lead research - lead does not meet criteria`);
             }
         }
         else {
-            console.log(`⏭️ Skipping lead research - lead does not meet criteria`);
+            console.log(`⚠️ Running legacy path (v0) - skipping lead info check and research due to workflow versioning`);
+            console.log(`   This is expected for workflows that started before the lead info check feature was added`);
         }
         console.log(`📞 Step 3: Executing lead follow-up for lead ${lead_id}...`);
         // Prepare lead follow-up request
@@ -363,8 +419,11 @@ async function leadFollowUpWorkflow(options) {
                 // Send WhatsApp if available
                 if (phone && whatsappMessage) {
                     console.log(`📱 Sending follow-up WhatsApp to ${phone}...`);
+                    // Format phone number for international compatibility
+                    const formattedPhone = formatSpanishPhoneNumber(phone);
+                    console.log(`📞 Phone format: ${phone} -> ${formattedPhone}`);
                     const whatsappResult = await sendWhatsAppFromAgentActivity({
-                        phone_number: phone,
+                        phone_number: formattedPhone,
                         message: whatsappMessage,
                         site_id: site_id,
                         agent_id: options.userId || site.user_id,
@@ -372,13 +431,13 @@ async function leadFollowUpWorkflow(options) {
                         from: siteName,
                     });
                     if (whatsappResult.success) {
-                        console.log(`✅ Follow-up WhatsApp sent successfully to ${phone}`);
+                        console.log(`✅ Follow-up WhatsApp sent successfully to ${formattedPhone}`);
                         whatsappSent = true;
                         // If no email was sent or email failed, set WhatsApp as primary message sent
                         if (!emailSent) {
                             messageSent = {
                                 channel: 'whatsapp',
-                                recipient: phone,
+                                recipient: formattedPhone,
                                 success: true,
                                 messageId: whatsappResult.messageId,
                             };
@@ -388,6 +447,45 @@ async function leadFollowUpWorkflow(options) {
                         const errorMsg = `Failed to send follow-up WhatsApp: ${whatsappResult.messageId}`;
                         console.error(`⚠️ ${errorMsg}`);
                         errors.push(errorMsg);
+                        // Execute lead invalidation workflow when WhatsApp fails
+                        console.log(`🚫 WhatsApp delivery failed, executing lead invalidation workflow...`);
+                        try {
+                            const invalidationOptions = {
+                                lead_id: lead_id,
+                                site_id: site_id,
+                                telephone: formattedPhone,
+                                reason: 'whatsapp_failed',
+                                userId: options.userId || site.user_id,
+                                additionalData: {
+                                    original_phone: phone,
+                                    formatted_phone: formattedPhone,
+                                    whatsapp_error: whatsappResult.messageId,
+                                    failed_in_workflow: 'leadFollowUpWorkflow',
+                                    failed_at: new Date().toISOString()
+                                }
+                            };
+                            const invalidationHandle = await (0, workflow_1.startChild)(leadInvalidationWorkflow_1.leadInvalidationWorkflow, {
+                                args: [invalidationOptions],
+                                workflowId: `lead-invalidation-whatsapp-${lead_id}-${Date.now()}`,
+                            });
+                            const invalidationResult = await invalidationHandle.result();
+                            if (invalidationResult.success) {
+                                console.log(`✅ Lead invalidation completed successfully`);
+                                console.log(`📊 Invalidation summary:`);
+                                console.log(`   - Lead invalidated: ${invalidationResult.invalidatedLead}`);
+                                console.log(`   - Shared leads invalidated: ${invalidationResult.invalidatedSharedLeads}`);
+                                console.log(`   - Original site_id: ${invalidationResult.originalSiteId}`);
+                            }
+                            else {
+                                console.error(`⚠️ Lead invalidation failed: ${invalidationResult.errors.join(', ')}`);
+                                errors.push(`Lead invalidation failed: ${invalidationResult.errors.join(', ')}`);
+                            }
+                        }
+                        catch (invalidationError) {
+                            const invalidationErrorMessage = invalidationError instanceof Error ? invalidationError.message : String(invalidationError);
+                            console.error(`⚠️ Exception during lead invalidation: ${invalidationErrorMessage}`);
+                            errors.push(`Lead invalidation exception: ${invalidationErrorMessage}`);
+                        }
                     }
                 }
                 // Log results
