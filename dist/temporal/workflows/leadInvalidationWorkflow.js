@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.leadInvalidationWorkflow = leadInvalidationWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getLeadActivity, invalidateLeadActivity, findLeadsBySharedContactActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getLeadActivity, invalidateLeadActivity, findLeadsBySharedContactActivity, checkCompanyValidLeadsActivity, addCompanyToNullListActivity, getCompanyInfoFromLeadActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '3 minutes', // Reasonable timeout for lead invalidation
     retry: {
         maximumAttempts: 3,
@@ -56,6 +56,9 @@ async function leadInvalidationWorkflow(options) {
     let sharedContactLeads = [];
     let invalidatedSharedLeads = 0;
     let originalSiteId = site_id;
+    let companyAddedToNullList = false;
+    let nullCompanyId;
+    let companyInfo = {};
     try {
         console.log(`👤 Step 1: Getting lead information for ${lead_id}...`);
         // Get lead information to check current contact methods
@@ -157,6 +160,87 @@ async function leadInvalidationWorkflow(options) {
         else {
             console.log(`⚠️ No contact information provided for shared lead search`);
         }
+        // Step 4: Check if company should be added to null companies list
+        console.log(`🏢 Step 4: Checking if company should be added to null companies list...`);
+        try {
+            // First, get company information from the lead
+            console.log(`📋 Getting company information from lead ${lead_id}...`);
+            const companyInfoResult = await getCompanyInfoFromLeadActivity({
+                lead_id: lead_id
+            });
+            if (companyInfoResult.success && companyInfoResult.company) {
+                companyInfo = companyInfoResult.company;
+                console.log(`✅ Company info obtained: ${companyInfo.name} in ${companyInfo.city}`);
+                // Only proceed if we have both company name and city
+                if (companyInfo.name && companyInfo.city) {
+                    console.log(`🔍 Checking if company ${companyInfo.name} has any valid leads remaining...`);
+                    // Check if company has any valid leads remaining
+                    const validLeadsResult = await checkCompanyValidLeadsActivity({
+                        company_name: companyInfo.name,
+                        company_id: companyInfo.id,
+                        site_id: site_id,
+                        exclude_lead_id: lead_id // Exclude the current lead being invalidated
+                    });
+                    if (validLeadsResult.success) {
+                        console.log(`📊 Company ${companyInfo.name} validation results:`);
+                        console.log(`   - Total leads: ${validLeadsResult.totalLeads}`);
+                        console.log(`   - Valid leads remaining: ${validLeadsResult.validLeads}`);
+                        console.log(`   - Has valid leads: ${validLeadsResult.hasValidLeads}`);
+                        if (!validLeadsResult.hasValidLeads) {
+                            console.log(`🚫 No valid leads remaining for ${companyInfo.name} - adding to null companies list...`);
+                            // Add company to null companies list
+                            const nullCompanyResult = await addCompanyToNullListActivity({
+                                company_name: companyInfo.name,
+                                company_id: companyInfo.id,
+                                city: companyInfo.city,
+                                site_id: site_id,
+                                reason: reason,
+                                failed_contact: {
+                                    telephone: options.telephone,
+                                    email: options.email
+                                },
+                                userId: options.userId,
+                                total_leads_invalidated: 1 + invalidatedSharedLeads, // Current lead + shared leads
+                                original_lead_id: lead_id
+                            });
+                            if (nullCompanyResult.success) {
+                                companyAddedToNullList = true;
+                                nullCompanyId = nullCompanyResult.nullCompanyId;
+                                console.log(`✅ Company ${companyInfo.name} successfully added to null companies list for ${companyInfo.city}`);
+                            }
+                            else {
+                                const errorMsg = `Failed to add company to null list: ${nullCompanyResult.error}`;
+                                console.error(`❌ ${errorMsg}`);
+                                errors.push(errorMsg);
+                            }
+                        }
+                        else {
+                            console.log(`✅ Company ${companyInfo.name} still has ${validLeadsResult.validLeads} valid leads - keeping active`);
+                        }
+                    }
+                    else {
+                        const errorMsg = `Failed to check company valid leads: ${validLeadsResult.error}`;
+                        console.error(`❌ ${errorMsg}`);
+                        errors.push(errorMsg);
+                    }
+                }
+                else {
+                    console.log(`⚠️ Missing company name or city information - skipping null company check`);
+                    console.log(`   - Company name: ${companyInfo.name || 'N/A'}`);
+                    console.log(`   - Company city: ${companyInfo.city || 'N/A'}`);
+                }
+            }
+            else {
+                const errorMsg = `Failed to get company information: ${companyInfoResult.error}`;
+                console.error(`⚠️ ${errorMsg}`);
+                errors.push(errorMsg);
+            }
+        }
+        catch (companyError) {
+            const errorMessage = companyError instanceof Error ? companyError.message : String(companyError);
+            console.error(`⚠️ Exception during company null list check: ${errorMessage}`);
+            errors.push(`Company null list check exception: ${errorMessage}`);
+        }
         const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         const result = {
             success: true,
@@ -165,6 +249,9 @@ async function leadInvalidationWorkflow(options) {
             invalidatedLead: leadInvalidated,
             sharedContactLeads,
             invalidatedSharedLeads,
+            companyAddedToNullList,
+            nullCompanyId,
+            companyInfo,
             reason,
             errors,
             executionTime,
@@ -172,6 +259,9 @@ async function leadInvalidationWorkflow(options) {
         };
         console.log(`🎉 Lead invalidation workflow completed successfully!`);
         console.log(`📊 Summary: Lead ${lead_id} - Invalidated: ${leadInvalidated}, Shared leads: ${invalidatedSharedLeads}`);
+        if (companyAddedToNullList && companyInfo.name) {
+            console.log(`🚫 Company "${companyInfo.name}" added to null companies list for ${companyInfo.city}`);
+        }
         console.log(`⏱️ Execution time: ${executionTime}`);
         // Update cron status to indicate successful completion
         await saveCronStatusActivity({
@@ -223,6 +313,9 @@ async function leadInvalidationWorkflow(options) {
             invalidatedLead: leadInvalidated,
             sharedContactLeads,
             invalidatedSharedLeads,
+            companyAddedToNullList,
+            nullCompanyId,
+            companyInfo,
             reason,
             errors: [...errors, errorMessage],
             executionTime,

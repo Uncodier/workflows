@@ -25,10 +25,10 @@ const {
 });
 
 /**
- * Format Spanish phone numbers to international format
- * Converts "663 211 22 33" to "+34663211233"
+ * Format phone numbers to international format
+ * Prioritizes Spanish numbers but handles international formats
  */
-function formatSpanishPhoneNumber(phone: string): string {
+function formatPhoneNumber(phone: string): string {
   if (!phone || typeof phone !== 'string') {
     return phone;
   }
@@ -46,12 +46,12 @@ function formatSpanishPhoneNumber(phone: string): string {
     return '+' + cleanPhone;
   }
   
-  // If it's 9 digits starting with 6 or 7, it's likely a Spanish mobile number
+  // Spanish mobile numbers (9 digits starting with 6 or 7)
   if (cleanPhone.length === 9 && (cleanPhone.startsWith('6') || cleanPhone.startsWith('7'))) {
     return '+34' + cleanPhone;
   }
   
-  // If it's 9 digits starting with 9, it's likely a Spanish landline
+  // Spanish landline numbers (9 digits starting with 9)
   if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
     return '+34' + cleanPhone;
   }
@@ -61,15 +61,49 @@ function formatSpanishPhoneNumber(phone: string): string {
     return '+34' + cleanPhone;
   }
   
-  // For 10-digit numbers starting with 6 or 7 (likely Spanish mobile with extra digit)
+  // Spanish mobile with extra digit (10 digits starting with 6 or 7)
   if (cleanPhone.length === 10 && (cleanPhone.startsWith('6') || cleanPhone.startsWith('7'))) {
-    // For numbers like 6632112233, treat as Spanish mobile
     return '+34' + cleanPhone;
   }
   
-  // For other cases, try to add +34 if it looks like it could be Spanish
+  // Handle US/Canada numbers (10 digits, often starting with 2-9 in first position)
+  if (cleanPhone.length === 10 && /^[2-9]\d{9}$/.test(cleanPhone)) {
+    return '+1' + cleanPhone;
+  }
+  
+  // Handle international numbers that start with 1 (US/Canada with country code)
+  if (cleanPhone.startsWith('1') && cleanPhone.length === 11) {
+    return '+' + cleanPhone;
+  }
+  
+  // Handle other common international patterns
+  // UK numbers (11 digits starting with 44 or just 11 digits)
+  if (cleanPhone.length === 11 && cleanPhone.startsWith('44')) {
+    return '+' + cleanPhone;
+  }
+  
+  // France numbers (10 digits or 12 with 33)
+  if (cleanPhone.startsWith('33') && cleanPhone.length === 12) {
+    return '+' + cleanPhone;
+  }
+  
+  // Germany numbers (11-12 digits starting with 49)
+  if (cleanPhone.startsWith('49') && (cleanPhone.length === 11 || cleanPhone.length === 12)) {
+    return '+' + cleanPhone;
+  }
+  
+  // For shorter numbers, try to add +34 if it looks like it could be Spanish
   if (cleanPhone.length <= 9 && cleanPhone.length >= 7) {
     return '+34' + cleanPhone;
+  }
+  
+  // For any remaining numbers, try to guess the format
+  // If it's 10+ digits and doesn't start with known country codes, it might be international
+  if (cleanPhone.length >= 10) {
+    // Log warning for manual review
+    console.log(`⚠️ Unknown phone format, returning without prefix: ${phone} -> ${cleanPhone}`);
+    console.log(`💡 This number might need manual verification or specific country code`);
+    return cleanPhone; // Return as-is for API to potentially handle or reject
   }
   
   // Return as-is if we can't determine format
@@ -536,19 +570,20 @@ export async function leadFollowUpWorkflow(
           console.log(`📱 Sending follow-up WhatsApp to ${phone}...`);
           
           // Format phone number for international compatibility
-          const formattedPhone = formatSpanishPhoneNumber(phone);
+          const formattedPhone = formatPhoneNumber(phone);
           console.log(`📞 Phone format: ${phone} -> ${formattedPhone}`);
           
-          const whatsappResult = await sendWhatsAppFromAgentActivity({
-            phone_number: formattedPhone,
-            message: whatsappMessage,
-            site_id: site_id,
-            agent_id: options.userId || site.user_id,
-            lead_id: lead_id,
-            from: siteName,
-          });
-          
-          if (whatsappResult.success) {
+          try {
+            const whatsappResult = await sendWhatsAppFromAgentActivity({
+              phone_number: formattedPhone,
+              message: whatsappMessage,
+              site_id: site_id,
+              agent_id: options.userId || site.user_id,
+              lead_id: lead_id,
+              from: siteName,
+            });
+            
+            // If we reach here, WhatsApp was sent successfully
             console.log(`✅ Follow-up WhatsApp sent successfully to ${formattedPhone}`);
             whatsappSent = true;
             // If no email was sent or email failed, set WhatsApp as primary message sent
@@ -560,13 +595,20 @@ export async function leadFollowUpWorkflow(
                 messageId: whatsappResult.messageId,
               };
             }
-          } else {
-            const errorMsg = `Failed to send follow-up WhatsApp: ${whatsappResult.messageId}`;
+            
+          } catch (whatsappError) {
+            // This catch block will handle both activity exceptions and result.success === false cases
+            const whatsappErrorMessage = whatsappError instanceof Error ? whatsappError.message : String(whatsappError);
+            const errorMsg = `Failed to send follow-up WhatsApp: ${whatsappErrorMessage}`;
             console.error(`⚠️ ${errorMsg}`);
             errors.push(errorMsg);
             
             // Execute lead invalidation workflow when WhatsApp fails
             console.log(`🚫 WhatsApp delivery failed, executing lead invalidation workflow...`);
+            console.log(`📋 Failure details:`);
+            console.log(`   - Original phone: ${phone}`);
+            console.log(`   - Formatted phone: ${formattedPhone}`);
+            console.log(`   - Error: ${whatsappErrorMessage}`);
             
             try {
               const invalidationOptions: LeadInvalidationOptions = {
@@ -578,12 +620,14 @@ export async function leadFollowUpWorkflow(
                 additionalData: {
                   original_phone: phone,
                   formatted_phone: formattedPhone,
-                  whatsapp_error: whatsappResult.messageId,
+                  whatsapp_error: whatsappErrorMessage,
                   failed_in_workflow: 'leadFollowUpWorkflow',
-                  failed_at: new Date().toISOString()
+                  failed_at: new Date().toISOString(),
+                  error_type: 'activity_exception'
                 }
               };
               
+              console.log(`🚀 Starting lead invalidation workflow...`);
               const invalidationHandle = await startChild(leadInvalidationWorkflow, {
                 args: [invalidationOptions],
                 workflowId: `lead-invalidation-whatsapp-${lead_id}-${Date.now()}`,
