@@ -191,7 +191,7 @@ export async function syncEmailsWorkflow(
               parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
             });
             
-            console.log(`✅ Started scheduleCustomerSupportMessagesWorkflow: ${customerSupportWorkflowId}`);
+            console.log(`✅ Started scheduleCustomerSupportMessagesWorkflow: ${childWorkflowHandle.workflowId}`);
             console.log(`🔄 This will process customer support messages with 1-minute intervals`);
             console.log(`🚀 Parent close policy: ABANDON - child workflow will continue running independently`);
             

@@ -58,6 +58,7 @@ exports.updateLeadInvalidationMetadataActivity = updateLeadInvalidationMetadataA
 exports.checkCompanyValidLeadsActivity = checkCompanyValidLeadsActivity;
 exports.addCompanyToNullListActivity = addCompanyToNullListActivity;
 exports.getCompanyInfoFromLeadActivity = getCompanyInfoFromLeadActivity;
+exports.cleanupFailedFollowUpActivity = cleanupFailedFollowUpActivity;
 const apiService_1 = require("../services/apiService");
 const supabaseService_1 = require("../services/supabaseService");
 const client_1 = require("../client");
@@ -1649,6 +1650,243 @@ async function getCompanyInfoFromLeadActivity(request) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Exception getting company info from lead:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to cleanup failed follow-up attempts
+ * This cleans up conversations, messages, and tasks when message delivery fails
+ * Also resets lead status to 'new' if no other conversations exist
+ */
+async function cleanupFailedFollowUpActivity(request) {
+    console.log(`🧹 Starting cleanup for failed follow-up delivery...`);
+    console.log(`📋 Lead ID: ${request.lead_id}, Site ID: ${request.site_id}`);
+    console.log(`❌ Failure reason: ${request.failure_reason}`);
+    console.log(`📞 Channel: ${request.delivery_channel}, Phone: ${request.phone_number}, Email: ${request.email}`);
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot perform cleanup');
+            return {
+                success: false,
+                error: 'Database not available'
+            };
+        }
+        console.log('✅ Database connection confirmed, starting cleanup process...');
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        let conversationDeleted = false;
+        let messageDeleted = false;
+        let taskDeleted = false;
+        let leadResetToNew = false;
+        const cleanupSummary = {
+            conversations_found: 0,
+            messages_in_conversation: 0,
+            tasks_found: 0,
+            other_conversations_exist: false
+        };
+        // Step 1: Find the conversation to cleanup (either provided or search by lead_id)
+        let targetConversationId = request.conversation_id;
+        if (!targetConversationId) {
+            console.log(`🔍 No conversation ID provided, searching for conversation by lead_id...`);
+            const { data: conversation, error: findError } = await supabaseServiceRole
+                .from('conversations')
+                .select('id, status, created_at')
+                .eq('lead_id', request.lead_id)
+                .eq('site_id', request.site_id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single();
+            if (findError && findError.code !== 'PGRST116') {
+                console.error(`❌ Error searching for conversation:`, findError);
+                return {
+                    success: false,
+                    error: `Failed to search for conversation: ${findError.message}`
+                };
+            }
+            if (conversation) {
+                targetConversationId = conversation.id;
+                console.log(`✅ Found conversation to cleanup: ${targetConversationId} (status: ${conversation.status})`);
+            }
+            else {
+                console.log(`⚠️ No conversation found for lead ${request.lead_id} - cleanup will focus on tasks only`);
+            }
+        }
+        // Step 2: Check how many conversations exist for this lead
+        console.log(`🔍 Checking total conversations for lead ${request.lead_id}...`);
+        const { data: allConversations, error: countError } = await supabaseServiceRole
+            .from('conversations')
+            .select('id, status, created_at')
+            .eq('lead_id', request.lead_id)
+            .eq('site_id', request.site_id)
+            .order('created_at', { ascending: false });
+        if (countError) {
+            console.error(`❌ Error counting conversations:`, countError);
+            return {
+                success: false,
+                error: `Failed to count conversations: ${countError.message}`
+            };
+        }
+        cleanupSummary.conversations_found = allConversations?.length || 0;
+        cleanupSummary.other_conversations_exist = (allConversations?.length || 0) > 1;
+        console.log(`📊 Found ${cleanupSummary.conversations_found} total conversations for this lead`);
+        console.log(`🔍 Other conversations exist: ${cleanupSummary.other_conversations_exist}`);
+        // Step 3: If we have a target conversation, check its messages and potentially delete it
+        if (targetConversationId) {
+            console.log(`🔍 Checking messages in conversation ${targetConversationId}...`);
+            const { data: messages, error: messagesError } = await supabaseServiceRole
+                .from('messages')
+                .select('id, role, content, custom_data, created_at')
+                .eq('conversation_id', targetConversationId)
+                .order('created_at', { ascending: false });
+            if (messagesError) {
+                console.error(`❌ Error fetching messages:`, messagesError);
+                return {
+                    success: false,
+                    error: `Failed to fetch messages: ${messagesError.message}`
+                };
+            }
+            cleanupSummary.messages_in_conversation = messages?.length || 0;
+            console.log(`📊 Found ${cleanupSummary.messages_in_conversation} messages in conversation`);
+            // Step 3.1: Delete specific message if provided
+            if (request.message_id) {
+                console.log(`🗑️ Deleting specific message ${request.message_id}...`);
+                const { error: deleteMessageError } = await supabaseServiceRole
+                    .from('messages')
+                    .delete()
+                    .eq('id', request.message_id)
+                    .eq('conversation_id', targetConversationId);
+                if (deleteMessageError) {
+                    console.error(`❌ Error deleting message ${request.message_id}:`, deleteMessageError);
+                }
+                else {
+                    messageDeleted = true;
+                    console.log(`✅ Successfully deleted message ${request.message_id}`);
+                }
+            }
+            // Step 3.2: Delete conversation if it only has one message (the failed one) or no messages
+            if (cleanupSummary.messages_in_conversation <= 1) {
+                console.log(`🗑️ Deleting conversation ${targetConversationId} (${cleanupSummary.messages_in_conversation} messages)...`);
+                // First delete any remaining messages
+                const { error: deleteMessagesError } = await supabaseServiceRole
+                    .from('messages')
+                    .delete()
+                    .eq('conversation_id', targetConversationId);
+                if (deleteMessagesError) {
+                    console.error(`⚠️ Error deleting messages from conversation:`, deleteMessagesError);
+                }
+                // Then delete the conversation
+                const { error: deleteConversationError } = await supabaseServiceRole
+                    .from('conversations')
+                    .delete()
+                    .eq('id', targetConversationId)
+                    .eq('site_id', request.site_id);
+                if (deleteConversationError) {
+                    console.error(`❌ Error deleting conversation ${targetConversationId}:`, deleteConversationError);
+                }
+                else {
+                    conversationDeleted = true;
+                    console.log(`✅ Successfully deleted conversation ${targetConversationId}`);
+                }
+            }
+            else {
+                console.log(`⚠️ Keeping conversation ${targetConversationId} (has ${cleanupSummary.messages_in_conversation} messages)`);
+            }
+        }
+        // Step 4: Delete tasks created for this lead (typically first_contact tasks)
+        console.log(`🔍 Searching for tasks to cleanup for lead ${request.lead_id}...`);
+        const { data: tasks, error: tasksError } = await supabaseServiceRole
+            .from('tasks')
+            .select('id, task_id, name, stage, status, custom_data, created_at')
+            .eq('lead_id', request.lead_id)
+            .eq('site_id', request.site_id)
+            .order('created_at', { ascending: false });
+        if (tasksError) {
+            console.error(`❌ Error fetching tasks:`, tasksError);
+        }
+        else {
+            cleanupSummary.tasks_found = tasks?.length || 0;
+            console.log(`📊 Found ${cleanupSummary.tasks_found} tasks for this lead`);
+            if (tasks && tasks.length > 0) {
+                console.log(`🗑️ Deleting ${tasks.length} tasks...`);
+                for (const task of tasks) {
+                    console.log(`   - Deleting task: ${task.name} (${task.stage}/${task.status})`);
+                }
+                const { error: deleteTasksError } = await supabaseServiceRole
+                    .from('tasks')
+                    .delete()
+                    .eq('lead_id', request.lead_id)
+                    .eq('site_id', request.site_id);
+                if (deleteTasksError) {
+                    console.error(`❌ Error deleting tasks:`, deleteTasksError);
+                }
+                else {
+                    taskDeleted = true;
+                    console.log(`✅ Successfully deleted ${tasks.length} tasks`);
+                }
+            }
+        }
+        // Step 5: Reset lead status to 'new' if no other conversations exist
+        if (!cleanupSummary.other_conversations_exist) {
+            console.log(`🔄 Resetting lead ${request.lead_id} status to 'new' (no other conversations exist)...`);
+            const { data: leadData, error: resetError } = await supabaseServiceRole
+                .from('leads')
+                .update({
+                status: 'new',
+                updated_at: new Date().toISOString(),
+                custom_data: {
+                    cleanup_performed: true,
+                    cleanup_reason: request.failure_reason,
+                    cleanup_timestamp: new Date().toISOString(),
+                    original_follow_up_failure: {
+                        channel: request.delivery_channel,
+                        phone: request.phone_number,
+                        email: request.email,
+                        reason: request.failure_reason
+                    }
+                }
+            })
+                .eq('id', request.lead_id)
+                .eq('site_id', request.site_id)
+                .select()
+                .single();
+            if (resetError) {
+                console.error(`❌ Error resetting lead status:`, resetError);
+            }
+            else if (leadData) {
+                leadResetToNew = true;
+                console.log(`✅ Successfully reset lead ${request.lead_id} status to 'new'`);
+            }
+        }
+        else {
+            console.log(`⚠️ Keeping lead status unchanged (${cleanupSummary.conversations_found} total conversations exist)`);
+        }
+        // Step 6: Log cleanup summary
+        console.log(`🎉 Cleanup completed for failed follow-up!`);
+        console.log(`📊 Cleanup summary:`);
+        console.log(`   - Conversation deleted: ${conversationDeleted}`);
+        console.log(`   - Message deleted: ${messageDeleted}`);
+        console.log(`   - Tasks deleted: ${taskDeleted} (${cleanupSummary.tasks_found} found)`);
+        console.log(`   - Lead reset to 'new': ${leadResetToNew}`);
+        console.log(`   - Other conversations exist: ${cleanupSummary.other_conversations_exist}`);
+        console.log(`   - Total conversations found: ${cleanupSummary.conversations_found}`);
+        return {
+            success: true,
+            conversation_deleted: conversationDeleted,
+            message_deleted: messageDeleted,
+            task_deleted: taskDeleted,
+            lead_reset_to_new: leadResetToNew,
+            cleanup_summary: cleanupSummary
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception during failed follow-up cleanup:`, errorMessage);
         return {
             success: false,
             error: errorMessage

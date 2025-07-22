@@ -5,7 +5,7 @@ const workflow_1 = require("@temporalio/workflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
 // Define the activity interface and options
 const { logWorkflowExecutionActivity, saveCronStatusActivity, analyzeEmailsActivity, syncSentEmailsActivity, deliveryStatusActivity, } = (0, workflow_1.proxyActivities)({
-    startToCloseTimeout: '5 minutes',
+    startToCloseTimeout: '10 minutes', // ✅ FIXED: Increased timeout from 5 to 10 minutes
     retry: {
         maximumAttempts: 3,
     },
@@ -92,6 +92,7 @@ async function syncEmailsWorkflow(options) {
                 since_date: validation.since.toISOString()
             };
             const analysisResponse = await analyzeEmailsActivity(analysisRequest);
+            // ✅ FIXED: Properly handle analysis failure and propagate critical errors
             if (analysisResponse.success) {
                 console.log(`✅ Email analysis initiated successfully`);
                 console.log(`📧 ${analysisResponse.data?.emailCount || 0} emails submitted for analysis`);
@@ -121,20 +122,24 @@ async function syncEmailsWorkflow(options) {
                         origin: "email" // Indicar que el origen es email (syncMails)
                     };
                     try {
-                        // ✅ FIXED: Configurar parentClosePolicy para que el child workflow continúe ejecutándose 
-                        // incluso cuando el parent workflow (syncEmails) termine
-                        void (0, workflow_1.startChild)(scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow, {
+                        // ✅ FIXED: Better error handling for child workflow
+                        const childWorkflowHandle = await (0, workflow_1.startChild)(scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow, {
                             workflowId: customerSupportWorkflowId,
                             args: [scheduleParams],
                             parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
                         });
-                        console.log(`✅ Started scheduleCustomerSupportMessagesWorkflow: ${customerSupportWorkflowId}`);
+                        console.log(`✅ Started scheduleCustomerSupportMessagesWorkflow: ${childWorkflowHandle.workflowId}`);
                         console.log(`🔄 This will process customer support messages with 1-minute intervals`);
                         console.log(`🚀 Parent close policy: ABANDON - child workflow will continue running independently`);
+                        // ✅ FIXED: Wait a moment to ensure child workflow started properly
+                        console.log(`⏳ Waiting for child workflow to initialize...`);
+                        await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay
                     }
                     catch (workflowError) {
-                        console.error(`❌ Failed to start customer support workflow: ${workflowError}`);
-                        // No fallar todo el sync por esto
+                        const workflowErrorMessage = workflowError instanceof Error ? workflowError.message : String(workflowError);
+                        console.error(`❌ Failed to start customer support workflow: ${workflowErrorMessage}`);
+                        // ✅ FIXED: Add error to result but don't fail the entire workflow
+                        result.errors.push(`Customer support workflow failed: ${workflowErrorMessage}`);
                     }
                 }
                 else {
@@ -149,6 +154,10 @@ async function syncEmailsWorkflow(options) {
                     success: false,
                     error: analysisResponse.error?.message || 'Unknown analysis error'
                 };
+                // ✅ FIXED: Add to errors array for visibility
+                result.errors.push(`Email analysis failed: ${analysisResponse.error?.message || 'Unknown error'}`);
+                // ✅ FIXED: Don't throw exception for analysis failure - it's not critical for the workflow
+                console.log(`🔄 Continuing workflow despite analysis failure...`);
             }
         }
         catch (analysisError) {
@@ -158,6 +167,9 @@ async function syncEmailsWorkflow(options) {
                 success: false,
                 error: analysisErrorMessage
             };
+            // ✅ FIXED: Add to errors array and continue workflow
+            result.errors.push(`Email analysis exception: ${analysisErrorMessage}`);
+            console.log(`🔄 Continuing workflow despite analysis exception...`);
         }
         // Step 6: Sync Sent Emails  
         console.log(`📨 Step 6: Syncing sent emails to update lead status...`);
@@ -168,17 +180,20 @@ async function syncEmailsWorkflow(options) {
                 since_date: validation.since.toISOString()
             };
             const syncSentResponse = await syncSentEmailsActivity(syncSentEmailsRequest);
+            // ✅ FIXED: Proper error handling for sent emails sync
             if (syncSentResponse.success) {
                 console.log(`✅ Sent emails sync completed successfully`);
                 console.log(`📊 Sync results:`, JSON.stringify(syncSentResponse.data, null, 2));
             }
             else {
                 console.log(`⚠️ Sent emails sync failed: ${syncSentResponse.error}`);
+                result.errors.push(`Sent emails sync failed: ${syncSentResponse.error || 'Unknown error'}`);
             }
         }
         catch (syncError) {
             const syncErrorMessage = syncError instanceof Error ? syncError.message : String(syncError);
             console.log(`⚠️ Sent emails sync error: ${syncErrorMessage}`);
+            result.errors.push(`Sent emails sync exception: ${syncErrorMessage}`);
         }
         // Step 7: Check Email Delivery Status
         console.log(`📋 Step 7: Checking email delivery status...`);
@@ -187,24 +202,34 @@ async function syncEmailsWorkflow(options) {
                 site_id: siteId
             };
             const deliveryStatusResponse = await deliveryStatusActivity(deliveryStatusRequest);
+            // ✅ FIXED: Proper error handling for delivery status
             if (deliveryStatusResponse.success) {
                 console.log(`✅ Email delivery status check completed successfully`);
                 console.log(`📊 Delivery status results:`, JSON.stringify(deliveryStatusResponse.data, null, 2));
             }
             else {
                 console.log(`⚠️ Email delivery status check failed: ${deliveryStatusResponse.error}`);
+                result.errors.push(`Delivery status check failed: ${deliveryStatusResponse.error || 'Unknown error'}`);
             }
         }
         catch (deliveryError) {
             const deliveryErrorMessage = deliveryError instanceof Error ? deliveryError.message : String(deliveryError);
             console.log(`⚠️ Email delivery status check error: ${deliveryErrorMessage}`);
+            result.errors.push(`Delivery status check exception: ${deliveryErrorMessage}`);
         }
         console.log(`🎉 Email sync completed successfully!`);
         console.log(`📊 Results: Email sync activities completed successfully`);
         if (result.analysisResult?.success) {
             console.log(`🤖 AI Analysis: ${result.analysisResult.emailCount} emails processed, ${result.analysisResult.analysisCount} analyzed (Command: ${result.analysisResult.commandId})`);
         }
-        // Update cron status to indicate successful completion
+        // ✅ FIXED: Show warnings if there were non-critical errors
+        if (result.errors.length > 0) {
+            console.log(`⚠️ Workflow completed with ${result.errors.length} non-critical errors:`);
+            result.errors.forEach((error, index) => {
+                console.log(`   ${index + 1}. ${error}`);
+            });
+        }
+        // ✅ FIXED: Always update cron status to COMPLETED even if there were non-critical errors
         if (siteId) {
             await saveCronStatusActivity({
                 siteId,
@@ -213,7 +238,9 @@ async function syncEmailsWorkflow(options) {
                 activityName: 'syncEmailsWorkflow',
                 status: 'COMPLETED',
                 lastRun: new Date().toISOString(),
-                nextRun: result.nextSyncRecommended
+                nextRun: result.nextSyncRecommended,
+                // ✅ FIXED: Include error summary if there were non-critical errors
+                errorMessage: result.errors.length > 0 ? `${result.errors.length} non-critical errors occurred` : undefined
             });
         }
         // Log successful completion
@@ -229,27 +256,39 @@ async function syncEmailsWorkflow(options) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Email sync failed: ${errorMessage}`);
-        // Update cron status to indicate failure
+        // ✅ FIXED: Always update cron status to FAILED in the catch block
         if (siteId) {
-            await saveCronStatusActivity({
-                siteId,
+            try {
+                await saveCronStatusActivity({
+                    siteId,
+                    workflowId,
+                    scheduleId: `email-sync-${siteId}`,
+                    activityName: 'syncEmailsWorkflow',
+                    status: 'FAILED',
+                    lastRun: new Date().toISOString(),
+                    errorMessage: errorMessage,
+                    retryCount: 1
+                });
+            }
+            catch (statusError) {
+                console.error(`❌ Failed to update cron status to FAILED: ${statusError}`);
+                // Even if updating status fails, continue with other cleanup
+            }
+        }
+        // ✅ FIXED: Always log workflow execution failure
+        try {
+            await logWorkflowExecutionActivity({
                 workflowId,
-                scheduleId: `email-sync-${siteId}`,
-                activityName: 'syncEmailsWorkflow',
+                workflowType: 'syncEmailsWorkflow',
                 status: 'FAILED',
-                lastRun: new Date().toISOString(),
-                errorMessage: errorMessage,
-                retryCount: 1
+                input: options,
+                error: errorMessage,
             });
         }
-        // Log workflow execution failure
-        await logWorkflowExecutionActivity({
-            workflowId,
-            workflowType: 'syncEmailsWorkflow',
-            status: 'FAILED',
-            input: options,
-            error: errorMessage,
-        });
+        catch (logError) {
+            console.error(`❌ Failed to log workflow execution failure: ${logError}`);
+            // Continue even if logging fails
+        }
         throw error;
     }
 }

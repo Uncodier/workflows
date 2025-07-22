@@ -5,7 +5,7 @@ const workflow_1 = require("@temporalio/workflow");
 const leadResearchWorkflow_1 = require("./leadResearchWorkflow");
 const leadInvalidationWorkflow_1 = require("./leadInvalidationWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, sendEmailFromAgentActivity, sendWhatsAppFromAgentActivity, updateConversationStatusAfterFollowUpActivity, validateMessageAndConversationActivity, updateMessageStatusToSentActivity, updateTaskStatusToCompletedActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, sendEmailFromAgentActivity, sendWhatsAppFromAgentActivity, updateConversationStatusAfterFollowUpActivity, validateMessageAndConversationActivity, updateMessageStatusToSentActivity, updateTaskStatusToCompletedActivity, cleanupFailedFollowUpActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
     retry: {
         maximumAttempts: 3,
@@ -442,6 +442,35 @@ async function leadFollowUpWorkflow(options) {
                         const errorMsg = `Failed to send follow-up email: ${emailResult.messageId}`;
                         console.error(`⚠️ ${errorMsg}`);
                         errors.push(errorMsg);
+                        // Execute cleanup when email delivery fails
+                        console.log(`🧹 Email delivery failed, executing cleanup...`);
+                        try {
+                            const cleanupResult = await cleanupFailedFollowUpActivity({
+                                lead_id: lead_id,
+                                site_id: site_id,
+                                conversation_id: validationResult?.conversation_id,
+                                message_id: validationResult?.message_id,
+                                failure_reason: `email_delivery_failed: ${emailResult.messageId}`,
+                                delivery_channel: 'email',
+                                email: email
+                            });
+                            if (cleanupResult.success) {
+                                console.log(`✅ Cleanup completed after email failure:`);
+                                console.log(`   - Conversation deleted: ${cleanupResult.conversation_deleted}`);
+                                console.log(`   - Message deleted: ${cleanupResult.message_deleted}`);
+                                console.log(`   - Task deleted: ${cleanupResult.task_deleted}`);
+                                console.log(`   - Lead reset to 'new': ${cleanupResult.lead_reset_to_new}`);
+                            }
+                            else {
+                                console.error(`⚠️ Cleanup failed after email failure: ${cleanupResult.error}`);
+                                errors.push(`Cleanup failed: ${cleanupResult.error}`);
+                            }
+                        }
+                        catch (cleanupError) {
+                            const cleanupErrorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+                            console.error(`⚠️ Exception during cleanup after email failure: ${cleanupErrorMessage}`);
+                            errors.push(`Cleanup exception: ${cleanupErrorMessage}`);
+                        }
                     }
                 }
                 // Send WhatsApp if available
@@ -523,6 +552,35 @@ async function leadFollowUpWorkflow(options) {
                             console.error(`⚠️ Exception during lead invalidation: ${invalidationErrorMessage}`);
                             errors.push(`Lead invalidation exception: ${invalidationErrorMessage}`);
                         }
+                        // Execute cleanup when WhatsApp delivery fails
+                        console.log(`🧹 WhatsApp delivery failed, executing cleanup...`);
+                        try {
+                            const cleanupResult = await cleanupFailedFollowUpActivity({
+                                lead_id: lead_id,
+                                site_id: site_id,
+                                conversation_id: validationResult?.conversation_id,
+                                message_id: validationResult?.message_id,
+                                failure_reason: `whatsapp_delivery_failed: ${whatsappErrorMessage}`,
+                                delivery_channel: 'whatsapp',
+                                phone_number: formattedPhone
+                            });
+                            if (cleanupResult.success) {
+                                console.log(`✅ Cleanup completed after WhatsApp failure:`);
+                                console.log(`   - Conversation deleted: ${cleanupResult.conversation_deleted}`);
+                                console.log(`   - Message deleted: ${cleanupResult.message_deleted}`);
+                                console.log(`   - Task deleted: ${cleanupResult.task_deleted}`);
+                                console.log(`   - Lead reset to 'new': ${cleanupResult.lead_reset_to_new}`);
+                            }
+                            else {
+                                console.error(`⚠️ Cleanup failed after WhatsApp failure: ${cleanupResult.error}`);
+                                errors.push(`Cleanup failed: ${cleanupResult.error}`);
+                            }
+                        }
+                        catch (cleanupError) {
+                            const cleanupErrorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+                            console.error(`⚠️ Exception during cleanup after WhatsApp failure: ${cleanupErrorMessage}`);
+                            errors.push(`Cleanup exception: ${cleanupErrorMessage}`);
+                        }
                     }
                 }
                 // Log results
@@ -541,6 +599,36 @@ async function leadFollowUpWorkflow(options) {
                     else {
                         console.log(`⚠️ Messages available but delivery failed`);
                         errors.push('Messages available but delivery failed');
+                        // Execute cleanup when messages are available but delivery failed
+                        console.log(`🧹 Message delivery failed (both channels), executing cleanup...`);
+                        try {
+                            const cleanupResult = await cleanupFailedFollowUpActivity({
+                                lead_id: lead_id,
+                                site_id: site_id,
+                                conversation_id: validationResult?.conversation_id,
+                                message_id: validationResult?.message_id,
+                                failure_reason: 'all_message_delivery_failed',
+                                delivery_channel: emailMessage ? 'email' : 'whatsapp',
+                                email: email,
+                                phone_number: phone
+                            });
+                            if (cleanupResult.success) {
+                                console.log(`✅ Cleanup completed after total delivery failure:`);
+                                console.log(`   - Conversation deleted: ${cleanupResult.conversation_deleted}`);
+                                console.log(`   - Message deleted: ${cleanupResult.message_deleted}`);
+                                console.log(`   - Task deleted: ${cleanupResult.task_deleted}`);
+                                console.log(`   - Lead reset to 'new': ${cleanupResult.lead_reset_to_new}`);
+                            }
+                            else {
+                                console.error(`⚠️ Cleanup failed after total delivery failure: ${cleanupResult.error}`);
+                                errors.push(`Cleanup failed: ${cleanupResult.error}`);
+                            }
+                        }
+                        catch (cleanupError) {
+                            const cleanupErrorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+                            console.error(`⚠️ Exception during cleanup after total delivery failure: ${cleanupErrorMessage}`);
+                            errors.push(`Cleanup exception: ${cleanupErrorMessage}`);
+                        }
                     }
                 }
                 // Step 5.2: Mark first_contact task as completed after successful message delivery

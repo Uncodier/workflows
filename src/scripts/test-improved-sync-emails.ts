@@ -135,7 +135,7 @@ async function runSingleTest(
   console.log(`   - Site ID: ${siteId}`);
   console.log(`   - Provider: ${provider}`);
 
-  let result: TestResult = {
+  const result: TestResult = {
     workflowId,
     started: false,
     completed: false,

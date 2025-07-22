@@ -8,6 +8,7 @@ exports.saveCronStatusActivity = saveCronStatusActivity;
 exports.batchSaveCronStatusActivity = batchSaveCronStatusActivity;
 exports.getCronStatusActivity = getCronStatusActivity;
 exports.shouldRunWorkflowActivity = shouldRunWorkflowActivity;
+exports.cleanStuckRunningStatusActivity = cleanStuckRunningStatusActivity;
 const services_1 = require("../services");
 /**
  * Save or update a single cron status record
@@ -146,6 +147,55 @@ async function shouldRunWorkflowActivity(activityName, siteId, minHoursBetweenRu
             shouldRun: true,
             reason: 'Error checking status - defaulting to run'
         };
+    }
+}
+/**
+ * Clean stuck RUNNING cron status records automatically
+ * This helps prevent the workflow manager from getting confused
+ * about what workflows are actually running
+ */
+async function cleanStuckRunningStatusActivity(hoursThreshold = 6) {
+    console.log(`🧹 Auto-cleaning stuck RUNNING cron status records older than ${hoursThreshold} hours...`);
+    const errors = [];
+    let cleaned = 0;
+    try {
+        const supabaseService = (0, services_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available for cleanup');
+            return { cleaned: 0, errors: ['Database not available'] };
+        }
+        // Find stuck RUNNING records
+        const stuckRecords = await supabaseService.fetchStuckCronStatus(hoursThreshold);
+        if (!stuckRecords || stuckRecords.length === 0) {
+            console.log('✅ No stuck RUNNING records found');
+            return { cleaned: 0, errors: [] };
+        }
+        console.log(`🔧 Found ${stuckRecords.length} stuck records to clean up`);
+        // Reset each stuck record to FAILED
+        for (const record of stuckRecords) {
+            try {
+                const updatedAt = new Date(record.updated_at);
+                const hoursStuck = (Date.now() - updatedAt.getTime()) / (1000 * 60 * 60);
+                const errorMessage = `Auto-reset from stuck RUNNING state after ${hoursStuck.toFixed(1)}h by preventive cleanup`;
+                await supabaseService.resetCronStatusToFailed(record.id, errorMessage);
+                console.log(`✅ Auto-cleaned stuck ${record.activity_name} for site ${record.site_id?.substring(0, 8)}...`);
+                cleaned++;
+            }
+            catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error(`❌ Failed to clean record ${record.id}: ${errorMessage}`);
+                errors.push(`Failed to clean ${record.activity_name}: ${errorMessage}`);
+            }
+        }
+        console.log(`🎉 Auto-cleanup completed: ${cleaned} records cleaned, ${errors.length} errors`);
+        return { cleaned, errors };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Error in cleanStuckRunningStatusActivity: ${errorMessage}`);
+        errors.push(`Cleanup activity error: ${errorMessage}`);
+        return { cleaned, errors };
     }
 }
 /**

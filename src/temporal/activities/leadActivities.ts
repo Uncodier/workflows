@@ -2208,7 +2208,7 @@ export async function cleanupFailedFollowUpActivity(request: {
     let messageDeleted = false;
     let taskDeleted = false;
     let leadResetToNew = false;
-    let cleanupSummary = {
+    const cleanupSummary = {
       conversations_found: 0,
       messages_in_conversation: 0,
       tasks_found: 0,
