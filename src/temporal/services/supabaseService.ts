@@ -777,6 +777,87 @@ export class SupabaseService {
       return { hasAnalysis: false, count: 0 };
     }
   }
+
+  /**
+   * Fetch stuck RUNNING cron status records (older than specified hours)
+   */
+  async fetchStuckCronStatus(hoursThreshold: number = 2): Promise<any[]> {
+    const isConnected = await this.getConnectionStatus();
+    if (!isConnected) {
+      throw new Error('Database not connected');
+    }
+
+    console.log(`🔍 Fetching stuck RUNNING cron status records older than ${hoursThreshold} hours...`);
+    const thresholdTime = new Date(Date.now() - hoursThreshold * 60 * 60 * 1000).toISOString();
+    
+    const { data, error } = await this.client
+      .from('cron_status')
+      .select('*')
+      .eq('status', 'RUNNING')
+      .lt('updated_at', thresholdTime)
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Error fetching stuck cron status records:', error);
+      throw new Error(`Failed to fetch stuck cron status: ${error.message}`);
+    }
+
+    console.log(`✅ Found ${data?.length || 0} stuck RUNNING records`);
+    return data || [];
+  }
+
+  /**
+   * Fetch all RUNNING cron status records
+   */
+  async fetchAllRunningCronStatus(): Promise<any[]> {
+    const isConnected = await this.getConnectionStatus();
+    if (!isConnected) {
+      throw new Error('Database not connected');
+    }
+
+    console.log('🔍 Fetching all RUNNING cron status records...');
+    
+    const { data, error } = await this.client
+      .from('cron_status')
+      .select('*')
+      .eq('status', 'RUNNING')
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Error fetching running cron status records:', error);
+      throw new Error(`Failed to fetch running cron status: ${error.message}`);
+    }
+
+    console.log(`✅ Found ${data?.length || 0} RUNNING records`);
+    return data || [];
+  }
+
+  /**
+   * Reset a cron status record to FAILED with error message
+   */
+  async resetCronStatusToFailed(recordId: string, errorMessage: string): Promise<void> {
+    if (!this.isConnected) {
+      throw new Error('Database not connected');
+    }
+
+    console.log(`📝 Resetting cron status record ${recordId} to FAILED...`);
+    
+    const { error } = await this.client
+      .from('cron_status')
+      .update({
+        status: 'FAILED',
+        error_message: errorMessage,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', recordId);
+
+    if (error) {
+      console.error('❌ Error resetting cron status:', error);
+      throw new Error(`Failed to reset cron status: ${error.message}`);
+    }
+
+    console.log('✅ Successfully reset cron status record to FAILED');
+  }
 }
 
 // Singleton instance

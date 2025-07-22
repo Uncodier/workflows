@@ -7,7 +7,8 @@ const {
   designPlan, 
   sendPlan, 
   sendPriorityMail, 
-  scheduleActivities
+  scheduleActivities,
+  cleanStuckRunningStatusActivity, // ✅ ADDED: Activity to clean stuck RUNNING records
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: '2 minutes',
 });
@@ -42,6 +43,9 @@ const {
 /**
  * Daily Operations Workflow
  * Executes all daily operational activities when triggered by activityPrioritizationEngine
+ * 
+ * INCLUDES PREVENTIVE MAINTENANCE:
+ * - Cleans stuck RUNNING cron status records before operations
  */
 export async function dailyOperationsWorkflow(
   options: { businessHoursAnalysis?: any } = {}
@@ -52,10 +56,12 @@ export async function dailyOperationsWorkflow(
   priorityMailsSent: number;
   activitiesScheduled: number;
   dailyStandUpsExecuted: number;
+  stuckRecordsCleaned: number; // ✅ ADDED: Track cleaned records
   executionTime: string;
 }> {
   console.log('⚙️ Starting daily operations workflow...');
   const startTime = new Date();
+  let stuckRecordsCleaned = 0; // ✅ ADDED: Initialize counter
 
   // Extract business hours analysis
   const { businessHoursAnalysis } = options;
@@ -73,6 +79,29 @@ export async function dailyOperationsWorkflow(
   }
 
   try {
+    // ✅ ADDED: Step 0: Preventive maintenance - Clean stuck RUNNING records
+    console.log('🧹 Step 0: Preventive maintenance - cleaning stuck RUNNING cron status records...');
+    try {
+      const cleanupResult = await cleanStuckRunningStatusActivity(6); // Clean records older than 6 hours
+      stuckRecordsCleaned = cleanupResult.cleaned;
+      
+      if (stuckRecordsCleaned > 0) {
+        console.log(`✅ Preventive maintenance completed: ${stuckRecordsCleaned} stuck records cleaned`);
+      } else {
+        console.log('✅ Preventive maintenance completed: No stuck records found');
+      }
+      
+      if (cleanupResult.errors.length > 0) {
+        console.log(`⚠️ Cleanup had ${cleanupResult.errors.length} errors:`);
+        cleanupResult.errors.forEach((error, index) => {
+          console.log(`   ${index + 1}. ${error}`);
+        });
+      }
+    } catch (cleanupError) {
+      console.error('⚠️ Preventive maintenance failed, continuing with operations:', cleanupError);
+      // Don't fail the entire workflow for cleanup errors
+    }
+
     // Step 1: Get context
     console.log('🔍 Step 1: Getting context...');
     const contextResult = await getContext();
@@ -144,6 +173,7 @@ export async function dailyOperationsWorkflow(
 
     console.log('🎉 Daily operations workflow completed successfully');
     console.log(`   Total execution time: ${executionTime}`);
+    console.log(`   Stuck records cleaned: ${stuckRecordsCleaned}`); // ✅ ADDED: Log cleanup results
     console.log('   Strategy: Operational execution under prioritization control');
     
     return {
@@ -153,6 +183,7 @@ export async function dailyOperationsWorkflow(
       priorityMailsSent: priorityMailResult.count,
       activitiesScheduled: scheduleResult.apiCalls,
       dailyStandUpsExecuted: dailyStandUpResult.scheduled,
+      stuckRecordsCleaned, // ✅ ADDED: Include in result
       executionTime
     };
 

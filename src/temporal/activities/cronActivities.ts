@@ -190,6 +190,70 @@ export async function shouldRunWorkflowActivity(
 }
 
 /**
+ * Clean stuck RUNNING cron status records automatically
+ * This helps prevent the workflow manager from getting confused
+ * about what workflows are actually running
+ */
+export async function cleanStuckRunningStatusActivity(
+  hoursThreshold: number = 6
+): Promise<{ cleaned: number; errors: string[] }> {
+  console.log(`🧹 Auto-cleaning stuck RUNNING cron status records older than ${hoursThreshold} hours...`);
+  
+  const errors: string[] = [];
+  let cleaned = 0;
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    const isConnected = await supabaseService.getConnectionStatus();
+    if (!isConnected) {
+      console.log('⚠️  Database not available for cleanup');
+      return { cleaned: 0, errors: ['Database not available'] };
+    }
+
+    // Find stuck RUNNING records
+    const stuckRecords = await supabaseService.fetchStuckCronStatus(hoursThreshold);
+    
+    if (!stuckRecords || stuckRecords.length === 0) {
+      console.log('✅ No stuck RUNNING records found');
+      return { cleaned: 0, errors: [] };
+    }
+
+    console.log(`🔧 Found ${stuckRecords.length} stuck records to clean up`);
+
+    // Reset each stuck record to FAILED
+    for (const record of stuckRecords) {
+      try {
+        const updatedAt = new Date(record.updated_at);
+        const hoursStuck = (Date.now() - updatedAt.getTime()) / (1000 * 60 * 60);
+        
+        const errorMessage = `Auto-reset from stuck RUNNING state after ${hoursStuck.toFixed(1)}h by preventive cleanup`;
+        await supabaseService.resetCronStatusToFailed(record.id, errorMessage);
+        
+        console.log(`✅ Auto-cleaned stuck ${record.activity_name} for site ${record.site_id?.substring(0, 8)}...`);
+        cleaned++;
+        
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Failed to clean record ${record.id}: ${errorMessage}`);
+        errors.push(`Failed to clean ${record.activity_name}: ${errorMessage}`);
+      }
+    }
+
+    console.log(`🎉 Auto-cleanup completed: ${cleaned} records cleaned, ${errors.length} errors`);
+    
+    return { cleaned, errors };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Error in cleanStuckRunningStatusActivity: ${errorMessage}`);
+    errors.push(`Cleanup activity error: ${errorMessage}`);
+    
+    return { cleaned, errors };
+  }
+}
+
+/**
  * Log cron status update to console (fallback method)
  */
 function logCronStatusUpdate(update: CronStatusUpdate): void {

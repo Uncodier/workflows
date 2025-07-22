@@ -233,7 +233,7 @@ export async function validateCommunicationChannelsActivity(
  * Finds leads with:
  * - More than X hours old (default 48)
  * - Status = 'new'
- * - No tasks in 'awareness' stage
+ * - No active tasks in 'awareness' stage (pending tasks are allowed)
  */
 export async function getProspectionLeadsActivity(
   options: DailyProspectionOptions
@@ -338,17 +338,30 @@ export async function getProspectionLeadsActivity(
     
     console.log(`📋 Found ${awarenessTasksData?.length || 0} existing awareness tasks for candidate leads`);
     
-    // Create a set of lead IDs that already have awareness tasks
-    const leadsWithAwarenessTasks = new Set(
-      (awarenessTasksData || []).map(task => task.lead_id)
+    // Filter out tasks that are in 'pending' status - those leads are still eligible
+    const activeTasks = (awarenessTasksData || []).filter(task => task.status !== 'pending');
+    const pendingTasks = (awarenessTasksData || []).filter(task => task.status === 'pending');
+    
+    console.log(`📋 Task status breakdown:`);
+    console.log(`   - Total awareness tasks: ${awarenessTasksData?.length || 0}`);
+    console.log(`   - Active tasks (excluding leads): ${activeTasks.length}`);
+    console.log(`   - Pending tasks (leads still eligible): ${pendingTasks.length}`);
+    
+    if (pendingTasks.length > 0) {
+      console.log(`✅ Note: ${pendingTasks.length} leads with pending awareness tasks will remain eligible for contact`);
+    }
+    
+    // Create a set of lead IDs that have NON-PENDING awareness tasks
+    const leadsWithActiveAwarenessTasks = new Set(
+      activeTasks.map(task => task.lead_id)
     );
     
-    // Filter out leads that already have awareness tasks
+    // Filter out leads that have active (non-pending) awareness tasks
     const leadsWithoutAwarenessTasks = candidateLeads.filter(
-      lead => !leadsWithAwarenessTasks.has(lead.id)
+      lead => !leadsWithActiveAwarenessTasks.has(lead.id)
     );
     
-    console.log(`📋 After awareness task filtering: ${leadsWithoutAwarenessTasks.length} leads available`);
+    console.log(`📋 After active awareness task filtering: ${leadsWithoutAwarenessTasks.length} leads available (excluded leads with non-pending tasks)`);
     
     // 🔒 ASSIGNEE_ID VALIDATION: Filter leads by assignee_id and company rules
     console.log(`🔒 Applying assignee_id validation rules...`);
@@ -388,7 +401,7 @@ export async function getProspectionLeadsActivity(
     const excludedCompanies: string[] = [];
     const excludedCompanyLeadsCount = { total: 0, withAssignee: 0 };
     
-    for (const [companyKey, companyLeads] of leadsGroupedByCompany) {
+    leadsGroupedByCompany.forEach((companyLeads, companyKey) => {
       const leadsWithAssignee = companyLeads.filter(lead => lead.assignee_id);
       
       if (leadsWithAssignee.length > 0) {
@@ -412,7 +425,7 @@ export async function getProspectionLeadsActivity(
         
         console.log(`✅ Including company "${companyName}" (${companyLeads.length} leads) - no assignee_id found`);
       }
-    }
+    });
     
     // Step 3: Filter individual leads without company - exclude those with assignee_id
     const validIndividualLeads = leadsWithoutCompany.filter(lead => !lead.assignee_id);
@@ -437,7 +450,7 @@ export async function getProspectionLeadsActivity(
     
     console.log(`✅ Successfully identified ${prospectionLeads.length} leads for prospection`);
     console.log(`   - Total candidates: ${candidateLeads.length}`);
-    console.log(`   - With awareness tasks: ${leadsWithAwarenessTasks.size}`);
+    console.log(`   - With active awareness tasks: ${leadsWithActiveAwarenessTasks.size}`);
     console.log(`   - Excluded by assignee_id rules: ${leadsWithoutAwarenessTasks.length - prospectionLeads.length}`);
     console.log(`   - Available for prospection: ${prospectionLeads.length}`);
     
