@@ -38,14 +38,24 @@ const {
 
 /**
  * Daily Operations Monitoring Workflow
- * Reviews status of existing workflows and tasks to determine if issues need attention
  * 
- * RESPONSIBILITIES:
- * - Monitor health of existing workflows
- * - Check for stuck or failed processes  
- * - Review task completion status
- * - Determine if human intervention is needed
- * - Send alerts/notifications only when problems are detected
+ * ⚠️  IMPORTANT: THIS IS A MONITORING-ONLY WORKFLOW
+ * ⚠️  IT DOES NOT CREATE TASKS, LEADS, OR EXECUTE OTHER WORKFLOWS
+ * ⚠️  IT ONLY MONITORS THE HEALTH OF EXISTING WORKFLOWS AND SENDS ALERTS
+ * 
+ * RESPONSIBILITIES (MONITORING ONLY):
+ * ✅ Monitor health of existing workflows
+ * ✅ Check for stuck or failed processes  
+ * ✅ Review task completion status
+ * ✅ Determine if human intervention is needed
+ * ✅ Send alerts/notifications ONLY when problems are detected
+ * ✅ Clean up stuck status records (maintenance)
+ * 
+ * WHAT IT DOES NOT DO:
+ * ❌ Create tasks (tasks are created by dailyProspectionWorkflow)
+ * ❌ Create leads (leads are created by leadGenerationWorkflow)  
+ * ❌ Execute other workflows (it only monitors them)
+ * ❌ Schedule new workflows (it only checks existing ones)
  */
 export async function dailyOperationsWorkflow(
   options: { businessHoursAnalysis?: any } = {}
@@ -60,6 +70,7 @@ export async function dailyOperationsWorkflow(
 }> {
   console.log('👁️ Starting daily operations monitoring workflow...');
   console.log('🔍 MONITORING MODE: Will check status of existing workflows/tasks only');
+  console.log('⚠️ THIS WORKFLOW DOES NOT CREATE TASKS - tasks are created by dailyProspectionWorkflow');
   const startTime = new Date();
   let stuckRecordsCleaned = 0;
 
