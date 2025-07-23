@@ -74,6 +74,8 @@ export interface CreateAwarenessTaskResult {
   task?: any;
   taskId?: string;
   error?: string;
+  skipped?: boolean;
+  reason?: string;
 }
 
 /**
@@ -493,6 +495,95 @@ export async function getProspectionLeadsActivity(
 }
 
 /**
+ * Activity to check if lead has any existing tasks (awareness or later stages)
+ */
+export async function checkLeadExistingTasksActivity(
+  options: { lead_id: string; site_id: string }
+): Promise<{
+  success: boolean;
+  hasExistingTasks: boolean;
+  existingTasks: any[];
+  error?: string;
+}> {
+  const { lead_id, site_id } = options;
+  
+  console.log(`🔍 Checking existing tasks for lead: ${lead_id}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    const isConnected = await supabaseService.getConnectionStatus();
+    if (!isConnected) {
+      console.log('⚠️ Database not available, cannot check existing tasks');
+      return {
+        success: false,
+        hasExistingTasks: false,
+        existingTasks: [],
+        error: 'Database not available'
+      };
+    }
+
+    // Import supabase service role client (bypasses RLS)
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    // Check for any existing tasks (awareness or later stages)
+    const { data: existingTasks, error: checkError } = await supabaseServiceRole
+      .from('tasks')
+      .select('id, status, stage, title, created_at')
+      .eq('lead_id', lead_id)
+      .eq('site_id', site_id)
+      .in('stage', ['awareness', 'consideration', 'decision', 'purchase', 'retention', 'referral'])
+      .order('created_at', { ascending: false });
+    
+    if (checkError) {
+      logger.error('❌ Error checking existing tasks', {
+        error: checkError.message,
+        lead_id,
+        site_id
+      });
+      return {
+        success: false,
+        hasExistingTasks: false,
+        existingTasks: [],
+        error: checkError.message
+      };
+    }
+    
+    const hasExistingTasks = existingTasks && existingTasks.length > 0;
+    
+    if (hasExistingTasks) {
+      console.log(`⚠️ Lead ${lead_id} already has ${existingTasks.length} task(s):`);
+      existingTasks.forEach((task, index) => {
+        console.log(`   ${index + 1}. ${task.title} (${task.stage}/${task.status}) - Created: ${task.created_at}`);
+      });
+    } else {
+      console.log(`✅ Lead ${lead_id} has no existing tasks - eligible for new awareness task`);
+    }
+    
+    return {
+      success: true,
+      hasExistingTasks,
+      existingTasks: existingTasks || []
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error('❌ Exception checking existing tasks', {
+      error: errorMessage,
+      lead_id,
+      site_id
+    });
+    
+    return {
+      success: false,
+      hasExistingTasks: false,
+      existingTasks: [],
+      error: errorMessage
+    };
+  }
+}
+
+/**
  * Activity to create an awareness task for a lead
  */
 export async function createAwarenessTaskActivity(
@@ -542,16 +633,17 @@ export async function createAwarenessTaskActivity(
       };
     }
     
-    // Check if awareness task already exists
+    // Check if any tasks already exist (awareness or later stages)
     const { data: existingTasks, error: checkError } = await supabaseServiceRole
       .from('tasks')
-      .select('id, status, stage')
+      .select('id, status, stage, title, created_at')
       .eq('lead_id', lead_id)
       .eq('site_id', site_id)
-      .eq('stage', 'awareness');
+      .in('stage', ['awareness', 'consideration', 'decision', 'purchase', 'retention', 'referral'])
+      .order('created_at', { ascending: false });
     
     if (checkError) {
-      logger.error('❌ Error checking existing awareness tasks', {
+      logger.error('❌ Error checking existing tasks', {
         error: checkError.message,
         lead_id,
         site_id
@@ -563,12 +655,15 @@ export async function createAwarenessTaskActivity(
     }
     
     if (existingTasks && existingTasks.length > 0) {
-      const existingTask = existingTasks[0];
-      console.log(`⚠️ Awareness task already exists for lead ${lead_id}: ${existingTask.id} (${existingTask.status})`);
+      const mostRecentTask = existingTasks[0];
+      console.log(`⚠️ Lead ${lead_id} already has ${existingTasks.length} task(s). Most recent: ${mostRecentTask.title} (${mostRecentTask.stage}/${mostRecentTask.status})`);
+      console.log(`❌ Skipping task creation - lead already has tasks in the system`);
       return {
         success: true,
-        task: existingTask,
-        taskId: existingTask.id
+        task: mostRecentTask,
+        taskId: mostRecentTask.id,
+        skipped: true,
+        reason: `Lead already has ${existingTasks.length} existing task(s)`
       };
     }
 

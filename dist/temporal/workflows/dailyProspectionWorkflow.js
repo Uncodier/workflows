@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.dailyProspectionWorkflow = dailyProspectionWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 // Import specific daily prospection activities
-const { validateCommunicationChannelsActivity, getProspectionLeadsActivity, createAwarenessTaskActivity, updateLeadProspectionStatusActivity, sendLeadsToSalesAgentActivity, assignPriorityLeadsActivity, } = (0, workflow_1.proxyActivities)({
+const { validateCommunicationChannelsActivity, getProspectionLeadsActivity, checkLeadExistingTasksActivity, createAwarenessTaskActivity, updateLeadProspectionStatusActivity, sendLeadsToSalesAgentActivity, assignPriorityLeadsActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes', // Longer timeout for prospection processes
     retry: {
         maximumAttempts: 3,
@@ -405,33 +405,59 @@ async function dailyProspectionWorkflow(options) {
                 errors: []
             };
             try {
-                // Step 3a: Create awareness task for this lead
+                // Step 3a: Check if lead already has tasks before creating new one
                 if (createTasks) {
-                    console.log(`📝 Step 3a: Creating awareness task for lead: ${lead.name || lead.email}`);
-                    const createTaskResult = await createAwarenessTaskActivity({
+                    console.log(`🔍 Step 3a.1: Checking existing tasks for lead: ${lead.name || lead.email}`);
+                    const existingTasksCheck = await checkLeadExistingTasksActivity({
                         lead_id: lead.id,
-                        site_id: site_id,
-                        userId: options.userId || site.user_id,
-                        title: `Contacto inicial con ${lead.name || lead.email}`,
-                        description: `Tarea de prospección para establecer primer contacto con el lead ${lead.name || lead.email}`,
-                        scheduled_date: new Date().toISOString(),
-                        additionalData: {
-                            ...options.additionalData,
-                            workflowId: workflowId,
-                            prospectionReason: 'daily_prospection_workflow',
-                            leadAge: Math.floor((new Date().getTime() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24))
-                        }
+                        site_id: site_id
                     });
-                    if (createTaskResult.success) {
-                        prospectionResult.taskCreated = true;
-                        prospectionResult.taskId = createTaskResult.taskId;
-                        tasksCreated++;
-                        console.log(`✅ Successfully created awareness task ${createTaskResult.taskId} for ${lead.name || lead.email}`);
-                    }
-                    else {
-                        const errorMsg = `Failed to create awareness task for ${lead.name || lead.email}: ${createTaskResult.error}`;
+                    if (!existingTasksCheck.success) {
+                        const errorMsg = `Failed to check existing tasks for ${lead.name || lead.email}: ${existingTasksCheck.error}`;
                         console.error(`❌ ${errorMsg}`);
                         prospectionResult.errors.push(errorMsg);
+                    }
+                    else if (existingTasksCheck.hasExistingTasks) {
+                        // Lead already has tasks, skip creating new one
+                        console.log(`⚠️ Lead ${lead.name || lead.email} already has ${existingTasksCheck.existingTasks.length} existing task(s) - skipping task creation`);
+                        prospectionResult.taskCreated = false;
+                        prospectionResult.errors.push(`Skipped: Lead already has ${existingTasksCheck.existingTasks.length} existing task(s)`);
+                    }
+                    else {
+                        // Lead has no existing tasks, create awareness task
+                        console.log(`📝 Step 3a.2: Creating awareness task for lead: ${lead.name || lead.email} (no existing tasks found)`);
+                        const createTaskResult = await createAwarenessTaskActivity({
+                            lead_id: lead.id,
+                            site_id: site_id,
+                            userId: options.userId || site.user_id,
+                            title: `Contacto inicial con ${lead.name || lead.email}`,
+                            description: `Tarea de prospección para establecer primer contacto con el lead ${lead.name || lead.email}`,
+                            scheduled_date: new Date().toISOString(),
+                            additionalData: {
+                                ...options.additionalData,
+                                workflowId: workflowId,
+                                prospectionReason: 'daily_prospection_workflow',
+                                leadAge: Math.floor((new Date().getTime() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24))
+                            }
+                        });
+                        if (createTaskResult.success) {
+                            if (createTaskResult.skipped) {
+                                console.log(`⚠️ Task creation was skipped for ${lead.name || lead.email}: ${createTaskResult.reason}`);
+                                prospectionResult.taskCreated = false;
+                                prospectionResult.errors.push(`Skipped: ${createTaskResult.reason}`);
+                            }
+                            else {
+                                prospectionResult.taskCreated = true;
+                                prospectionResult.taskId = createTaskResult.taskId;
+                                tasksCreated++;
+                                console.log(`✅ Successfully created awareness task ${createTaskResult.taskId} for ${lead.name || lead.email}`);
+                            }
+                        }
+                        else {
+                            const errorMsg = `Failed to create awareness task for ${lead.name || lead.email}: ${createTaskResult.error}`;
+                            console.error(`❌ ${errorMsg}`);
+                            prospectionResult.errors.push(errorMsg);
+                        }
                     }
                 }
                 else {

@@ -433,8 +433,18 @@ async function saveLeadFollowUpLogsActivity(request) {
             };
         }
         console.log(`✅ Lead follow-up logs saved successfully`);
+        // Extract message_ids and conversation_ids from response data if available
+        const responseData = response.data || {};
+        const message_ids = responseData.message_ids || [];
+        const conversation_ids = responseData.conversation_ids || [];
+        console.log(`📋 Logs response data:`);
+        console.log(`   - Message IDs: ${message_ids.length > 0 ? message_ids.join(', ') : 'None'}`);
+        console.log(`   - Conversation IDs: ${conversation_ids.length > 0 ? conversation_ids.join(', ') : 'None'}`);
         return {
-            success: true
+            success: true,
+            message_ids,
+            conversation_ids,
+            data: responseData
         };
     }
     catch (error) {

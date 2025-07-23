@@ -353,54 +353,124 @@ async function leadFollowUpWorkflow(options) {
         console.log(`✅ Follow-up messages found - proceeding with message sending workflow`);
         console.log(`📧 Email message: ${!!emailMessage}, 📱 WhatsApp message: ${!!whatsappMessage}`);
         // Step 4: Save lead follow-up logs to database
+        let logsResult = null;
         if (response) {
             console.log(`📝 Step 4: Saving lead follow-up logs to database...`);
-            const saveLogsResult = await saveLeadFollowUpLogsActivity({
+            logsResult = await saveLeadFollowUpLogsActivity({
                 siteId: site_id,
                 leadId: lead_id,
                 userId: options.userId || site.user_id,
                 data: response
             });
-            if (!saveLogsResult.success) {
-                const errorMsg = `Failed to save lead follow-up logs: ${saveLogsResult.error}`;
+            if (!logsResult.success) {
+                const errorMsg = `Failed to save lead follow-up logs: ${logsResult.error}`;
                 console.error(`⚠️ ${errorMsg}`);
                 errors.push(errorMsg);
                 // Note: We don't throw here as the main operation was successful
             }
             else {
                 console.log(`✅ Lead follow-up logs saved successfully`);
+                // Verify that logs returned the required message and conversation IDs
+                if (!logsResult.message_ids || logsResult.message_ids.length === 0) {
+                    const errorMsg = `Logs endpoint did not return message IDs - cannot proceed with follow-up delivery`;
+                    console.error(`❌ ${errorMsg}`);
+                    errors.push(errorMsg);
+                    throw new Error(errorMsg);
+                }
+                console.log(`📋 Logs returned required IDs for follow-up delivery:`);
+                console.log(`   - Message IDs: ${logsResult.message_ids.join(', ')}`);
+                console.log(`   - Conversation IDs: ${logsResult.conversation_ids?.join(', ') || 'None'}`);
+                console.log(`✅ Proceeding with 2-hour timer and message delivery`);
             }
         }
-        // Step 4.5: Validate message and conversation existence before proceeding
-        console.log(`🔍 Step 4.5: Validating message and conversation existence...`);
-        validationResult = await validateMessageAndConversationActivity({
-            lead_id: lead_id,
-            site_id: site_id,
-            response_data: response,
-            additional_data: options.additionalData,
-            message_id: options.additionalData?.message_id
-        });
-        if (!validationResult.success) {
-            const errorMsg = `Validation failed: ${validationResult.error}`;
-            console.error(`❌ ${errorMsg}`);
-            errors.push(errorMsg);
-            console.log(`⚠️ Proceeding with follow-up despite validation issues`);
-        }
-        else {
-            console.log(`✅ Validation successful - entities exist and are ready`);
-            if (validationResult.conversation_id) {
-                console.log(`💬 Conversation ${validationResult.conversation_id} validated`);
-            }
-            if (validationResult.message_id) {
-                console.log(`📝 Message ${validationResult.message_id} validated`);
-            }
-        }
+        // Note: We trust the logs endpoint - if it returns message_ids, we proceed with delivery
         // Step 5: Wait 2 hours before sending follow-up message
         if (response && response.messages && response.lead) {
             console.log(`⏰ Step 5: Waiting 2 hours before sending follow-up message...`);
             // Wait 2 hours before sending the message
             await (0, workflow_1.sleep)('2 hours');
-            console.log(`📤 Step 5.1: Now sending follow-up message based on communication channel...`);
+            // Step 5.1: Final validation before sending - ensure messages still exist after the 2-hour wait
+            console.log(`🔍 Step 5.1: Performing final validation before message sending...`);
+            console.log(`📝 Validating message IDs from logs: ${logsResult?.message_ids?.join(', ') || 'None'}`);
+            validationResult = await validateMessageAndConversationActivity({
+                lead_id: lead_id,
+                site_id: site_id,
+                response_data: response,
+                additional_data: {
+                    ...options.additionalData,
+                    message_ids: logsResult?.message_ids,
+                    conversation_ids: logsResult?.conversation_ids,
+                    validate_before_send: true
+                }
+            });
+            if (!validationResult.success) {
+                const errorMsg = `Final validation failed - messages no longer exist: ${validationResult.error}`;
+                console.error(`❌ ${errorMsg}`);
+                errors.push(errorMsg);
+                // Execute cleanup since messages are gone
+                console.log(`🧹 Messages no longer exist after 2-hour wait, executing cleanup...`);
+                try {
+                    const cleanupResult = await cleanupFailedFollowUpActivity({
+                        lead_id: lead_id,
+                        site_id: site_id,
+                        conversation_id: logsResult?.conversation_ids?.[0],
+                        message_id: logsResult?.message_ids?.[0],
+                        failure_reason: 'messages_deleted_during_wait_period',
+                        delivery_channel: undefined
+                    });
+                    if (cleanupResult.success) {
+                        console.log(`✅ Cleanup completed after validation failure`);
+                    }
+                    else {
+                        console.error(`⚠️ Cleanup failed: ${cleanupResult.error}`);
+                        errors.push(`Cleanup failed: ${cleanupResult.error}`);
+                    }
+                }
+                catch (cleanupError) {
+                    const cleanupErrorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+                    console.error(`⚠️ Exception during cleanup: ${cleanupErrorMessage}`);
+                    errors.push(`Cleanup exception: ${cleanupErrorMessage}`);
+                }
+                // Early exit without sending messages
+                const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+                const result = {
+                    success: true,
+                    leadId: lead_id,
+                    siteId: site_id,
+                    siteName,
+                    siteUrl,
+                    followUpActions,
+                    nextSteps,
+                    data: response,
+                    messageSent: undefined,
+                    errors: [...errors, 'Messages no longer exist after wait period - delivery cancelled'],
+                    executionTime,
+                    completedAt: new Date().toISOString()
+                };
+                console.log(`⚠️ Lead follow-up workflow completed - messages were deleted during wait period`);
+                // Update cron status
+                await saveCronStatusActivity({
+                    siteId: site_id,
+                    workflowId,
+                    scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+                    activityName: 'leadFollowUpWorkflow',
+                    status: 'COMPLETED',
+                    lastRun: new Date().toISOString()
+                });
+                // Log completion
+                await logWorkflowExecutionActivity({
+                    workflowId,
+                    workflowType: 'leadFollowUpWorkflow',
+                    status: 'COMPLETED',
+                    input: options,
+                    output: result,
+                });
+                return result;
+            }
+            else {
+                console.log(`✅ Final validation successful - proceeding with message delivery`);
+            }
+            console.log(`📤 Step 5.2: Now sending follow-up message based on communication channel...`);
             try {
                 const responseData = response; // response is already the response data
                 const messages = responseData.messages || {};
@@ -631,9 +701,9 @@ async function leadFollowUpWorkflow(options) {
                         }
                     }
                 }
-                // Step 5.2: Mark first_contact task as completed after successful message delivery
+                // Step 5.3: Mark first_contact task as completed after successful message delivery
                 if (emailSent || whatsappSent) {
-                    console.log(`📝 Step 5.2: Marking first_contact task as completed after successful message delivery...`);
+                    console.log(`📝 Step 5.3: Marking first_contact task as completed after successful message delivery...`);
                     const taskUpdateResult = await updateTaskStatusToCompletedActivity({
                         lead_id: lead_id,
                         site_id: site_id,
@@ -667,9 +737,9 @@ async function leadFollowUpWorkflow(options) {
                 // Note: We don't throw here as the main operation was successful
             }
         }
-        // Step 5.5: Update message status to 'sent' after successful delivery
+        // Step 5.4: Update message status to 'sent' after successful delivery
         if (messageSent && messageSent.success) {
-            console.log(`📝 Step 5.5: Updating message status to 'sent'...`);
+            console.log(`📝 Step 5.4: Updating message status to 'sent'...`);
             const messageUpdateResult = await updateMessageStatusToSentActivity({
                 message_id: validationResult?.message_id,
                 conversation_id: validationResult?.conversation_id,
@@ -701,9 +771,9 @@ async function leadFollowUpWorkflow(options) {
         else {
             console.log(`⚠️ Skipping message status update - no successful delivery`);
         }
-        // Step 6: Activate conversation after successful follow-up
+        // Step 5.5: Activate conversation after successful follow-up
         if (messageSent && messageSent.success) {
-            console.log(`💬 Step 6: Activating conversation after successful lead follow-up...`);
+            console.log(`💬 Step 5.5: Activating conversation after successful lead follow-up...`);
             console.log(`🔍 Searching for conversation associated with lead ${lead_id}...`);
             const conversationUpdateResult = await updateConversationStatusAfterFollowUpActivity({
                 lead_id: lead_id,
