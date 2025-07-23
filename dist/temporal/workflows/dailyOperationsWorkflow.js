@@ -2,48 +2,46 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.dailyOperationsWorkflow = dailyOperationsWorkflow;
 const workflow_1 = require("@temporalio/workflow");
-// Configure activity options
-const { getContext, designPlan, sendPlan, sendPriorityMail, scheduleActivities, cleanStuckRunningStatusActivity, // ✅ ADDED: Activity to clean stuck RUNNING records
- } = (0, workflow_1.proxyActivities)({
+// Configure activity options for status checking and reporting
+const { getContext, sendPriorityMail, cleanStuckRunningStatusActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '2 minutes',
 });
-// Configure longer timeout for executing activities
-const { executeDailyStandUpWorkflowsActivity: executeDailyStandUp, } = (0, workflow_1.proxyActivities)({
-    startToCloseTimeout: '10 minutes',
+// Configure longer timeout for comprehensive status checks
+const { checkWorkflowsHealthActivity: checkWorkflowsHealth, } = (0, workflow_1.proxyActivities)({
+    startToCloseTimeout: '5 minutes',
     heartbeatTimeout: '1 minute',
     retry: {
         initialInterval: '1 minute',
-        maximumInterval: '5 minutes',
-        maximumAttempts: 3,
+        maximumInterval: '3 minutes',
+        maximumAttempts: 2,
     },
 });
 /**
- * Daily Operations Workflow
- * Executes all daily operational activities when triggered by activityPrioritizationEngine
+ * Daily Operations Monitoring Workflow
+ * Reviews status of existing workflows and tasks to determine if issues need attention
  *
- * INCLUDES PREVENTIVE MAINTENANCE:
- * - Cleans stuck RUNNING cron status records before operations
+ * RESPONSIBILITIES:
+ * - Monitor health of existing workflows
+ * - Check for stuck or failed processes
+ * - Review task completion status
+ * - Determine if human intervention is needed
+ * - Send alerts/notifications only when problems are detected
  */
 async function dailyOperationsWorkflow(options = {}) {
-    console.log('⚙️ Starting daily operations workflow...');
+    console.log('👁️ Starting daily operations monitoring workflow...');
+    console.log('🔍 MONITORING MODE: Will check status of existing workflows/tasks only');
     const startTime = new Date();
-    let stuckRecordsCleaned = 0; // ✅ ADDED: Initialize counter
+    let stuckRecordsCleaned = 0;
     // Extract business hours analysis
     const { businessHoursAnalysis } = options;
     if (businessHoursAnalysis) {
-        console.log('📊 Using business hours analysis from prioritization engine:');
+        console.log('📊 Using business hours analysis for monitoring scope:');
         console.log(`   - Sites open today: ${businessHoursAnalysis.sitesOpenToday}`);
-        console.log(`   - Should execute operations: ${businessHoursAnalysis.shouldExecuteOperations}`);
-        if (businessHoursAnalysis.openSites && businessHoursAnalysis.openSites.length > 0) {
-            console.log('   - Open sites:');
-            businessHoursAnalysis.openSites.forEach((site) => {
-                console.log(`     • Site ${site.siteId}: ${site.businessHours.open} - ${site.businessHours.close}`);
-            });
-        }
+        console.log(`   - Monitoring focused on active sites: ${businessHoursAnalysis.shouldExecuteOperations}`);
     }
     try {
-        // ✅ ADDED: Step 0: Preventive maintenance - Clean stuck RUNNING records
-        console.log('🧹 Step 0: Preventive maintenance - cleaning stuck RUNNING cron status records...');
+        // Step 1: Preventive maintenance - Clean stuck RUNNING records
+        console.log('🧹 Step 1: Preventive maintenance - cleaning stuck RUNNING cron status records...');
         try {
             const cleanupResult = await cleanStuckRunningStatusActivity(6); // Clean records older than 6 hours
             stuckRecordsCleaned = cleanupResult.cleaned;
@@ -61,85 +59,69 @@ async function dailyOperationsWorkflow(options = {}) {
             }
         }
         catch (cleanupError) {
-            console.error('⚠️ Preventive maintenance failed, continuing with operations:', cleanupError);
-            // Don't fail the entire workflow for cleanup errors
+            console.error('⚠️ Preventive maintenance failed, continuing with monitoring:', cleanupError);
         }
-        // Step 1: Get context
-        console.log('🔍 Step 1: Getting context...');
-        const contextResult = await getContext();
+        // Step 2: Get operational context
+        console.log('🔍 Step 2: Getting operational context...');
+        await getContext();
         console.log('✅ Context retrieved successfully');
-        // Step 2: Design plan
-        console.log('📋 Step 2: Designing plan...');
-        const planResult = await designPlan(contextResult.context);
-        console.log('✅ Plan designed successfully');
-        // Step 3: Send plan
-        console.log('📤 Step 3: Sending plan...');
-        const sendPlanResult = await sendPlan(planResult.plan);
-        console.log(`✅ Plan sent to ${sendPlanResult.recipients.length} recipients`);
-        // Step 4: Send priority mail
-        console.log('📬 Step 4: Sending priority mails...');
-        const priorityMailResult = await sendPriorityMail(planResult.activities);
-        console.log(`✅ Priority mails sent: ${priorityMailResult.count}`);
-        // Step 5: Schedule activities (API calls)
-        console.log('📅 Step 5: Scheduling activities...');
-        const scheduleResult = await scheduleActivities(planResult.activities);
-        console.log(`✅ Activities scheduled via ${scheduleResult.apiCalls} API calls`);
-        // Step 6: Execute daily stand up workflows for sites with active business hours
-        console.log('🌅 Step 6: Executing daily stand up workflows...');
-        let dailyStandUpResult;
-        try {
-            console.log('🔄 About to call executeDailyStandUpWorkflowsActivity...');
-            if (businessHoursAnalysis && businessHoursAnalysis.openSites.length > 0) {
-                console.log(`   Executing workflows for ${businessHoursAnalysis.openSites.length} sites with active business hours`);
-                console.log('   Respecting business hours scheduling');
-            }
-            else {
-                console.log('   No business hours analysis available - executing for all sites (fallback mode)');
-            }
-            // Execute the activity with business hours filtering
-            dailyStandUpResult = await executeDailyStandUp({
-                dryRun: false, // PRODUCTION: Actually execute workflows
-                testMode: false, // PRODUCTION: Full production mode
-                businessHoursAnalysis, // PASS business hours analysis for filtering
-            });
-            console.log('🎯 executeDailyStandUpWorkflowsActivity completed successfully');
-            console.log(`✅ Daily stand ups executed: ${dailyStandUpResult.scheduled} sites`);
-            console.log(`   Failed: ${dailyStandUpResult.failed}, Skipped: ${dailyStandUpResult.skipped}`);
-            if (dailyStandUpResult.testInfo) {
-                console.log(`   Mode: ${dailyStandUpResult.testInfo.mode}`);
-                console.log(`   Duration: ${dailyStandUpResult.testInfo.duration}`);
-            }
+        // Step 3: Comprehensive workflow health check
+        console.log('🏥 Step 3: Checking health of existing workflows and tasks...');
+        const healthCheck = await checkWorkflowsHealth({
+            businessHoursAnalysis,
+            checkTypes: ['daily-standup', 'email-sync', 'lead-generation', 'daily-prospection']
+        });
+        console.log(`📊 Health check completed:`);
+        console.log(`   - Healthy workflows: ${healthCheck.healthyWorkflows}`);
+        console.log(`   - Failed workflows: ${healthCheck.failedWorkflows}`);
+        console.log(`   - Stuck workflows: ${healthCheck.stuckWorkflows}`);
+        console.log(`   - Pending tasks: ${healthCheck.pendingTasks}`);
+        console.log(`   - Issues detected: ${healthCheck.issues.length}`);
+        // Step 4: Determine system health level
+        let systemHealth = 'healthy';
+        let alertsSent = 0;
+        if (healthCheck.failedWorkflows > 0 || healthCheck.stuckWorkflows > 3) {
+            systemHealth = 'critical';
         }
-        catch (dailyStandUpError) {
-            console.error('❌ Error in executeDailyStandUpWorkflowsActivity:', dailyStandUpError);
-            // Set default values for the failed activity
-            dailyStandUpResult = {
-                scheduled: 0,
-                failed: 1,
-                skipped: 0,
-                results: [],
-                errors: [dailyStandUpError instanceof Error ? dailyStandUpError.message : String(dailyStandUpError)]
-            };
+        else if (healthCheck.issues.length > 2 || healthCheck.stuckWorkflows > 0) {
+            systemHealth = 'warning';
+        }
+        console.log(`🎯 Overall system health: ${systemHealth.toUpperCase()}`);
+        // Step 5: Send alerts only if issues need attention
+        if (healthCheck.needsAttention) {
+            console.log('🚨 Step 5: Issues detected - sending priority alerts...');
+            const alertActivities = [
+                `System Health: ${systemHealth}`,
+                `Failed Workflows: ${healthCheck.failedWorkflows}`,
+                `Stuck Workflows: ${healthCheck.stuckWorkflows}`,
+                ...healthCheck.issues.map(issue => `Issue: ${issue.description}`)
+            ];
+            const priorityMailResult = await sendPriorityMail(alertActivities);
+            alertsSent = priorityMailResult.count;
+            console.log(`📧 Priority alerts sent: ${alertsSent}`);
+        }
+        else {
+            console.log('✅ Step 5: No critical issues detected - no alerts needed');
         }
         const endTime = new Date();
         const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
-        console.log('🎉 Daily operations workflow completed successfully');
+        console.log('🎉 Daily operations monitoring completed successfully');
         console.log(`   Total execution time: ${executionTime}`);
-        console.log(`   Stuck records cleaned: ${stuckRecordsCleaned}`); // ✅ ADDED: Log cleanup results
-        console.log('   Strategy: Operational execution under prioritization control');
+        console.log(`   Stuck records cleaned: ${stuckRecordsCleaned}`);
+        console.log(`   System health: ${systemHealth}`);
+        console.log('   Strategy: Monitor existing workflows, alert only when needed');
         return {
-            contextRetrieved: true,
-            planDesigned: true,
-            planSent: true,
-            priorityMailsSent: priorityMailResult.count,
-            activitiesScheduled: scheduleResult.apiCalls,
-            dailyStandUpsExecuted: dailyStandUpResult.scheduled,
-            stuckRecordsCleaned, // ✅ ADDED: Include in result
+            workflowsMonitored: healthCheck.healthyWorkflows + healthCheck.failedWorkflows + healthCheck.stuckWorkflows,
+            issuesDetected: healthCheck.issues.length,
+            alertsSent,
+            stuckRecordsCleaned,
+            systemHealth,
+            recommendations: healthCheck.recommendations,
             executionTime
         };
     }
     catch (error) {
-        console.error('❌ Daily operations workflow failed:', error);
+        console.error('❌ Daily operations monitoring workflow failed:', error);
         throw error;
     }
 }

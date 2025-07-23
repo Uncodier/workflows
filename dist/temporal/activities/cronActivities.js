@@ -9,6 +9,7 @@ exports.batchSaveCronStatusActivity = batchSaveCronStatusActivity;
 exports.getCronStatusActivity = getCronStatusActivity;
 exports.shouldRunWorkflowActivity = shouldRunWorkflowActivity;
 exports.cleanStuckRunningStatusActivity = cleanStuckRunningStatusActivity;
+exports.checkWorkflowsHealthActivity = checkWorkflowsHealthActivity;
 const services_1 = require("../services");
 /**
  * Save or update a single cron status record
@@ -196,6 +197,166 @@ async function cleanStuckRunningStatusActivity(hoursThreshold = 6) {
         console.error(`❌ Error in cleanStuckRunningStatusActivity: ${errorMessage}`);
         errors.push(`Cleanup activity error: ${errorMessage}`);
         return { cleaned, errors };
+    }
+}
+/**
+ * Comprehensive workflow health check activity
+ * Reviews status of all existing workflows and determines if issues need attention
+ */
+async function checkWorkflowsHealthActivity(options) {
+    console.log('🏥 Starting comprehensive workflow health check...');
+    const { checkTypes = ['daily-standup', 'email-sync', 'lead-generation', 'daily-prospection'] } = options;
+    let healthyWorkflows = 0;
+    let failedWorkflows = 0;
+    let stuckWorkflows = 0;
+    let pendingTasks = 0;
+    const issues = [];
+    const recommendations = [];
+    try {
+        const supabaseService = (0, services_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️ Database not available for health check');
+            issues.push({
+                type: 'database-unavailable',
+                severity: 'critical',
+                description: 'Database connection not available for health monitoring'
+            });
+            recommendations.push('Check database connectivity and service status');
+            return {
+                healthyWorkflows: 0,
+                failedWorkflows: 1,
+                stuckWorkflows: 0,
+                pendingTasks: 0,
+                issues,
+                recommendations,
+                needsAttention: true
+            };
+        }
+        // Get all sites for context
+        const allSites = await supabaseService.fetchSites();
+        console.log(`📊 Monitoring ${allSites.length} sites across ${checkTypes.length} workflow types`);
+        // Check each workflow type
+        for (const workflowType of checkTypes) {
+            console.log(`🔍 Checking ${workflowType} workflows...`);
+            const cronData = await getCronStatusActivity(workflowType, allSites.map(s => s.id));
+            for (const site of allSites) {
+                const siteStatus = cronData.find(record => record.site_id === site.id);
+                if (!siteStatus) {
+                    // No record found - could be a new site or workflow never scheduled
+                    console.log(`⚠️ No ${workflowType} record found for site ${site.name}`);
+                    pendingTasks++;
+                    continue;
+                }
+                // Check for stuck workflows (running for more than 2 hours)
+                if (siteStatus.status === 'RUNNING' && siteStatus.last_run) {
+                    const lastRunTime = new Date(siteStatus.last_run);
+                    const hoursRunning = (Date.now() - lastRunTime.getTime()) / (1000 * 60 * 60);
+                    if (hoursRunning > 2) {
+                        console.log(`🚨 Stuck workflow detected: ${workflowType} for ${site.name} running for ${hoursRunning.toFixed(1)}h`);
+                        stuckWorkflows++;
+                        issues.push({
+                            type: 'stuck-workflow',
+                            severity: 'warning',
+                            description: `${workflowType} for ${site.name} has been running for ${hoursRunning.toFixed(1)} hours`,
+                            siteId: site.id,
+                            siteName: site.name,
+                            workflowType,
+                            hoursRunning: hoursRunning.toFixed(1)
+                        });
+                    }
+                    else {
+                        healthyWorkflows++;
+                    }
+                }
+                // Check for failed workflows
+                else if (siteStatus.status === 'FAILED') {
+                    console.log(`❌ Failed workflow: ${workflowType} for ${site.name} - ${siteStatus.error_message || 'No error message'}`);
+                    failedWorkflows++;
+                    issues.push({
+                        type: 'failed-workflow',
+                        severity: 'critical',
+                        description: `${workflowType} failed for ${site.name}: ${siteStatus.error_message || 'Unknown error'}`,
+                        siteId: site.id,
+                        siteName: site.name,
+                        workflowType,
+                        errorMessage: siteStatus.error_message
+                    });
+                }
+                // Check for overdue workflows (should have run in last 24 hours)
+                else if (siteStatus.last_run) {
+                    const lastRunTime = new Date(siteStatus.last_run);
+                    const hoursSinceRun = (Date.now() - lastRunTime.getTime()) / (1000 * 60 * 60);
+                    if (hoursSinceRun > 24) {
+                        console.log(`⏰ Overdue workflow: ${workflowType} for ${site.name} last ran ${hoursSinceRun.toFixed(1)}h ago`);
+                        issues.push({
+                            type: 'overdue-workflow',
+                            severity: 'warning',
+                            description: `${workflowType} for ${site.name} hasn't run in ${hoursSinceRun.toFixed(1)} hours`,
+                            siteId: site.id,
+                            siteName: site.name,
+                            workflowType,
+                            hoursSinceRun: hoursSinceRun.toFixed(1)
+                        });
+                    }
+                    else {
+                        healthyWorkflows++;
+                    }
+                }
+                // Healthy recent completion
+                else if (siteStatus.status === 'COMPLETED') {
+                    healthyWorkflows++;
+                }
+            }
+        }
+        // Generate recommendations based on issues
+        if (failedWorkflows > 0) {
+            recommendations.push(`Investigate ${failedWorkflows} failed workflow(s) and check error logs`);
+        }
+        if (stuckWorkflows > 0) {
+            recommendations.push(`Review ${stuckWorkflows} stuck workflow(s) - consider restarting or increasing timeouts`);
+        }
+        if (pendingTasks > 0) {
+            recommendations.push(`${pendingTasks} workflow(s) have no status records - verify scheduling is working`);
+        }
+        if (issues.length === 0) {
+            recommendations.push('All workflows are operating normally');
+        }
+        const needsAttention = failedWorkflows > 0 || stuckWorkflows > 3 || issues.length > 5;
+        console.log('📊 Health check completed:');
+        console.log(`   ✅ Healthy: ${healthyWorkflows}`);
+        console.log(`   ❌ Failed: ${failedWorkflows}`);
+        console.log(`   🔄 Stuck: ${stuckWorkflows}`);
+        console.log(`   ⏳ Pending: ${pendingTasks}`);
+        console.log(`   🚨 Issues: ${issues.length}`);
+        console.log(`   💡 Needs attention: ${needsAttention ? 'YES' : 'NO'}`);
+        return {
+            healthyWorkflows,
+            failedWorkflows,
+            stuckWorkflows,
+            pendingTasks,
+            issues,
+            recommendations,
+            needsAttention
+        };
+    }
+    catch (error) {
+        console.error('❌ Error during workflow health check:', error);
+        issues.push({
+            type: 'health-check-error',
+            severity: 'critical',
+            description: `Health check failed: ${error instanceof Error ? error.message : String(error)}`
+        });
+        recommendations.push('Investigate health check system and database connectivity');
+        return {
+            healthyWorkflows: 0,
+            failedWorkflows: 1,
+            stuckWorkflows: 0,
+            pendingTasks: 0,
+            issues,
+            recommendations,
+            needsAttention: true
+        };
     }
 }
 /**
