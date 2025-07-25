@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.dailyProspectionWorkflow = dailyProspectionWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 // Import specific daily prospection activities
-const { validateCommunicationChannelsActivity, getProspectionLeadsActivity, checkLeadExistingTasksActivity, createAwarenessTaskActivity, updateLeadProspectionStatusActivity, sendLeadsToSalesAgentActivity, assignPriorityLeadsActivity, } = (0, workflow_1.proxyActivities)({
+const { validateCommunicationChannelsActivity, getProspectionLeadsActivity, checkLeadExistingTasksActivity, updateLeadProspectionStatusActivity, sendLeadsToSalesAgentActivity, assignPriorityLeadsActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes', // Longer timeout for prospection processes
     retry: {
         maximumAttempts: 3,
@@ -112,7 +112,7 @@ function filterLeadsByAvailableChannels(leads, channelsValidation) {
  * @param options - Configuration options for daily prospection
  */
 async function dailyProspectionWorkflow(options) {
-    const { site_id, hoursThreshold = 48, maxLeads = 50, createTasks = true, updateStatus = false } = options;
+    const { site_id, hoursThreshold = 48, maxLeads = 100, createTasks = true, updateStatus = false } = options;
     if (!site_id) {
         throw new Error('No site ID provided');
     }
@@ -140,7 +140,7 @@ async function dailyProspectionWorkflow(options) {
     const prospectionResults = [];
     let leadsFound = 0;
     let leadsProcessed = 0;
-    let tasksCreated = 0;
+    const tasksCreated = 0;
     let statusUpdated = 0;
     let prospectionCriteria = null;
     let siteName = '';
@@ -424,40 +424,10 @@ async function dailyProspectionWorkflow(options) {
                         prospectionResult.errors.push(`Skipped: Lead already has ${existingTasksCheck.existingTasks.length} existing task(s)`);
                     }
                     else {
-                        // Lead has no existing tasks, create awareness task
-                        console.log(`📝 Step 3a.2: Creating awareness task for lead: ${lead.name || lead.email} (no existing tasks found)`);
-                        const createTaskResult = await createAwarenessTaskActivity({
-                            lead_id: lead.id,
-                            site_id: site_id,
-                            userId: options.userId || site.user_id,
-                            title: `Contacto inicial con ${lead.name || lead.email}`,
-                            description: `Tarea de prospección para establecer primer contacto con el lead ${lead.name || lead.email}`,
-                            scheduled_date: new Date().toISOString(),
-                            additionalData: {
-                                ...options.additionalData,
-                                workflowId: workflowId,
-                                prospectionReason: 'daily_prospection_workflow',
-                                leadAge: Math.floor((new Date().getTime() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24))
-                            }
-                        });
-                        if (createTaskResult.success) {
-                            if (createTaskResult.skipped) {
-                                console.log(`⚠️ Task creation was skipped for ${lead.name || lead.email}: ${createTaskResult.reason}`);
-                                prospectionResult.taskCreated = false;
-                                prospectionResult.errors.push(`Skipped: ${createTaskResult.reason}`);
-                            }
-                            else {
-                                prospectionResult.taskCreated = true;
-                                prospectionResult.taskId = createTaskResult.taskId;
-                                tasksCreated++;
-                                console.log(`✅ Successfully created awareness task ${createTaskResult.taskId} for ${lead.name || lead.email}`);
-                            }
-                        }
-                        else {
-                            const errorMsg = `Failed to create awareness task for ${lead.name || lead.email}: ${createTaskResult.error}`;
-                            console.error(`❌ ${errorMsg}`);
-                            prospectionResult.errors.push(errorMsg);
-                        }
+                        // Lead has no existing tasks - task creation disabled
+                        console.log(`📝 Step 3a.2: Task creation disabled for lead: ${lead.name || lead.email} (no existing tasks found)`);
+                        prospectionResult.taskCreated = false;
+                        prospectionResult.errors.push(`Task creation disabled - would have created awareness task`);
                     }
                 }
                 else {

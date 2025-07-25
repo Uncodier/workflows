@@ -101,7 +101,7 @@ async function activityPrioritizationEngineWorkflow() {
                         testMode: false, // PRODUCTION: Full production mode
                         businessHoursAnalysis, // PASS business hours analysis for filtering
                         hoursThreshold: 48, // Look for leads older than 48 hours
-                        maxLeads: 50 // Limit to 50 leads per site
+                        maxLeads: 100 // Limit to 100 leads per site (doubled from 50)
                     });
                     console.log(`🎯 Daily prospection workflows execution completed:`);
                     console.log(`   ✅ Prospection executed: ${dailyProspectionResult.scheduled} sites`);
@@ -239,7 +239,7 @@ async function activityPrioritizationEngineWorkflow() {
                     const dailyProspectionSchedulingResult = await scheduleIndividualDailyProspectionActivity(businessHoursAnalysis, {
                         timezone: 'America/Mexico_City',
                         hoursThreshold: 48, // Look for leads older than 48 hours
-                        maxLeads: 50 // Limit to 50 leads per site
+                        maxLeads: 100 // Limit to 100 leads per site (doubled from 50)
                     });
                     console.log(`🎯 Daily prospection scheduling completed:`);
                     console.log(`   ✅ Scheduled: ${dailyProspectionSchedulingResult.scheduled} sites`);

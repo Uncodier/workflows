@@ -244,7 +244,7 @@ export async function dailyProspectionWorkflow(
   const prospectionResults: ProspectionResult[] = [];
   let leadsFound = 0;
   let leadsProcessed = 0;
-  let tasksCreated = 0;
+  const tasksCreated = 0;
   let statusUpdated = 0;
   let prospectionCriteria: any = null;
   let siteName = '';

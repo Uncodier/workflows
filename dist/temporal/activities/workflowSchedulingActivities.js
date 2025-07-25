@@ -1667,7 +1667,7 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
  */
 async function executeDailyProspectionWorkflowsActivity(options = {}) {
     console.log('🎯 Starting Daily Prospection workflow execution...');
-    const { businessHoursAnalysis, hoursThreshold = 48, maxLeads = 50 } = options;
+    const { businessHoursAnalysis, hoursThreshold = 48, maxLeads = 100 } = options;
     if (businessHoursAnalysis) {
         console.log('📋 BUSINESS HOURS FILTERING ENABLED:');
         console.log(`   - Sites with business_hours: ${businessHoursAnalysis.sitesWithBusinessHours}`);
@@ -1862,7 +1862,7 @@ async function executeDailyProspectionWorkflow(site, executionOptions) {
                     site_id: site.id,
                     userId: site.user_id,
                     hoursThreshold: executionOptions.hoursThreshold || 48,
-                    maxLeads: executionOptions.maxLeads || 50,
+                    maxLeads: executionOptions.maxLeads || 100,
                     createTasks: true,
                     updateStatus: false,
                     additionalData: {
@@ -1900,7 +1900,7 @@ async function executeDailyProspectionWorkflow(site, executionOptions) {
  * EXECUTES 2 HOURS AFTER DAILY STANDUP to process leads after standup and lead generation
  */
 async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis, options = {}) {
-    const { timezone = 'America/Mexico_City', hoursThreshold = 48, maxLeads = 50 } = options;
+    const { timezone = 'America/Mexico_City', hoursThreshold = 48, maxLeads = 100 } = options;
     console.log(`🎯 Scheduling individual Daily Prospection workflows using TIMERS`);
     console.log(`   - Default timezone: ${timezone}`);
     console.log(`   - Sites with business_hours: ${businessHoursAnalysis.openSites?.length || 0}`);

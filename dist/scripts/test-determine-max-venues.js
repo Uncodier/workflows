@@ -33,20 +33,20 @@ async function testDetermineMaxVenues() {
             // Validate the logic
             console.log('\n🔍 Logic Validation:');
             if (result.plan === 'free') {
-                const expectedVenues = result.hasChannels ? 2 : 1;
+                const expectedVenues = result.hasChannels ? 4 : 2;
                 const isCorrect = result.maxVenues === expectedVenues;
                 console.log(`   Free plan logic: ${isCorrect ? '✅ CORRECT' : '❌ INCORRECT'}`);
                 console.log(`   Expected: ${expectedVenues}, Got: ${result.maxVenues}`);
             }
             else if (result.plan === 'startup') {
-                const isCorrect = result.maxVenues === 10;
+                const isCorrect = result.maxVenues === 20;
                 console.log(`   Startup plan logic: ${isCorrect ? '✅ CORRECT' : '❌ INCORRECT'}`);
-                console.log(`   Expected: 10, Got: ${result.maxVenues}`);
+                console.log(`   Expected: 20, Got: ${result.maxVenues}`);
             }
             else if (result.plan === 'enterprise') {
-                const isCorrect = result.maxVenues === 30;
+                const isCorrect = result.maxVenues === 60;
                 console.log(`   Enterprise plan logic: ${isCorrect ? '✅ CORRECT' : '❌ INCORRECT'}`);
-                console.log(`   Expected: 30, Got: ${result.maxVenues}`);
+                console.log(`   Expected: 60, Got: ${result.maxVenues}`);
             }
         }
         else {
