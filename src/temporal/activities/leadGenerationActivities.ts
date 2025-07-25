@@ -388,7 +388,7 @@ export async function callRegionVenuesApiActivity(
       searchTerm: options.searchTerm,
       city: options.city,
       region: options.region,
-      maxVenues: options.maxVenues || 10,
+      maxVenues: options.maxVenues || 20,
       priority: options.priority || 'high',
       excludeNames: options.excludeNames || [], // Pass excludeNames to API
       targetAudience: {
@@ -2157,24 +2157,24 @@ export async function determineMaxVenuesActivity(
         channel && typeof channel === 'object' && channel.enabled === true
       );
 
-    let maxVenues = 1; // Default for free plan without channels
+    let maxVenues = 2; // Default for free plan without channels (doubled)
 
-    // Apply business logic for venue limits
+    // Apply business logic for venue limits (doubled from original values)
     switch (plan.toLowerCase()) {
       case 'free':
       case 'commission': // ✅ Commission plan treated as free plan
-        maxVenues = hasChannels ? 2 : 1;
+        maxVenues = hasChannels ? 4 : 2;
         break;
       case 'startup':
-        maxVenues = 10;
+        maxVenues = 20;
         break;
       case 'enterprise':
-        maxVenues = 30;
+        maxVenues = 60;
         break;
       default:
         // For any unknown plan, treat as free without channels
-        maxVenues = 1;
-        logger.warn('⚠️ Unknown billing plan, defaulting to 1 venue', {
+        maxVenues = 2;
+        logger.warn('⚠️ Unknown billing plan, defaulting to 2 venues', {
           site_id: options.site_id,
           plan: plan
         });

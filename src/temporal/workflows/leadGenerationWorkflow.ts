@@ -181,6 +181,14 @@ function generateEmployeeDeliverables(_company: CompanyData): any {
         email: "professional email address",
         position: "job title or role in the company",
         linkedin_url: "LinkedIn profile URL if available"
+      },
+      {
+        // Second lead per company (doubled from original 1 lead)
+        name: "full name of another employee or decision maker",
+        telephone: "direct phone number or mobile contact", 
+        email: "professional email address",
+        position: "job title or role in the company",
+        linkedin_url: "LinkedIn profile URL if available"
       }
     ]
   };

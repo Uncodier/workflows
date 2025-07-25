@@ -2013,7 +2013,7 @@ export async function executeDailyProspectionWorkflowsActivity(
 }> {
   console.log('🎯 Starting Daily Prospection workflow execution...');
   
-  const { businessHoursAnalysis, hoursThreshold = 48, maxLeads = 50 } = options;
+  const { businessHoursAnalysis, hoursThreshold = 48, maxLeads = 100 } = options;
   
   if (businessHoursAnalysis) {
     console.log('📋 BUSINESS HOURS FILTERING ENABLED:');
@@ -2250,7 +2250,7 @@ async function executeDailyProspectionWorkflow(
         site_id: site.id,
         userId: site.user_id,
         hoursThreshold: executionOptions.hoursThreshold || 48,
-        maxLeads: executionOptions.maxLeads || 50,
+        maxLeads: executionOptions.maxLeads || 100,
         createTasks: true,
         updateStatus: false,
         additionalData: {
@@ -2304,7 +2304,7 @@ export async function scheduleIndividualDailyProspectionActivity(
   results: ScheduleWorkflowResult[];
   errors: string[];
 }> {
-  const { timezone = 'America/Mexico_City', hoursThreshold = 48, maxLeads = 50 } = options;
+  const { timezone = 'America/Mexico_City', hoursThreshold = 48, maxLeads = 100 } = options;
   
   console.log(`🎯 Scheduling individual Daily Prospection workflows using TIMERS`);
   console.log(`   - Default timezone: ${timezone}`);

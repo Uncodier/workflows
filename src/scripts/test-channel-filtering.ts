@@ -64,7 +64,7 @@ async function testChannelFiltering() {
             site_id: testCase.siteId,
             createTasks: false, // Validation mode only
             updateStatus: false,
-            maxLeads: 10, // Limit for testing
+            maxLeads: 20, // Limit for testing (doubled)
             additionalData: {
               testMode: true,
               testCase: testCase.name

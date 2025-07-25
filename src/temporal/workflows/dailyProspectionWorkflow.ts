@@ -212,7 +212,7 @@ function filterLeadsByAvailableChannels(
 export async function dailyProspectionWorkflow(
   options: DailyProspectionOptions
 ): Promise<DailyProspectionResult> {
-  const { site_id, hoursThreshold = 48, maxLeads = 50, createTasks = true, updateStatus = false } = options;
+  const { site_id, hoursThreshold = 48, maxLeads = 100, createTasks = true, updateStatus = false } = options;
   
   if (!site_id) {
     throw new Error('No site ID provided');
