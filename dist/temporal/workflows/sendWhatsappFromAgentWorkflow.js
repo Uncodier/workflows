@@ -77,7 +77,7 @@ async function sendWhatsappFromAgent(params) {
                         console.log('📝 Updating message custom_data with channel = whatsapp...', {
                             message_id: params.message_id || 'not-provided',
                             conversation_id: params.conversation_id || 'not-provided',
-                            api_messageId: sendTemplateResult.messageId // Para logging
+                            templateFlow: true
                         });
                         const updateResult = await updateMessageStatusToSentActivity({
                             message_id: params.message_id,
@@ -88,10 +88,11 @@ async function sendWhatsappFromAgent(params) {
                             delivery_success: true,
                             delivery_details: {
                                 channel: 'whatsapp',
-                                api_messageId: sendTemplateResult.messageId, // ID retornado por la API
+                                phone_number: params.phone_number, // Número de teléfono de destino
                                 recipient: whatsappResult.recipient,
                                 timestamp: sendTemplateResult.timestamp,
-                                templateFlow: true
+                                templateFlow: true,
+                                messageLength: params.message.length
                             }
                         });
                         if (updateResult.success) {
@@ -135,9 +136,11 @@ async function sendWhatsappFromAgent(params) {
                             delivery_success: false,
                             delivery_details: {
                                 status: 'failed',
+                                phone_number: params.phone_number, // Número de teléfono para contexto
                                 error: templateError instanceof Error ? templateError.message : String(templateError),
                                 timestamp: new Date().toISOString(),
-                                templateFlow: true
+                                templateFlow: true,
+                                messageLength: params.message.length
                             }
                         });
                         console.log('📊 Message status updated to failed for template error');
@@ -168,7 +171,7 @@ async function sendWhatsappFromAgent(params) {
                     console.log('📝 Updating message custom_data with channel = whatsapp...', {
                         message_id: params.message_id || 'not-provided',
                         conversation_id: params.conversation_id || 'not-provided',
-                        api_messageId: whatsappResult.messageId // Para logging
+                        templateFlow: false
                     });
                     const updateResult = await updateMessageStatusToSentActivity({
                         message_id: params.message_id,
@@ -179,10 +182,11 @@ async function sendWhatsappFromAgent(params) {
                         delivery_success: true,
                         delivery_details: {
                             channel: 'whatsapp',
-                            api_messageId: whatsappResult.messageId, // ID retornado por la API
+                            phone_number: params.phone_number, // Número de teléfono de destino
                             recipient: whatsappResult.recipient,
                             timestamp: whatsappResult.timestamp,
-                            templateFlow: false
+                            templateFlow: false,
+                            messageLength: params.message.length
                         }
                     });
                     if (updateResult.success) {
@@ -233,8 +237,10 @@ async function sendWhatsappFromAgent(params) {
                     delivery_success: false,
                     delivery_details: {
                         status: 'failed',
+                        phone_number: params.phone_number, // Número de teléfono para contexto
                         error: error instanceof Error ? error.message : String(error),
-                        timestamp: new Date().toISOString()
+                        timestamp: new Date().toISOString(),
+                        messageLength: params.message.length
                     }
                 });
                 console.log('📊 Message status updated to failed for workflow error');

@@ -19,6 +19,7 @@ export interface SendEmailResult {
   messageId: string;
   recipient: string;
   timestamp: string;
+  external_message_id?: string; // ID externo retornado por la API de email
 }
 
 /**
@@ -86,7 +87,8 @@ export async function sendEmailFromAgentActivity(params: SendEmailParams): Promi
       success: true,
       messageId: response.data.messageId || 'unknown',
       recipient: params.email,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      external_message_id: response.data.external_message_id // Capturar el ID externo si está presente
     };
 
   } catch (error) {

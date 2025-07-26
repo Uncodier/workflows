@@ -78,7 +78,7 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
     const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
 
     console.log('✅ Email sent successfully via agent API:', {
-      messageId: emailResult.messageId,
+      external_message_id: emailResult.external_message_id || 'not-provided',
       recipient: emailResult.recipient,
       executionTime
     });
@@ -90,7 +90,7 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
         console.log('📝 Updating message custom_data with channel = email...', {
           message_id: params.message_id || 'not-provided',
           conversation_id: params.conversation_id || 'not-provided',
-          api_messageId: emailResult.messageId // Para logging
+          external_message_id: emailResult.external_message_id || 'not-provided' // ID del email provider
         });
         const updateResult = await updateMessageStatusToSentActivity({
           message_id: params.message_id,
@@ -101,7 +101,8 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
           delivery_success: true,
           delivery_details: {
             channel: 'email',
-            api_messageId: emailResult.messageId, // ID retornado por la API
+            subject: params.subject, // Subject del email
+            external_message_id: emailResult.external_message_id, // ID del email provider (SendGrid, Mailgun, etc.)
             recipient: emailResult.recipient,
             timestamp: emailResult.timestamp
           }
@@ -153,6 +154,7 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
           delivery_success: false,
           delivery_details: {
             status: 'failed',
+            subject: params.subject, // Subject del email para contexto
             error: error instanceof Error ? error.message : String(error),
             timestamp: new Date().toISOString(),
             executionTime
