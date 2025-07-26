@@ -4,7 +4,7 @@ exports.sendWhatsappFromAgent = sendWhatsappFromAgent;
 const workflow_1 = require("@temporalio/workflow");
 const timeouts_1 = require("../config/timeouts");
 // Configure activity options using centralized timeouts
-const { sendWhatsAppFromAgentActivity, createTemplateActivity, sendTemplateActivity, updateMessageStatusActivity } = (0, workflow_1.proxyActivities)({
+const { sendWhatsAppFromAgentActivity, createTemplateActivity, sendTemplateActivity, updateMessageStatusToSentActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: timeouts_1.ACTIVITY_TIMEOUTS.WHATSAPP_OPERATIONS, // ✅ Using centralized config (2 minutes)
     retry: timeouts_1.RETRY_POLICIES.NETWORK, // ✅ Using appropriate retry policy for WhatsApp operations
 });
@@ -71,6 +71,35 @@ async function sendWhatsappFromAgent(params) {
                     executionTime,
                     templateFlow: true
                 });
+                // Actualizar custom_data.channel = "whatsapp" para template exitoso
+                try {
+                    console.log('📝 Updating message custom_data with channel = whatsapp...');
+                    const updateResult = await updateMessageStatusToSentActivity({
+                        message_id: sendTemplateResult.messageId,
+                        conversation_id: params.conversation_id,
+                        lead_id: params.lead_id || '',
+                        site_id: params.site_id,
+                        delivery_channel: 'whatsapp',
+                        delivery_success: true,
+                        delivery_details: {
+                            channel: 'whatsapp',
+                            messageId: sendTemplateResult.messageId,
+                            recipient: whatsappResult.recipient,
+                            timestamp: sendTemplateResult.timestamp,
+                            templateFlow: true
+                        }
+                    });
+                    if (updateResult.success) {
+                        console.log('✅ Message custom_data updated successfully with channel = whatsapp');
+                    }
+                    else {
+                        console.log('⚠️ Failed to update message custom_data:', updateResult.error);
+                    }
+                }
+                catch (updateError) {
+                    console.log('⚠️ Error updating message custom_data:', updateError instanceof Error ? updateError.message : String(updateError));
+                    // No fallar el workflow por error de actualización
+                }
                 return {
                     success: sendTemplateResult.success,
                     messageId: sendTemplateResult.messageId,
@@ -83,13 +112,21 @@ async function sendWhatsappFromAgent(params) {
                 // Update message status to failed when template flow fails
                 console.error('❌ Template flow failed:', templateError);
                 try {
-                    await updateMessageStatusActivity({
-                        message_id: whatsappResult.messageId, // messageId from workflow interface maps to DB message_id
-                        status: 'failed',
-                        error_details: templateError instanceof Error ? templateError.message : String(templateError),
-                        site_id: params.site_id
+                    await updateMessageStatusToSentActivity({
+                        message_id: whatsappResult.messageId,
+                        conversation_id: params.conversation_id,
+                        lead_id: params.lead_id || '',
+                        site_id: params.site_id,
+                        delivery_channel: 'whatsapp',
+                        delivery_success: false,
+                        delivery_details: {
+                            status: 'failed',
+                            error: templateError instanceof Error ? templateError.message : String(templateError),
+                            timestamp: new Date().toISOString(),
+                            templateFlow: true
+                        }
                     });
-                    console.log('📊 Message status updated to failed');
+                    console.log('📊 Message status updated to failed for template error');
                 }
                 catch (updateError) {
                     console.error('❌ Failed to update message status:', updateError);
@@ -107,6 +144,35 @@ async function sendWhatsappFromAgent(params) {
                 executionTime,
                 templateFlow: false
             });
+            // Actualizar custom_data.channel = "whatsapp" para mensaje directo exitoso
+            try {
+                console.log('📝 Updating message custom_data with channel = whatsapp...');
+                const updateResult = await updateMessageStatusToSentActivity({
+                    message_id: whatsappResult.messageId,
+                    conversation_id: params.conversation_id,
+                    lead_id: params.lead_id || '',
+                    site_id: params.site_id,
+                    delivery_channel: 'whatsapp',
+                    delivery_success: true,
+                    delivery_details: {
+                        channel: 'whatsapp',
+                        messageId: whatsappResult.messageId,
+                        recipient: whatsappResult.recipient,
+                        timestamp: whatsappResult.timestamp,
+                        templateFlow: false
+                    }
+                });
+                if (updateResult.success) {
+                    console.log('✅ Message custom_data updated successfully with channel = whatsapp');
+                }
+                else {
+                    console.log('⚠️ Failed to update message custom_data:', updateResult.error);
+                }
+            }
+            catch (updateError) {
+                console.log('⚠️ Error updating message custom_data:', updateError instanceof Error ? updateError.message : String(updateError));
+                // No fallar el workflow por error de actualización
+            }
             return {
                 success: whatsappResult.success,
                 messageId: whatsappResult.messageId,
@@ -129,11 +195,18 @@ async function sendWhatsappFromAgent(params) {
             // Only update if we have a messageId from the initial call
             const messageId = whatsappResult?.messageId;
             if (messageId) {
-                await updateMessageStatusActivity({
-                    message_id: messageId, // messageId from workflow interface maps to DB message_id
-                    status: 'failed',
-                    error_details: error instanceof Error ? error.message : String(error),
-                    site_id: params.site_id
+                await updateMessageStatusToSentActivity({
+                    message_id: messageId,
+                    conversation_id: params.conversation_id,
+                    lead_id: params.lead_id || '',
+                    site_id: params.site_id,
+                    delivery_channel: 'whatsapp',
+                    delivery_success: false,
+                    delivery_details: {
+                        status: 'failed',
+                        error: error instanceof Error ? error.message : String(error),
+                        timestamp: new Date().toISOString()
+                    }
                 });
                 console.log('📊 Message status updated to failed for workflow error');
             }

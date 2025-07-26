@@ -3,7 +3,10 @@ import type * as activities from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 
 // Configure activity options using centralized timeouts
-const { sendEmailFromAgentActivity } = proxyActivities<typeof activities>({
+const { 
+  sendEmailFromAgentActivity,
+  updateMessageStatusToSentActivity
+} = proxyActivities<typeof activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.EMAIL_OPERATIONS, // ✅ Using centralized config (3 minutes)
   retry: RETRY_POLICIES.NETWORK, // ✅ Using appropriate retry policy for email operations
 });
@@ -20,6 +23,7 @@ export interface SendEmailFromAgentParams {
   agent_id?: string;
   conversation_id?: string;
   lead_id?: string;
+  message_id?: string; // ID del mensaje en la base de datos para actualizar custom_data
 }
 
 /**
@@ -79,6 +83,36 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
       executionTime
     });
 
+    // Actualizar custom_data.channel = "email" si tenemos message_id
+    if (params.message_id || params.conversation_id) {
+      try {
+        console.log('📝 Updating message custom_data with channel = email...');
+        const updateResult = await updateMessageStatusToSentActivity({
+          message_id: params.message_id,
+          conversation_id: params.conversation_id,
+          lead_id: params.lead_id || '',
+          site_id: params.site_id,
+          delivery_channel: 'email',
+          delivery_success: true,
+          delivery_details: {
+            channel: 'email',
+            messageId: emailResult.messageId,
+            recipient: emailResult.recipient,
+            timestamp: emailResult.timestamp
+          }
+        });
+
+        if (updateResult.success) {
+          console.log('✅ Message custom_data updated successfully with channel = email');
+        } else {
+          console.log('⚠️ Failed to update message custom_data:', updateResult.error);
+        }
+      } catch (updateError) {
+        console.log('⚠️ Error updating message custom_data:', updateError instanceof Error ? updateError.message : String(updateError));
+        // No fallar el workflow por error de actualización
+      }
+    }
+
     return {
       success: emailResult.success,
       messageId: emailResult.messageId,
@@ -95,6 +129,36 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
       error: error instanceof Error ? error.message : String(error),
       executionTime
     });
+
+    // Actualizar status = "failed" si tenemos message_id
+    if (params.message_id || params.conversation_id) {
+      try {
+        console.log('📝 Updating message status to failed...');
+        const updateResult = await updateMessageStatusToSentActivity({
+          message_id: params.message_id,
+          conversation_id: params.conversation_id,
+          lead_id: params.lead_id || '',
+          site_id: params.site_id,
+          delivery_channel: 'email',
+          delivery_success: false,
+          delivery_details: {
+            status: 'failed',
+            error: error instanceof Error ? error.message : String(error),
+            timestamp: new Date().toISOString(),
+            executionTime
+          }
+        });
+
+        if (updateResult.success) {
+          console.log('✅ Message status updated to failed');
+        } else {
+          console.log('⚠️ Failed to update message status to failed:', updateResult.error);
+        }
+      } catch (updateError) {
+        console.log('⚠️ Error updating message status to failed:', updateError instanceof Error ? updateError.message : String(updateError));
+        // No fallar el workflow por error de actualización
+      }
+    }
     
     throw error;
   }
