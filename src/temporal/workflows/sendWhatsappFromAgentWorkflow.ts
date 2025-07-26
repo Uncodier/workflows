@@ -24,6 +24,7 @@ export interface SendWhatsAppFromAgentParams {
   agent_id?: string;
   conversation_id?: string;
   lead_id?: string;
+  message_id?: string; // ID del mensaje en la base de datos para actualizar custom_data
 }
 
 /**
@@ -111,33 +112,41 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
           templateFlow: true
         });
 
-        // Actualizar custom_data.channel = "whatsapp" para template exitoso
-        try {
-          console.log('📝 Updating message custom_data with channel = whatsapp...');
-          const updateResult = await updateMessageStatusToSentActivity({
-            message_id: sendTemplateResult.messageId,
-            conversation_id: params.conversation_id,
-            lead_id: params.lead_id || '',
-            site_id: params.site_id,
-            delivery_channel: 'whatsapp',
-            delivery_success: true,
-            delivery_details: {
-              channel: 'whatsapp',
-              messageId: sendTemplateResult.messageId,
-              recipient: whatsappResult.recipient,
-              timestamp: sendTemplateResult.timestamp,
-              templateFlow: true
-            }
-          });
+        // Actualizar custom_data.channel = "whatsapp" solo si tenemos message_id o conversation_id
+        if (params.message_id || params.conversation_id) {
+          try {
+            console.log('📝 Updating message custom_data with channel = whatsapp...', {
+              message_id: params.message_id || 'not-provided',
+              conversation_id: params.conversation_id || 'not-provided',
+              api_messageId: sendTemplateResult.messageId // Para logging
+            });
+            const updateResult = await updateMessageStatusToSentActivity({
+              message_id: params.message_id,
+              conversation_id: params.conversation_id,
+              lead_id: params.lead_id || '',
+              site_id: params.site_id,
+              delivery_channel: 'whatsapp',
+              delivery_success: true,
+              delivery_details: {
+                channel: 'whatsapp',
+                api_messageId: sendTemplateResult.messageId, // ID retornado por la API
+                recipient: whatsappResult.recipient,
+                timestamp: sendTemplateResult.timestamp,
+                templateFlow: true
+              }
+            });
 
-          if (updateResult.success) {
-            console.log('✅ Message custom_data updated successfully with channel = whatsapp');
-          } else {
-            console.log('⚠️ Failed to update message custom_data:', updateResult.error);
+            if (updateResult.success) {
+              console.log('✅ Message custom_data updated successfully with channel = whatsapp');
+            } else {
+              console.log('⚠️ Failed to update message custom_data:', updateResult.error);
+            }
+          } catch (updateError) {
+            console.log('⚠️ Error updating message custom_data:', updateError instanceof Error ? updateError.message : String(updateError));
+            // No fallar el workflow por error de actualización
           }
-        } catch (updateError) {
-          console.log('⚠️ Error updating message custom_data:', updateError instanceof Error ? updateError.message : String(updateError));
-          // No fallar el workflow por error de actualización
+        } else {
+          console.log('ℹ️ No message_id or conversation_id provided - skipping custom_data update');
         }
 
         return {
@@ -152,24 +161,32 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
         // Update message status to failed when template flow fails
         console.error('❌ Template flow failed:', templateError);
         
-        try {
-          await updateMessageStatusToSentActivity({
-            message_id: whatsappResult.messageId,
-            conversation_id: params.conversation_id,
-            lead_id: params.lead_id || '',
-            site_id: params.site_id,
-            delivery_channel: 'whatsapp',
-            delivery_success: false,
-            delivery_details: {
-              status: 'failed',
-              error: templateError instanceof Error ? templateError.message : String(templateError),
-              timestamp: new Date().toISOString(),
-              templateFlow: true
-            }
-          });
-          console.log('📊 Message status updated to failed for template error');
-        } catch (updateError) {
-          console.error('❌ Failed to update message status:', updateError);
+        if (params.message_id || params.conversation_id) {
+          try {
+            console.log('📝 Updating message status to failed for template error...', {
+              message_id: params.message_id || 'not-provided',
+              conversation_id: params.conversation_id || 'not-provided'
+            });
+            await updateMessageStatusToSentActivity({
+              message_id: params.message_id,
+              conversation_id: params.conversation_id,
+              lead_id: params.lead_id || '',
+              site_id: params.site_id,
+              delivery_channel: 'whatsapp',
+              delivery_success: false,
+              delivery_details: {
+                status: 'failed',
+                error: templateError instanceof Error ? templateError.message : String(templateError),
+                timestamp: new Date().toISOString(),
+                templateFlow: true
+              }
+            });
+            console.log('📊 Message status updated to failed for template error');
+          } catch (updateError) {
+            console.error('❌ Failed to update message status:', updateError);
+          }
+        } else {
+          console.log('ℹ️ No message_id or conversation_id provided - skipping status update');
         }
         
         throw templateError; // Re-throw the original error
@@ -187,33 +204,41 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
         templateFlow: false
       });
 
-      // Actualizar custom_data.channel = "whatsapp" para mensaje directo exitoso
-      try {
-        console.log('📝 Updating message custom_data with channel = whatsapp...');
-        const updateResult = await updateMessageStatusToSentActivity({
-          message_id: whatsappResult.messageId,
-          conversation_id: params.conversation_id,
-          lead_id: params.lead_id || '',
-          site_id: params.site_id,
-          delivery_channel: 'whatsapp',
-          delivery_success: true,
-          delivery_details: {
-            channel: 'whatsapp',
-            messageId: whatsappResult.messageId,
-            recipient: whatsappResult.recipient,
-            timestamp: whatsappResult.timestamp,
-            templateFlow: false
-          }
-        });
+      // Actualizar custom_data.channel = "whatsapp" solo si tenemos message_id o conversation_id
+      if (params.message_id || params.conversation_id) {
+        try {
+          console.log('📝 Updating message custom_data with channel = whatsapp...', {
+            message_id: params.message_id || 'not-provided',
+            conversation_id: params.conversation_id || 'not-provided',
+            api_messageId: whatsappResult.messageId // Para logging
+          });
+          const updateResult = await updateMessageStatusToSentActivity({
+            message_id: params.message_id,
+            conversation_id: params.conversation_id,
+            lead_id: params.lead_id || '',
+            site_id: params.site_id,
+            delivery_channel: 'whatsapp',
+            delivery_success: true,
+            delivery_details: {
+              channel: 'whatsapp',
+              api_messageId: whatsappResult.messageId, // ID retornado por la API
+              recipient: whatsappResult.recipient,
+              timestamp: whatsappResult.timestamp,
+              templateFlow: false
+            }
+          });
 
-        if (updateResult.success) {
-          console.log('✅ Message custom_data updated successfully with channel = whatsapp');
-        } else {
-          console.log('⚠️ Failed to update message custom_data:', updateResult.error);
+          if (updateResult.success) {
+            console.log('✅ Message custom_data updated successfully with channel = whatsapp');
+          } else {
+            console.log('⚠️ Failed to update message custom_data:', updateResult.error);
+          }
+        } catch (updateError) {
+          console.log('⚠️ Error updating message custom_data:', updateError instanceof Error ? updateError.message : String(updateError));
+          // No fallar el workflow por error de actualización
         }
-      } catch (updateError) {
-        console.log('⚠️ Error updating message custom_data:', updateError instanceof Error ? updateError.message : String(updateError));
-        // No fallar el workflow por error de actualización
+      } else {
+        console.log('ℹ️ No message_id or conversation_id provided - skipping custom_data update');
       }
 
       return {
@@ -236,12 +261,14 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
     
     // Try to update message status to failed for initial send failures
     // (template failures are handled separately above)
-    try {
-      // Only update if we have a messageId from the initial call
-      const messageId = whatsappResult?.messageId;
-      if (messageId) {
+    if (params.message_id || params.conversation_id) {
+      try {
+        console.log('📝 Updating message status to failed for workflow error...', {
+          message_id: params.message_id || 'not-provided',
+          conversation_id: params.conversation_id || 'not-provided'
+        });
         await updateMessageStatusToSentActivity({
-          message_id: messageId,
+          message_id: params.message_id,
           conversation_id: params.conversation_id,
           lead_id: params.lead_id || '',
           site_id: params.site_id,
@@ -254,9 +281,11 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
           }
         });
         console.log('📊 Message status updated to failed for workflow error');
+      } catch (updateError) {
+        console.error('❌ Failed to update message status for workflow error:', updateError);
       }
-    } catch (updateError) {
-      console.error('❌ Failed to update message status for workflow error:', updateError);
+    } else {
+      console.log('ℹ️ No message_id or conversation_id provided - skipping status update');
     }
     
     throw error;

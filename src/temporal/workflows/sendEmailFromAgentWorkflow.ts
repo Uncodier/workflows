@@ -83,10 +83,15 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
       executionTime
     });
 
-    // Actualizar custom_data.channel = "email" si tenemos message_id
+    // Actualizar custom_data.channel = "email" solo si tenemos message_id o conversation_id
+    // (significa que hay un mensaje existente en BD para actualizar)
     if (params.message_id || params.conversation_id) {
       try {
-        console.log('📝 Updating message custom_data with channel = email...');
+        console.log('📝 Updating message custom_data with channel = email...', {
+          message_id: params.message_id || 'not-provided',
+          conversation_id: params.conversation_id || 'not-provided',
+          api_messageId: emailResult.messageId // Para logging
+        });
         const updateResult = await updateMessageStatusToSentActivity({
           message_id: params.message_id,
           conversation_id: params.conversation_id,
@@ -96,7 +101,7 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
           delivery_success: true,
           delivery_details: {
             channel: 'email',
-            messageId: emailResult.messageId,
+            api_messageId: emailResult.messageId, // ID retornado por la API
             recipient: emailResult.recipient,
             timestamp: emailResult.timestamp
           }
@@ -107,11 +112,13 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
         } else {
           console.log('⚠️ Failed to update message custom_data:', updateResult.error);
         }
-      } catch (updateError) {
-        console.log('⚠️ Error updating message custom_data:', updateError instanceof Error ? updateError.message : String(updateError));
-        // No fallar el workflow por error de actualización
+              } catch (updateError) {
+          console.log('⚠️ Error updating message custom_data:', updateError instanceof Error ? updateError.message : String(updateError));
+          // No fallar el workflow por error de actualización
+        }
+      } else {
+        console.log('ℹ️ No message_id or conversation_id provided - skipping custom_data update');
       }
-    }
 
     return {
       success: emailResult.success,
@@ -130,10 +137,13 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
       executionTime
     });
 
-    // Actualizar status = "failed" si tenemos message_id
+    // Actualizar status = "failed" solo si tenemos message_id o conversation_id
     if (params.message_id || params.conversation_id) {
       try {
-        console.log('📝 Updating message status to failed...');
+        console.log('📝 Updating message status to failed...', {
+          message_id: params.message_id || 'not-provided',
+          conversation_id: params.conversation_id || 'not-provided'
+        });
         const updateResult = await updateMessageStatusToSentActivity({
           message_id: params.message_id,
           conversation_id: params.conversation_id,
@@ -154,11 +164,13 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
         } else {
           console.log('⚠️ Failed to update message status to failed:', updateResult.error);
         }
-      } catch (updateError) {
-        console.log('⚠️ Error updating message status to failed:', updateError instanceof Error ? updateError.message : String(updateError));
-        // No fallar el workflow por error de actualización
+              } catch (updateError) {
+          console.log('⚠️ Error updating message status to failed:', updateError instanceof Error ? updateError.message : String(updateError));
+          // No fallar el workflow por error de actualización
+        }
+      } else {
+        console.log('ℹ️ No message_id or conversation_id provided - skipping status update');
       }
-    }
     
     throw error;
   }
