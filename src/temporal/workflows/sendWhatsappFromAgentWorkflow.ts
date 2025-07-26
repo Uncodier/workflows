@@ -3,7 +3,12 @@ import type * as activities from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 
 // Configure activity options using centralized timeouts
-const { sendWhatsAppFromAgentActivity } = proxyActivities<typeof activities>({
+const { 
+  sendWhatsAppFromAgentActivity,
+  createTemplateActivity,
+  sendTemplateActivity,
+  updateMessageStatusActivity
+} = proxyActivities<typeof activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.WHATSAPP_OPERATIONS, // ✅ Using centralized config (2 minutes)
   retry: RETRY_POLICIES.NETWORK, // ✅ Using appropriate retry policy for WhatsApp operations
 });
@@ -35,11 +40,14 @@ export interface SendWhatsAppFromAgentResult {
 /**
  * Send WhatsApp From Agent Workflow
  * Sends a WhatsApp message via the agent API endpoint
+ * Handles both direct messages (when there's response window) and template messages (when no response window)
  */
 export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams): Promise<SendWhatsAppFromAgentResult> {
   console.log('📱 Starting send WhatsApp from agent workflow...');
   const startTime = new Date();
 
+  let whatsappResult: any = null; // Declare in broader scope for error handling
+  
   try {
     // Validate required parameters
     if (!params.phone_number || !params.message || !params.site_id) {
@@ -56,8 +64,8 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
       lead_id: params.lead_id || 'not-provided'
     });
 
-    // Send WhatsApp using the agent API
-    const whatsappResult = await sendWhatsAppFromAgentActivity({
+    // Step 1: Send WhatsApp using the agent API
+    whatsappResult = await sendWhatsAppFromAgentActivity({
       phone_number: params.phone_number,
       message: params.message,
       site_id: params.site_id,
@@ -67,22 +75,89 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
       lead_id: params.lead_id
     });
 
-    const endTime = new Date();
-    const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
+    // Step 2: Check if template is required (no response window)
+    if (whatsappResult.template_required) {
+      console.log('📄 Template required - no response window available. Creating template...');
+      
+      try {
+        // Step 3: Create template using the message_id and required parameters
+        const templateResult = await createTemplateActivity({
+          message_id: whatsappResult.messageId, // messageId from workflow interface maps to API's message_id
+          phone_number: params.phone_number,
+          message: params.message,
+          site_id: params.site_id
+        });
 
-    console.log('✅ WhatsApp sent successfully via agent API:', {
-      messageId: whatsappResult.messageId,
-      recipient: whatsappResult.recipient,
-      executionTime
-    });
+        console.log('✅ Template created successfully:', {
+          template_id: templateResult.template_id
+        });
 
-    return {
-      success: whatsappResult.success,
-      messageId: whatsappResult.messageId,
-      recipient: whatsappResult.recipient,
-      executionTime,
-      timestamp: whatsappResult.timestamp
-    };
+        // Step 4: Send template with all required parameters
+        const sendTemplateResult = await sendTemplateActivity({
+          template_id: templateResult.template_id,
+          phone_number: params.phone_number,
+          site_id: params.site_id,
+          message_id: whatsappResult.messageId, // Para tracking - messageId from workflow interface
+          original_message: params.message      // Para logging
+        });
+
+        const endTime = new Date();
+        const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
+
+        console.log('✅ WhatsApp template sent successfully:', {
+          messageId: sendTemplateResult.messageId,
+          recipient: whatsappResult.recipient,
+          executionTime,
+          templateFlow: true
+        });
+
+        return {
+          success: sendTemplateResult.success,
+          messageId: sendTemplateResult.messageId,
+          recipient: whatsappResult.recipient,
+          executionTime,
+          timestamp: sendTemplateResult.timestamp
+        };
+
+      } catch (templateError) {
+        // Update message status to failed when template flow fails
+        console.error('❌ Template flow failed:', templateError);
+        
+                 try {
+           await updateMessageStatusActivity({
+             message_id: whatsappResult.messageId, // messageId from workflow interface maps to DB message_id
+             status: 'failed',
+             error_details: templateError instanceof Error ? templateError.message : String(templateError),
+             site_id: params.site_id
+           });
+           console.log('📊 Message status updated to failed');
+         } catch (updateError) {
+           console.error('❌ Failed to update message status:', updateError);
+         }
+        
+        throw templateError; // Re-throw the original error
+      }
+
+    } else {
+      // Scenario A: Direct message (response window available)
+      const endTime = new Date();
+      const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
+
+      console.log('✅ WhatsApp sent successfully via direct message:', {
+        messageId: whatsappResult.messageId,
+        recipient: whatsappResult.recipient,
+        executionTime,
+        templateFlow: false
+      });
+
+      return {
+        success: whatsappResult.success,
+        messageId: whatsappResult.messageId,
+        recipient: whatsappResult.recipient,
+        executionTime,
+        timestamp: whatsappResult.timestamp
+      };
+    }
 
   } catch (error) {
     const endTime = new Date();
@@ -92,6 +167,24 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
       error: error instanceof Error ? error.message : String(error),
       executionTime
     });
+    
+    // Try to update message status to failed for initial send failures
+    // (template failures are handled separately above)
+         try {
+       // Only update if we have a messageId from the initial call
+       const messageId = whatsappResult?.messageId;
+       if (messageId) {
+         await updateMessageStatusActivity({
+           message_id: messageId, // messageId from workflow interface maps to DB message_id
+           status: 'failed',
+           error_details: error instanceof Error ? error.message : String(error),
+           site_id: params.site_id
+         });
+         console.log('📊 Message status updated to failed for workflow error');
+       }
+     } catch (updateError) {
+       console.error('❌ Failed to update message status for workflow error:', updateError);
+     }
     
     throw error;
   }

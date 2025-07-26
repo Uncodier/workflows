@@ -14,6 +14,11 @@ export * from './sendWhatsappFromAgentWorkflow';
 export * from './answerWhatsappMessageWorkflow';
 // Export alias for backward compatibility  
 export { answerWhatsappMessageWorkflow as whatsappMessageWorkflow } from './answerWhatsappMessageWorkflow';
+
+// ✅ Export aliases for agent workflows to support different naming conventions
+export { sendWhatsappFromAgent as sendWhatsappFromAgentWorkflow } from './sendWhatsappFromAgentWorkflow';
+export { sendEmailFromAgent as sendEmailFromAgentWorkflow } from './sendEmailFromAgentWorkflow';
+
 export * from './siteSetupWorkflow';
 export * from './executeToolWorkflow';
 export * from './buildCampaignsWorkflow';

@@ -18,6 +18,7 @@ const {
   updateMessageStatusToSentActivity,
   updateTaskStatusToCompletedActivity,
   cleanupFailedFollowUpActivity,
+  updateMessageTimestampActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
   retry: {
@@ -909,6 +910,36 @@ export async function leadFollowUpWorkflow(
       }
     } else {
       console.log(`⚠️ Skipping message status update - no successful delivery`);
+    }
+
+    // Step 5.4.1: Update message timestamp to sync with real delivery time
+    if (messageSent && messageSent.success) {
+      console.log(`⏰ Step 5.4.1: Syncing message timestamp with actual delivery time...`);
+      
+      const timestampUpdateResult = await updateMessageTimestampActivity({
+        message_id: validationResult?.message_id,
+        conversation_id: validationResult?.conversation_id,
+        lead_id: lead_id,
+        site_id: site_id,
+        delivery_timestamp: new Date().toISOString(), // Use actual delivery time
+        delivery_channel: messageSent.channel
+      });
+      
+      if (timestampUpdateResult.success) {
+        if (timestampUpdateResult.updated_message_id) {
+          console.log(`✅ Message ${timestampUpdateResult.updated_message_id} timestamp synced with delivery time`);
+          console.log(`📅 Message now shows actual delivery time instead of creation time`);
+        } else {
+          console.log(`✅ Message timestamp sync completed (no message to update)`);
+        }
+      } else {
+        const errorMsg = `Failed to sync message timestamp: ${timestampUpdateResult.error}`;
+        console.error(`⚠️ ${errorMsg}`);
+        errors.push(errorMsg);
+        // Note: We don't throw here as the main operation was successful
+      }
+    } else {
+      console.log(`⚠️ Skipping message timestamp sync - no successful delivery`);
     }
 
     // Step 5.5: Activate conversation after successful follow-up

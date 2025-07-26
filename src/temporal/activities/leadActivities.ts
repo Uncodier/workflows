@@ -1307,6 +1307,169 @@ export async function updateMessageStatusToSentActivity(request: {
       error: errorMessage
     };
   }
+}
+
+/**
+ * Activity to update message timestamp to sync with real delivery time
+ * Updates the created_at field in the messages table to reflect actual send time
+ */
+export async function updateMessageTimestampActivity(request: {
+  message_id?: string;
+  conversation_id?: string;
+  lead_id: string;
+  site_id: string;
+  delivery_timestamp: string;
+  delivery_channel: 'email' | 'whatsapp';
+}): Promise<{ success: boolean; error?: string; updated_message_id?: string }> {
+  console.log(`⏰ Updating message timestamp to sync with delivery time...`);
+  console.log(`📋 Message ID: ${request.message_id}, Channel: ${request.delivery_channel}`);
+  console.log(`📅 Delivery timestamp: ${request.delivery_timestamp}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot update message timestamp');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, updating message timestamp...');
+    
+    // Import supabase service role client (bypasses RLS)
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    let messageId = request.message_id;
+    
+    // If no message_id provided, try to find the most recent message in the conversation
+    if (!messageId && request.conversation_id) {
+      console.log(`🔍 No message ID provided, searching for recent message in conversation...`);
+      
+      const { data: recentMessage, error: findError } = await supabaseServiceRole
+        .from('messages')
+        .select('id, created_at')
+        .eq('conversation_id', request.conversation_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (findError && findError.code !== 'PGRST116') {
+        console.error(`❌ Error finding recent message:`, findError);
+        return {
+          success: false,
+          error: `Failed to find recent message: ${findError.message}`
+        };
+      }
+
+      if (recentMessage) {
+        messageId = recentMessage.id;
+        console.log(`✅ Found recent message: ${messageId}`);
+      }
+    }
+
+    if (!messageId) {
+      console.log(`⚠️ No message found to update timestamp - this is normal for some follow-ups`);
+      return {
+        success: true, // Don't fail the workflow for missing message
+        error: 'No message found to update timestamp'
+      };
+    }
+
+    console.log(`⏰ Updating message ${messageId} timestamp to delivery time...`);
+
+    // Verify the message exists and get current data
+    const { data: currentMessage, error: getCurrentError } = await supabaseServiceRole
+      .from('messages')
+      .select('id, conversation_id, created_at, custom_data')
+      .eq('id', messageId)
+      .single();
+
+    if (getCurrentError) {
+      console.error(`❌ Error fetching current message:`, getCurrentError);
+      return {
+        success: false,
+        error: `Failed to fetch message: ${getCurrentError.message}`
+      };
+    }
+
+    console.log(`📅 Current message timestamp: ${currentMessage.created_at}`);
+    console.log(`📅 New delivery timestamp: ${request.delivery_timestamp}`);
+
+    // Verify the message belongs to the correct conversation (security check)
+    if (request.conversation_id && currentMessage.conversation_id !== request.conversation_id) {
+      console.error(`❌ Message ${messageId} conversation mismatch:`);
+      console.error(`   - Expected: ${request.conversation_id}`);
+      console.error(`   - Actual: ${currentMessage.conversation_id}`);
+      return {
+        success: false,
+        error: 'Message conversation mismatch - possible data corruption'
+      };
+    }
+
+    // Update the custom_data to track the original timestamp
+    const currentCustomData = currentMessage.custom_data || {};
+    const updatedCustomData = {
+      ...currentCustomData,
+      timestamp_sync: {
+        original_created_at: currentMessage.created_at,
+        delivery_timestamp: request.delivery_timestamp,
+        synced_at: new Date().toISOString(),
+        delivery_channel: request.delivery_channel,
+        lead_id: request.lead_id,
+        site_id: request.site_id
+      }
+    };
+
+    // Update message with new timestamp and custom data
+    const { data, error } = await supabaseServiceRole
+      .from('messages')
+      .update({
+        created_at: request.delivery_timestamp,
+        custom_data: updatedCustomData,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', messageId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error(`❌ Error updating message timestamp:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+
+    if (!data) {
+      return {
+        success: false,
+        error: `Message ${messageId} not found or timestamp update failed`
+      };
+    }
+
+    console.log(`✅ Successfully updated message ${messageId} timestamp`);
+    console.log(`📅 Message timestamp synced: ${currentMessage.created_at} → ${request.delivery_timestamp}`);
+    console.log(`📊 Original timestamp preserved in custom_data for audit trail`);
+    
+    return {
+      success: true,
+      updated_message_id: messageId
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception updating message timestamp:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
 } 
 
 export interface UpdateTaskStatusRequest {

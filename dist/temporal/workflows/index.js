@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.workflowNames = exports.workflows = exports.whatsappMessageWorkflow = void 0;
+exports.workflowNames = exports.workflows = exports.sendEmailFromAgentWorkflow = exports.sendWhatsappFromAgentWorkflow = exports.whatsappMessageWorkflow = void 0;
 const dataProcessingWorkflow_1 = require("./dataProcessingWorkflow");
 const cronWorkflow_1 = require("./cronWorkflow");
 const syncEmailsWorkflow_1 = require("./syncEmailsWorkflow");
@@ -31,6 +31,9 @@ const answerWhatsappMessageWorkflow_1 = require("./answerWhatsappMessageWorkflow
 const leadAttentionWorkflow_1 = require("./leadAttentionWorkflow");
 // Export alias for backward compatibility
 exports.whatsappMessageWorkflow = answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow;
+// ✅ Export aliases for agent workflows to support different naming conventions
+exports.sendWhatsappFromAgentWorkflow = sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent;
+exports.sendEmailFromAgentWorkflow = sendEmailFromAgentWorkflow_1.sendEmailFromAgent;
 const siteSetupWorkflow_1 = require("./siteSetupWorkflow");
 const buildCampaignsWorkflow_1 = require("./buildCampaignsWorkflow");
 const buildSegmentsWorkflow_1 = require("./buildSegmentsWorkflow");
@@ -114,6 +117,9 @@ exports.workflows = {
     leadInvalidationWorkflow: leadInvalidationWorkflow_1.leadInvalidationWorkflow,
     // Alias for backward compatibility
     whatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
+    // ✅ Aliases for agent workflows with different naming conventions
+    sendWhatsappFromAgentWorkflow: sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent,
+    sendEmailFromAgentWorkflow: sendEmailFromAgentWorkflow_1.sendEmailFromAgent,
 };
 // Workflow names for Temporal Client (strings)
 exports.workflowNames = {
@@ -152,4 +158,7 @@ exports.workflowNames = {
     leadInvalidationWorkflow: 'leadInvalidationWorkflow',
     // Alias for backward compatibility
     whatsappMessageWorkflow: 'whatsappMessageWorkflow',
+    // ✅ Aliases for agent workflows with different naming conventions
+    sendWhatsappFromAgentWorkflow: 'sendWhatsappFromAgentWorkflow',
+    sendEmailFromAgentWorkflow: 'sendEmailFromAgentWorkflow',
 };

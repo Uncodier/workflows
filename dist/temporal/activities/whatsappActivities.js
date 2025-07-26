@@ -1,8 +1,44 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.analyzeWhatsAppMessageActivity = analyzeWhatsAppMessageActivity;
 exports.sendWhatsAppResponseActivity = sendWhatsAppResponseActivity;
 exports.sendWhatsAppFromAgentActivity = sendWhatsAppFromAgentActivity;
+exports.createTemplateActivity = createTemplateActivity;
+exports.sendTemplateActivity = sendTemplateActivity;
+exports.updateMessageStatusActivity = updateMessageStatusActivity;
 const apiService_1 = require("../services/apiService");
 /**
  * Analyze WhatsApp message using AI
@@ -139,14 +175,131 @@ async function sendWhatsAppFromAgentActivity(params) {
         console.log('✅ WhatsApp sent successfully via agent API:', response.data);
         return {
             success: true,
-            messageId: response.data.messageId || 'unknown',
+            messageId: response.data.message_id || 'unknown', // ✅ API returns message_id, not messageId
             recipient: params.phone_number,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            template_required: response.data.template_required || false // ✅ Include template_required from API response
         };
     }
     catch (error) {
         console.error('❌ WhatsApp sending failed:', error);
         throw new Error(`WhatsApp sending failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+/**
+ * Activity to create WhatsApp template
+ */
+async function createTemplateActivity(params) {
+    console.log('📄 Creating WhatsApp template:', {
+        message_id: params.message_id,
+        phone_number: params.phone_number,
+        site_id: params.site_id,
+        messageLength: params.message.length
+    });
+    try {
+        const response = await apiService_1.apiService.post('/api/agents/whatsapp/createTemplate', {
+            message_id: params.message_id,
+            phone_number: params.phone_number,
+            message: params.message,
+            site_id: params.site_id
+        });
+        if (!response.success) {
+            throw new Error(`Failed to create WhatsApp template: ${response.error?.message}`);
+        }
+        console.log('✅ WhatsApp template created successfully:', response.data);
+        return {
+            success: true,
+            template_id: response.data.template_id,
+            timestamp: new Date().toISOString()
+        };
+    }
+    catch (error) {
+        console.error('❌ WhatsApp template creation failed:', error);
+        throw new Error(`WhatsApp template creation failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+/**
+ * Activity to send WhatsApp template
+ */
+async function sendTemplateActivity(params) {
+    console.log('📤 Sending WhatsApp template:', {
+        template_id: params.template_id,
+        phone_number: params.phone_number,
+        site_id: params.site_id,
+        message_id: params.message_id || 'not-provided',
+        original_message: params.original_message ? `${params.original_message.substring(0, 50)}...` : 'not-provided'
+    });
+    try {
+        const response = await apiService_1.apiService.post('/api/agents/whatsapp/sendTemplate', {
+            template_id: params.template_id,
+            phone_number: params.phone_number,
+            site_id: params.site_id,
+            message_id: params.message_id,
+            original_message: params.original_message
+        });
+        if (!response.success) {
+            throw new Error(`Failed to send WhatsApp template: ${response.error?.message}`);
+        }
+        console.log('✅ WhatsApp template sent successfully:', response.data);
+        return {
+            success: true,
+            messageId: response.data.message_id || 'unknown', // ✅ API returns message_id, not messageId
+            timestamp: new Date().toISOString()
+        };
+    }
+    catch (error) {
+        console.error('❌ WhatsApp template sending failed:', error);
+        throw new Error(`WhatsApp template sending failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+/**
+ * Activity to update message custom_data with status using Supabase
+ */
+async function updateMessageStatusActivity(params) {
+    console.log('📊 Updating message status via Supabase:', {
+        message_id: params.message_id,
+        status: params.status,
+        site_id: params.site_id,
+        hasErrorDetails: !!params.error_details
+    });
+    try {
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // Prepare custom_data update
+        const customDataUpdate = {
+            status: params.status,
+            updated_at: new Date().toISOString()
+        };
+        // Include error details if status is failed
+        if (params.status === 'failed' && params.error_details) {
+            customDataUpdate.error_details = params.error_details;
+            customDataUpdate.error_timestamp = new Date().toISOString();
+        }
+        // Update message in Supabase
+        const { data, error } = await supabaseServiceRole
+            .from('messages')
+            .update({
+            custom_data: customDataUpdate
+        })
+            .eq('id', params.message_id) // ✅ Table uses 'id' as primary key, not 'message_id'
+            .select();
+        if (error) {
+            throw new Error(`Supabase update failed: ${error.message}`);
+        }
+        if (!data || data.length === 0) {
+            throw new Error(`Message not found with id: ${params.message_id} for site: ${params.site_id}`);
+        }
+        console.log('✅ Message status updated successfully in Supabase:', data[0]);
+        return {
+            success: true,
+            message_id: params.message_id,
+            updated_status: params.status,
+            timestamp: new Date().toISOString()
+        };
+    }
+    catch (error) {
+        console.error('❌ Message status update failed:', error);
+        throw new Error(`Message status update failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 /**

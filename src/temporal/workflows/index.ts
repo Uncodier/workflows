@@ -15,6 +15,10 @@ import { leadAttentionWorkflow } from './leadAttentionWorkflow';
 
 // Export alias for backward compatibility
 export const whatsappMessageWorkflow = answerWhatsappMessageWorkflow;
+
+// ✅ Export aliases for agent workflows to support different naming conventions
+export const sendWhatsappFromAgentWorkflow = sendWhatsappFromAgent;
+export const sendEmailFromAgentWorkflow = sendEmailFromAgent;
 import { siteSetupWorkflow } from './siteSetupWorkflow';
 import { buildCampaignsWorkflow } from './buildCampaignsWorkflow';
 import { buildSegmentsWorkflow } from './buildSegmentsWorkflow';
@@ -100,6 +104,9 @@ export const workflows = {
   leadInvalidationWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
+  // ✅ Aliases for agent workflows with different naming conventions
+  sendWhatsappFromAgentWorkflow: sendWhatsappFromAgent,
+  sendEmailFromAgentWorkflow: sendEmailFromAgent,
 };
 
 // Workflow names for Temporal Client (strings)
@@ -139,6 +146,9 @@ export const workflowNames = {
   leadInvalidationWorkflow: 'leadInvalidationWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',
+  // ✅ Aliases for agent workflows with different naming conventions
+  sendWhatsappFromAgentWorkflow: 'sendWhatsappFromAgentWorkflow',
+  sendEmailFromAgentWorkflow: 'sendEmailFromAgentWorkflow',
 };
 
 // Workflow types for type-safe execution

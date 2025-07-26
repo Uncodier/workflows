@@ -203,6 +203,7 @@ export interface SendWhatsAppFromAgentResult {
   messageId: string;
   recipient: string;
   timestamp: string;
+  template_required?: boolean; // ✅ Nueva propiedad para indicar si se requiere template
 }
 
 /**
@@ -249,14 +250,209 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
 
     return {
       success: true,
-      messageId: response.data.messageId || 'unknown',
+      messageId: response.data.message_id || 'unknown', // ✅ API returns message_id, not messageId
       recipient: params.phone_number,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      template_required: response.data.template_required || false // ✅ Include template_required from API response
     };
 
   } catch (error) {
     console.error('❌ WhatsApp sending failed:', error);
     throw new Error(`WhatsApp sending failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Interface for createTemplate activity parameters
+ */
+export interface CreateTemplateParams {
+  message_id: string;
+  phone_number: string;
+  message: string;
+  site_id: string;
+}
+
+/**
+ * Interface for createTemplate activity result
+ */
+export interface CreateTemplateResult {
+  success: boolean;
+  template_id: string;
+  timestamp: string;
+}
+
+/**
+ * Activity to create WhatsApp template
+ */
+export async function createTemplateActivity(params: CreateTemplateParams): Promise<CreateTemplateResult> {
+  console.log('📄 Creating WhatsApp template:', {
+    message_id: params.message_id,
+    phone_number: params.phone_number,
+    site_id: params.site_id,
+    messageLength: params.message.length
+  });
+
+  try {
+    const response = await apiService.post('/api/agents/whatsapp/createTemplate', {
+      message_id: params.message_id,
+      phone_number: params.phone_number,
+      message: params.message,
+      site_id: params.site_id
+    });
+
+    if (!response.success) {
+      throw new Error(`Failed to create WhatsApp template: ${response.error?.message}`);
+    }
+
+    console.log('✅ WhatsApp template created successfully:', response.data);
+
+    return {
+      success: true,
+      template_id: response.data.template_id,
+      timestamp: new Date().toISOString()
+    };
+
+  } catch (error) {
+    console.error('❌ WhatsApp template creation failed:', error);
+    throw new Error(`WhatsApp template creation failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Interface for sendTemplate activity parameters
+ */
+export interface SendTemplateParams {
+  template_id: string;
+  phone_number: string;
+  site_id: string;
+  message_id?: string;       // Para tracking
+  original_message?: string; // Para logging
+}
+
+/**
+ * Interface for sendTemplate activity result  
+ */
+export interface SendTemplateResult {
+  success: boolean;
+  messageId: string;
+  timestamp: string;
+}
+
+/**
+ * Activity to send WhatsApp template
+ */
+export async function sendTemplateActivity(params: SendTemplateParams): Promise<SendTemplateResult> {
+  console.log('📤 Sending WhatsApp template:', {
+    template_id: params.template_id,
+    phone_number: params.phone_number,
+    site_id: params.site_id,
+    message_id: params.message_id || 'not-provided',
+    original_message: params.original_message ? `${params.original_message.substring(0, 50)}...` : 'not-provided'
+  });
+
+  try {
+    const response = await apiService.post('/api/agents/whatsapp/sendTemplate', {
+      template_id: params.template_id,
+      phone_number: params.phone_number,
+      site_id: params.site_id,
+      message_id: params.message_id,
+      original_message: params.original_message
+    });
+
+    if (!response.success) {
+      throw new Error(`Failed to send WhatsApp template: ${response.error?.message}`);
+    }
+
+    console.log('✅ WhatsApp template sent successfully:', response.data);
+
+    return {
+      success: true,
+      messageId: response.data.message_id || 'unknown', // ✅ API returns message_id, not messageId
+      timestamp: new Date().toISOString()
+    };
+
+  } catch (error) {
+    console.error('❌ WhatsApp template sending failed:', error);
+    throw new Error(`WhatsApp template sending failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Interface for updateMessageStatus activity parameters
+ */
+export interface UpdateMessageStatusParams {
+  message_id: string; // ✅ This is actually the 'id' field from messages table
+  status: 'failed' | 'sent' | 'pending';
+  error_details?: string;
+  site_id: string; // ✅ For validation and logging purposes
+}
+
+/**
+ * Interface for updateMessageStatus activity result
+ */
+export interface UpdateMessageStatusResult {
+  success: boolean;
+  message_id: string;
+  updated_status: string;
+  timestamp: string;
+}
+
+/**
+ * Activity to update message custom_data with status using Supabase
+ */
+export async function updateMessageStatusActivity(params: UpdateMessageStatusParams): Promise<UpdateMessageStatusResult> {
+  console.log('📊 Updating message status via Supabase:', {
+    message_id: params.message_id,
+    status: params.status,
+    site_id: params.site_id,
+    hasErrorDetails: !!params.error_details
+  });
+
+  try {
+    // Import supabase service role client (bypasses RLS)
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    // Prepare custom_data update
+    const customDataUpdate: any = {
+      status: params.status,
+      updated_at: new Date().toISOString()
+    };
+
+    // Include error details if status is failed
+    if (params.status === 'failed' && params.error_details) {
+      customDataUpdate.error_details = params.error_details;
+      customDataUpdate.error_timestamp = new Date().toISOString();
+    }
+
+    // Update message in Supabase
+    const { data, error } = await supabaseServiceRole
+      .from('messages')
+      .update({ 
+        custom_data: customDataUpdate
+      })
+      .eq('id', params.message_id) // ✅ Table uses 'id' as primary key, not 'message_id'
+      .select();
+
+    if (error) {
+      throw new Error(`Supabase update failed: ${error.message}`);
+    }
+
+    if (!data || data.length === 0) {
+      throw new Error(`Message not found with id: ${params.message_id} for site: ${params.site_id}`);
+    }
+
+    console.log('✅ Message status updated successfully in Supabase:', data[0]);
+
+    return {
+      success: true,
+      message_id: params.message_id,
+      updated_status: params.status,
+      timestamp: new Date().toISOString()
+    };
+
+  } catch (error) {
+    console.error('❌ Message status update failed:', error);
+    throw new Error(`Message status update failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
