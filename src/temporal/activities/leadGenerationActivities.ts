@@ -54,7 +54,7 @@ export interface RegionSearchApiOptions {
 }
 
 export interface BusinessType {
-  business_type_name: string;
+  name: string;
   description: string;
   relevance: string;
   market_potential: string;
@@ -503,12 +503,12 @@ export async function callRegionVenuesWithMultipleSearchTermsActivity(
 
     console.log(`🎯 Target venue goal: ${targetVenueGoal} venues`);
     console.log(`🌍 Geographic location: ${locationString}`);
-    console.log(`🏷️ Business types to search: ${businessTypes.map(bt => bt.business_type_name).join(', ')}`);
+    console.log(`🏷️ Business types to search: ${businessTypes.map(bt => bt.name).join(', ')}`);
 
     // Búsqueda inicial con el primer business type si está disponible
     if (businessTypes.length > 0) {
       const firstBusinessType = businessTypes[0];
-      const firstBusinessTypeName = firstBusinessType.business_type_name;
+      const firstBusinessTypeName = firstBusinessType.name;
       const firstSearchTerm = locationString ? `${firstBusinessTypeName} in ${locationString}` : firstBusinessTypeName;
 
       console.log(`🔍 Initial search with first business type: "${firstSearchTerm}"`);
@@ -569,7 +569,7 @@ export async function callRegionVenuesWithMultipleSearchTermsActivity(
 
       for (let i = 1; i < businessTypes.length && allVenues.length < targetVenueGoal; i++) {
         const businessType = businessTypes[i];
-        const businessTypeName = businessType.business_type_name;
+        const businessTypeName = businessType.name;
         const searchTerm = locationString ? `${businessTypeName} in ${locationString}` : businessTypeName;
         
         console.log(`🔍 Additional search ${i + 1}: "${searchTerm}"`);
@@ -668,8 +668,8 @@ export async function callRegionVenuesWithMultipleSearchTermsActivity(
     // Crear respuesta en el formato esperado
     const responseData = {
       searchTerm: locationString ? 
-        `Multiple searches: ${businessTypes.map(bt => bt.business_type_name).join(', ')} in ${locationString}` :
-        `Multiple searches: ${businessTypes.map(bt => bt.business_type_name).join(', ')}`,
+        `Multiple searches: ${businessTypes.map(bt => bt.name).join(', ')} in ${locationString}` :
+        `Multiple searches: ${businessTypes.map(bt => bt.name).join(', ')}`,
       city: options.city,
       region: options.region,
       venueCount: finalVenueCount,

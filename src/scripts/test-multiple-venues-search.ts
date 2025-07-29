@@ -12,19 +12,19 @@ async function testMultipleVenuesSearch() {
   // Mock business types para la prueba
   const mockBusinessTypes: BusinessType[] = [
     {
-      business_type_name: 'restaurantes',
+      name: 'restaurantes',
       description: 'Establecimientos de comida',
       relevance: 'High demand for marketing services',
       market_potential: 'High'
     },
     {
-      business_type_name: 'tiendas de ropa',
+      name: 'tiendas de ropa',
       description: 'Comercios de moda',
       relevance: 'Need digital presence',
       market_potential: 'Medium'
     },
     {
-      business_type_name: 'consultorias',
+      name: 'consultorias',
       description: 'Servicios profesionales',
       relevance: 'Business growth focus',
       market_potential: 'High'
@@ -94,7 +94,7 @@ async function runTestScenarios() {
   console.log('📋 Scenario 2: Search with single business type');
   const singleBusinessType: BusinessType[] = [
     {
-      business_type_name: 'farmacias',
+      name: 'farmacias',
       description: 'Establecimientos farmacéuticos',
       relevance: 'Essential services',
       market_potential: 'Medium'

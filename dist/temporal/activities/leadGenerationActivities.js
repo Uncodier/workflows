@@ -332,7 +332,7 @@ async function callRegionVenuesApiActivity(options) {
 /**
  * Nueva actividad para llamar a la API de venues con búsquedas múltiples individuales
  * En lugar de pasar todos los business types en un search term, hace búsquedas individuales
- * Incluye el país en cada búsqueda e intenta con cada business type si es necesario
+ * Usa solo ciudad y región (sin asumir país) e intenta con cada business type si es necesario
  */
 async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
     try {
@@ -349,28 +349,28 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
         });
         const businessTypes = options.businessTypes || [];
         const targetVenueGoal = options.targetVenueGoal || options.maxVenues || 20;
-        const country = options.country || 'España'; // País por defecto
         const allVenues = [];
         let totalApiCalls = 0;
         const searchResults = [];
         const combinedExcludeNames = [...(options.excludeNames || [])];
-        // Construir información geográfica completa incluyendo país
+        // Construir información geográfica solo con ciudad y región
         const geographicInfo = [];
         if (options.city)
             geographicInfo.push(options.city);
         if (options.region)
             geographicInfo.push(options.region);
-        if (country)
-            geographicInfo.push(country);
+        // Solo agregar país si viene especificado explícitamente
+        if (options.country)
+            geographicInfo.push(options.country);
         const locationString = geographicInfo.join(', ');
         console.log(`🎯 Target venue goal: ${targetVenueGoal} venues`);
         console.log(`🌍 Geographic location: ${locationString}`);
-        console.log(`🏷️ Business types to search: ${businessTypes.map(bt => bt.business_type_name).join(', ')}`);
+        console.log(`🏷️ Business types to search: ${businessTypes.map(bt => bt.name).join(', ')}`);
         // Búsqueda inicial con el primer business type si está disponible
         if (businessTypes.length > 0) {
             const firstBusinessType = businessTypes[0];
-            const firstBusinessTypeName = firstBusinessType.business_type_name;
-            const firstSearchTerm = `${firstBusinessTypeName} in ${locationString}`;
+            const firstBusinessTypeName = firstBusinessType.name;
+            const firstSearchTerm = locationString ? `${firstBusinessTypeName} in ${locationString}` : firstBusinessTypeName;
             console.log(`🔍 Initial search with first business type: "${firstSearchTerm}"`);
             const firstSearchOptions = {
                 site_id: options.site_id,
@@ -422,8 +422,8 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
             console.log(`🔄 Need more venues (${allVenues.length}/${targetVenueGoal}), trying additional business types...`);
             for (let i = 1; i < businessTypes.length && allVenues.length < targetVenueGoal; i++) {
                 const businessType = businessTypes[i];
-                const businessTypeName = businessType.business_type_name;
-                const searchTerm = `${businessTypeName} in ${locationString}`;
+                const businessTypeName = businessType.name;
+                const searchTerm = locationString ? `${businessTypeName} in ${locationString}` : businessTypeName;
                 console.log(`🔍 Additional search ${i + 1}: "${searchTerm}"`);
                 const remainingVenuesNeeded = targetVenueGoal - allVenues.length;
                 const searchOptions = {
@@ -509,7 +509,9 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
         }
         // Crear respuesta en el formato esperado
         const responseData = {
-            searchTerm: `Multiple searches: ${businessTypes.map(bt => bt.business_type_name).join(', ')} in ${locationString}`,
+            searchTerm: locationString ?
+                `Multiple searches: ${businessTypes.map(bt => bt.name).join(', ')} in ${locationString}` :
+                `Multiple searches: ${businessTypes.map(bt => bt.name).join(', ')}`,
             city: options.city,
             region: options.region,
             venueCount: finalVenueCount,
@@ -522,7 +524,7 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
                 targetVenueGoal,
                 goalAchieved: finalVenueCount >= targetVenueGoal,
                 searchResults,
-                country,
+                country: options.country || null,
                 strategy: 'individual_business_type_searches'
             }
         };

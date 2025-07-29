@@ -468,7 +468,7 @@ async function leadGenerationWorkflow(options) {
         // Create enhanced search topic combining all business types with geographic info
         let businessTypeNames = [];
         if (businessTypes && businessTypes.length > 0) {
-            businessTypeNames = businessTypes.map(bt => bt.business_type_name);
+            businessTypeNames = businessTypes.map(bt => bt.name);
             console.log(`🔍 Business type names extracted: ${businessTypeNames.join(', ')}`);
         }
         else {
@@ -503,32 +503,14 @@ async function leadGenerationWorkflow(options) {
         }
         // Call region venues API with multiple search terms strategy
         try {
-            // Determinar país basado en región o usar uno por defecto
-            let targetCountry = 'España'; // País por defecto
-            if (targetRegion) {
-                // Intentar inferir el país basado en la región
-                const regionLower = targetRegion.toLowerCase();
-                if (regionLower.includes('cataluña') || regionLower.includes('valencia') || regionLower.includes('madrid') ||
-                    regionLower.includes('andalucia') || regionLower.includes('galicia') || regionLower.includes('españa')) {
-                    targetCountry = 'España';
-                }
-                else if (regionLower.includes('california') || regionLower.includes('texas') || regionLower.includes('florida') ||
-                    regionLower.includes('usa') || regionLower.includes('united states')) {
-                    targetCountry = 'Estados Unidos';
-                }
-                else if (regionLower.includes('mexico') || regionLower.includes('méxico')) {
-                    targetCountry = 'México';
-                }
-                // Agregar más países según sea necesario
-            }
-            console.log(`🌍 Using country for venue searches: ${targetCountry}`);
+            console.log(`🌍 Using geographic location: ${targetCity || 'No city'}, ${targetRegion || 'No region'}`);
             const regionVenuesMultipleOptions = {
                 site_id: site_id,
                 userId: options.userId || site.user_id,
                 businessTypes: businessTypes, // Pasar array de business types para búsquedas individuales
                 city: targetCity || '',
                 region: targetRegion || '',
-                country: targetCountry,
+                // No especificar país - solo usar city y region
                 maxVenues: maxVenues, // ✅ Use dynamically determined venue limit
                 targetVenueGoal: maxVenues, // Objetivo de venues a alcanzar
                 priority: 'high',
@@ -544,7 +526,7 @@ async function leadGenerationWorkflow(options) {
                     hasChannels: maxVenuesResult.hasChannels // Include channel info
                 }
             };
-            console.log(`🔍 Using multiple search terms strategy with ${businessTypes.length} business types`);
+            console.log(`🔍 Using multiple search terms strategy with ${businessTypes.length} business types (city + region only)`);
             venuesResult = await callRegionVenuesWithMultipleSearchTermsActivity(regionVenuesMultipleOptions);
             if (venuesResult.success && venuesResult.data && venuesResult.data.venues) {
                 venuesFound = venuesResult.data.venues;

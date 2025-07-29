@@ -590,7 +590,7 @@ export async function leadGenerationWorkflow(
     // Create enhanced search topic combining all business types with geographic info
     let businessTypeNames = [];
     if (businessTypes && businessTypes.length > 0) {
-      businessTypeNames = businessTypes.map(bt => bt.business_type_name);
+      businessTypeNames = businessTypes.map(bt => bt.name);
       console.log(`🔍 Business type names extracted: ${businessTypeNames.join(', ')}`);
     } else {
       // Use generic search if no business types available
