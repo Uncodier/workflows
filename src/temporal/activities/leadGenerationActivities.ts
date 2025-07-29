@@ -98,7 +98,7 @@ export interface RegionVenuesMultipleSearchOptions {
   businessTypes: BusinessType[]; // Array de business types para buscar individualmente
   city: string;
   region: string;
-  country?: string; // Campo opcional para país (no se especifica por defecto)
+  country?: string; // Campo opcional para país (viene del regionSearch si disponible)
   maxVenues?: number;
   priority?: string;
   excludeNames?: string[];
@@ -471,7 +471,7 @@ export async function callRegionVenuesApiActivity(
 /**
  * Nueva actividad para llamar a la API de venues con búsquedas múltiples individuales
  * En lugar de pasar todos los business types en un search term, hace búsquedas individuales
- * Usa solo ciudad y región (sin asumir país) e intenta con cada business type si es necesario
+ * Usa ciudad, región y país (si disponible) e intenta con cada business type si es necesario
  */
 export async function callRegionVenuesWithMultipleSearchTermsActivity(
   options: RegionVenuesMultipleSearchOptions
@@ -514,7 +514,7 @@ export async function callRegionVenuesWithMultipleSearchTermsActivity(
     const locationString = geographicInfo.join(', ');
 
     console.log(`🎯 Target venue goal: ${targetVenueGoal} venues`);
-    console.log(`🌍 Geographic location: ${locationString}`);
+    console.log(`🌍 Geographic location: ${locationString}${options.country ? ' (country from regionSearch)' : ' (no country specified)'}`);
     console.log(`🏷️ Business types to search: ${businessTypes.map(bt => bt?.name || 'UNDEFINED').join(', ')}`);
 
     // Búsqueda inicial con el primer business type si está disponible
