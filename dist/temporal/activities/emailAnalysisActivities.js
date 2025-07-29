@@ -14,7 +14,12 @@ async function analyzeEmailsActivity(request) {
     console.log(`🔍 Analyzing emails for site ${request.site_id}`);
     console.log(`📋 Request:`, JSON.stringify(request, null, 2));
     try {
-        const response = await apiService_1.apiService.post('/api/agents/email', request);
+        // Use extended timeout for email analysis operations (10 minutes to match activity timeout)
+        const response = await apiService_1.apiService.request('/api/agents/email', {
+            method: 'POST',
+            body: request,
+            timeout: 600000 // 10 minutes timeout (600,000ms) to match workflow activity timeout
+        });
         if (!response.success) {
             console.error(`❌ Email analysis failed:`, response.error);
             return {

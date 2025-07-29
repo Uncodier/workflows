@@ -116,7 +116,12 @@ export async function syncSentEmailsActivity(params: SyncSentEmailsParams): Prom
 
     console.log('📤 Sending sync sent emails request:', JSON.stringify(requestBody, null, 2));
 
-    const response = await apiService.post('/api/agents/email/sync', requestBody);
+    // Use extended timeout for email sync operations (10 minutes to match activity timeout)
+    const response = await apiService.request('/api/agents/email/sync', {
+      method: 'POST',
+      body: requestBody,
+      timeout: 600000 // 10 minutes timeout (600,000ms) to match workflow activity timeout
+    });
 
     if (!response.success) {
       console.error('❌ Sent emails sync failed:', response.error);
@@ -160,7 +165,12 @@ export async function deliveryStatusActivity(params: DeliveryStatusParams): Prom
 
     console.log('📤 Sending delivery status request:', JSON.stringify(requestBody, null, 2));
 
-    const response = await apiService.post('/api/agents/email/deliveryStatus', requestBody);
+    // Use extended timeout for delivery status operations (10 minutes to match activity timeout)
+    const response = await apiService.request('/api/agents/email/deliveryStatus', {
+      method: 'POST',
+      body: requestBody,
+      timeout: 600000 // 10 minutes timeout (600,000ms) to match workflow activity timeout
+    });
 
     if (!response.success) {
       console.error('❌ Email delivery status check failed:', response.error);
