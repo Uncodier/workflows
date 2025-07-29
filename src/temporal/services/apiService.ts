@@ -92,6 +92,7 @@ class ApiService {
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
+      console.log(`🚀 Initiating fetch request...`);
       const response = await fetch(url, {
         method,
         headers: requestHeaders,
@@ -99,6 +100,7 @@ class ApiService {
         signal: controller.signal,
       });
 
+      console.log(`📡 Fetch completed, status: ${response.status} ${response.statusText}`);
       clearTimeout(timeoutId);
 
       if (!response.ok) {
