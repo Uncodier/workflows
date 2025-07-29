@@ -58,12 +58,14 @@ class ApiService {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeout);
         try {
+            console.log(`🚀 Initiating fetch request...`);
             const response = await fetch(url, {
                 method,
                 headers: requestHeaders,
                 body: body ? JSON.stringify(body) : undefined,
                 signal: controller.signal,
             });
+            console.log(`📡 Fetch completed, status: ${response.status} ${response.statusText}`);
             clearTimeout(timeoutId);
             if (!response.ok) {
                 const errorText = await response.text();

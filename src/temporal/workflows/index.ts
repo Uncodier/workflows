@@ -34,6 +34,7 @@ import { leadGenerationWorkflow } from './leadGenerationWorkflow';
 import { analyzeSiteWorkflow } from './analyzeSiteWorkflow';
 import { sendNewsletterWorkflow } from './sendNewsletterWorkflow';
 import { dailyProspectionWorkflow } from './dailyProspectionWorkflow';
+import { dailyStrategicAccountsWorkflow } from './dailyStrategicAccountsWorkflow';
 import { leadInvalidationWorkflow } from './leadInvalidationWorkflow';
 
 // Export workflows individually
@@ -65,6 +66,7 @@ export * from './analyzeSiteWorkflow';
 export * from './sendNewsletterWorkflow';
 export * from './leadAttentionWorkflow';
 export * from './dailyProspectionWorkflow';
+export * from './dailyStrategicAccountsWorkflow';
 export * from './leadInvalidationWorkflow';
 
 // Also export as a bundle for the client
@@ -101,6 +103,7 @@ export const workflows = {
   sendNewsletterWorkflow,
   leadAttentionWorkflow,
   dailyProspectionWorkflow,
+  dailyStrategicAccountsWorkflow,
   leadInvalidationWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
@@ -143,6 +146,7 @@ export const workflowNames = {
   sendNewsletterWorkflow: 'sendNewsletterWorkflow',
   leadAttentionWorkflow: 'leadAttentionWorkflow',
   dailyProspectionWorkflow: 'dailyProspectionWorkflow',
+  dailyStrategicAccountsWorkflow: 'dailyStrategicAccountsWorkflow',
   leadInvalidationWorkflow: 'leadInvalidationWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',

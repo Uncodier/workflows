@@ -11,12 +11,13 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, }
     },
 });
 // Import specific lead generation activities
-const { callRegionSearchApiActivity, callRegionVenuesApiActivity, callLeadGenerationApiActivity, createCompaniesFromVenuesActivity, saveLeadsFromDeepResearchActivity, searchLeadsByCompanyCityActivity, updateMemoryActivity, upsertVenueFailedActivity, determineMaxVenuesActivity, notifyNewLeadsActivity, } = (0, workflow_1.proxyActivities)({
+const { callRegionSearchApiActivity, callRegionVenuesWithMultipleSearchTermsActivity, callLeadGenerationApiActivity, createCompaniesFromVenuesActivity, saveLeadsFromDeepResearchActivity, searchLeadsByCompanyCityActivity, updateMemoryActivity, upsertVenueFailedActivity, determineMaxVenuesActivity, notifyNewLeadsActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes', // Longer timeout for lead generation processes
     retry: {
         maximumAttempts: 3,
     },
 });
+// BusinessType interface now imported from activities
 /**
  * Generate deliverables structure for companies research
  * Returns structure with companies information
@@ -467,7 +468,7 @@ async function leadGenerationWorkflow(options) {
         // Create enhanced search topic combining all business types with geographic info
         let businessTypeNames = [];
         if (businessTypes && businessTypes.length > 0) {
-            businessTypeNames = businessTypes.map(bt => bt.name);
+            businessTypeNames = businessTypes.map(bt => bt.business_type_name);
             console.log(`🔍 Business type names extracted: ${businessTypeNames.join(', ')}`);
         }
         else {
@@ -500,15 +501,36 @@ async function leadGenerationWorkflow(options) {
         else {
             console.log(`⚠️ Failed to determine venue limits, using default: ${maxVenues} venues. Error: ${maxVenuesResult.error}`);
         }
-        // Call region venues API to find businesses
+        // Call region venues API with multiple search terms strategy
         try {
-            const regionVenuesOptions = {
+            // Determinar país basado en región o usar uno por defecto
+            let targetCountry = 'España'; // País por defecto
+            if (targetRegion) {
+                // Intentar inferir el país basado en la región
+                const regionLower = targetRegion.toLowerCase();
+                if (regionLower.includes('cataluña') || regionLower.includes('valencia') || regionLower.includes('madrid') ||
+                    regionLower.includes('andalucia') || regionLower.includes('galicia') || regionLower.includes('españa')) {
+                    targetCountry = 'España';
+                }
+                else if (regionLower.includes('california') || regionLower.includes('texas') || regionLower.includes('florida') ||
+                    regionLower.includes('usa') || regionLower.includes('united states')) {
+                    targetCountry = 'Estados Unidos';
+                }
+                else if (regionLower.includes('mexico') || regionLower.includes('méxico')) {
+                    targetCountry = 'México';
+                }
+                // Agregar más países según sea necesario
+            }
+            console.log(`🌍 Using country for venue searches: ${targetCountry}`);
+            const regionVenuesMultipleOptions = {
                 site_id: site_id,
                 userId: options.userId || site.user_id,
-                searchTerm: enhancedSearchTopic,
+                businessTypes: businessTypes, // Pasar array de business types para búsquedas individuales
                 city: targetCity || '',
                 region: targetRegion || '',
+                country: targetCountry,
                 maxVenues: maxVenues, // ✅ Use dynamically determined venue limit
+                targetVenueGoal: maxVenues, // Objetivo de venues a alcanzar
                 priority: 'high',
                 excludeNames: excludeNames, // Exclude companies that already have leads
                 additionalData: {
@@ -522,7 +544,8 @@ async function leadGenerationWorkflow(options) {
                     hasChannels: maxVenuesResult.hasChannels // Include channel info
                 }
             };
-            venuesResult = await callRegionVenuesApiActivity(regionVenuesOptions);
+            console.log(`🔍 Using multiple search terms strategy with ${businessTypes.length} business types`);
+            venuesResult = await callRegionVenuesWithMultipleSearchTermsActivity(regionVenuesMultipleOptions);
             if (venuesResult.success && venuesResult.data && venuesResult.data.venues) {
                 venuesFound = venuesResult.data.venues;
                 // Step 3a: Create companies from venues

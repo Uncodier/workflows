@@ -5,8 +5,9 @@ import type {
   LeadGenerationApiOptions,
   LeadData,
   RegionSearchApiOptions,
-  RegionVenuesApiOptions,
-  VenueData
+  RegionVenuesMultipleSearchOptions,
+  VenueData,
+  BusinessType
 } from '../activities/leadGenerationActivities';
 
 // Define the activity interface and options
@@ -24,7 +25,7 @@ const {
 // Import specific lead generation activities
 const {
   callRegionSearchApiActivity,
-  callRegionVenuesApiActivity,
+  callRegionVenuesWithMultipleSearchTermsActivity,
   callLeadGenerationApiActivity,
   createCompaniesFromVenuesActivity,
   saveLeadsFromDeepResearchActivity,
@@ -35,7 +36,7 @@ const {
   notifyNewLeadsActivity,
 } = proxyActivities<{
   callRegionSearchApiActivity: (options: RegionSearchApiOptions) => Promise<any>;
-  callRegionVenuesApiActivity: (options: any) => Promise<any>;
+  callRegionVenuesWithMultipleSearchTermsActivity: (options: RegionVenuesMultipleSearchOptions) => Promise<any>;
   callLeadGenerationApiActivity: (options: LeadGenerationApiOptions) => Promise<any>;
   createCompaniesFromVenuesActivity: (options: any) => Promise<any>;
   saveLeadsFromDeepResearchActivity: (options: any) => Promise<any>;
@@ -98,13 +99,7 @@ export interface LeadGenerationResult {
   completedAt: string;
 }
 
-// Define BusinessType interface to match actual API response
-export interface BusinessType {
-  name: string;                      // Business type name from API
-  description: string;               // Description of the business type
-  relevance: string;                 // Why this type is relevant for the region
-  market_potential: string;          // Market potential assessment
-}
+// BusinessType interface now imported from activities
 
 /**
  * Generate deliverables structure for companies research
@@ -595,7 +590,7 @@ export async function leadGenerationWorkflow(
     // Create enhanced search topic combining all business types with geographic info
     let businessTypeNames = [];
     if (businessTypes && businessTypes.length > 0) {
-      businessTypeNames = businessTypes.map(bt => bt.name);
+      businessTypeNames = businessTypes.map(bt => bt.business_type_name);
       console.log(`🔍 Business type names extracted: ${businessTypeNames.join(', ')}`);
     } else {
       // Use generic search if no business types available
@@ -632,15 +627,36 @@ export async function leadGenerationWorkflow(
       console.log(`⚠️ Failed to determine venue limits, using default: ${maxVenues} venues. Error: ${maxVenuesResult.error}`);
     }
     
-    // Call region venues API to find businesses
+    // Call region venues API with multiple search terms strategy
     try {
-      const regionVenuesOptions: RegionVenuesApiOptions = {
+      // Determinar país basado en región o usar uno por defecto
+      let targetCountry = 'España'; // País por defecto
+      if (targetRegion) {
+        // Intentar inferir el país basado en la región
+        const regionLower = targetRegion.toLowerCase();
+        if (regionLower.includes('cataluña') || regionLower.includes('valencia') || regionLower.includes('madrid') || 
+            regionLower.includes('andalucia') || regionLower.includes('galicia') || regionLower.includes('españa')) {
+          targetCountry = 'España';
+        } else if (regionLower.includes('california') || regionLower.includes('texas') || regionLower.includes('florida') ||
+                   regionLower.includes('usa') || regionLower.includes('united states')) {
+          targetCountry = 'Estados Unidos';
+        } else if (regionLower.includes('mexico') || regionLower.includes('méxico')) {
+          targetCountry = 'México';
+        }
+        // Agregar más países según sea necesario
+      }
+
+      console.log(`🌍 Using country for venue searches: ${targetCountry}`);
+
+      const regionVenuesMultipleOptions: RegionVenuesMultipleSearchOptions = {
         site_id: site_id,
         userId: options.userId || site.user_id,
-        searchTerm: enhancedSearchTopic,
+        businessTypes: businessTypes, // Pasar array de business types para búsquedas individuales
         city: targetCity || '',
         region: targetRegion || '',
+        country: targetCountry,
         maxVenues: maxVenues, // ✅ Use dynamically determined venue limit
+        targetVenueGoal: maxVenues, // Objetivo de venues a alcanzar
         priority: 'high',
         excludeNames: excludeNames, // Exclude companies that already have leads
         additionalData: {
@@ -655,7 +671,8 @@ export async function leadGenerationWorkflow(
         }
       };
       
-      venuesResult = await callRegionVenuesApiActivity(regionVenuesOptions);
+      console.log(`🔍 Using multiple search terms strategy with ${businessTypes.length} business types`);
+      venuesResult = await callRegionVenuesWithMultipleSearchTermsActivity(regionVenuesMultipleOptions);
       
       if (venuesResult.success && venuesResult.data && venuesResult.data.venues) {
         venuesFound = venuesResult.data.venues;

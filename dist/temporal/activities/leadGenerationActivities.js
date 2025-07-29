@@ -44,6 +44,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.callRegionSearchApiActivity = callRegionSearchApiActivity;
 exports.searchLeadsByCompanyCityActivity = searchLeadsByCompanyCityActivity;
 exports.callRegionVenuesApiActivity = callRegionVenuesApiActivity;
+exports.callRegionVenuesWithMultipleSearchTermsActivity = callRegionVenuesWithMultipleSearchTermsActivity;
 exports.callLeadGenerationApiActivity = callLeadGenerationApiActivity;
 exports.saveLeadsFromDeepResearchActivity = saveLeadsFromDeepResearchActivity;
 exports.createLeadsFromResearchActivity = createLeadsFromResearchActivity;
@@ -325,6 +326,228 @@ async function callRegionVenuesApiActivity(options) {
         return {
             success: false,
             error: `API call exception: ${errorMessage}`
+        };
+    }
+}
+/**
+ * Nueva actividad para llamar a la API de venues con búsquedas múltiples individuales
+ * En lugar de pasar todos los business types en un search term, hace búsquedas individuales
+ * Incluye el país en cada búsqueda e intenta con cada business type si es necesario
+ */
+async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
+    try {
+        logger_1.logger.info('🏢 Starting multiple search terms region venues API call', {
+            site_id: options.site_id,
+            userId: options.userId,
+            businessTypesCount: options.businessTypes?.length || 0,
+            city: options.city,
+            region: options.region,
+            country: options.country,
+            maxVenues: options.maxVenues,
+            targetVenueGoal: options.targetVenueGoal,
+            excludeNamesCount: options.excludeNames?.length || 0
+        });
+        const businessTypes = options.businessTypes || [];
+        const targetVenueGoal = options.targetVenueGoal || options.maxVenues || 20;
+        const country = options.country || 'España'; // País por defecto
+        const allVenues = [];
+        let totalApiCalls = 0;
+        const searchResults = [];
+        const combinedExcludeNames = [...(options.excludeNames || [])];
+        // Construir información geográfica completa incluyendo país
+        const geographicInfo = [];
+        if (options.city)
+            geographicInfo.push(options.city);
+        if (options.region)
+            geographicInfo.push(options.region);
+        if (country)
+            geographicInfo.push(country);
+        const locationString = geographicInfo.join(', ');
+        console.log(`🎯 Target venue goal: ${targetVenueGoal} venues`);
+        console.log(`🌍 Geographic location: ${locationString}`);
+        console.log(`🏷️ Business types to search: ${businessTypes.map(bt => bt.business_type_name).join(', ')}`);
+        // Búsqueda inicial con el primer business type si está disponible
+        if (businessTypes.length > 0) {
+            const firstBusinessType = businessTypes[0];
+            const firstBusinessTypeName = firstBusinessType.business_type_name;
+            const firstSearchTerm = `${firstBusinessTypeName} in ${locationString}`;
+            console.log(`🔍 Initial search with first business type: "${firstSearchTerm}"`);
+            const firstSearchOptions = {
+                site_id: options.site_id,
+                userId: options.userId,
+                searchTerm: firstSearchTerm,
+                city: options.city,
+                region: options.region,
+                maxVenues: targetVenueGoal, // Intentar obtener todos los venues necesarios en la primera búsqueda
+                priority: options.priority || 'high',
+                excludeNames: combinedExcludeNames,
+                additionalData: {
+                    ...options.additionalData,
+                    searchIteration: 1,
+                    businessType: firstBusinessTypeName,
+                    isMultipleSearchStrategy: true
+                }
+            };
+            const firstResult = await callRegionVenuesApiActivity(firstSearchOptions);
+            totalApiCalls++;
+            if (firstResult.success && firstResult.data && firstResult.data.venues) {
+                const venues = firstResult.data.venues;
+                allVenues.push(...venues);
+                // Agregar nombres de venues encontrados a la lista de exclusión para búsquedas futuras
+                combinedExcludeNames.push(...venues.map(v => v.name));
+                searchResults.push({
+                    iteration: 1,
+                    businessType: firstBusinessTypeName,
+                    searchTerm: firstSearchTerm,
+                    venuesFound: venues.length,
+                    success: true
+                });
+                console.log(`✅ Initial search completed: ${venues.length} venues found`);
+                console.log(`📊 Current total: ${allVenues.length}/${targetVenueGoal} venues`);
+            }
+            else {
+                searchResults.push({
+                    iteration: 1,
+                    businessType: firstBusinessTypeName,
+                    searchTerm: firstSearchTerm,
+                    venuesFound: 0,
+                    success: false,
+                    error: firstResult.error
+                });
+                console.log(`⚠️ Initial search failed or returned no venues: ${firstResult.error}`);
+            }
+        }
+        // Si no hemos alcanzado el objetivo, continuar con los demás business types
+        if (allVenues.length < targetVenueGoal && businessTypes.length > 1) {
+            console.log(`🔄 Need more venues (${allVenues.length}/${targetVenueGoal}), trying additional business types...`);
+            for (let i = 1; i < businessTypes.length && allVenues.length < targetVenueGoal; i++) {
+                const businessType = businessTypes[i];
+                const businessTypeName = businessType.business_type_name;
+                const searchTerm = `${businessTypeName} in ${locationString}`;
+                console.log(`🔍 Additional search ${i + 1}: "${searchTerm}"`);
+                const remainingVenuesNeeded = targetVenueGoal - allVenues.length;
+                const searchOptions = {
+                    site_id: options.site_id,
+                    userId: options.userId,
+                    searchTerm: searchTerm,
+                    city: options.city,
+                    region: options.region,
+                    maxVenues: remainingVenuesNeeded, // Solo buscar los venues que faltan
+                    priority: options.priority || 'high',
+                    excludeNames: combinedExcludeNames,
+                    additionalData: {
+                        ...options.additionalData,
+                        searchIteration: i + 1,
+                        businessType: businessTypeName,
+                        isMultipleSearchStrategy: true
+                    }
+                };
+                const result = await callRegionVenuesApiActivity(searchOptions);
+                totalApiCalls++;
+                if (result.success && result.data && result.data.venues) {
+                    const venues = result.data.venues;
+                    const newVenues = venues.filter(v => !allVenues.some(existing => existing.name === v.name));
+                    if (newVenues.length > 0) {
+                        allVenues.push(...newVenues);
+                        combinedExcludeNames.push(...newVenues.map(v => v.name));
+                        console.log(`✅ Additional search ${i + 1} completed: ${newVenues.length} new venues found`);
+                        console.log(`📊 Current total: ${allVenues.length}/${targetVenueGoal} venues`);
+                    }
+                    else {
+                        console.log(`⚠️ Additional search ${i + 1} found no new venues (all were duplicates)`);
+                    }
+                    searchResults.push({
+                        iteration: i + 1,
+                        businessType: businessTypeName,
+                        searchTerm: searchTerm,
+                        venuesFound: newVenues.length,
+                        totalFoundBefore: venues.length,
+                        success: true
+                    });
+                }
+                else {
+                    searchResults.push({
+                        iteration: i + 1,
+                        businessType: businessTypeName,
+                        searchTerm: searchTerm,
+                        venuesFound: 0,
+                        success: false,
+                        error: result.error
+                    });
+                    console.log(`❌ Additional search ${i + 1} failed: ${result.error}`);
+                }
+                // Pequeña pausa entre búsquedas para evitar rate limiting
+                if (i < businessTypes.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
+        }
+        const finalVenueCount = allVenues.length;
+        console.log(`📊 Multiple search strategy completed:`);
+        console.log(`   - Total API calls made: ${totalApiCalls}`);
+        console.log(`   - Business types searched: ${businessTypes.length}`);
+        console.log(`   - Final venues found: ${finalVenueCount}`);
+        console.log(`   - Target goal achieved: ${finalVenueCount >= targetVenueGoal ? '✅' : '❌'} (${finalVenueCount}/${targetVenueGoal})`);
+        // Log resumen de resultados por búsqueda
+        console.log(`📋 Search results summary:`);
+        searchResults.forEach((result, index) => {
+            const status = result.success ? (result.venuesFound > 0 ? '✅' : '⚠️') : '❌';
+            console.log(`   ${index + 1}. ${status} ${result.businessType}: ${result.venuesFound} venues`);
+        });
+        if (finalVenueCount === 0) {
+            const errorMessage = `No venues found after ${totalApiCalls} search attempts across ${businessTypes.length} business types`;
+            logger_1.logger.error('❌ Multiple search strategy failed - no venues found', {
+                site_id: options.site_id,
+                businessTypesSearched: businessTypes.length,
+                totalApiCalls,
+                searchResults
+            });
+            return {
+                success: false,
+                error: errorMessage
+            };
+        }
+        // Crear respuesta en el formato esperado
+        const responseData = {
+            searchTerm: `Multiple searches: ${businessTypes.map(bt => bt.business_type_name).join(', ')} in ${locationString}`,
+            city: options.city,
+            region: options.region,
+            venueCount: finalVenueCount,
+            venues: allVenues,
+            timestamp: new Date().toISOString(),
+            // Metadatos adicionales sobre la estrategia de búsqueda múltiple
+            multipleSearchMetadata: {
+                totalApiCalls,
+                businessTypesSearched: businessTypes.length,
+                targetVenueGoal,
+                goalAchieved: finalVenueCount >= targetVenueGoal,
+                searchResults,
+                country,
+                strategy: 'individual_business_type_searches'
+            }
+        };
+        logger_1.logger.info('✅ Multiple search strategy region venues API call successful', {
+            site_id: options.site_id,
+            finalVenueCount,
+            businessTypesSearched: businessTypes.length,
+            totalApiCalls,
+            goalAchieved: finalVenueCount >= targetVenueGoal
+        });
+        return {
+            success: true,
+            data: responseData
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger_1.logger.error('❌ Exception in multiple search terms region venues API call', {
+            error: errorMessage,
+            site_id: options.site_id,
+            businessTypesCount: options.businessTypes?.length || 0
+        });
+        return {
+            success: false,
+            error: errorMessage
         };
     }
 }

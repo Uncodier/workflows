@@ -62,11 +62,11 @@ async function syncSentEmailsActivity(params) {
             ...(params.since_date && { since_date: params.since_date })
         };
         console.log('📤 Sending sync sent emails request:', JSON.stringify(requestBody, null, 2));
-        // Use extended timeout for email sync operations (10 minutes to match activity timeout)
+        // Use extended timeout for email sync operations (15 minutes to match activity timeout)
         const response = await apiService_1.apiService.request('/api/agents/email/sync', {
             method: 'POST',
             body: requestBody,
-            timeout: 600000 // 10 minutes timeout (600,000ms) to match workflow activity timeout
+            timeout: 900000 // 15 minutes timeout (900,000ms) to match workflow activity timeout
         });
         if (!response.success) {
             console.error('❌ Sent emails sync failed:', response.error);
@@ -103,11 +103,11 @@ async function deliveryStatusActivity(params) {
             site_id: params.site_id
         };
         console.log('📤 Sending delivery status request:', JSON.stringify(requestBody, null, 2));
-        // Use extended timeout for delivery status operations (10 minutes to match activity timeout)
+        // Use extended timeout for delivery status operations (15 minutes to match activity timeout)
         const response = await apiService_1.apiService.request('/api/agents/email/deliveryStatus', {
             method: 'POST',
             body: requestBody,
-            timeout: 600000 // 10 minutes timeout (600,000ms) to match workflow activity timeout
+            timeout: 900000 // 15 minutes timeout (900,000ms) to match workflow activity timeout
         });
         if (!response.success) {
             console.error('❌ Email delivery status check failed:', response.error);

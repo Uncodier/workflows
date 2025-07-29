@@ -17,12 +17,12 @@ async function analyzeEmailsActivity(request) {
         console.log(`🕐 Starting email analysis API call at: ${new Date().toISOString()}`);
         console.log(`⏰ Using timeout: 600000ms (10 minutes)`);
         console.log(`📊 Request size: ${JSON.stringify(request).length} characters`);
-        // Use extended timeout for email analysis operations (10 minutes to match activity timeout)
+        // Use extended timeout for email analysis operations (15 minutes to match activity timeout)
         const startTime = Date.now();
         const response = await apiService_1.apiService.request('/api/agents/email', {
             method: 'POST',
             body: request,
-            timeout: 600000 // 10 minutes timeout (600,000ms) to match workflow activity timeout
+            timeout: 900000 // 15 minutes timeout (900,000ms) to match workflow activity timeout
         });
         const duration = Date.now() - startTime;
         console.log(`🕐 Email analysis API call completed at: ${new Date().toISOString()}`);

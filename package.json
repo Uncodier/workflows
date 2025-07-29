@@ -28,6 +28,7 @@
     "test-lead-follow-up": "npx tsx src/scripts/test-lead-follow-up.ts",
     "test-send-whatsapp-from-agent": "npx tsx src/scripts/test-send-whatsapp-from-agent.ts",
     "test-daily-prospection": "npx tsx src/scripts/test-daily-prospection-workflow.ts",
+    "test-daily-strategic-accounts": "npx tsx src/scripts/test-daily-strategic-accounts-workflow.ts",
     "create-schedules": "npx tsx src/scripts/create-all-schedules.ts",
     "delete-schedules": "npx tsx src/scripts/delete-all-schedules.ts",
     "recreate-schedules": "npx tsx src/scripts/recreate-schedules.ts",
