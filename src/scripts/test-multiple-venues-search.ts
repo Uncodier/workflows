@@ -37,7 +37,7 @@ async function testMultipleVenuesSearch() {
     businessTypes: mockBusinessTypes,
     city: 'Madrid',
     region: 'Comunidad de Madrid',
-    country: 'España',
+    // No especificar país - solo usar city y region
     maxVenues: 10,
     targetVenueGoal: 8,
     priority: 'high',
@@ -107,7 +107,7 @@ async function runTestScenarios() {
     businessTypes: singleBusinessType,
     city: 'Barcelona',
     region: 'Cataluña',
-    country: 'España',
+    // No especificar país - solo usar city y region
     maxVenues: 5,
     targetVenueGoal: 5,
     priority: 'medium',

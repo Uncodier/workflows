@@ -629,24 +629,7 @@ export async function leadGenerationWorkflow(
     
     // Call region venues API with multiple search terms strategy
     try {
-      // Determinar país basado en región o usar uno por defecto
-      let targetCountry = 'España'; // País por defecto
-      if (targetRegion) {
-        // Intentar inferir el país basado en la región
-        const regionLower = targetRegion.toLowerCase();
-        if (regionLower.includes('cataluña') || regionLower.includes('valencia') || regionLower.includes('madrid') || 
-            regionLower.includes('andalucia') || regionLower.includes('galicia') || regionLower.includes('españa')) {
-          targetCountry = 'España';
-        } else if (regionLower.includes('california') || regionLower.includes('texas') || regionLower.includes('florida') ||
-                   regionLower.includes('usa') || regionLower.includes('united states')) {
-          targetCountry = 'Estados Unidos';
-        } else if (regionLower.includes('mexico') || regionLower.includes('méxico')) {
-          targetCountry = 'México';
-        }
-        // Agregar más países según sea necesario
-      }
-
-      console.log(`🌍 Using country for venue searches: ${targetCountry}`);
+      console.log(`🌍 Using geographic location: ${targetCity || 'No city'}, ${targetRegion || 'No region'}`);
 
       const regionVenuesMultipleOptions: RegionVenuesMultipleSearchOptions = {
         site_id: site_id,
@@ -654,7 +637,7 @@ export async function leadGenerationWorkflow(
         businessTypes: businessTypes, // Pasar array de business types para búsquedas individuales
         city: targetCity || '',
         region: targetRegion || '',
-        country: targetCountry,
+        // No especificar país - solo usar city y region
         maxVenues: maxVenues, // ✅ Use dynamically determined venue limit
         targetVenueGoal: maxVenues, // Objetivo de venues a alcanzar
         priority: 'high',
@@ -671,7 +654,7 @@ export async function leadGenerationWorkflow(
         }
       };
       
-      console.log(`🔍 Using multiple search terms strategy with ${businessTypes.length} business types`);
+      console.log(`🔍 Using multiple search terms strategy with ${businessTypes.length} business types (city + region only)`);
       venuesResult = await callRegionVenuesWithMultipleSearchTermsActivity(regionVenuesMultipleOptions);
       
       if (venuesResult.success && venuesResult.data && venuesResult.data.venues) {
