@@ -631,6 +631,10 @@ export async function leadGenerationWorkflow(
     try {
       console.log(`🌍 Using geographic location: ${targetCity || 'No city'}, ${targetRegion || 'No region'}`);
 
+      console.log(`🐛 Debug workflow businessTypes before passing:`, JSON.stringify(businessTypes, null, 2));
+      console.log(`🐛 Debug workflow targetCity: "${targetCity}"`);
+      console.log(`🐛 Debug workflow targetRegion: "${targetRegion}"`);
+
       const regionVenuesMultipleOptions: RegionVenuesMultipleSearchOptions = {
         site_id: site_id,
         userId: options.userId || site.user_id,
@@ -653,6 +657,8 @@ export async function leadGenerationWorkflow(
           hasChannels: maxVenuesResult.hasChannels // Include channel info
         }
       };
+      
+      console.log(`🐛 Debug regionVenuesMultipleOptions:`, JSON.stringify(regionVenuesMultipleOptions, null, 2));
       
       console.log(`🔍 Using multiple search terms strategy with ${businessTypes.length} business types (city + region only)`);
       venuesResult = await callRegionVenuesWithMultipleSearchTermsActivity(regionVenuesMultipleOptions);
