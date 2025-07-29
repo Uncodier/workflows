@@ -46,12 +46,22 @@ export async function analyzeEmailsActivity(
   console.log(`📋 Request:`, JSON.stringify(request, null, 2));
 
   try {
+    console.log(`🕐 Starting email analysis API call at: ${new Date().toISOString()}`);
+    console.log(`⏰ Using timeout: 600000ms (10 minutes)`);
+    console.log(`📊 Request size: ${JSON.stringify(request).length} characters`);
+    
     // Use extended timeout for email analysis operations (10 minutes to match activity timeout)
+    const startTime = Date.now();
     const response = await apiService.request('/api/agents/email', {
       method: 'POST',
       body: request,
       timeout: 600000 // 10 minutes timeout (600,000ms) to match workflow activity timeout
     });
+    
+    const duration = Date.now() - startTime;
+    console.log(`🕐 Email analysis API call completed at: ${new Date().toISOString()}`);
+    console.log(`⏱️ API call duration: ${duration}ms`);
+    console.log(`📊 Response size: ${JSON.stringify(response).length} characters`);
 
     if (!response.success) {
       console.error(`❌ Email analysis failed:`, response.error);

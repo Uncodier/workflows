@@ -30,6 +30,14 @@ class ApiService {
     this.baseUrl = apiConfig.baseUrl;
     this.apiKey = apiConfig.apiKey;
     
+    // 🔍 DIAGNOSTIC: Log configuration on initialization
+    console.log('🔧 ApiService Configuration:');
+    console.log(`   Base URL: ${this.baseUrl || 'NOT_SET'}`);
+    console.log(`   API Key: ${this.apiKey ? 'SET' : 'NOT_SET'}`);
+    console.log(`   Environment: NODE_ENV=${process.env.NODE_ENV}`);
+    console.log(`   Raw API_BASE_URL: ${process.env.API_BASE_URL || 'NOT_SET'}`);
+    console.log(`   Raw API_KEY: ${process.env.API_KEY ? 'SET' : 'NOT_SET'}`);
+    
     if (!this.baseUrl) {
       throw new Error('API_BASE_URL environment variable is not configured');
     }
@@ -74,6 +82,8 @@ class ApiService {
     };
 
     console.log(`🌐 API Request: ${method} ${url}`);
+    console.log(`🔧 Request Headers:`, JSON.stringify(requestHeaders, null, 2));
+    console.log(`⏰ Timeout: ${timeout}ms`);
     if (body) {
       console.log(`📤 Request body:`, JSON.stringify(body, null, 2));
     }
@@ -143,7 +153,27 @@ class ApiService {
         message: error instanceof Error ? error.message : String(error)
       };
       
+      // 🔍 ENHANCED DIAGNOSTIC: More details about network error
       console.error(`🔥 API Network Error:`, apiError);
+      console.error(`🔍 Network Error Details:`);
+      console.error(`   URL attempted: ${url}`);
+      console.error(`   Method: ${method}`);
+      console.error(`   Error type: ${error instanceof Error ? error.constructor.name : typeof error}`);
+      console.error(`   Error message: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`   Error stack:`, error instanceof Error ? error.stack : 'No stack available');
+      
+      // Check common connectivity issues
+      if (error instanceof Error) {
+        if (error.message.includes('ENOTFOUND')) {
+          console.error(`🚨 DNS Resolution Error: Cannot resolve hostname from ${url}`);
+        } else if (error.message.includes('ECONNREFUSED')) {
+          console.error(`🚨 Connection Refused: Server is not accepting connections at ${url}`);
+        } else if (error.message.includes('ETIMEDOUT') || error.message.includes('timeout')) {
+          console.error(`🚨 Connection Timeout: Server did not respond in time at ${url}`);
+        } else if (error.message.includes('certificate') || error.message.includes('SSL')) {
+          console.error(`🚨 SSL/TLS Error: Certificate or SSL handshake issue with ${url}`);
+        }
+      }
       
       return {
         success: false,
