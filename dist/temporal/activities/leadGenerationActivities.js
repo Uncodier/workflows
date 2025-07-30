@@ -265,6 +265,7 @@ async function callRegionVenuesApiActivity(options) {
             searchTerm: options.searchTerm,
             city: options.city,
             region: options.region,
+            country: options.country,
             maxVenues: options.maxVenues,
             excludeNamesCount: options.excludeNames?.length || 0
         });
@@ -276,6 +277,7 @@ async function callRegionVenuesApiActivity(options) {
             searchTerm: options.searchTerm,
             city: options.city,
             region: options.region,
+            country: options.country, // Add country parameter to API request
             maxVenues: options.maxVenues || 20,
             priority: options.priority || 'high',
             excludeNames: options.excludeNames || [], // Pass excludeNames to API
@@ -383,6 +385,7 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
                 searchTerm: firstSearchTerm,
                 city: options.city,
                 region: options.region,
+                country: options.country, // Pass country parameter to API
                 maxVenues: targetVenueGoal, // Intentar obtener todos los venues necesarios en la primera búsqueda
                 priority: options.priority || 'high',
                 excludeNames: combinedExcludeNames,
@@ -441,6 +444,7 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
                     searchTerm: searchTerm,
                     city: options.city,
                     region: options.region,
+                    country: options.country, // Pass country parameter to API
                     maxVenues: remainingVenuesNeeded, // Solo buscar los venues que faltan
                     priority: options.priority || 'high',
                     excludeNames: combinedExcludeNames,
