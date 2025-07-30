@@ -1291,27 +1291,33 @@ async function invalidateLeadActivity(request) {
         console.log('✅ Database connection confirmed, invalidating lead...');
         // Import supabase service role client (bypasses RLS)
         const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
-        // Prepare invalidation metadata
-        const invalidationMetadata = {
-            invalidated: true,
-            invalidated_at: new Date().toISOString(),
-            invalidation_reason: request.reason,
-            original_site_id: request.original_site_id,
-            pending_revalidation: true,
-            failed_contact: request.failed_contact || {},
-            invalidated_by_user_id: request.userId,
-        };
-        // If this is a shared contact invalidation, add reference
-        if (request.shared_with_lead_id) {
-            invalidationMetadata.shared_with_lead_id = request.shared_with_lead_id;
-        }
-        // Update lead: remove site_id and add invalidation metadata
+        // Only add metadata for email_failed or whatsapp_failed reasons
+        const shouldAddMetadata = request.reason === 'email_failed' || request.reason === 'whatsapp_failed';
         const updateData = {
-            site_id: null, // Remove site_id to "invalidate" the lead
-            metadata: invalidationMetadata,
-            status: 'invalidated',
+            site_id: null, // Remove site_id to remove lead from site
             updated_at: new Date().toISOString()
         };
+        if (shouldAddMetadata) {
+            // Prepare invalidation metadata only for communication failures
+            const invalidationMetadata = {
+                invalidated: true,
+                invalidated_at: new Date().toISOString(),
+                invalidation_reason: request.reason,
+                original_site_id: request.original_site_id,
+                pending_revalidation: true,
+                failed_contact: request.failed_contact || {},
+                invalidated_by_user_id: request.userId,
+            };
+            // If this is a shared contact invalidation, add reference
+            if (request.shared_with_lead_id) {
+                invalidationMetadata.shared_with_lead_id = request.shared_with_lead_id;
+            }
+            updateData.metadata = invalidationMetadata;
+            console.log(`📝 Adding invalidation metadata for ${request.reason}`);
+        }
+        else {
+            console.log(`📋 Reason '${request.reason}' - only removing site_id, no metadata added`);
+        }
         const { data, error } = await supabaseServiceRole
             .from('leads')
             .update(updateData)

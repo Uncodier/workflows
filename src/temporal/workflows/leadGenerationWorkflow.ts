@@ -56,6 +56,8 @@ export interface LeadGenerationOptions {
   site_id: string;                    // Required: Site ID
   userId?: string;
   create?: boolean;                   // Default true to create leads, set false for validation only
+  region?: string;                    // Optional: Override region for regionSearch (e.g., "world" for strategic accounts)
+  keywords?: string;                  // Optional: Override keywords for regionSearch (e.g., "key accounts")
   additionalData?: any;
 }
 
@@ -524,7 +526,9 @@ export async function leadGenerationWorkflow(
       additionalData: {
         ...options.additionalData,
         siteName: siteName,
-        siteUrl: siteUrl
+        siteUrl: siteUrl,
+        ...(options.region && { region: options.region }),
+        ...(options.keywords && { keywords: options.keywords })
       }
     };
     

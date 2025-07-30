@@ -39,6 +39,7 @@
     "test-create-agents": "npx tsx src/scripts/test-create-agents.ts",
     "test-phone-formatting": "npx tsx src/scripts/test-phone-formatting.ts",
     "test-lead-invalidation": "npx tsx src/scripts/test-lead-invalidation-workflow.ts",
+    "test-lead-invalidation-debug": "npx tsx src/scripts/test-lead-invalidation-debug.ts",
     "monitor-workflows": "npx tsx src/scripts/monitor-workflow-versions.ts",
     "render:start": "node api/worker.js",
     "render:init": "npx tsx src/scripts/initialize-render.ts",

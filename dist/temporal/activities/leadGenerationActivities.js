@@ -363,18 +363,8 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
         let totalApiCalls = 0;
         const searchResults = [];
         const combinedExcludeNames = [...(options.excludeNames || [])];
-        // Construir información geográfica solo con ciudad y región
-        const geographicInfo = [];
-        if (options.city)
-            geographicInfo.push(options.city);
-        if (options.region)
-            geographicInfo.push(options.region);
-        // Solo agregar país si viene especificado explícitamente
-        if (options.country)
-            geographicInfo.push(options.country);
-        const locationString = geographicInfo.join(', ');
         console.log(`🎯 Target venue goal: ${targetVenueGoal} venues`);
-        console.log(`🌍 Geographic location: ${locationString}${options.country ? ' (country from regionSearch)' : ' (no country specified)'}`);
+        console.log(`🌍 Geographic fields: city="${options.city || 'none'}", region="${options.region || 'none'}", country="${options.country || 'none'}"`);
         console.log(`🏷️ Business types to search: ${businessTypes.map(bt => bt?.name || 'UNDEFINED').join(', ')}`);
         // Búsqueda inicial con el primer business type si está disponible
         if (businessTypes.length > 0) {
@@ -383,11 +373,10 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
             // Verificación más robusta del acceso a la propiedad name
             const firstBusinessTypeName = firstBusinessType?.name || firstBusinessType?.business_type_name || 'UNKNOWN_BUSINESS_TYPE';
             console.log(`🚨 URGENT DEBUG firstBusinessTypeName: "${firstBusinessTypeName}"`);
-            console.log(`🚨 URGENT DEBUG locationString: "${locationString}"`);
             console.log(`🚨 URGENT DEBUG typeof firstBusinessTypeName: ${typeof firstBusinessTypeName}`);
-            const firstSearchTerm = locationString ? `${firstBusinessTypeName} in ${locationString}` : firstBusinessTypeName;
+            const firstSearchTerm = firstBusinessTypeName;
             console.log(`🚨 URGENT DEBUG firstSearchTerm FINAL: "${firstSearchTerm}"`);
-            console.log(`🔍 Initial search with first business type: "${firstSearchTerm}"`);
+            console.log(`🔍 Initial search with first business type: "${firstSearchTerm}" (no geographic concatenation - using separate fields)`);
             const firstSearchOptions = {
                 site_id: options.site_id,
                 userId: options.userId,
@@ -442,9 +431,9 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
             for (let i = 1; i < businessTypes.length && allVenues.length < targetVenueGoal; i++) {
                 const businessType = businessTypes[i];
                 const businessTypeName = businessType?.name || businessType?.business_type_name || `UNKNOWN_BUSINESS_TYPE_${i}`;
-                const searchTerm = locationString ? `${businessTypeName} in ${locationString}` : businessTypeName;
+                const searchTerm = businessTypeName;
                 console.log(`🚨 URGENT DEBUG Additional search ${i + 1} businessTypeName: "${businessTypeName}"`);
-                console.log(`🔍 Additional search ${i + 1}: "${searchTerm}"`);
+                console.log(`🔍 Additional search ${i + 1}: "${searchTerm}" (no geographic concatenation - using separate fields)`);
                 const remainingVenuesNeeded = targetVenueGoal - allVenues.length;
                 const searchOptions = {
                     site_id: options.site_id,
@@ -531,9 +520,7 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
         }
         // Crear respuesta en el formato esperado
         const responseData = {
-            searchTerm: locationString ?
-                `Multiple searches: ${businessTypes.map(bt => bt.name).join(', ')} in ${locationString}` :
-                `Multiple searches: ${businessTypes.map(bt => bt.name).join(', ')}`,
+            searchTerm: `Multiple searches: ${businessTypes.map(bt => bt.name).join(', ')} (geographic fields passed separately)`,
             city: options.city,
             region: options.region,
             venueCount: finalVenueCount,

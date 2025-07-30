@@ -8,9 +8,6 @@ const {
   getLeadActivity,
   invalidateLeadActivity,
   findLeadsBySharedContactActivity,
-  checkCompanyValidLeadsActivity,
-  addCompanyToNullListActivity,
-  getCompanyInfoFromLeadActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '3 minutes', // Reasonable timeout for lead invalidation
   retry: {
@@ -20,12 +17,12 @@ const {
 
 export interface LeadInvalidationOptions {
   lead_id: string;                    // Required: Lead ID to invalidate
+  site_id: string;                    // Required: Site ID for tracking
   telephone?: string;                 // Optional: Failed telephone number
   email?: string;                     // Optional: Failed email address
-  reason: 'whatsapp_failed' | 'email_failed' | 'invalid_contact'; // Reason for invalidation
-  site_id: string;                    // Site ID for tracking
-  userId?: string;                    // User ID for logging
-  additionalData?: any;               // Additional context data
+  reason?: 'whatsapp_failed' | 'email_failed' | 'invalid_contact' | 'invalid_email' | 'invalid_phone'; // Optional: Reason for invalidation
+  userId?: string;                    // Optional: User ID for logging
+  additionalData?: any;               // Optional: Additional context data
 }
 
 export interface LeadInvalidationResult {
@@ -35,13 +32,6 @@ export interface LeadInvalidationResult {
   invalidatedLead: boolean;
   sharedContactLeads?: string[];      // IDs of other leads with shared contact
   invalidatedSharedLeads: number;     // Count of shared leads invalidated
-  companyAddedToNullList?: boolean;   // Whether company was added to null companies list
-  nullCompanyId?: string;             // ID of null company record if created
-  companyInfo?: {                     // Company information processed
-    name?: string;
-    id?: string;
-    city?: string;
-  };
   reason: string;
   errors: string[];
   executionTime: string;
@@ -63,7 +53,18 @@ export interface LeadInvalidationResult {
 export async function leadInvalidationWorkflow(
   options: LeadInvalidationOptions
 ): Promise<LeadInvalidationResult> {
-  const { lead_id, site_id, reason } = options;
+  const { lead_id, site_id } = options;
+  // Set default reason if not provided and map legacy reasons
+  let reason = options.reason || 'invalid_contact';
+  
+  // Map legacy reasons to proper communication failure reasons for metadata tracking
+  if (reason === 'invalid_email') {
+    reason = 'email_failed';
+  } else if (reason === 'invalid_phone') {
+    reason = 'whatsapp_failed';
+  }
+  
+  console.log(`📋 Original reason: ${options.reason}, Mapped reason: ${reason}`);
   
   if (!lead_id) {
     throw new Error('No lead ID provided');
@@ -104,9 +105,6 @@ export async function leadInvalidationWorkflow(
   let sharedContactLeads: string[] = [];
   let invalidatedSharedLeads = 0;
   let originalSiteId = site_id;
-  let companyAddedToNullList = false;
-  let nullCompanyId: string | undefined;
-  let companyInfo: any = {};
 
   try {
     console.log(`👤 Step 1: Getting lead information for ${lead_id}...`);
@@ -131,39 +129,34 @@ export async function leadInvalidationWorkflow(
     console.log(`   - Phone: ${lead.phone || 'N/A'}`);
     console.log(`   - Has alternative contact: ${hasAlternativeContact(lead, options)}`);
 
-    // Step 2: Check if lead has alternative contact methods
-    console.log(`🔍 Step 2: Checking for alternative contact methods...`);
+    // Step 2: Invalidate lead (remove site_id and add metadata)
+    console.log(`🔍 Step 2: Invalidating lead (removing site_id and adding metadata)...`);
     
+    // Always invalidate the lead when this workflow is called
+    // This ensures proper tracking even if lead has alternative contact methods
     const hasAlternative = hasAlternativeContact(lead, options);
+    console.log(`📋 Lead has alternative contact methods: ${hasAlternative}`);
+    console.log(`🚫 Proceeding with invalidation regardless (for tracking purposes)`);
     
-    if (!hasAlternative) {
-      console.log(`⚠️ Lead has no alternative contact methods - proceeding with invalidation`);
-      
-      // Step 2a: Remove site_id and add invalidation metadata
-      console.log(`🚫 Step 2a: Invalidating lead (removing site_id)...`);
-      
-      const invalidationResult = await invalidateLeadActivity({
-        lead_id: lead_id,
-        original_site_id: originalSiteId,
-        reason: reason,
-        failed_contact: {
-          telephone: options.telephone,
-          email: options.email
-        },
-        userId: options.userId
-      });
-      
-      if (invalidationResult.success) {
-        leadInvalidated = true;
-        console.log(`✅ Lead ${lead_id} invalidated successfully`);
-      } else {
-        const errorMsg = `Failed to invalidate lead: ${invalidationResult.error}`;
-        console.error(`❌ ${errorMsg}`);
-        errors.push(errorMsg);
-      }
+    const invalidationResult = await invalidateLeadActivity({
+      lead_id: lead_id,
+      original_site_id: originalSiteId,
+      reason: reason,
+      failed_contact: {
+        telephone: options.telephone,
+        email: options.email
+      },
+      userId: options.userId
+    });
+    
+    if (invalidationResult.success) {
+      leadInvalidated = true;
+      console.log(`✅ Lead ${lead_id} invalidated successfully`);
+      console.log(`📝 site_id removed and invalidation metadata added`);
     } else {
-      console.log(`✅ Lead has alternative contact methods - skipping invalidation`);
-      console.log(`   - Keeping lead active with current site_id: ${lead.site_id}`);
+      const errorMsg = `Failed to invalidate lead: ${invalidationResult.error}`;
+      console.error(`❌ ${errorMsg}`);
+      errors.push(errorMsg);
     }
 
     // Step 3: Find and invalidate leads with shared contact information
@@ -221,89 +214,8 @@ export async function leadInvalidationWorkflow(
       console.log(`⚠️ No contact information provided for shared lead search`);
     }
 
-    // Step 4: Check if company should be added to null companies list
-    console.log(`🏢 Step 4: Checking if company should be added to null companies list...`);
-    
-    try {
-      // First, get company information from the lead
-      console.log(`📋 Getting company information from lead ${lead_id}...`);
-      const companyInfoResult = await getCompanyInfoFromLeadActivity({
-        lead_id: lead_id
-      });
-      
-      if (companyInfoResult.success && companyInfoResult.company) {
-        companyInfo = companyInfoResult.company;
-        console.log(`✅ Company info obtained: ${companyInfo.name} in ${companyInfo.city}`);
-        
-        // Only proceed if we have both company name and city
-        if (companyInfo.name && companyInfo.city) {
-          console.log(`🔍 Checking if company ${companyInfo.name} has any valid leads remaining...`);
-          
-          // Check if company has any valid leads remaining
-          const validLeadsResult = await checkCompanyValidLeadsActivity({
-            company_name: companyInfo.name,
-            company_id: companyInfo.id,
-            site_id: site_id,
-            exclude_lead_id: lead_id // Exclude the current lead being invalidated
-          });
-          
-          if (validLeadsResult.success) {
-            console.log(`📊 Company ${companyInfo.name} validation results:`);
-            console.log(`   - Total leads: ${validLeadsResult.totalLeads}`);
-            console.log(`   - Valid leads remaining: ${validLeadsResult.validLeads}`);
-            console.log(`   - Has valid leads: ${validLeadsResult.hasValidLeads}`);
-            
-            if (!validLeadsResult.hasValidLeads) {
-              console.log(`🚫 No valid leads remaining for ${companyInfo.name} - adding to null companies list...`);
-              
-              // Add company to null companies list
-              const nullCompanyResult = await addCompanyToNullListActivity({
-                company_name: companyInfo.name,
-                company_id: companyInfo.id,
-                city: companyInfo.city,
-                site_id: site_id,
-                reason: reason,
-                failed_contact: {
-                  telephone: options.telephone,
-                  email: options.email
-                },
-                userId: options.userId,
-                total_leads_invalidated: 1 + invalidatedSharedLeads, // Current lead + shared leads
-                original_lead_id: lead_id
-              });
-              
-              if (nullCompanyResult.success) {
-                companyAddedToNullList = true;
-                nullCompanyId = nullCompanyResult.nullCompanyId;
-                console.log(`✅ Company ${companyInfo.name} successfully added to null companies list for ${companyInfo.city}`);
-              } else {
-                const errorMsg = `Failed to add company to null list: ${nullCompanyResult.error}`;
-                console.error(`❌ ${errorMsg}`);
-                errors.push(errorMsg);
-              }
-            } else {
-              console.log(`✅ Company ${companyInfo.name} still has ${validLeadsResult.validLeads} valid leads - keeping active`);
-            }
-          } else {
-            const errorMsg = `Failed to check company valid leads: ${validLeadsResult.error}`;
-            console.error(`❌ ${errorMsg}`);
-            errors.push(errorMsg);
-          }
-        } else {
-          console.log(`⚠️ Missing company name or city information - skipping null company check`);
-          console.log(`   - Company name: ${companyInfo.name || 'N/A'}`);
-          console.log(`   - Company city: ${companyInfo.city || 'N/A'}`);
-        }
-      } else {
-        const errorMsg = `Failed to get company information: ${companyInfoResult.error}`;
-        console.error(`⚠️ ${errorMsg}`);
-        errors.push(errorMsg);
-      }
-    } catch (companyError) {
-      const errorMessage = companyError instanceof Error ? companyError.message : String(companyError);
-      console.error(`⚠️ Exception during company null list check: ${errorMessage}`);
-      errors.push(`Company null list check exception: ${errorMessage}`);
-    }
+    console.log(`✅ Lead invalidation process completed - skipping company null list functionality`);
+    console.log(`📝 Note: Company tracking has been simplified to focus on lead-level invalidation`);
 
     const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
     const result: LeadInvalidationResult = {
@@ -313,9 +225,6 @@ export async function leadInvalidationWorkflow(
       invalidatedLead: leadInvalidated,
       sharedContactLeads,
       invalidatedSharedLeads,
-      companyAddedToNullList,
-      nullCompanyId,
-      companyInfo,
       reason,
       errors,
       executionTime,
@@ -324,9 +233,6 @@ export async function leadInvalidationWorkflow(
 
     console.log(`🎉 Lead invalidation workflow completed successfully!`);
     console.log(`📊 Summary: Lead ${lead_id} - Invalidated: ${leadInvalidated}, Shared leads: ${invalidatedSharedLeads}`);
-    if (companyAddedToNullList && companyInfo.name) {
-      console.log(`🚫 Company "${companyInfo.name}" added to null companies list for ${companyInfo.city}`);
-    }
     console.log(`⏱️ Execution time: ${executionTime}`);
 
     // Update cron status to indicate successful completion
@@ -385,9 +291,6 @@ export async function leadInvalidationWorkflow(
       invalidatedLead: leadInvalidated,
       sharedContactLeads,
       invalidatedSharedLeads,
-      companyAddedToNullList,
-      nullCompanyId,
-      companyInfo,
       reason,
       errors: [...errors, errorMessage],
       executionTime,
