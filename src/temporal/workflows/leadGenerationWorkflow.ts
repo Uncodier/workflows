@@ -542,7 +542,7 @@ export async function leadGenerationWorkflow(
       businessTypes = regionSearchResult.business_types || [];
       targetCity = regionSearchResult.targetCity || '';
       targetRegion = regionSearchResult.targetRegion || '';
-      targetCountry = regionSearchResult.target_country || '';
+      targetCountry = regionSearchResult.data?.target_country || regionSearchResult.target_country || '';
       segmentId = regionSearchResult.target_segment_id || '';
       
       console.log(`✅ Region search API call successful`);

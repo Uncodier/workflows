@@ -268,6 +268,8 @@ async function callRegionVenuesApiActivity(options) {
             maxVenues: options.maxVenues,
             excludeNamesCount: options.excludeNames?.length || 0
         });
+        console.log(`🚨 URGENT DEBUG - callRegionVenuesApiActivity received searchTerm: "${options.searchTerm}"`);
+        console.log(`🚨 URGENT DEBUG - callRegionVenuesApiActivity options:`, JSON.stringify(options, null, 2));
         const requestBody = {
             siteId: options.site_id,
             userId: options.userId,
@@ -332,7 +334,7 @@ async function callRegionVenuesApiActivity(options) {
 /**
  * Nueva actividad para llamar a la API de venues con búsquedas múltiples individuales
  * En lugar de pasar todos los business types en un search term, hace búsquedas individuales
- * Usa solo ciudad y región (sin asumir país) e intenta con cada business type si es necesario
+ * Usa ciudad, región y país (si disponible) e intenta con cada business type si es necesario
  */
 async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
     try {
@@ -348,6 +350,14 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
             excludeNamesCount: options.excludeNames?.length || 0
         });
         const businessTypes = options.businessTypes || [];
+        console.log(`🚨 URGENT DEBUG callRegionVenuesWithMultipleSearchTermsActivity ENTRY`);
+        console.log(`🚨 URGENT DEBUG received businessTypes:`, JSON.stringify(businessTypes, null, 2));
+        console.log(`🚨 URGENT DEBUG businessTypes.length:`, businessTypes.length);
+        if (businessTypes.length > 0) {
+            console.log(`🚨 URGENT DEBUG businessTypes[0]:`, JSON.stringify(businessTypes[0], null, 2));
+            console.log(`🚨 URGENT DEBUG businessTypes[0].name:`, businessTypes[0]?.name);
+            console.log(`🚨 URGENT DEBUG typeof businessTypes[0].name:`, typeof businessTypes[0]?.name);
+        }
         const targetVenueGoal = options.targetVenueGoal || options.maxVenues || 20;
         const allVenues = [];
         let totalApiCalls = 0;
@@ -364,13 +374,19 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
             geographicInfo.push(options.country);
         const locationString = geographicInfo.join(', ');
         console.log(`🎯 Target venue goal: ${targetVenueGoal} venues`);
-        console.log(`🌍 Geographic location: ${locationString}`);
-        console.log(`🏷️ Business types to search: ${businessTypes.map(bt => bt.name).join(', ')}`);
+        console.log(`🌍 Geographic location: ${locationString}${options.country ? ' (country from regionSearch)' : ' (no country specified)'}`);
+        console.log(`🏷️ Business types to search: ${businessTypes.map(bt => bt?.name || 'UNDEFINED').join(', ')}`);
         // Búsqueda inicial con el primer business type si está disponible
         if (businessTypes.length > 0) {
             const firstBusinessType = businessTypes[0];
-            const firstBusinessTypeName = firstBusinessType.name;
+            console.log(`🚨 URGENT DEBUG firstBusinessType:`, JSON.stringify(firstBusinessType, null, 2));
+            // Verificación más robusta del acceso a la propiedad name
+            const firstBusinessTypeName = firstBusinessType?.name || firstBusinessType?.business_type_name || 'UNKNOWN_BUSINESS_TYPE';
+            console.log(`🚨 URGENT DEBUG firstBusinessTypeName: "${firstBusinessTypeName}"`);
+            console.log(`🚨 URGENT DEBUG locationString: "${locationString}"`);
+            console.log(`🚨 URGENT DEBUG typeof firstBusinessTypeName: ${typeof firstBusinessTypeName}`);
             const firstSearchTerm = locationString ? `${firstBusinessTypeName} in ${locationString}` : firstBusinessTypeName;
+            console.log(`🚨 URGENT DEBUG firstSearchTerm FINAL: "${firstSearchTerm}"`);
             console.log(`🔍 Initial search with first business type: "${firstSearchTerm}"`);
             const firstSearchOptions = {
                 site_id: options.site_id,
@@ -388,6 +404,9 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
                     isMultipleSearchStrategy: true
                 }
             };
+            console.log(`🚨 URGENT DEBUG About to call callRegionVenuesApiActivity with:`);
+            console.log(`🚨 URGENT DEBUG firstSearchOptions.searchTerm: "${firstSearchOptions.searchTerm}"`);
+            console.log(`🚨 URGENT DEBUG firstSearchOptions:`, JSON.stringify(firstSearchOptions, null, 2));
             const firstResult = await callRegionVenuesApiActivity(firstSearchOptions);
             totalApiCalls++;
             if (firstResult.success && firstResult.data && firstResult.data.venues) {
@@ -422,8 +441,9 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
             console.log(`🔄 Need more venues (${allVenues.length}/${targetVenueGoal}), trying additional business types...`);
             for (let i = 1; i < businessTypes.length && allVenues.length < targetVenueGoal; i++) {
                 const businessType = businessTypes[i];
-                const businessTypeName = businessType.name;
+                const businessTypeName = businessType?.name || businessType?.business_type_name || `UNKNOWN_BUSINESS_TYPE_${i}`;
                 const searchTerm = locationString ? `${businessTypeName} in ${locationString}` : businessTypeName;
+                console.log(`🚨 URGENT DEBUG Additional search ${i + 1} businessTypeName: "${businessTypeName}"`);
                 console.log(`🔍 Additional search ${i + 1}: "${searchTerm}"`);
                 const remainingVenuesNeeded = targetVenueGoal - allVenues.length;
                 const searchOptions = {
@@ -442,6 +462,8 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
                         isMultipleSearchStrategy: true
                     }
                 };
+                console.log(`🚨 URGENT DEBUG About to call callRegionVenuesApiActivity (additional search ${i + 1}) with:`);
+                console.log(`🚨 URGENT DEBUG searchOptions.searchTerm: "${searchOptions.searchTerm}"`);
                 const result = await callRegionVenuesApiActivity(searchOptions);
                 totalApiCalls++;
                 if (result.success && result.data && result.data.venues) {

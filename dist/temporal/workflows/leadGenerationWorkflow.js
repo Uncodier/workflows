@@ -376,6 +376,7 @@ async function leadGenerationWorkflow(options) {
     let enhancedSearchTopic = '';
     let targetCity = '';
     let targetRegion = '';
+    let targetCountry = '';
     let segmentId = '';
     let venuesResult = null;
     let venuesFound = [];
@@ -425,11 +426,13 @@ async function leadGenerationWorkflow(options) {
             businessTypes = regionSearchResult.business_types || [];
             targetCity = regionSearchResult.targetCity || '';
             targetRegion = regionSearchResult.targetRegion || '';
+            targetCountry = regionSearchResult.data?.target_country || regionSearchResult.target_country || '';
             segmentId = regionSearchResult.target_segment_id || '';
             console.log(`✅ Region search API call successful`);
             console.log(`🔍 Business types received: ${businessTypes.length}`);
             console.log(`🏙️ Target city: "${targetCity || 'Not specified'}"`);
             console.log(`🌍 Target region: "${targetRegion || 'Not specified'}"`);
+            console.log(`🌎 Target country: "${targetCountry || 'Not specified'}"`);
             console.log(`🎯 Segment ID: "${segmentId || 'Not specified'}"`);
         }
         // Step 2.5: Search for existing leads by company city to exclude them
@@ -483,6 +486,9 @@ async function leadGenerationWorkflow(options) {
         if (targetRegion) {
             geographicInfo.push(targetRegion);
         }
+        if (targetCountry) {
+            geographicInfo.push(targetCountry);
+        }
         enhancedSearchTopic = geographicInfo.length > 0
             ? `${businessTypeNames.join(', ')} in ${geographicInfo.join(', ')}`
             : businessTypeNames.join(', ');
@@ -503,14 +509,18 @@ async function leadGenerationWorkflow(options) {
         }
         // Call region venues API with multiple search terms strategy
         try {
-            console.log(`🌍 Using geographic location: ${targetCity || 'No city'}, ${targetRegion || 'No region'}`);
+            console.log(`🌍 Using geographic location: ${targetCity || 'No city'}, ${targetRegion || 'No region'}, ${targetCountry || 'No country'}`);
+            console.log(`🐛 Debug workflow businessTypes before passing:`, JSON.stringify(businessTypes, null, 2));
+            console.log(`🐛 Debug workflow targetCity: "${targetCity}"`);
+            console.log(`🐛 Debug workflow targetRegion: "${targetRegion}"`);
+            console.log(`🐛 Debug workflow targetCountry: "${targetCountry}"`);
             const regionVenuesMultipleOptions = {
                 site_id: site_id,
                 userId: options.userId || site.user_id,
                 businessTypes: businessTypes, // Pasar array de business types para búsquedas individuales
                 city: targetCity || '',
                 region: targetRegion || '',
-                // No especificar país - solo usar city y region
+                country: targetCountry || undefined, // Usar el país del regionSearch
                 maxVenues: maxVenues, // ✅ Use dynamically determined venue limit
                 targetVenueGoal: maxVenues, // Objetivo de venues a alcanzar
                 priority: 'high',
@@ -526,7 +536,8 @@ async function leadGenerationWorkflow(options) {
                     hasChannels: maxVenuesResult.hasChannels // Include channel info
                 }
             };
-            console.log(`🔍 Using multiple search terms strategy with ${businessTypes.length} business types (city + region only)`);
+            console.log(`🐛 Debug regionVenuesMultipleOptions:`, JSON.stringify(regionVenuesMultipleOptions, null, 2));
+            console.log(`🔍 Using multiple search terms strategy with ${businessTypes.length} business types (city + region + country)`);
             venuesResult = await callRegionVenuesWithMultipleSearchTermsActivity(regionVenuesMultipleOptions);
             if (venuesResult.success && venuesResult.data && venuesResult.data.venues) {
                 venuesFound = venuesResult.data.venues;
