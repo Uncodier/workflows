@@ -412,7 +412,9 @@ async function leadGenerationWorkflow(options) {
                 siteName: siteName,
                 siteUrl: siteUrl,
                 ...(options.region && { region: options.region }),
-                ...(options.keywords && { keywords: options.keywords })
+                ...(options.keywords && {
+                    keywords: Array.isArray(options.keywords) ? options.keywords : [options.keywords]
+                })
             }
         };
         regionSearchResult = await callRegionSearchApiActivity(regionSearchOptions);

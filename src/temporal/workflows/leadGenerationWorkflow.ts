@@ -57,7 +57,7 @@ export interface LeadGenerationOptions {
   userId?: string;
   create?: boolean;                   // Default true to create leads, set false for validation only
   region?: string;                    // Optional: Override region for regionSearch (e.g., "world" for strategic accounts)
-  keywords?: string;                  // Optional: Override keywords for regionSearch (e.g., "key accounts")
+  keywords?: string | string[];       // Optional: Override keywords for regionSearch (e.g., "key accounts" or ["key", "accounts"])
   additionalData?: any;
 }
 
@@ -528,7 +528,9 @@ export async function leadGenerationWorkflow(
         siteName: siteName,
         siteUrl: siteUrl,
         ...(options.region && { region: options.region }),
-        ...(options.keywords && { keywords: options.keywords })
+        ...(options.keywords && { 
+          keywords: Array.isArray(options.keywords) ? options.keywords : [options.keywords] 
+        })
       }
     };
     

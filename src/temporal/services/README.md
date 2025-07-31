@@ -47,7 +47,7 @@ const deleteResponse = await apiService.delete('/api/delete/123');
 
 - **Autenticación automática**: Agrega automáticamente el header `x-api-key` con el valor de `API_KEY`
 - **Manejo de errores**: Retorna una estructura consistente con `success` y `error`/`data`
-- **Timeout**: Implementa timeout de 30 segundos por defecto
+- **Timeout**: Implementa timeout de 5 minutos por defecto
 - **Logging**: Logs automáticos de requests y responses para debugging
 - **URL building**: Maneja automáticamente las barras diagonales en URLs
 

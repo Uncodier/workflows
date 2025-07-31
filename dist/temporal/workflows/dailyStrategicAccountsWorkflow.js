@@ -62,7 +62,7 @@ async function dailyStrategicAccountsWorkflow(options) {
             userId: options.userId,
             create: createTasks,
             region: 'world',
-            keywords: 'key accounts',
+            keywords: ['key accounts'], // ✅ Fixed: Pass as array instead of string
             additionalData: {
                 ...options.additionalData,
                 leadType: 'strategic_accounts',

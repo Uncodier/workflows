@@ -2,14 +2,14 @@ import { proxyActivities } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { CreateCampaignRequest } from '../activities/campaignActivities';
 
-// Configure activity options - Each activity has 2 minutes to complete
+// Configure activity options - Each activity has 5 minutes to complete
 const {
   createCampaignsActivity,
   createCampaignRequirementsActivity,
   getSiteActivity,
   getSegmentsActivity
 } = proxyActivities<Activities>({
-  startToCloseTimeout: '2 minutes', // Each activity has 2 minutes maximum execution time
+  startToCloseTimeout: '5 minutes', // Each activity has 5 minutes maximum execution time
   retry: {
     maximumAttempts: 3,
   },
