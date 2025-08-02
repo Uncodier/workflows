@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activityPrioritizationEngineWorkflow = activityPrioritizationEngineWorkflow;
 const workflow_1 = require("@temporalio/workflow");
-const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity, scheduleIndividualSiteAnalysisActivity, scheduleIndividualLeadGenerationActivity, scheduleIndividualDailyProspectionActivity, executeDailyProspectionWorkflowsActivity } = (0, workflow_1.proxyActivities)({
+const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity, scheduleIndividualSiteAnalysisActivity, scheduleIndividualLeadGenerationActivity, scheduleIndividualDailyProspectionActivity, executeDailyProspectionWorkflowsActivity, validateAndCleanStuckCronStatusActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes',
 });
 /**
@@ -19,6 +19,25 @@ async function activityPrioritizationEngineWorkflow() {
     console.log('🎯 Starting activity prioritization engine workflow...');
     const startTime = new Date();
     try {
+        // Step 0: Validate and clean any stuck cron status records
+        console.log('🔍 Step 0: Validating cron status for activity prioritization engine...');
+        const cronValidation = await validateAndCleanStuckCronStatusActivity('activityPrioritizationEngineWorkflow', 'global', // This is a global workflow
+        24 // 24 hours threshold
+        );
+        console.log(`📋 Cron validation result: ${cronValidation.reason}`);
+        if (cronValidation.wasStuck) {
+            console.log(`🧹 Cleaned stuck record: ${cronValidation.hoursStuck?.toFixed(1)}h old`);
+        }
+        if (!cronValidation.canProceed) {
+            console.log('⏳ Another activity prioritization engine is likely running - skipping execution');
+            return {
+                shouldExecute: false,
+                reason: cronValidation.reason,
+                operationsExecuted: false,
+                executionTime: `${Date.now() - startTime.getTime()}ms`,
+                timingDecision: 'skip'
+            };
+        }
         // Step 1: Decision Logic - Should we execute operations today?
         console.log('🤔 Step 1: Analyzing if operations should execute today...');
         const today = new Date();

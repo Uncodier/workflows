@@ -459,4 +459,121 @@ function logCronStatusUpdate(update: CronStatusUpdate): void {
     console.log(`   - Error: ${update.errorMessage}`);
   }
   console.log(`   - Retry Count: ${update.retryCount || 0}`);
+}
+
+/**
+ * Validate and clean stuck cron status for a specific workflow/site before execution
+ * This is a general-purpose activity that can be used by any workflow to ensure
+ * they don't get blocked by stuck RUNNING records from previous failed executions
+ * 
+ * @param activityName - Name of the activity to check (e.g., 'dailyStandUpWorkflow')
+ * @param siteId - Site ID to check, or 'global' for system-wide workflows
+ * @param hoursThreshold - Hours threshold to consider a record stuck (default: 24)
+ * @returns Object with validation result and cleanup details
+ */
+export async function validateAndCleanStuckCronStatusActivity(
+  activityName: string,
+  siteId: string,
+  hoursThreshold: number = 24
+): Promise<{
+  wasStuck: boolean;
+  cleaned: boolean;
+  reason: string;
+  previousStatus?: string;
+  hoursStuck?: number;
+  canProceed: boolean;
+}> {
+  console.log(`🔍 Validating cron status for ${activityName} (Site: ${siteId}, threshold: ${hoursThreshold}h)`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    const isConnected = await supabaseService.getConnectionStatus();
+    if (!isConnected) {
+      console.log('⚠️  Database not available for validation - proceeding optimistically');
+      return {
+        wasStuck: false,
+        cleaned: false,
+        reason: 'Database not available - proceeding without validation',
+        canProceed: true
+      };
+    }
+
+    // Get current cron status for this specific activity and site
+    const cronData = await getCronStatusActivity(activityName, [siteId]);
+    const currentRecord = cronData.find(record => 
+      record.site_id === siteId && record.activity_name === activityName
+    );
+
+    if (!currentRecord) {
+      console.log(`✅ No existing cron record found - safe to proceed`);
+      return {
+        wasStuck: false,
+        cleaned: false,
+        reason: 'No existing cron record - first execution',
+        canProceed: true
+      };
+    }
+
+    // Check if the record is in RUNNING state
+    if (currentRecord.status !== 'running') {
+      console.log(`✅ Current status is '${currentRecord.status}' - safe to proceed`);
+      return {
+        wasStuck: false,
+        cleaned: false,
+        reason: `Current status is '${currentRecord.status}' - not stuck`,
+        previousStatus: currentRecord.status,
+        canProceed: true
+      };
+    }
+
+    // Calculate how long it's been stuck in RUNNING state
+    const updatedAt = new Date(currentRecord.updated_at);
+    const now = new Date();
+    const hoursStuck = (now.getTime() - updatedAt.getTime()) / (1000 * 60 * 60);
+
+    if (hoursStuck < hoursThreshold) {
+      console.log(`⏳ Record is RUNNING but only for ${hoursStuck.toFixed(1)}h - within threshold`);
+      return {
+        wasStuck: false,
+        cleaned: false,
+        reason: `RUNNING for ${hoursStuck.toFixed(1)}h - within ${hoursThreshold}h threshold`,
+        previousStatus: 'running',
+        hoursStuck,
+        canProceed: false // Don't proceed if recently started
+      };
+    }
+
+    // Record is stuck - clean it
+    console.log(`🚨 Found stuck RUNNING record - stuck for ${hoursStuck.toFixed(1)}h (threshold: ${hoursThreshold}h)`);
+    
+    const errorMessage = `Auto-reset from stuck RUNNING state after ${hoursStuck.toFixed(1)}h - exceeded ${hoursThreshold}h threshold`;
+    await supabaseService.resetCronStatusToFailed(currentRecord.id, errorMessage);
+    
+    console.log(`✅ Successfully cleaned stuck record for ${activityName} (Site: ${siteId})`);
+    console.log(`   - Was stuck for: ${hoursStuck.toFixed(1)} hours`);
+    console.log(`   - Reset to: FAILED`);
+    console.log(`   - New execution can proceed`);
+
+    return {
+      wasStuck: true,
+      cleaned: true,
+      reason: `Cleaned stuck RUNNING record (${hoursStuck.toFixed(1)}h > ${hoursThreshold}h threshold)`,
+      previousStatus: 'running',
+      hoursStuck,
+      canProceed: true
+    };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Error in validateAndCleanStuckCronStatusActivity: ${errorMessage}`);
+    
+    // In case of error, proceed optimistically to avoid blocking legitimate executions
+    return {
+      wasStuck: false,
+      cleaned: false,
+      reason: `Error during validation: ${errorMessage} - proceeding optimistically`,
+      canProceed: true
+    };
+  }
 } 

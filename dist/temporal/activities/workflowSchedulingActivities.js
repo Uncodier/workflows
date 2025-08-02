@@ -120,7 +120,7 @@ async function scheduleEmailSyncWorkflowActivity(site, options = {}) {
         const nextRun = new Date(Date.now() + 60 * 60 * 1000); // Next run in 1 hour
         const cronUpdate = {
             siteId: site.id,
-            workflowId,
+            workflowId: handle.workflowId,
             scheduleId,
             activityName: 'syncEmailsWorkflow',
             status: 'RUNNING',
@@ -128,7 +128,7 @@ async function scheduleEmailSyncWorkflowActivity(site, options = {}) {
         };
         await (0, cronActivities_1.saveCronStatusActivity)(cronUpdate);
         return {
-            workflowId,
+            workflowId: handle.workflowId,
             scheduleId,
             success: true
         };
@@ -140,7 +140,7 @@ async function scheduleEmailSyncWorkflowActivity(site, options = {}) {
         try {
             const cronUpdate = {
                 siteId: site.id,
-                workflowId,
+                workflowId: workflowId,
                 scheduleId,
                 activityName: 'syncEmailsWorkflow',
                 status: 'FAILED',
@@ -153,7 +153,7 @@ async function scheduleEmailSyncWorkflowActivity(site, options = {}) {
             console.error('❌ Failed to save error status:', statusError);
         }
         return {
-            workflowId,
+            workflowId: workflowId,
             scheduleId,
             success: false,
             error: errorMessage
@@ -374,7 +374,7 @@ async function executeBuildCampaignsWorkflowActivity(siteId, options = {}) {
         // Log workflow execution (not cron status since this is on-demand)
         await (0, supabaseActivities_1.logWorkflowExecutionActivity)({
             workflowType: 'buildCampaignsWorkflow',
-            workflowId,
+            workflowId: handle.workflowId,
             status: 'STARTED',
             input: {
                 siteId,
@@ -384,7 +384,7 @@ async function executeBuildCampaignsWorkflowActivity(siteId, options = {}) {
             }
         });
         return {
-            workflowId,
+            workflowId: handle.workflowId,
             success: true
         };
     }
@@ -395,7 +395,7 @@ async function executeBuildCampaignsWorkflowActivity(siteId, options = {}) {
         try {
             await (0, supabaseActivities_1.logWorkflowExecutionActivity)({
                 workflowType: 'buildCampaignsWorkflow',
-                workflowId,
+                workflowId: workflowId,
                 status: 'FAILED',
                 error: errorMessage,
                 input: {
@@ -410,7 +410,7 @@ async function executeBuildCampaignsWorkflowActivity(siteId, options = {}) {
             console.error('❌ Failed to log execution error:', logError);
         }
         return {
-            workflowId,
+            workflowId: workflowId,
             success: false,
             error: errorMessage
         };
@@ -829,12 +829,12 @@ async function executeDailyStandUpWorkflow(site, executionOptions) {
         });
         console.log(`✅ Daily Stand Up workflow started for ${site.name}`);
         console.log(`   Workflow ID: ${handle.workflowId}`);
-        return { workflowId, scheduleId: executionOptions.scheduleType, success: true };
+        return { workflowId: handle.workflowId, scheduleId: executionOptions.scheduleType, success: true };
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Failed to execute Daily Stand Up workflow for ${site.name}: ${errorMessage}`);
-        return { workflowId, scheduleId: executionOptions.scheduleType, success: false, error: errorMessage };
+        return { workflowId: workflowId, scheduleId: executionOptions.scheduleType, success: false, error: errorMessage };
     }
 }
 // Removed calculateNextDailyStandUpTime function as it's not used
@@ -1974,12 +1974,12 @@ async function executeDailyProspectionWorkflow(site, executionOptions) {
         });
         console.log(`✅ Daily Prospection workflow started for ${site.name}`);
         console.log(`   Workflow ID: ${handle.workflowId}`);
-        return { workflowId, scheduleId: executionOptions.scheduleType, success: true };
+        return { workflowId: handle.workflowId, scheduleId: executionOptions.scheduleType, success: true };
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Failed to execute Daily Prospection workflow for ${site.name}: ${errorMessage}`);
-        return { workflowId, scheduleId: executionOptions.scheduleType, success: false, error: errorMessage };
+        return { workflowId: workflowId, scheduleId: executionOptions.scheduleType, success: false, error: errorMessage };
     }
 }
 /**

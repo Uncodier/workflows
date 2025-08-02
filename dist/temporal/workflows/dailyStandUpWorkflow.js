@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.dailyStandUpWorkflow = dailyStandUpWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, cmoSystemAnalysisActivity, cmoSalesAnalysisActivity, cmoSupportAnalysisActivity, cmoGrowthAnalysisActivity, cmoWrapUpActivity, sendDailyStandUpNotificationActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, validateAndCleanStuckCronStatusActivity, getSiteActivity, cmoSystemAnalysisActivity, cmoSalesAnalysisActivity, cmoSupportAnalysisActivity, cmoGrowthAnalysisActivity, cmoWrapUpActivity, sendDailyStandUpNotificationActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes', // Extended timeout for CMO analysis operations
     retry: {
         maximumAttempts: 3,
@@ -36,6 +36,33 @@ async function dailyStandUpWorkflow(options) {
     const startTime = Date.now();
     console.log(`🎯 Starting CMO daily stand up workflow for site ${site_id}`);
     console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+    // Validate and clean any stuck cron status records before execution
+    console.log('🔍 Validating cron status before daily standup execution...');
+    const cronValidation = await validateAndCleanStuckCronStatusActivity('dailyStandUpWorkflow', site_id, 24 // 24 hours threshold - daily standups should not be stuck longer than 24h
+    );
+    console.log(`📋 Cron validation result: ${cronValidation.reason}`);
+    if (cronValidation.wasStuck) {
+        console.log(`🧹 Cleaned stuck record that was ${cronValidation.hoursStuck?.toFixed(1)}h old`);
+    }
+    if (!cronValidation.canProceed) {
+        console.log('⏳ Another daily standup is likely running for this site - terminating');
+        const result = {
+            success: false,
+            siteId: site_id,
+            errors: [`Workflow blocked: ${cronValidation.reason}`],
+            executionTime: `${Date.now() - startTime}ms`,
+            completedAt: new Date().toISOString()
+        };
+        // Log termination
+        await logWorkflowExecutionActivity({
+            workflowId,
+            workflowType: 'dailyStandUpWorkflow',
+            status: 'BLOCKED',
+            input: options,
+            output: result,
+        });
+        return result;
+    }
     // Log workflow execution start
     await logWorkflowExecutionActivity({
         workflowId,

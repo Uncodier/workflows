@@ -5,6 +5,7 @@ import type { Activities } from '../activities';
 const { 
   logWorkflowExecutionActivity,
   saveCronStatusActivity,
+  validateAndCleanStuckCronStatusActivity,
   getSiteActivity,
   cmoSystemAnalysisActivity,
   cmoSalesAnalysisActivity,
@@ -76,6 +77,43 @@ export async function dailyStandUpWorkflow(
   
   console.log(`🎯 Starting CMO daily stand up workflow for site ${site_id}`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+
+  // Validate and clean any stuck cron status records before execution
+  console.log('🔍 Validating cron status before daily standup execution...');
+  
+  const cronValidation = await validateAndCleanStuckCronStatusActivity(
+    'dailyStandUpWorkflow',
+    site_id,
+    24 // 24 hours threshold - daily standups should not be stuck longer than 24h
+  );
+  
+  console.log(`📋 Cron validation result: ${cronValidation.reason}`);
+  if (cronValidation.wasStuck) {
+    console.log(`🧹 Cleaned stuck record that was ${cronValidation.hoursStuck?.toFixed(1)}h old`);
+  }
+  
+  if (!cronValidation.canProceed) {
+    console.log('⏳ Another daily standup is likely running for this site - terminating');
+    
+    const result: DailyStandUpResult = {
+      success: false,
+      siteId: site_id,
+      errors: [`Workflow blocked: ${cronValidation.reason}`],
+      executionTime: `${Date.now() - startTime}ms`,
+      completedAt: new Date().toISOString()
+    };
+
+    // Log termination
+    await logWorkflowExecutionActivity({
+      workflowId,
+      workflowType: 'dailyStandUpWorkflow',
+      status: 'BLOCKED',
+      input: options,
+      output: result,
+    });
+
+    return result;
+  }
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({

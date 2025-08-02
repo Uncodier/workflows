@@ -4,7 +4,7 @@ exports.dailyStrategicAccountsWorkflow = dailyStrategicAccountsWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const leadGenerationWorkflow_1 = require("./leadGenerationWorkflow");
 // Import general activities
-const { logWorkflowExecutionActivity, saveCronStatusActivity, startLeadFollowUpWorkflowActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes',
     retry: {
         maximumAttempts: 3,
@@ -147,89 +147,12 @@ async function dailyStrategicAccountsWorkflow(options) {
             executionTime,
             completedAt: new Date().toISOString()
         };
-        // Step 2: Start follow-up workflows for strategic leads (optional enhancement)
-        console.log(`🔄 Step 2: Starting follow-up workflows for strategic leads...`);
-        // Extract all leads from strategic account results for follow-up processing
-        const allStrategicLeads = strategicAccountResults.map(result => result.lead);
-        const unassignedLeads = allStrategicLeads; // For now, all leads can have follow-up workflows
-        console.log(`📊 Strategic follow-up analysis:`);
-        console.log(`   - Total strategic leads generated: ${allStrategicLeads.length}`);
-        console.log(`   - Strategic leads for follow-up: ${unassignedLeads.length}`);
-        const followUpResults = [];
-        let followUpWorkflowsStarted = 0;
-        if (unassignedLeads.length > 0) {
-            console.log(`🚀 Starting strategic lead follow-up workflows for ${unassignedLeads.length} unassigned strategic leads...`);
-            for (const lead of unassignedLeads) {
-                try {
-                    console.log(`📞 Starting follow-up workflow for strategic lead: ${lead.name || lead.email} (ID: ${lead.id})`);
-                    const followUpResult = await startLeadFollowUpWorkflowActivity({
-                        lead_id: lead.id,
-                        site_id: site_id,
-                        userId: options.userId,
-                        additionalData: {
-                            triggeredBy: 'dailyStrategicAccountsWorkflow',
-                            reason: 'strategic_lead_not_assigned_to_human',
-                            prospectionDate: new Date().toISOString(),
-                            originalWorkflowId: workflowId,
-                            leadType: 'strategic_account',
-                            leadInfo: {
-                                name: lead.name,
-                                email: lead.email,
-                                company: lead.company
-                            }
-                        }
-                    });
-                    if (followUpResult.success) {
-                        followUpWorkflowsStarted++;
-                        console.log(`✅ Follow-up workflow started for strategic lead ${lead.name || lead.email}: ${followUpResult.workflowId}`);
-                        followUpResults.push({
-                            lead_id: lead.id,
-                            lead_name: lead.name || lead.email,
-                            success: true,
-                            workflowId: followUpResult.workflowId
-                        });
-                    }
-                    else {
-                        const errorMsg = `Failed to start follow-up workflow for strategic lead ${lead.name || lead.email}: ${followUpResult.error}`;
-                        console.error(`❌ ${errorMsg}`);
-                        errors.push(errorMsg);
-                        followUpResults.push({
-                            lead_id: lead.id,
-                            lead_name: lead.name || lead.email,
-                            success: false,
-                            error: followUpResult.error
-                        });
-                    }
-                }
-                catch (followUpError) {
-                    const errorMessage = followUpError instanceof Error ? followUpError.message : String(followUpError);
-                    const errorMsg = `Exception starting follow-up workflow for strategic lead ${lead.name || lead.email}: ${errorMessage}`;
-                    console.error(`❌ ${errorMsg}`);
-                    errors.push(errorMsg);
-                    followUpResults.push({
-                        lead_id: lead.id,
-                        lead_name: lead.name || lead.email,
-                        success: false,
-                        error: errorMessage
-                    });
-                }
-            }
-            console.log(`✅ Strategic follow-up workflows completed: ${followUpWorkflowsStarted}/${unassignedLeads.length} started successfully`);
-        }
-        else {
-            console.log(`ℹ️ No strategic follow-up workflows needed (all strategic leads were assigned to humans or no leads processed)`);
-        }
-        // Update result with follow-up information
-        result.followUpWorkflowsStarted = followUpWorkflowsStarted;
-        result.followUpResults = followUpResults;
-        result.unassignedLeads = unassignedLeads;
         console.log(`🎉 Daily strategic accounts workflow completed successfully!`);
         console.log(`📊 Summary: Daily strategic accounts for site ${siteName} completed in ${executionTime}`);
         console.log(`   - Site: ${siteName} (${siteUrl})`);
         console.log(`   - Strategic leads generated: ${leadsGenerated}`);
         console.log(`   - Strategic leads processed: ${leadsProcessed}`);
         console.log(`   - Tasks created: ${result.tasksCreated}`);
-        console.log(`   - Strategic follow-up workflows started: ${followUpWorkflowsStarted}/${unassignedLeads.length}`);
         console.log(`   - Strategic accounts from companies: ${leadGenResult.companiesCreated?.length || 0}`);
         if (errors.length > 0) {
             console.log(`   - Errors encountered: ${errors.length}`);
@@ -300,10 +223,6 @@ async function dailyStrategicAccountsWorkflow(options) {
             leadsPriority: null,
             assignedLeads: [],
             notificationResults: [],
-            // Add follow-up fields with default values for error case
-            followUpWorkflowsStarted: 0,
-            followUpResults: [],
-            unassignedLeads: [],
             // Add channel filtering fields
             leadsFiltered: 0,
             filteredLeads: [],
