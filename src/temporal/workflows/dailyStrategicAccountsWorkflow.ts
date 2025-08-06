@@ -98,8 +98,13 @@ export async function dailyStrategicAccountsWorkflow(
   const workflowId = `daily-strategic-accounts-${site_id}`;
   const startTime = Date.now();
   
+  // Extract scheduleId from additionalData.scheduleType (passed by scheduling activities)
+  // Fallback to generic format if not provided
+  const scheduleId = options.additionalData?.scheduleType || `daily-strategic-accounts-${site_id}`;
+  
   console.log(`🎯 Starting daily strategic accounts workflow for site ${site_id}`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+  console.log(`📋 Schedule ID: ${scheduleId} (from ${options.additionalData?.scheduleType ? 'scheduleType' : 'fallback'})`);
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({
@@ -113,7 +118,7 @@ export async function dailyStrategicAccountsWorkflow(
   await saveCronStatusActivity({
     siteId: site_id,
     workflowId,
-    scheduleId: `daily-strategic-accounts-${site_id}`,
+    scheduleId: scheduleId,
     activityName: 'dailyStrategicAccountsWorkflow',
     status: 'RUNNING',
     lastRun: new Date().toISOString()
@@ -252,7 +257,7 @@ export async function dailyStrategicAccountsWorkflow(
     await saveCronStatusActivity({
       siteId: site_id,
       workflowId,
-      scheduleId: `daily-strategic-accounts-${site_id}`,
+      scheduleId: scheduleId,
       activityName: 'dailyStrategicAccountsWorkflow',
       status: 'COMPLETED',
       lastRun: new Date().toISOString()
@@ -279,7 +284,7 @@ export async function dailyStrategicAccountsWorkflow(
     await saveCronStatusActivity({
       siteId: site_id,
       workflowId,
-      scheduleId: `daily-strategic-accounts-${site_id}`,
+      scheduleId: scheduleId,
       activityName: 'dailyStrategicAccountsWorkflow',
       status: 'FAILED',
       lastRun: new Date().toISOString(),

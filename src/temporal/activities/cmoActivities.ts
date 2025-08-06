@@ -36,10 +36,7 @@ export async function cmoSystemAnalysisActivity(request: DailyStandUpRequest): P
 
     if (!response.success) {
       console.error(`❌ CMO system analysis failed:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to run system analysis'
-      };
+      throw new Error(`Failed to run system analysis: ${response.error?.message || 'Unknown error'}`);
     }
 
     console.log(`✅ CMO system analysis completed successfully`);
@@ -78,10 +75,7 @@ export async function cmoSalesAnalysisActivity(request: DailyStandUpRequest & { 
 
     if (!response.success) {
       console.error(`❌ CMO sales analysis failed:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to run sales analysis'
-      };
+      throw new Error(`Failed to run sales analysis: ${response.error?.message || 'Unknown error'}`);
     }
 
     console.log(`✅ CMO sales analysis completed successfully`);
@@ -120,10 +114,7 @@ export async function cmoSupportAnalysisActivity(request: DailyStandUpRequest & 
 
     if (!response.success) {
       console.error(`❌ CMO support analysis failed:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to run support analysis'
-      };
+      throw new Error(`Failed to run support analysis: ${response.error?.message || 'Unknown error'}`);
     }
 
     console.log(`✅ CMO support analysis completed successfully`);
@@ -162,10 +153,7 @@ export async function cmoGrowthAnalysisActivity(request: DailyStandUpRequest & {
 
     if (!response.success) {
       console.error(`❌ CMO growth analysis failed:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to run growth analysis'
-      };
+      throw new Error(`Failed to run growth analysis: ${response.error?.message || 'Unknown error'}`);
     }
 
     console.log(`✅ CMO growth analysis completed successfully`);
@@ -205,10 +193,7 @@ export async function cmoWrapUpActivity(request: DailyStandUpRequest & { command
 
     if (!response.success) {
       console.error(`❌ CMO wrap up failed:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to run wrap up'
-      };
+      throw new Error(`Failed to run wrap up: ${response.error?.message || 'Unknown error'}`);
     }
 
     console.log(`✅ CMO wrap up completed successfully`);

@@ -51,6 +51,7 @@ const sendNewsletterWorkflow_1 = require("./sendNewsletterWorkflow");
 const dailyProspectionWorkflow_1 = require("./dailyProspectionWorkflow");
 const dailyStrategicAccountsWorkflow_1 = require("./dailyStrategicAccountsWorkflow");
 const leadInvalidationWorkflow_1 = require("./leadInvalidationWorkflow");
+const startRobotWorkflow_1 = require("./startRobotWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -62,6 +63,7 @@ __exportStar(require("./dailyOperationsWorkflow"), exports);
 __exportStar(require("./sendReportWorkflow"), exports);
 __exportStar(require("./scheduleCustomerSupportMessagesWorkflow"), exports);
 __exportStar(require("./sendEmailFromAgentWorkflow"), exports);
+__exportStar(require("./startRobotWorkflow"), exports);
 __exportStar(require("./sendWhatsappFromAgentWorkflow"), exports);
 __exportStar(require("./answerWhatsappMessageWorkflow"), exports);
 __exportStar(require("./siteSetupWorkflow"), exports);
@@ -118,6 +120,7 @@ exports.workflows = {
     dailyProspectionWorkflow: dailyProspectionWorkflow_1.dailyProspectionWorkflow,
     dailyStrategicAccountsWorkflow: dailyStrategicAccountsWorkflow_1.dailyStrategicAccountsWorkflow,
     leadInvalidationWorkflow: leadInvalidationWorkflow_1.leadInvalidationWorkflow,
+    startRobotWorkflow: startRobotWorkflow_1.startRobotWorkflow,
     // Alias for backward compatibility
     whatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
     // ✅ Aliases for agent workflows with different naming conventions
@@ -160,6 +163,7 @@ exports.workflowNames = {
     dailyProspectionWorkflow: 'dailyProspectionWorkflow',
     dailyStrategicAccountsWorkflow: 'dailyStrategicAccountsWorkflow',
     leadInvalidationWorkflow: 'leadInvalidationWorkflow',
+    startRobotWorkflow: 'startRobotWorkflow',
     // Alias for backward compatibility
     whatsappMessageWorkflow: 'whatsappMessageWorkflow',
     // ✅ Aliases for agent workflows with different naming conventions

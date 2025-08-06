@@ -118,8 +118,12 @@ async function dailyProspectionWorkflow(options) {
     }
     const workflowId = `daily-prospection-${site_id}`;
     const startTime = Date.now();
+    // Extract scheduleId from additionalData.scheduleType (passed by scheduling activities)
+    // Fallback to generic format if not provided
+    const scheduleId = options.additionalData?.scheduleType || `daily-prospection-${site_id}`;
     console.log(`🎯 Starting daily prospection workflow for site ${site_id}`);
     console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+    console.log(`📋 Schedule ID: ${scheduleId} (from ${options.additionalData?.scheduleType ? 'scheduleType' : 'fallback'})`);
     // Log workflow execution start
     await logWorkflowExecutionActivity({
         workflowId,
@@ -131,7 +135,7 @@ async function dailyProspectionWorkflow(options) {
     await saveCronStatusActivity({
         siteId: site_id,
         workflowId,
-        scheduleId: `daily-prospection-${site_id}`,
+        scheduleId: scheduleId,
         activityName: 'dailyProspectionWorkflow',
         status: 'RUNNING',
         lastRun: new Date().toISOString()
@@ -206,7 +210,7 @@ async function dailyProspectionWorkflow(options) {
             await saveCronStatusActivity({
                 siteId: site_id,
                 workflowId,
-                scheduleId: `daily-prospection-${site_id}`,
+                scheduleId: scheduleId,
                 activityName: 'dailyProspectionWorkflow',
                 status: 'FAILED',
                 lastRun: new Date().toISOString(),
@@ -366,7 +370,7 @@ async function dailyProspectionWorkflow(options) {
             await saveCronStatusActivity({
                 siteId: site_id,
                 workflowId,
-                scheduleId: `daily-prospection-${site_id}`,
+                scheduleId: scheduleId,
                 activityName: 'dailyProspectionWorkflow',
                 status: 'COMPLETED',
                 lastRun: new Date().toISOString()
@@ -591,7 +595,7 @@ async function dailyProspectionWorkflow(options) {
         await saveCronStatusActivity({
             siteId: site_id,
             workflowId,
-            scheduleId: `daily-prospection-${site_id}`,
+            scheduleId: scheduleId,
             activityName: 'dailyProspectionWorkflow',
             status: 'COMPLETED',
             lastRun: new Date().toISOString()
@@ -614,7 +618,7 @@ async function dailyProspectionWorkflow(options) {
         await saveCronStatusActivity({
             siteId: site_id,
             workflowId,
-            scheduleId: `daily-prospection-${site_id}`,
+            scheduleId: scheduleId,
             activityName: 'dailyProspectionWorkflow',
             status: 'FAILED',
             lastRun: new Date().toISOString(),

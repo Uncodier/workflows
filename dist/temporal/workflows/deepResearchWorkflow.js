@@ -118,8 +118,12 @@ async function deepResearchWorkflow(options) {
     }
     const workflowId = `deep-research-${site_id}-${Date.now()}`;
     const startTime = Date.now();
+    // Extract scheduleId from additionalData.scheduleType (passed by scheduling activities)
+    // Fallback to generic format if not provided
+    const scheduleId = options.additionalData?.scheduleType || `deep-research-${site_id}`;
     console.log(`🔬 Starting deep research workflow for topic "${research_topic}" on site ${site_id}`);
     console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+    console.log(`📋 Schedule ID: ${scheduleId} (from ${options.additionalData?.scheduleType ? 'scheduleType' : 'fallback'})`);
     // Log workflow execution start
     await logWorkflowExecutionActivity({
         workflowId,
@@ -131,7 +135,7 @@ async function deepResearchWorkflow(options) {
     await saveCronStatusActivity({
         siteId: site_id,
         workflowId,
-        scheduleId: `deep-research-${site_id}`,
+        scheduleId: scheduleId,
         activityName: 'deepResearchWorkflow',
         status: 'RUNNING',
         lastRun: new Date().toISOString()
@@ -627,7 +631,7 @@ async function deepResearchWorkflow(options) {
         await saveCronStatusActivity({
             siteId: site_id,
             workflowId,
-            scheduleId: `deep-research-${site_id}`,
+            scheduleId: scheduleId,
             activityName: 'deepResearchWorkflow',
             status: 'COMPLETED',
             lastRun: new Date().toISOString(),
@@ -670,7 +674,7 @@ async function deepResearchWorkflow(options) {
         await saveCronStatusActivity({
             siteId: site_id,
             workflowId,
-            scheduleId: `deep-research-${site_id}`,
+            scheduleId: scheduleId,
             activityName: 'deepResearchWorkflow',
             status: 'FAILED',
             lastRun: new Date().toISOString(),

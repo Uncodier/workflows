@@ -102,13 +102,7 @@ export async function analyzeWhatsAppMessageActivity(
     
     if (!response.success) {
       console.error('❌ WhatsApp analysis failed:', response.error);
-      return {
-        success: false,
-        error: {
-          code: response.error?.code || 'ANALYSIS_FAILED',
-          message: response.error?.message || 'Failed to analyze WhatsApp message'
-        }
-      };
+      throw new Error(`Failed to analyze WhatsApp message: ${response.error?.message || 'Unknown error'}`);
     }
     
     console.log('✅ WhatsApp analysis completed successfully');

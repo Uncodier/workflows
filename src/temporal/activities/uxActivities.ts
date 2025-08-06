@@ -79,13 +79,7 @@ export async function uxAnalysisActivity(
         site_id: request.site_id
       });
       
-      return {
-        success: false,
-        error: {
-          code: response.error?.code || 'API_ERROR',
-          message: response.error?.message || 'Failed to call UX analysis API'
-        }
-      };
+      throw new Error(`Failed to call UX analysis API: ${response.error?.message || 'Unknown error'}`);
     }
 
     logger.info('✅ UX analysis completed successfully', {
@@ -142,13 +136,7 @@ export async function uxAssimilateActivity(
         site_id: request.site_id
       });
       
-      return {
-        success: false,
-        error: {
-          code: response.error?.code || 'API_ERROR',
-          message: response.error?.message || 'Failed to call UX assimilate API'
-        }
-      };
+      throw new Error(`Failed to call UX assimilate API: ${response.error?.message || 'Unknown error'}`);
     }
 
     logger.info('✅ UX assimilation completed successfully', {
@@ -205,13 +193,7 @@ export async function uxExperimentsActivity(
         site_id: request.site_id
       });
       
-      return {
-        success: false,
-        error: {
-          code: response.error?.code || 'API_ERROR',
-          message: response.error?.message || 'Failed to call UX experiments API'
-        }
-      };
+      throw new Error(`Failed to call UX experiments API: ${response.error?.message || 'Unknown error'}`);
     }
 
     logger.info('✅ UX experiments completed successfully', {

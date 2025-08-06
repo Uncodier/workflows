@@ -260,10 +260,7 @@ export async function buildSegmentsActivity(request: BuildSegmentsRequest): Prom
     
     if (!response.success) {
       console.error(`❌ Failed to build segments for URL ${request.url}:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to build segments'
-      };
+      throw new Error(`Failed to build segments for URL ${request.url}: ${response.error?.message || 'Unknown error'}`);
     }
     
     console.log(`✅ Successfully built segments for URL ${request.url}`);
@@ -305,10 +302,7 @@ export async function createCampaignsActivity(request: CreateCampaignRequest): P
     
     if (!response.success) {
       console.error(`❌ Failed to create campaigns for site ${request.siteId}:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to create campaigns'
-      };
+      throw new Error(`Failed to create campaigns for site ${request.siteId}: ${response.error?.message || 'Unknown error'}`);
     }
     
     console.log(`✅ Successfully created campaigns for site ${request.siteId}`);
@@ -349,10 +343,7 @@ export async function createCampaignRequirementsActivity(request: CreateCampaign
     
     if (!response.success) {
       console.error(`❌ Failed to create campaign requirements for site ${request.siteId}:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to create campaign requirements'
-      };
+      throw new Error(`Failed to create campaign requirements for site ${request.siteId}: ${response.error?.message || 'Unknown error'}`);
     }
     
     console.log(`✅ Successfully created campaign requirements for site ${request.siteId}`);
@@ -435,10 +426,7 @@ export async function buildContentActivity(request: BuildContentRequest & { endp
     
     if (!response.success) {
       console.error(`❌ Failed to build content for URL ${request.url}:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to build content recommendations'
-      };
+      throw new Error(`Failed to build content for URL ${request.url}: ${response.error?.message || 'Unknown error'}`);
     }
 
     console.log(`✅ Successfully built content recommendations for URL ${request.url}`);
@@ -494,10 +482,7 @@ export async function createContentCalendarActivity(request: {
     
     if (!response.success) {
       console.error(`❌ Failed to create content calendar for site ${request.siteId}:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to create content calendar'
-      };
+      throw new Error(`Failed to create content calendar for site ${request.siteId}: ${response.error?.message || 'Unknown error'}`);
     }
 
     console.log(`✅ Successfully created content calendar for site ${request.siteId}`);
@@ -557,10 +542,7 @@ export async function improveContentActivity(request: {
     
     if (!response.success) {
       console.error(`❌ Failed to improve content for site ${request.siteId}:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to improve content'
-      };
+      throw new Error(`Failed to improve content for site ${request.siteId}: ${response.error?.message || 'Unknown error'}`);
     }
 
     console.log(`✅ Successfully improved content for site ${request.siteId}`);

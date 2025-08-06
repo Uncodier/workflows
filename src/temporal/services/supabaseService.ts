@@ -858,6 +858,40 @@ export class SupabaseService {
 
     console.log('✅ Successfully reset cron status record to FAILED');
   }
+
+  /**
+   * Fetch recent cron status records for analysis
+   */
+  async fetchRecentCronStatus(limit: number = 10): Promise<any[]> {
+    const isConnected = await this.getConnectionStatus();
+    if (!isConnected) {
+      throw new Error('Database not connected');
+    }
+
+    console.log(`🔍 Fetching ${limit} most recent cron status records...`);
+    
+    const { data, error } = await this.client
+      .from('cron_status')
+      .select(`
+        id,
+        workflow_id,
+        schedule_id,
+        activity_name,
+        status,
+        created_at,
+        updated_at
+      `)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('❌ Error fetching recent cron status records:', error);
+      throw new Error(`Failed to fetch recent cron status: ${error.message}`);
+    }
+
+    console.log(`✅ Found ${data?.length || 0} recent records`);
+    return data || [];
+  }
 }
 
 // Singleton instance

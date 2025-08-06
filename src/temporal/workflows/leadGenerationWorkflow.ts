@@ -458,8 +458,13 @@ export async function leadGenerationWorkflow(
   const workflowId = `lead-generation-${site_id}`;
   const startTime = Date.now();
   
+  // Extract scheduleId from additionalData.scheduleType (passed by scheduling activities)
+  // Fallback to generic format if not provided
+  const scheduleId = options.additionalData?.scheduleType || `lead-generation-${site_id}`;
+  
   console.log(`🔥 Starting NEW lead generation workflow for site ${site_id}`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+  console.log(`📋 Schedule ID: ${scheduleId} (from ${options.additionalData?.scheduleType ? 'scheduleType' : 'fallback'})`);
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({
@@ -473,7 +478,7 @@ export async function leadGenerationWorkflow(
   await saveCronStatusActivity({
     siteId: site_id,
     workflowId,
-    scheduleId: `lead-generation-${site_id}`,
+    scheduleId: scheduleId,
     activityName: 'leadGenerationWorkflow',
     status: 'RUNNING',
     lastRun: new Date().toISOString()
@@ -1263,7 +1268,7 @@ export async function leadGenerationWorkflow(
     await saveCronStatusActivity({
       siteId: site_id,
       workflowId,
-      scheduleId: `lead-generation-${site_id}`,
+      scheduleId: scheduleId,
       activityName: 'leadGenerationWorkflow',
       status: 'COMPLETED',
       lastRun: new Date().toISOString()
@@ -1290,7 +1295,7 @@ export async function leadGenerationWorkflow(
     await saveCronStatusActivity({
       siteId: site_id,
       workflowId,
-      scheduleId: `lead-generation-${site_id}`,
+      scheduleId: scheduleId,
       activityName: 'leadGenerationWorkflow',
       status: 'FAILED',
       lastRun: new Date().toISOString(),

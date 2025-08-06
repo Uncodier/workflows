@@ -81,10 +81,7 @@ async function callRegionSearchApiActivity(options) {
                 error: response.error,
                 site_id: options.site_id
             });
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to call region search API'
-            };
+            throw new Error(`Failed to call region search API: ${response.error?.message || 'Unknown error'}`);
         }
         const data = response.data;
         // Extract business_types, location data, and target_segment_id
@@ -304,10 +301,7 @@ async function callRegionVenuesApiActivity(options) {
                 error: response.error,
                 site_id: options.site_id
             });
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to call region venues API'
-            };
+            throw new Error(`Failed to call region venues API: ${response.error?.message || 'Unknown error'}`);
         }
         const data = response.data;
         logger_1.logger.info('✅ Region venues API call successful', {
@@ -587,10 +581,7 @@ async function callLeadGenerationApiActivity(options) {
                 error: response.error,
                 site_id: options.site_id
             });
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to call lead generation API'
-            };
+            throw new Error(`Failed to call lead generation API: ${response.error?.message || 'Unknown error'}`);
         }
         const data = response.data;
         // Handle different response structures from API
@@ -1950,10 +1941,7 @@ async function notifyNewLeadsActivity(options) {
                 site_id: options.site_id,
                 leadNamesCount: options.leadNames.length
             });
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to send new leads notification'
-            };
+            throw new Error(`Failed to send new leads notification: ${response.error?.message || 'Unknown error'}`);
         }
         logger_1.logger.info('✅ New leads notification sent successfully', {
             site_id: options.site_id,

@@ -172,30 +172,16 @@ async function syncEmailsWorkflow(options) {
             result.errors.push(`Email analysis exception: ${analysisErrorMessage}`);
             console.log(`🔄 Continuing workflow despite analysis exception...`);
         }
-        // Step 6: Sync Sent Emails  
+        // Step 6: Sync Sent Emails (CRITICAL - workflow will fail if this fails)
         console.log(`📨 Step 6: Syncing sent emails to update lead status...`);
-        try {
-            const syncSentEmailsRequest = {
-                site_id: siteId,
-                limit: 20, // Sync last 20 sent emails
-                since_date: validation.since.toISOString()
-            };
-            const syncSentResponse = await syncSentEmailsActivity(syncSentEmailsRequest);
-            // ✅ FIXED: Proper error handling for sent emails sync
-            if (syncSentResponse.success) {
-                console.log(`✅ Sent emails sync completed successfully`);
-                console.log(`📊 Sync results:`, JSON.stringify(syncSentResponse.data, null, 2));
-            }
-            else {
-                console.log(`⚠️ Sent emails sync failed: ${syncSentResponse.error}`);
-                result.errors.push(`Sent emails sync failed: ${syncSentResponse.error || 'Unknown error'}`);
-            }
-        }
-        catch (syncError) {
-            const syncErrorMessage = syncError instanceof Error ? syncError.message : String(syncError);
-            console.log(`⚠️ Sent emails sync error: ${syncErrorMessage}`);
-            result.errors.push(`Sent emails sync exception: ${syncErrorMessage}`);
-        }
+        const syncSentEmailsRequest = {
+            site_id: siteId,
+            limit: 20, // Sync last 20 sent emails
+            since_date: validation.since.toISOString()
+        };
+        const syncSentResponse = await syncSentEmailsActivity(syncSentEmailsRequest);
+        console.log(`✅ Sent emails sync completed successfully`);
+        console.log(`📊 Sync results:`, JSON.stringify(syncSentResponse.data, null, 2));
         // Step 7: Check Email Delivery Status
         console.log(`📋 Step 7: Checking email delivery status...`);
         try {

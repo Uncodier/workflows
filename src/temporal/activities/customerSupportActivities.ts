@@ -216,10 +216,7 @@ export async function sendCustomerSupportMessageActivity(
         console.error('💡 Suggestions: 1) Check API server load, 2) Increase timeout if needed, 3) Check agent configuration');
       }
       
-      return {
-        success: false,
-        error: errorMessage
-      };
+      throw new Error(errorMessage);
     }
     
     console.log('✅ Customer support message sent successfully');

@@ -65,13 +65,7 @@ export async function analyzeEmailsActivity(
 
     if (!response.success) {
       console.error(`❌ Email analysis failed:`, response.error);
-      return {
-        success: false,
-        error: {
-          code: response.error?.code || 'API_ERROR',
-          message: response.error?.message || 'Unknown API error'
-        }
-      };
+      throw new Error(`Email analysis failed: ${response.error?.message || 'Unknown API error'}`);
     }
 
     console.log(`✅ Email analysis completed successfully`);

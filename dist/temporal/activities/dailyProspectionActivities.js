@@ -561,10 +561,7 @@ async function sendLeadsToSalesAgentActivity(options) {
         });
         if (!response.success) {
             console.error(`❌ Failed to send leads to sales agent:`, response.error);
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to send leads to sales agent'
-            };
+            throw new Error(`Failed to send leads to sales agent: ${response.error?.message || 'Unknown error'}`);
         }
         console.log(`✅ Successfully sent leads to sales agent`);
         console.log(`📊 Sales agent response:`, JSON.stringify(response.data, null, 2));

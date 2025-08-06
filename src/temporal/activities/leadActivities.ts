@@ -237,10 +237,7 @@ export async function leadFollowUpActivity(request: LeadFollowUpRequest): Promis
     
     if (!response.success) {
       console.error(`❌ Failed to execute lead follow-up for lead ${request.lead_id}:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to execute lead follow-up'
-      };
+      throw new Error(`Failed to execute lead follow-up for lead ${request.lead_id}: ${response.error?.message || 'Unknown error'}`);
     }
     
     const data = response.data;
@@ -293,10 +290,7 @@ export async function leadResearchActivity(request: LeadResearchRequest): Promis
     
     if (!response.success) {
       console.error(`❌ Failed to execute lead research for lead ${request.lead_id}:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to execute lead research'
-      };
+      throw new Error(`Failed to execute lead research for lead ${request.lead_id}: ${response.error?.message || 'Unknown error'}`);
     }
     
     const data = response.data;
@@ -384,10 +378,7 @@ export async function leadAttentionActivity(request: LeadAttentionRequest): Prom
     
     if (!response.success) {
       console.error(`❌ API CALL FAILED: API call failed for lead ${request.lead_id}:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to send lead attention notification'
-      };
+      throw new Error(`Failed to send lead attention notification for lead ${request.lead_id}: ${response.error?.message || 'Unknown error'}`);
     }
     
     console.log(`✅ API CALL SUCCESS: Lead attention notification sent successfully for lead ${request.lead_id}`);
@@ -567,10 +558,7 @@ export async function saveLeadFollowUpLogsActivity(request: {
     
     if (!response.success) {
       console.error(`❌ Failed to save lead follow-up logs:`, response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to save lead follow-up logs'
-      };
+      throw new Error(`Failed to save lead follow-up logs: ${response.error?.message || 'Unknown error'}`);
     }
     
     console.log(`✅ Lead follow-up logs saved successfully`);

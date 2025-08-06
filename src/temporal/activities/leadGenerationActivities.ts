@@ -171,10 +171,7 @@ export async function callRegionSearchApiActivity(
         site_id: options.site_id
       });
       
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to call region search API'
-      };
+      throw new Error(`Failed to call region search API: ${response.error?.message || 'Unknown error'}`);
     }
 
     const data = response.data;
@@ -438,10 +435,7 @@ export async function callRegionVenuesApiActivity(
         error: response.error,
         site_id: options.site_id
       });
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to call region venues API'
-      };
+      throw new Error(`Failed to call region venues API: ${response.error?.message || 'Unknown error'}`);
     }
 
     const data = response.data;
@@ -765,10 +759,7 @@ export async function callLeadGenerationApiActivity(
         site_id: options.site_id
       });
       
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to call lead generation API'
-      };
+      throw new Error(`Failed to call lead generation API: ${response.error?.message || 'Unknown error'}`);
     }
 
     const data = response.data;
@@ -2333,10 +2324,7 @@ export async function notifyNewLeadsActivity(
         leadNamesCount: options.leadNames.length
       });
       
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to send new leads notification'
-      };
+      throw new Error(`Failed to send new leads notification: ${response.error?.message || 'Unknown error'}`);
     }
 
     logger.info('✅ New leads notification sent successfully', {

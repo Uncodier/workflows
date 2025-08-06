@@ -70,10 +70,7 @@ async function syncSentEmailsActivity(params) {
         });
         if (!response.success) {
             console.error('❌ Sent emails sync failed:', response.error);
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to sync sent emails'
-            };
+            throw new Error(`Failed to sync sent emails: ${response.error?.message || 'Unknown error'}`);
         }
         console.log('✅ Sent emails sync completed successfully');
         console.log('📊 Sync response data:', JSON.stringify(response.data, null, 2));
@@ -85,10 +82,7 @@ async function syncSentEmailsActivity(params) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error('❌ Sent emails sync failed:', errorMessage);
-        return {
-            success: false,
-            error: errorMessage
-        };
+        throw new Error(`Sent emails sync failed: ${errorMessage}`);
     }
 }
 /**
@@ -111,10 +105,7 @@ async function deliveryStatusActivity(params) {
         });
         if (!response.success) {
             console.error('❌ Email delivery status check failed:', response.error);
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to check email delivery status'
-            };
+            throw new Error(`Failed to check email delivery status: ${response.error?.message || 'Unknown error'}`);
         }
         console.log('✅ Email delivery status check completed successfully');
         console.log('📊 Delivery status response data:', JSON.stringify(response.data, null, 2));

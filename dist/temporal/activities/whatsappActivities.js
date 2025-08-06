@@ -75,13 +75,7 @@ async function analyzeWhatsAppMessageActivity(messageData) {
         const response = await apiService_1.apiService.post('/api/agents/whatsapp/analyze', analysisRequest);
         if (!response.success) {
             console.error('❌ WhatsApp analysis failed:', response.error);
-            return {
-                success: false,
-                error: {
-                    code: response.error?.code || 'ANALYSIS_FAILED',
-                    message: response.error?.message || 'Failed to analyze WhatsApp message'
-                }
-            };
+            throw new Error(`Failed to analyze WhatsApp message: ${response.error?.message || 'Unknown error'}`);
         }
         console.log('✅ WhatsApp analysis completed successfully');
         console.log('📊 Analysis result:', JSON.stringify(response.data, null, 2));

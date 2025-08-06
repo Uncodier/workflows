@@ -300,8 +300,8 @@ export async function createRecurringEmailSyncScheduleActivity(
       analysisLimit: 15     // Analyze up to 15 emails
     }];
 
-    // Create schedule
-    await scheduleClient.create({
+    // Create schedule and capture the actual handle returned by Temporal
+    const scheduleHandle = await scheduleClient.create({
       scheduleId,
       spec: {
         cron: cronExpression
@@ -320,14 +320,18 @@ export async function createRecurringEmailSyncScheduleActivity(
       },
     });
 
+    // Get the actual schedule ID from Temporal (should be the same as scheduleId, but using actual returned value)
+    const actualScheduleId = scheduleHandle.scheduleId;
+    
     console.log(`✅ Successfully created recurring schedule for ${site.name}`);
+    console.log(`   - Temporal Schedule ID: ${actualScheduleId}`);
 
-    // Update cron status to reflect the scheduled workflow
+    // Update cron status to reflect the scheduled workflow using actual Temporal IDs
     const nextRun = getNextRunTime(cronExpression);
     const cronUpdate: CronStatusUpdate = {
       siteId: site.id,
-      workflowId: `${scheduleId}-recurring`,
-      scheduleId,
+      workflowId: `${actualScheduleId}-recurring`, // Use actual Temporal schedule ID
+      scheduleId: actualScheduleId, // Use actual Temporal schedule ID
       activityName: 'syncEmailsWorkflow',
       status: 'SCHEDULED',
       nextRun: nextRun.toISOString()
@@ -336,8 +340,8 @@ export async function createRecurringEmailSyncScheduleActivity(
     await saveCronStatusActivity(cronUpdate);
 
     return {
-      workflowId: `${scheduleId}-recurring`,
-      scheduleId,
+      workflowId: `${actualScheduleId}-recurring`, // Use actual Temporal schedule ID
+      scheduleId: actualScheduleId, // Use actual Temporal schedule ID
       success: true
     };
 
@@ -346,7 +350,7 @@ export async function createRecurringEmailSyncScheduleActivity(
     console.error(`❌ Failed to create recurring schedule for ${site.name}:`, errorMessage);
 
     return {
-      workflowId: `${scheduleId}-recurring`,
+      workflowId: `${scheduleId}-recurring`, // Keep original generated ID in error case
       scheduleId,
       success: false,
       error: errorMessage
@@ -1078,8 +1082,8 @@ export async function scheduleDailyOperationsWorkflowActivity(
     // Prepare workflow arguments
     const workflowArgs = [{ businessHoursAnalysis }];
 
-    // Create the schedule
-    await scheduleClient.create({
+    // Create the schedule and capture the actual handle returned by Temporal
+    const scheduleHandle = await scheduleClient.create({
       scheduleId,
       spec: {
         cron: cronExpression
@@ -1103,19 +1107,22 @@ export async function scheduleDailyOperationsWorkflowActivity(
       },
     });
 
+    // Get the actual schedule ID from Temporal
+    const actualScheduleId = scheduleHandle.scheduleId;
+
     const executionMessage = scheduleForTomorrow ? 
       `Will execute TOMORROW (${finalLocalDateStr}) at ${scheduledTime} ${timezone}` :
       `Will execute TODAY (${finalLocalDateStr}) at ${scheduledTime} ${timezone}`;
       
     console.log(`✅ Successfully scheduled Daily Operations workflow`);
     console.log(`   - ${executionMessage}`);
-    console.log(`   - Schedule ID: ${scheduleId}`);
+    console.log(`   - Temporal Schedule ID: ${actualScheduleId}`);
     
-    // Update cron status to reflect the scheduled workflow
+    // Update cron status to reflect the scheduled workflow using actual Temporal IDs
     const cronUpdate: CronStatusUpdate = {
       siteId: 'global', // This is a global schedule
-      workflowId: scheduleId,
-      scheduleId,
+      workflowId: actualScheduleId, // Use actual Temporal schedule ID
+      scheduleId: actualScheduleId, // Use actual Temporal schedule ID
       activityName: 'dailyOperationsWorkflow',
       status: 'SCHEDULED',
       nextRun: finalTargetUTC.toISOString(),
@@ -1124,8 +1131,8 @@ export async function scheduleDailyOperationsWorkflowActivity(
     await saveCronStatusActivity(cronUpdate);
 
     return {
-      workflowId: scheduleId,
-      scheduleId,
+      workflowId: actualScheduleId, // Use actual Temporal schedule ID
+      scheduleId: actualScheduleId, // Use actual Temporal schedule ID
       success: true
     };
 
@@ -1314,9 +1321,9 @@ export async function scheduleIndividualDailyStandUpsActivity(
           }
         }];
 
-        // Start the DELAYED workflow with improved error handling
+        // Start the DELAYED workflow and capture the actual handle returned by Temporal
         try {
-          await client.workflow.start('delayedExecutionWorkflow', {
+          const workflowHandle = await client.workflow.start('delayedExecutionWorkflow', {
             args: [{
               delayMs: Math.max(delayMs, 0), // Ensure non-negative delay
               targetWorkflow: 'dailyStandUpWorkflow',
@@ -1330,10 +1337,34 @@ export async function scheduleIndividualDailyStandUpsActivity(
             workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
           });
 
+          // Get the actual workflow ID from Temporal
+          const actualWorkflowId = workflowHandle.workflowId;
+
           console.log(`✅ Successfully scheduled Daily Stand Up with TIMER for ${site.name || 'Site'}`);
           console.log(`   - Will execute at: ${scheduledTime} ${siteTimezone} on ${finalLocalDateStr}`);
           console.log(`   - Business hours source: ${businessHoursSource}`);
+          console.log(`   - Temporal Workflow ID: ${actualWorkflowId}`);
           console.log(`   - Using TIMER approach instead of schedule`);
+
+          // Update cron status to reflect the scheduled workflow using actual Temporal IDs
+          const cronUpdate: CronStatusUpdate = {
+            siteId: site.id,
+            workflowId: actualWorkflowId, // Use actual Temporal workflow ID
+            scheduleId: dateSpecificId, // Use dateSpecificId as scheduleId for timers
+            activityName: 'dailyStandUpWorkflow-timer',
+            status: 'SCHEDULED',
+            nextRun: finalTargetUTC.toISOString(),
+          };
+          
+          await saveCronStatusActivity(cronUpdate);
+
+          results.push({
+            workflowId: actualWorkflowId, // Use actual Temporal workflow ID
+            scheduleId: dateSpecificId,
+            success: true
+          });
+          
+          scheduled++;
           
         } catch (startError) {
           // If we get a "workflow already started" error, we need to handle it gracefully
@@ -1362,26 +1393,6 @@ export async function scheduleIndividualDailyStandUpsActivity(
             throw startError;
           }
         }
-
-        // Update cron status to reflect the scheduled workflow
-        const cronUpdate: CronStatusUpdate = {
-          siteId: site.id,
-          workflowId: dateSpecificId,
-          scheduleId: dateSpecificId, // Use dateSpecificId as scheduleId for timers
-          activityName: 'dailyStandUpWorkflow-timer',
-          status: 'SCHEDULED',
-          nextRun: finalTargetUTC.toISOString(),
-        };
-        
-        await saveCronStatusActivity(cronUpdate);
-
-        results.push({
-          workflowId: dateSpecificId,
-          scheduleId: dateSpecificId,
-          success: true
-        });
-        
-        scheduled++;
 
       } catch (siteError) {
         const errorMessage = siteError instanceof Error ? siteError.message : String(siteError);
@@ -1902,8 +1913,8 @@ export async function scheduleIndividualLeadGenerationActivity(
           }
         }];
 
-        // Start the DELAYED workflow for lead generation
-        await client.workflow.start('delayedExecutionWorkflow', {
+        // Start the DELAYED workflow and capture the actual handle returned by Temporal
+        const leadGenHandle = await client.workflow.start('delayedExecutionWorkflow', {
           args: [{
             delayMs: Math.max(delayMs, 0), // Ensure non-negative delay
             targetWorkflow: 'leadGenerationWorkflow',
@@ -1917,18 +1928,22 @@ export async function scheduleIndividualLeadGenerationActivity(
           workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
         });
 
+        // Get the actual workflow ID from Temporal
+        const actualLeadGenWorkflowId = leadGenHandle.workflowId;
+
         console.log(`✅ Successfully scheduled Lead Generation with TIMER for ${site.name || 'Site'}`);
         console.log(`   - Will execute at: ${leadGenScheduledTime} ${siteTimezone} on ${finalLocalDateStr} (1h after daily standup)`);
         console.log(`   - Daily standup time: ${scheduledTime} ${siteTimezone}`);
         console.log(`   - Business hours source: ${businessHoursSource}`);
+        console.log(`   - Temporal Workflow ID: ${actualLeadGenWorkflowId}`);
         console.log(`   - Using TIMER approach for one-time lead generation`);
         console.log(`   - 🔥 EXECUTES 1 HOUR AFTER DAILY STANDUP`);
         
-        // Update cron status to reflect the scheduled workflow
+        // Update cron status to reflect the scheduled workflow using actual Temporal IDs
         const cronUpdate: CronStatusUpdate = {
           siteId: site.id,
-          workflowId: workflowId,
-          scheduleId: workflowId, // Use workflowId as scheduleId for timers
+          workflowId: actualLeadGenWorkflowId, // Use actual Temporal workflow ID
+          scheduleId: workflowId, // Use original generated workflowId as scheduleId for timers
           activityName: 'leadGenerationWorkflow',
           status: 'SCHEDULED',
           nextRun: finalTargetUTC.toISOString(),
@@ -1937,7 +1952,7 @@ export async function scheduleIndividualLeadGenerationActivity(
         await saveCronStatusActivity(cronUpdate);
 
         results.push({
-          workflowId: workflowId,
+          workflowId: actualLeadGenWorkflowId, // Use actual Temporal workflow ID
           scheduleId: workflowId,
           success: true
         });

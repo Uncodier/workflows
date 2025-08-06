@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 // Import specific daily prospection activities
@@ -99,6 +99,34 @@ export interface DailyProspectionResult {
  * Filter leads based on available communication channels
  * Only includes leads that have contact info compatible with enabled channels
  */
+/**
+ * Extract the real schedule ID from workflow info
+ * This looks for evidence of schedule execution in search attributes or memo
+ */
+function extractScheduleId(info: any): string {
+  // Check if workflow was triggered by a schedule
+  // Temporal schedules typically set search attributes or memo data
+  const searchAttributes = info.searchAttributes || {};
+  const memo = info.memo || {};
+  
+  // Look for common schedule-related attributes
+  const scheduleId = 
+    searchAttributes['TemporalScheduledById'] || 
+    searchAttributes['ScheduleId'] ||
+    memo['TemporalScheduledById'] ||
+    memo['scheduleId'] ||
+    memo['scheduleName'];
+    
+  if (scheduleId) {
+    console.log(`✅ Real schedule ID found: ${scheduleId}`);
+    return scheduleId;
+  }
+  
+  // If no schedule ID found, it might be a manual execution or child workflow
+  console.log(`⚠️ No schedule ID found in workflow info - likely manual execution or child workflow`);
+  return 'manual-execution';
+}
+
 function filterLeadsByAvailableChannels(
   leads: any[], 
   channelsValidation: any
@@ -216,15 +244,20 @@ export async function dailyProspectionWorkflow(
     throw new Error('No site ID provided');
   }
   
-  const workflowId = `daily-prospection-${site_id}`;
+  // Get REAL workflow information from Temporal
+  const workflowInfo_real = workflowInfo();
+  const realWorkflowId = workflowInfo_real.workflowId;
+  const realScheduleId = extractScheduleId(workflowInfo_real);
   const startTime = Date.now();
   
   console.log(`🎯 Starting daily prospection workflow for site ${site_id}`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+  console.log(`📋 REAL Workflow ID: ${realWorkflowId} (from Temporal)`);
+  console.log(`📋 REAL Schedule ID: ${realScheduleId} (from ${realScheduleId === 'manual-execution' ? 'manual execution' : 'schedule'})`);
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({
-    workflowId,
+    workflowId: realWorkflowId,
     workflowType: 'dailyProspectionWorkflow',
     status: 'STARTED',
     input: options,
@@ -233,8 +266,8 @@ export async function dailyProspectionWorkflow(
   // Update cron status to indicate the workflow is running
   await saveCronStatusActivity({
     siteId: site_id,
-    workflowId,
-    scheduleId: `daily-prospection-${site_id}`,
+    workflowId: realWorkflowId,
+    scheduleId: realScheduleId,
     activityName: 'dailyProspectionWorkflow',
     status: 'RUNNING',
     lastRun: new Date().toISOString()
@@ -315,8 +348,8 @@ export async function dailyProspectionWorkflow(
       // Update cron status to indicate validation failure
       await saveCronStatusActivity({
         siteId: site_id,
-        workflowId,
-        scheduleId: `daily-prospection-${site_id}`,
+        workflowId: realWorkflowId,
+        scheduleId: realScheduleId,
         activityName: 'dailyProspectionWorkflow',
         status: 'FAILED',
         lastRun: new Date().toISOString(),
@@ -326,7 +359,7 @@ export async function dailyProspectionWorkflow(
       
       // Log workflow execution failure
       await logWorkflowExecutionActivity({
-        workflowId,
+        workflowId: realWorkflowId,
         workflowType: 'dailyProspectionWorkflow',
         status: 'FAILED',
         input: options,
@@ -426,7 +459,7 @@ export async function dailyProspectionWorkflow(
           ...options.additionalData,
           siteName: siteName,
           siteUrl: siteUrl,
-          workflowId: workflowId
+          workflowId: realWorkflowId
         }
       });
 
@@ -443,12 +476,12 @@ export async function dailyProspectionWorkflow(
           site_id: site_id,
           salesAgentResponse: salesAgentResponse,
           userId: options.userId || site.user_id,
-          additionalData: {
-            ...options.additionalData,
-            siteName: siteName,
-            siteUrl: siteUrl,
-            workflowId: workflowId
-          }
+                  additionalData: {
+          ...options.additionalData,
+          siteName: siteName,
+          siteUrl: siteUrl,
+          workflowId: realWorkflowId
+        }
         });
 
         if (assignmentResult.success) {
@@ -503,8 +536,8 @@ export async function dailyProspectionWorkflow(
       // Update cron status to indicate successful completion
       await saveCronStatusActivity({
         siteId: site_id,
-        workflowId,
-        scheduleId: `daily-prospection-${site_id}`,
+        workflowId: realWorkflowId,
+        scheduleId: realScheduleId,
         activityName: 'dailyProspectionWorkflow',
         status: 'COMPLETED',
         lastRun: new Date().toISOString()
@@ -512,7 +545,7 @@ export async function dailyProspectionWorkflow(
       
       // Log successful completion
       await logWorkflowExecutionActivity({
-        workflowId,
+        workflowId: realWorkflowId,
         workflowType: 'dailyProspectionWorkflow',
         status: 'COMPLETED',
         input: options,
@@ -673,7 +706,7 @@ export async function dailyProspectionWorkflow(
               triggeredBy: 'dailyProspectionWorkflow',
               reason: 'lead_not_assigned_to_human',
               prospectionDate: new Date().toISOString(),
-              originalWorkflowId: workflowId,
+              originalWorkflowId: realWorkflowId,
               leadInfo: {
                 name: lead.name,
                 email: lead.email,
@@ -750,8 +783,8 @@ export async function dailyProspectionWorkflow(
     // Update cron status to indicate successful completion
     await saveCronStatusActivity({
       siteId: site_id,
-      workflowId,
-      scheduleId: `daily-prospection-${site_id}`,
+      workflowId: realWorkflowId,
+      scheduleId: realScheduleId,
       activityName: 'dailyProspectionWorkflow',
       status: 'COMPLETED',
       lastRun: new Date().toISOString()
@@ -759,7 +792,7 @@ export async function dailyProspectionWorkflow(
 
     // Log successful completion
     await logWorkflowExecutionActivity({
-      workflowId,
+      workflowId: realWorkflowId,
       workflowType: 'dailyProspectionWorkflow',
       status: 'COMPLETED',
       input: options,
@@ -777,8 +810,8 @@ export async function dailyProspectionWorkflow(
     // Update cron status to indicate failure
     await saveCronStatusActivity({
       siteId: site_id,
-      workflowId,
-      scheduleId: `daily-prospection-${site_id}`,
+      workflowId: realWorkflowId,
+      scheduleId: realScheduleId,
       activityName: 'dailyProspectionWorkflow',
       status: 'FAILED',
       lastRun: new Date().toISOString(),
@@ -788,7 +821,7 @@ export async function dailyProspectionWorkflow(
 
     // Log workflow execution failure
     await logWorkflowExecutionActivity({
-      workflowId,
+      workflowId: realWorkflowId,
       workflowType: 'dailyProspectionWorkflow',
       status: 'FAILED',
       input: options,

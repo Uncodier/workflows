@@ -34,8 +34,12 @@ async function dailyStandUpWorkflow(options) {
     }
     const workflowId = `daily-standup-${site_id}-${Date.now()}`;
     const startTime = Date.now();
+    // Extract scheduleId from additionalData.scheduleType (passed by scheduling activities)
+    // Fallback to generic format if not provided
+    const scheduleId = options.additionalData?.scheduleType || `daily-standup-${site_id}`;
     console.log(`🎯 Starting CMO daily stand up workflow for site ${site_id}`);
     console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+    console.log(`📋 Schedule ID: ${scheduleId} (from ${options.additionalData?.scheduleType ? 'scheduleType' : 'fallback'})`);
     // Validate and clean any stuck cron status records before execution
     console.log('🔍 Validating cron status before daily standup execution...');
     const cronValidation = await validateAndCleanStuckCronStatusActivity('dailyStandUpWorkflow', site_id, 24 // 24 hours threshold - daily standups should not be stuck longer than 24h
@@ -74,7 +78,7 @@ async function dailyStandUpWorkflow(options) {
     await saveCronStatusActivity({
         siteId: site_id,
         workflowId,
-        scheduleId: `daily-standup-${site_id}`,
+        scheduleId: scheduleId,
         activityName: 'dailyStandUpWorkflow',
         status: 'RUNNING',
         lastRun: new Date().toISOString()
@@ -309,7 +313,7 @@ async function dailyStandUpWorkflow(options) {
         await saveCronStatusActivity({
             siteId: site_id,
             workflowId,
-            scheduleId: `daily-standup-${site_id}`,
+            scheduleId: scheduleId,
             activityName: 'dailyStandUpWorkflow',
             status: 'COMPLETED',
             lastRun: new Date().toISOString()
@@ -332,7 +336,7 @@ async function dailyStandUpWorkflow(options) {
         await saveCronStatusActivity({
             siteId: site_id,
             workflowId,
-            scheduleId: `daily-standup-${site_id}`,
+            scheduleId: scheduleId,
             activityName: 'dailyStandUpWorkflow',
             status: 'FAILED',
             lastRun: new Date().toISOString(),

@@ -125,10 +125,7 @@ export async function syncSentEmailsActivity(params: SyncSentEmailsParams): Prom
 
     if (!response.success) {
       console.error('❌ Sent emails sync failed:', response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to sync sent emails'
-      };
+      throw new Error(`Failed to sync sent emails: ${response.error?.message || 'Unknown error'}`);
     }
 
     console.log('✅ Sent emails sync completed successfully');
@@ -143,10 +140,7 @@ export async function syncSentEmailsActivity(params: SyncSentEmailsParams): Prom
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error('❌ Sent emails sync failed:', errorMessage);
     
-    return {
-      success: false,
-      error: errorMessage
-    };
+    throw new Error(`Sent emails sync failed: ${errorMessage}`);
   }
 }
 
@@ -174,10 +168,7 @@ export async function deliveryStatusActivity(params: DeliveryStatusParams): Prom
 
     if (!response.success) {
       console.error('❌ Email delivery status check failed:', response.error);
-      return {
-        success: false,
-        error: response.error?.message || 'Failed to check email delivery status'
-      };
+      throw new Error(`Failed to check email delivery status: ${response.error?.message || 'Unknown error'}`);
     }
 
     console.log('✅ Email delivery status check completed successfully');

@@ -207,10 +207,7 @@ async function leadFollowUpActivity(request) {
         const response = await apiService_1.apiService.post('/api/agents/sales/leadFollowUp', requestBody);
         if (!response.success) {
             console.error(`❌ Failed to execute lead follow-up for lead ${request.lead_id}:`, response.error);
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to execute lead follow-up'
-            };
+            throw new Error(`Failed to execute lead follow-up for lead ${request.lead_id}: ${response.error?.message || 'Unknown error'}`);
         }
         const data = response.data;
         const followUpActions = data?.followUpActions || data?.actions || [];
@@ -254,10 +251,7 @@ async function leadResearchActivity(request) {
         const response = await apiService_1.apiService.post('/api/agents/sales/leadResearch', requestBody);
         if (!response.success) {
             console.error(`❌ Failed to execute lead research for lead ${request.lead_id}:`, response.error);
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to execute lead research'
-            };
+            throw new Error(`Failed to execute lead research for lead ${request.lead_id}: ${response.error?.message || 'Unknown error'}`);
         }
         const data = response.data;
         const researchData = data?.researchData || data?.research || data;
@@ -307,10 +301,7 @@ async function leadAttentionActivity(request) {
         console.log('📤 API CALL: Response:', JSON.stringify(response, null, 2));
         if (!response.success) {
             console.error(`❌ API CALL FAILED: API call failed for lead ${request.lead_id}:`, response.error);
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to send lead attention notification'
-            };
+            throw new Error(`Failed to send lead attention notification for lead ${request.lead_id}: ${response.error?.message || 'Unknown error'}`);
         }
         console.log(`✅ API CALL SUCCESS: Lead attention notification sent successfully for lead ${request.lead_id}`);
         return {
@@ -428,10 +419,7 @@ async function saveLeadFollowUpLogsActivity(request) {
         const response = await apiService_1.apiService.post('/api/agents/sales/leadFollowUp/logs', requestBody);
         if (!response.success) {
             console.error(`❌ Failed to save lead follow-up logs:`, response.error);
-            return {
-                success: false,
-                error: response.error?.message || 'Failed to save lead follow-up logs'
-            };
+            throw new Error(`Failed to save lead follow-up logs: ${response.error?.message || 'Unknown error'}`);
         }
         console.log(`✅ Lead follow-up logs saved successfully`);
         // Extract message_ids and conversation_ids from response data if available

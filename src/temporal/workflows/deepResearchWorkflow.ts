@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 // Define the activity interface and options
@@ -45,6 +45,34 @@ const safeString = (value: any): string | null => {
 /**
  * Generates a company structure based on the database schema
  */
+/**
+ * Extract the real schedule ID from workflow info
+ * This looks for evidence of schedule execution in search attributes or memo
+ */
+function extractScheduleId(info: any): string {
+  // Check if workflow was triggered by a schedule
+  // Temporal schedules typically set search attributes or memo data
+  const searchAttributes = info.searchAttributes || {};
+  const memo = info.memo || {};
+  
+  // Look for common schedule-related attributes
+  const scheduleId = 
+    searchAttributes['TemporalScheduledById'] || 
+    searchAttributes['ScheduleId'] ||
+    memo['TemporalScheduledById'] ||
+    memo['scheduleId'] ||
+    memo['scheduleName'];
+    
+  if (scheduleId) {
+    console.log(`✅ Real schedule ID found: ${scheduleId}`);
+    return scheduleId;
+  }
+  
+  // If no schedule ID found, it might be a manual execution or child workflow
+  console.log(`⚠️ No schedule ID found in workflow info - likely manual execution or child workflow`);
+  return 'manual-execution';
+}
+
 function generateCompanyStructure(existingCompany?: any): any {
 
   return {
@@ -155,15 +183,20 @@ export async function deepResearchWorkflow(
     };
   }
   
-  const workflowId = `deep-research-${site_id}-${Date.now()}`;
+  // Get REAL workflow information from Temporal
+  const workflowInfo_real = workflowInfo();
+  const realWorkflowId = workflowInfo_real.workflowId;
+  const realScheduleId = extractScheduleId(workflowInfo_real);
   const startTime = Date.now();
   
   console.log(`🔬 Starting deep research workflow for topic "${research_topic}" on site ${site_id}`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+  console.log(`📋 REAL Workflow ID: ${realWorkflowId} (from Temporal)`);
+  console.log(`📋 REAL Schedule ID: ${realScheduleId} (from ${realScheduleId === 'manual-execution' ? 'manual execution' : 'schedule'})`);
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({
-    workflowId,
+    workflowId: realWorkflowId,
     workflowType: 'deepResearchWorkflow',
     status: 'STARTED',
     input: options,
@@ -172,8 +205,8 @@ export async function deepResearchWorkflow(
   // Update cron status to indicate the workflow is running
   await saveCronStatusActivity({
     siteId: site_id,
-    workflowId,
-    scheduleId: `deep-research-${site_id}`,
+    workflowId: realWorkflowId,
+    scheduleId: realScheduleId,
     activityName: 'deepResearchWorkflow',
     status: 'RUNNING',
     lastRun: new Date().toISOString()
@@ -723,8 +756,8 @@ export async function deepResearchWorkflow(
     // Update cron status to indicate successful completion
     await saveCronStatusActivity({
       siteId: site_id,
-      workflowId,
-      scheduleId: `deep-research-${site_id}`,
+      workflowId: realWorkflowId,
+      scheduleId: realScheduleId,
       activityName: 'deepResearchWorkflow',
       status: 'COMPLETED',
       lastRun: new Date().toISOString(),
@@ -736,7 +769,7 @@ export async function deepResearchWorkflow(
 
     // Log successful completion (with full data for logging purposes)
     await logWorkflowExecutionActivity({
-      workflowId,
+      workflowId: realWorkflowId,
       workflowType: 'deepResearchWorkflow',
       status: 'COMPLETED',
       input: options,
@@ -769,8 +802,8 @@ export async function deepResearchWorkflow(
     // Update cron status to indicate failure
     await saveCronStatusActivity({
       siteId: site_id,
-      workflowId,
-      scheduleId: `deep-research-${site_id}`,
+      workflowId: realWorkflowId,
+      scheduleId: realScheduleId,
       activityName: 'deepResearchWorkflow',
       status: 'FAILED',
       lastRun: new Date().toISOString(),
@@ -780,7 +813,7 @@ export async function deepResearchWorkflow(
 
     // Log workflow execution failure (with full data for logging purposes)
     await logWorkflowExecutionActivity({
-      workflowId,
+      workflowId: realWorkflowId,
       workflowType: 'deepResearchWorkflow',
       status: 'FAILED',
       input: options,

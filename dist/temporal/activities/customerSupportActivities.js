@@ -124,10 +124,7 @@ baseParams) {
                 console.error('🚨 TIMEOUT DETECTED: Customer support API is taking too long to respond');
                 console.error('💡 Suggestions: 1) Check API server load, 2) Increase timeout if needed, 3) Check agent configuration');
             }
-            return {
-                success: false,
-                error: errorMessage
-            };
+            throw new Error(errorMessage);
         }
         console.log('✅ Customer support message sent successfully');
         console.log('📊 API Response data:', JSON.stringify(response.data, null, 2));

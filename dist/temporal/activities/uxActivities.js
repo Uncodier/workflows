@@ -30,13 +30,7 @@ async function uxAnalysisActivity(request) {
                 error: response.error,
                 site_id: request.site_id
             });
-            return {
-                success: false,
-                error: {
-                    code: response.error?.code || 'API_ERROR',
-                    message: response.error?.message || 'Failed to call UX analysis API'
-                }
-            };
+            throw new Error(`Failed to call UX analysis API: ${response.error?.message || 'Unknown error'}`);
         }
         logger_1.logger.info('✅ UX analysis completed successfully', {
             site_id: request.site_id
@@ -82,13 +76,7 @@ async function uxAssimilateActivity(request) {
                 error: response.error,
                 site_id: request.site_id
             });
-            return {
-                success: false,
-                error: {
-                    code: response.error?.code || 'API_ERROR',
-                    message: response.error?.message || 'Failed to call UX assimilate API'
-                }
-            };
+            throw new Error(`Failed to call UX assimilate API: ${response.error?.message || 'Unknown error'}`);
         }
         logger_1.logger.info('✅ UX assimilation completed successfully', {
             site_id: request.site_id
@@ -134,13 +122,7 @@ async function uxExperimentsActivity(request) {
                 error: response.error,
                 site_id: request.site_id
             });
-            return {
-                success: false,
-                error: {
-                    code: response.error?.code || 'API_ERROR',
-                    message: response.error?.message || 'Failed to call UX experiments API'
-                }
-            };
+            throw new Error(`Failed to call UX experiments API: ${response.error?.message || 'Unknown error'}`);
         }
         logger_1.logger.info('✅ UX experiments completed successfully', {
             site_id: request.site_id
