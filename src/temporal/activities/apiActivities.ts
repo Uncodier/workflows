@@ -53,6 +53,125 @@ export async function deleteApiResourceActivity(resourceId: string): Promise<any
 }
 
 /**
+ * Activity to validate contact information (email, phone, etc.)
+ * Accepts context and handles all contact validation decisions internally
+ */
+export async function validateContactInformation(request: {
+  email?: string;
+  hasEmailMessage?: boolean;
+  hasWhatsAppMessage?: boolean;
+  leadId?: string;
+  phone?: string;
+}): Promise<{
+  success: boolean;
+  isValid: boolean;
+  result?: string;
+  flags?: string[];
+  suggested_correction?: string;
+  execution_time?: number;
+  message?: string;
+  error?: string;
+  shouldProceed: boolean;
+  validationType: 'email' | 'whatsapp' | 'none';
+  reason?: string;
+}> {
+  const { email, hasEmailMessage, hasWhatsAppMessage, leadId, phone } = request;
+  
+  console.log(`🔍 Contact Information Validation Activity Started`);
+  console.log(`📋 Context: lead=${leadId}, email=${email}, phone=${!!phone}`);
+  console.log(`📨 Messages: email=${!!hasEmailMessage}, whatsapp=${!!hasWhatsAppMessage}`);
+  
+  // Always audit what's happening
+  if (!hasEmailMessage && !hasWhatsAppMessage) {
+    console.log(`⏭️ No messages to send - skipping all validation`);
+    return {
+      success: true,
+      isValid: false,
+      shouldProceed: false,
+      validationType: 'none',
+      reason: 'No messages available for sending'
+    };
+  }
+  
+  if (!hasEmailMessage) {
+    console.log(`📱 Only WhatsApp message available - skipping email validation`);
+    return {
+      success: true,
+      isValid: false,
+      shouldProceed: true,
+      validationType: 'whatsapp',
+      reason: 'WhatsApp message only, no email validation needed'
+    };
+  }
+  
+  if (!email || email.trim() === '') {
+    console.log(`❌ Email message exists but no email address found`);
+    return {
+      success: true,
+      isValid: false,
+      shouldProceed: false,
+      validationType: 'email',
+      reason: 'Email message exists but no email address provided'
+    };
+  }
+  
+  // Proceed with email validation
+  console.log(`📧 Validating email: ${email}`);
+  
+  try {
+    const response = await apiService.post('/api/integrations/neverbounce/validate', { email });
+    
+    if (!response.success) {
+      console.error(`❌ Email validation API call failed: ${response.error?.message}`);
+      return {
+        success: false,
+        isValid: false,
+        shouldProceed: true, // Proceed anyway when service fails
+        validationType: 'email',
+        error: response.error?.message || 'Email validation failed',
+        reason: 'Validation service failed, proceeding with send'
+      };
+    }
+    
+    // Handle case where API response wraps data in a 'data' property
+    const data = response.data?.data || response.data;
+    console.log(`✅ Email validation response:`, data);
+    console.log(`🔍 Full API response structure:`, JSON.stringify(response, null, 2));
+    
+    const isValid = data.isValid || false;
+    const hasWhatsApp = phone && phone.trim() !== '';
+    
+    console.log(`📊 Validation result: isValid=${isValid}, hasWhatsApp=${hasWhatsApp}`);
+    
+    return {
+      success: true,
+      isValid,
+      result: data.result,
+      flags: data.flags,
+      suggested_correction: data.suggested_correction,
+      execution_time: data.execution_time,
+      message: data.message,
+      shouldProceed: isValid, // Only proceed if valid
+      validationType: 'email',
+      reason: isValid ? 'Email is valid' : `Email is invalid (${data.result || 'unknown'})`
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception during email validation: ${errorMessage}`);
+    
+    return {
+      success: false,
+      isValid: false,
+      shouldProceed: true, // Proceed anyway when exception occurs
+      validationType: 'email',
+      error: errorMessage,
+      reason: 'Validation exception, proceeding with send'
+    };
+  }
+}
+
+/**
  * Activity to send daily stand up notification
  */
 export async function sendDailyStandUpNotificationActivity(params: {

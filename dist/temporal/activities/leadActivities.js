@@ -54,6 +54,7 @@ exports.updateMessageStatusToSentActivity = updateMessageStatusToSentActivity;
 exports.updateMessageTimestampActivity = updateMessageTimestampActivity;
 exports.updateTaskStatusToCompletedActivity = updateTaskStatusToCompletedActivity;
 exports.invalidateLeadActivity = invalidateLeadActivity;
+exports.invalidateEmailOnlyActivity = invalidateEmailOnlyActivity;
 exports.findLeadsBySharedContactActivity = findLeadsBySharedContactActivity;
 exports.updateLeadInvalidationMetadataActivity = updateLeadInvalidationMetadataActivity;
 exports.checkCompanyValidLeadsActivity = checkCompanyValidLeadsActivity;
@@ -1334,6 +1335,65 @@ async function invalidateLeadActivity(request) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Exception invalidating lead ${request.lead_id}:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to invalidate only email from a lead (when lead has alternative contact methods like WhatsApp)
+ * This removes only the email field but keeps the site_id
+ */
+async function invalidateEmailOnlyActivity(request) {
+    console.log(`📧🚫 Invalidating only email for lead ${request.lead_id} - email: ${request.failed_email}`);
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot invalidate email');
+            return {
+                success: false,
+                error: 'Database not available'
+            };
+        }
+        console.log('✅ Database connection confirmed, invalidating email only...');
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // Only remove the email field, keep site_id and other data
+        const updateData = {
+            email: null, // Remove invalid email
+            updated_at: new Date().toISOString()
+        };
+        const { data, error } = await supabaseServiceRole
+            .from('leads')
+            .update(updateData)
+            .eq('id', request.lead_id)
+            .select()
+            .single();
+        if (error) {
+            console.error(`❌ Error invalidating email for lead ${request.lead_id}:`, error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+        if (!data) {
+            return {
+                success: false,
+                error: `Lead ${request.lead_id} not found or update failed`
+            };
+        }
+        console.log(`✅ Successfully invalidated email for lead ${request.lead_id}`);
+        console.log(`📝 Email removed, site_id preserved: ${data.site_id}`);
+        return {
+            success: true
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception invalidating email for lead ${request.lead_id}:`, errorMessage);
         return {
             success: false,
             error: errorMessage

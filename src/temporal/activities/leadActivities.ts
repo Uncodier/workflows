@@ -1745,6 +1745,82 @@ export async function invalidateLeadActivity(request: {
 }
 
 /**
+ * Activity to invalidate only email from a lead (when lead has alternative contact methods like WhatsApp)
+ * This removes only the email field but keeps the site_id
+ */
+export async function invalidateEmailOnlyActivity(request: {
+  lead_id: string;
+  failed_email: string;
+  userId?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  console.log(`📧🚫 Invalidating only email for lead ${request.lead_id} - email: ${request.failed_email}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot invalidate email');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, invalidating email only...');
+    
+    // Import supabase service role client (bypasses RLS)
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    // Only remove the email field, keep site_id and other data
+    const updateData: any = {
+      email: null, // Remove invalid email
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabaseServiceRole
+      .from('leads')
+      .update(updateData)
+      .eq('id', request.lead_id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error(`❌ Error invalidating email for lead ${request.lead_id}:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+
+    if (!data) {
+      return {
+        success: false,
+        error: `Lead ${request.lead_id} not found or update failed`
+      };
+    }
+
+    console.log(`✅ Successfully invalidated email for lead ${request.lead_id}`);
+    console.log(`📝 Email removed, site_id preserved: ${data.site_id}`);
+    
+    return {
+      success: true
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception invalidating email for lead ${request.lead_id}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
  * Activity to find leads that share the same contact information
  */
 export async function findLeadsBySharedContactActivity(request: {
