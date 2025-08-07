@@ -1,4 +1,4 @@
-import { proxyActivities, startChild } from '@temporalio/workflow';
+import { proxyActivities, startChild, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { deepResearchWorkflow, type DeepResearchOptions } from './deepResearchWorkflow';
 import type { 
@@ -433,6 +433,34 @@ function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
 }
 
 /**
+ * Extract the real schedule ID from workflow info
+ * This looks for evidence of schedule execution in search attributes or memo
+ */
+function extractScheduleId(info: any): string {
+  // Check if workflow was triggered by a schedule
+  // Temporal schedules typically set search attributes or memo data
+  const searchAttributes = info.searchAttributes || {};
+  const memo = info.memo || {};
+  
+  // Look for common schedule-related attributes
+  const scheduleId = 
+    searchAttributes['TemporalScheduledById'] || 
+    searchAttributes['ScheduleId'] ||
+    memo['TemporalScheduledById'] ||
+    memo['scheduleId'] ||
+    memo['scheduleName'];
+    
+  if (scheduleId) {
+    console.log(`✅ Lead Generation - Real schedule ID found: ${scheduleId}`);
+    return scheduleId;
+  }
+  
+  // If no schedule ID found, it might be a manual execution or child workflow
+  console.log(`⚠️ Lead Generation - No schedule ID found in workflow info - likely manual execution`);
+  return 'manual-execution';
+}
+
+/**
  * Workflow to execute lead generation process with optimized flow
  * 
  * Este workflow sigue el flujo optimizado:
@@ -455,6 +483,11 @@ export async function leadGenerationWorkflow(
     throw new Error('No site ID provided');
   }
   
+  // Get workflow information from Temporal to extract schedule ID
+  const workflowInfo_real = workflowInfo();
+  const realWorkflowId = workflowInfo_real.workflowId;
+  const realScheduleId = extractScheduleId(workflowInfo_real);
+  
   const workflowId = `lead-generation-${site_id}`;
   const startTime = Date.now();
   
@@ -464,6 +497,8 @@ export async function leadGenerationWorkflow(
   
   console.log(`🔥 Starting NEW lead generation workflow for site ${site_id}`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+  console.log(`📋 REAL Workflow ID: ${realWorkflowId} (from Temporal)`);
+  console.log(`📋 REAL Schedule ID: ${realScheduleId} (from ${realScheduleId === 'manual-execution' ? 'manual execution' : 'schedule'})`);
   console.log(`📋 Schedule ID: ${scheduleId} (from ${options.additionalData?.scheduleType ? 'scheduleType' : 'fallback'})`);
 
   // Log workflow execution start
@@ -837,6 +872,8 @@ export async function leadGenerationWorkflow(
                       research_topic: employeeSearchTopic,
                       userId: options.userId || site.user_id,
                       deliverables: employeeDeliverables,
+                      scheduleId: realScheduleId, // Pass the schedule ID from parent workflow
+                      parentWorkflowType: 'leadGenerationWorkflow', // Identify the parent workflow type
                       additionalData: {
                         ...options.additionalData,
                         company: cleanCompanyForDeepResearch(company),

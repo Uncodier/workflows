@@ -1,4 +1,4 @@
-import { proxyActivities, startChild } from '@temporalio/workflow';
+import { proxyActivities, startChild, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { deepResearchWorkflow, type DeepResearchOptions } from './deepResearchWorkflow';
 
@@ -39,6 +39,34 @@ export interface LeadResearchResult {
   errors: string[];
   executionTime: string;
   completedAt: string;
+}
+
+/**
+ * Extract the real schedule ID from workflow info
+ * This looks for evidence of schedule execution in search attributes or memo
+ */
+function extractScheduleId(info: any): string {
+  // Check if workflow was triggered by a schedule
+  // Temporal schedules typically set search attributes or memo data
+  const searchAttributes = info.searchAttributes || {};
+  const memo = info.memo || {};
+  
+  // Look for common schedule-related attributes
+  const scheduleId = 
+    searchAttributes['TemporalScheduledById'] || 
+    searchAttributes['ScheduleId'] ||
+    memo['TemporalScheduledById'] ||
+    memo['scheduleId'] ||
+    memo['scheduleName'];
+    
+  if (scheduleId) {
+    console.log(`✅ Lead Research - Real schedule ID found: ${scheduleId}`);
+    return scheduleId;
+  }
+  
+  // If no schedule ID found, it might be a manual execution or child workflow
+  console.log(`⚠️ Lead Research - No schedule ID found in workflow info - likely manual execution`);
+  return 'manual-execution';
 }
 
 /**
@@ -578,11 +606,18 @@ export async function leadResearchWorkflow(
     throw new Error('No site ID provided');
   }
   
+  // Get workflow information from Temporal to extract schedule ID
+  const workflowInfo_real = workflowInfo();
+  const realWorkflowId = workflowInfo_real.workflowId;
+  const realScheduleId = extractScheduleId(workflowInfo_real);
+  
   const workflowId = `lead-research-${lead_id}-${site_id}`;
   const startTime = Date.now();
   
   console.log(`🔍 Starting lead research workflow for lead ${lead_id} on site ${site_id}`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+  console.log(`📋 REAL Workflow ID: ${realWorkflowId} (from Temporal)`);
+  console.log(`📋 REAL Schedule ID: ${realScheduleId} (from ${realScheduleId === 'manual-execution' ? 'manual execution' : 'schedule'})`);
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({
@@ -674,6 +709,8 @@ export async function leadResearchWorkflow(
       research_topic: researchQuery,
       userId: options.userId || site.user_id,
       deliverables: leadDeliverables,
+      scheduleId: realScheduleId, // Pass the schedule ID from parent workflow
+      parentWorkflowType: 'leadResearchWorkflow', // Identify the parent workflow type
       additionalData: {
         ...options.additionalData,
         leadId: lead_id,

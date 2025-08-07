@@ -2593,40 +2593,79 @@ export async function cleanupFailedFollowUpActivity(request: {
       }
     }
 
-    // Step 4: Delete tasks created for this lead (typically first_contact tasks)
-    console.log(`🔍 Searching for tasks to cleanup for lead ${request.lead_id}...`);
-    
-    const { data: tasks, error: tasksError } = await supabaseServiceRole
-      .from('tasks')
-      .select('id, task_id, name, stage, status, custom_data, created_at')
-      .eq('lead_id', request.lead_id)
-      .eq('site_id', request.site_id)
-      .order('created_at', { ascending: false });
+    // Step 4: Delete only tasks linked to the specific conversation (if conversation_id provided)
+    if (request.conversation_id) {
+      console.log(`🔍 Searching for tasks linked to conversation ${request.conversation_id}...`);
+      
+      const { data: tasks, error: tasksError } = await supabaseServiceRole
+        .from('tasks')
+        .select('id, task_id, name, stage, status, custom_data, created_at')
+        .eq('lead_id', request.lead_id)
+        .eq('site_id', request.site_id)
+        .eq('conversation_id', request.conversation_id)
+        .order('created_at', { ascending: false });
 
-    if (tasksError) {
-      console.error(`❌ Error fetching tasks:`, tasksError);
-    } else {
-      cleanupSummary.tasks_found = tasks?.length || 0;
-      console.log(`📊 Found ${cleanupSummary.tasks_found} tasks for this lead`);
+      if (tasksError) {
+        console.error(`❌ Error fetching conversation-specific tasks:`, tasksError);
+      } else {
+        cleanupSummary.tasks_found = tasks?.length || 0;
+        console.log(`📊 Found ${cleanupSummary.tasks_found} tasks linked to this conversation`);
 
-      if (tasks && tasks.length > 0) {
-        console.log(`🗑️ Deleting ${tasks.length} tasks...`);
-        
-        for (const task of tasks) {
-          console.log(`   - Deleting task: ${task.name} (${task.stage}/${task.status})`);
+        if (tasks && tasks.length > 0) {
+          console.log(`🗑️ Deleting ${tasks.length} conversation-specific tasks...`);
+          
+          for (const task of tasks) {
+            console.log(`   - Deleting task: ${task.name} (${task.stage}/${task.status}) linked to conversation ${request.conversation_id}`);
+          }
+
+          const { error: deleteTasksError } = await supabaseServiceRole
+            .from('tasks')
+            .delete()
+            .eq('lead_id', request.lead_id)
+            .eq('site_id', request.site_id)
+            .eq('conversation_id', request.conversation_id);
+
+          if (deleteTasksError) {
+            console.error(`❌ Error deleting conversation-specific tasks:`, deleteTasksError);
+          } else {
+            taskDeleted = true;
+            console.log(`✅ Successfully deleted ${tasks.length} conversation-specific tasks`);
+          }
         }
+      }
+    } else {
+      // Fallback: If no conversation_id provided, find most recent tasks for this lead
+      console.log(`⚠️ No conversation_id provided - searching for recent tasks to cleanup for lead ${request.lead_id}...`);
+      
+      const { data: tasks, error: tasksError } = await supabaseServiceRole
+        .from('tasks')
+        .select('id, task_id, name, stage, status, custom_data, created_at')
+        .eq('lead_id', request.lead_id)
+        .eq('site_id', request.site_id)
+        .order('created_at', { ascending: false })
+        .limit(1); // Only get the most recent task
 
-        const { error: deleteTasksError } = await supabaseServiceRole
-          .from('tasks')
-          .delete()
-          .eq('lead_id', request.lead_id)
-          .eq('site_id', request.site_id);
+      if (tasksError) {
+        console.error(`❌ Error fetching recent tasks:`, tasksError);
+      } else {
+        cleanupSummary.tasks_found = tasks?.length || 0;
+        console.log(`📊 Found ${cleanupSummary.tasks_found} recent task(s) for this lead`);
 
-        if (deleteTasksError) {
-          console.error(`❌ Error deleting tasks:`, deleteTasksError);
-        } else {
-          taskDeleted = true;
-          console.log(`✅ Successfully deleted ${tasks.length} tasks`);
+        if (tasks && tasks.length > 0) {
+          const recentTask = tasks[0];
+          console.log(`🗑️ Deleting most recent task: ${recentTask.name} (${recentTask.stage}/${recentTask.status})...`);
+
+          const { error: deleteTasksError } = await supabaseServiceRole
+            .from('tasks')
+            .delete()
+            .eq('id', recentTask.id);
+
+          if (deleteTasksError) {
+            console.error(`❌ Error deleting recent task:`, deleteTasksError);
+          } else {
+            taskDeleted = true;
+            console.log(`✅ Successfully deleted most recent task for lead ${request.lead_id}`);
+          }
         }
       }
     }

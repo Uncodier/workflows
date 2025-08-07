@@ -841,11 +841,17 @@ export async function leadFollowUpWorkflow(
             console.log(`🧹 Email delivery failed, executing cleanup...`);
             
             try {
+              // Use actual conversation_id and message_id from logs if available
+              const conversationId = logsResult?.conversation_ids?.[0];
+              const messageId = logsResult?.message_ids?.[0];
+              
+              console.log(`🔍 Cleanup using: conversation_id=${conversationId}, message_id=${messageId}`);
+              
               const cleanupResult = await cleanupFailedFollowUpActivity({
                 lead_id: lead_id,
                 site_id: site_id,
-                conversation_id: undefined,
-                message_id: undefined,
+                conversation_id: conversationId,
+                message_id: messageId,
                 failure_reason: `email_delivery_failed: ${emailResult.messageId}`,
                 delivery_channel: 'email',
                 email: email
@@ -956,11 +962,17 @@ export async function leadFollowUpWorkflow(
             console.log(`🧹 WhatsApp delivery failed, executing cleanup...`);
             
             try {
+              // Use actual conversation_id and message_id from logs if available
+              const conversationId = logsResult?.conversation_ids?.[0];
+              const messageId = logsResult?.message_ids?.[0];
+              
+              console.log(`🔍 Cleanup using: conversation_id=${conversationId}, message_id=${messageId}`);
+              
               const cleanupResult = await cleanupFailedFollowUpActivity({
                 lead_id: lead_id,
                 site_id: site_id,
-                conversation_id: undefined,
-                message_id: undefined,
+                conversation_id: conversationId,
+                message_id: messageId,
                 failure_reason: `whatsapp_delivery_failed: ${whatsappErrorMessage}`,
                 delivery_channel: 'whatsapp',
                 phone_number: formattedPhone
@@ -1002,11 +1014,17 @@ export async function leadFollowUpWorkflow(
             console.log(`🧹 Message delivery failed (both channels), executing cleanup...`);
             
             try {
+              // Use actual conversation_id and message_id from logs if available
+              const conversationId = logsResult?.conversation_ids?.[0];
+              const messageId = logsResult?.message_ids?.[0];
+              
+              console.log(`🔍 Cleanup using: conversation_id=${conversationId}, message_id=${messageId}`);
+              
               const cleanupResult = await cleanupFailedFollowUpActivity({
                 lead_id: lead_id,
                 site_id: site_id,
-                conversation_id: undefined,
-                message_id: undefined,
+                conversation_id: conversationId,
+                message_id: messageId,
                 failure_reason: 'all_message_delivery_failed',
                 delivery_channel: emailMessage ? 'email' : 'whatsapp',
                 email: email,
@@ -1071,9 +1089,15 @@ export async function leadFollowUpWorkflow(
     if (messageSent && messageSent.success) {
       console.log(`📝 Step 5.4: Updating message status to 'sent'...`);
       
+      // Use actual conversation_id and message_id from logs if available
+      const conversationId = logsResult?.conversation_ids?.[0];
+      const messageId = logsResult?.message_ids?.[0];
+      
+      console.log(`🔍 Updating message status using: conversation_id=${conversationId}, message_id=${messageId}`);
+      
       const messageUpdateResult = await updateMessageStatusToSentActivity({
-        message_id: undefined,
-        conversation_id: undefined,
+        message_id: messageId,
+        conversation_id: conversationId,
         lead_id: lead_id,
         site_id: site_id,
         delivery_channel: messageSent.channel,
@@ -1105,9 +1129,15 @@ export async function leadFollowUpWorkflow(
     if (messageSent && messageSent.success) {
       console.log(`⏰ Step 5.4.1: Syncing message timestamp with actual delivery time...`);
       
+      // Use actual conversation_id and message_id from logs if available
+      const conversationId = logsResult?.conversation_ids?.[0];
+      const messageId = logsResult?.message_ids?.[0];
+      
+      console.log(`🔍 Updating message timestamp using: conversation_id=${conversationId}, message_id=${messageId}`);
+      
       const timestampUpdateResult = await updateMessageTimestampActivity({
-        message_id: undefined,
-        conversation_id: undefined,
+        message_id: messageId,
+        conversation_id: conversationId,
         lead_id: lead_id,
         site_id: site_id,
         delivery_timestamp: new Date().toISOString(), // Use actual delivery time

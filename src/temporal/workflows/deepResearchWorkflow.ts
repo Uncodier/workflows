@@ -24,6 +24,8 @@ export interface DeepResearchOptions {
   userId?: string;
   additionalData?: any;
   deliverables?: any;                 // Optional: Expected deliverables structure for lead updates
+  scheduleId?: string;                // Optional: Schedule ID from parent workflow (for tracking)
+  parentWorkflowType?: string;        // Optional: Type of parent workflow (for tracking)
 }
 
 export interface DeepResearchResponse {
@@ -71,6 +73,30 @@ function extractScheduleId(info: any): string {
   // If no schedule ID found, it might be a manual execution or child workflow
   console.log(`⚠️ No schedule ID found in workflow info - likely manual execution or child workflow`);
   return 'manual-execution';
+}
+
+/**
+ * Determine the effective schedule ID for tracking purposes
+ * Uses passed scheduleId parameter if available, otherwise tries to extract from workflow info
+ */
+function getEffectiveScheduleId(options: DeepResearchOptions, workflowInfo: any): string {
+  // Priority 1: Use passed scheduleId from parent workflow
+  if (options.scheduleId) {
+    console.log(`✅ Using scheduleId from parent workflow: ${options.scheduleId}`);
+    return options.scheduleId;
+  }
+  
+  // Priority 2: Try to extract from workflow info (for direct schedule executions)
+  const extractedScheduleId = extractScheduleId(workflowInfo);
+  
+  // Priority 3: If this is a child workflow, create a descriptive identifier
+  if (extractedScheduleId === 'manual-execution' && options.parentWorkflowType) {
+    const childScheduleId = `child-of-${options.parentWorkflowType}`;
+    console.log(`📋 Child workflow detected - using identifier: ${childScheduleId}`);
+    return childScheduleId;
+  }
+  
+  return extractedScheduleId;
 }
 
 function generateCompanyStructure(existingCompany?: any): any {
@@ -186,7 +212,7 @@ export async function deepResearchWorkflow(
   // Get REAL workflow information from Temporal
   const workflowInfo_real = workflowInfo();
   const realWorkflowId = workflowInfo_real.workflowId;
-  const realScheduleId = extractScheduleId(workflowInfo_real);
+  const realScheduleId = getEffectiveScheduleId(options, workflowInfo_real);
   const startTime = Date.now();
   
   console.log(`🔬 Starting deep research workflow for topic "${research_topic}" on site ${site_id}`);

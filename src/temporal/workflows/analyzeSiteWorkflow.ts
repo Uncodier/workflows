@@ -1,4 +1,4 @@
-import { proxyActivities, startChild } from '@temporalio/workflow';
+import { proxyActivities, startChild, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { deepResearchWorkflow } from './deepResearchWorkflow';
 
@@ -878,6 +878,34 @@ function extractSettingsUpdateFromDeepResearch(deepResearchResult: any, existing
 }
 
 /**
+ * Extract the real schedule ID from workflow info
+ * This looks for evidence of schedule execution in search attributes or memo
+ */
+function extractScheduleId(info: any): string {
+  // Check if workflow was triggered by a schedule
+  // Temporal schedules typically set search attributes or memo data
+  const searchAttributes = info.searchAttributes || {};
+  const memo = info.memo || {};
+  
+  // Look for common schedule-related attributes
+  const scheduleId = 
+    searchAttributes['TemporalScheduledById'] || 
+    searchAttributes['ScheduleId'] ||
+    memo['TemporalScheduledById'] ||
+    memo['scheduleId'] ||
+    memo['scheduleName'];
+    
+  if (scheduleId) {
+    console.log(`✅ Analyze Site - Real schedule ID found: ${scheduleId}`);
+    return scheduleId;
+  }
+  
+  // If no schedule ID found, it might be a manual execution or child workflow
+  console.log(`⚠️ Analyze Site - No schedule ID found in workflow info - likely manual execution`);
+  return 'manual-execution';
+}
+
+/**
  * Workflow to analyze a site using deep research for company and project research
  * 
  * Este workflow ejecuta el siguiente flujo:
@@ -898,11 +926,18 @@ export async function analyzeSiteWorkflow(
     throw new Error('No site ID provided');
   }
   
+  // Get workflow information from Temporal to extract schedule ID
+  const workflowInfo_real = workflowInfo();
+  const realWorkflowId = workflowInfo_real.workflowId;
+  const realScheduleId = extractScheduleId(workflowInfo_real);
+  
   const workflowId = `analyze-site-${site_id}`;
   const startTime = Date.now();
   
   console.log(`🔍 Starting company and project research workflow for site ${site_id}`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+  console.log(`📋 REAL Workflow ID: ${realWorkflowId} (from Temporal)`);
+  console.log(`📋 REAL Schedule ID: ${realScheduleId} (from ${realScheduleId === 'manual-execution' ? 'manual execution' : 'schedule'})`);
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({
@@ -1017,6 +1052,8 @@ export async function analyzeSiteWorkflow(
         site_id: site_id,
         research_topic: researchTopic,
         userId: options.userId || site.user_id,
+        scheduleId: realScheduleId, // Pass the schedule ID from parent workflow
+        parentWorkflowType: 'analyzeSiteWorkflow', // Identify the parent workflow type
         deliverables: {
           // Enviar la información de company en la estructura correcta
           company: companyProjectDeliverables,
