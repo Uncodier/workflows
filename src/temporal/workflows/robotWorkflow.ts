@@ -1,9 +1,12 @@
-import { proxyActivities, sleep } from '@temporalio/workflow';
+import { proxyActivities, sleep, startChild } from '@temporalio/workflow';
 import type { Activities } from '../activities';
+import { humanInterventionWorkflow } from './humanInterventionWorkflow';
 
 // Define the activity interface and options
 const { 
-  callRobotPlanActActivity
+  callRobotPlanActActivity,
+  callRobotPlanActivity,
+  callRobotAuthActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -47,9 +50,25 @@ export interface RobotWorkflowResult {
       output_tokens: number;
     };
     remote_instance_id?: string;
+    // Estados originales
     is_blocked?: boolean;
     waiting_for_session?: boolean;
     requires_continuation?: boolean;
+    // Nuevos estados según documentación v2
+    plan_completed?: boolean;
+    plan_failed?: boolean;
+    failure_reason?: string;
+    new_plan_required?: boolean;
+    new_session?: boolean;
+    new_session_info?: any;
+    session_needed?: boolean;
+    session_request?: any;
+    user_attention_required?: boolean;
+    user_attention_info?: any;
+    waiting_for_user?: boolean;
+    // Respuesta cruda del agente para parsing
+    agent_response?: string;
+    response_type?: 'step_completed' | 'step_failed' | 'step_canceled' | 'plan_failed' | 'new_plan' | 'new_session' | 'session_needed' | 'user_attention';
     timestamp: string;
   }[];
   totalPlanCycles?: number;
@@ -70,12 +89,107 @@ export interface RobotWorkflowResult {
   executedAt: string;
 }
 
+// Tipos de respuesta según documentación v2
+interface ParsedAgentResponse {
+  type: 'step_completed' | 'step_failed' | 'step_canceled' | 'plan_failed' | 'new_plan' | 'new_session' | 'session_needed' | 'user_attention' | 'unknown';
+  stepNumber?: number;
+  reason?: string;
+  explanation?: string;
+  platform?: string;
+  domain?: string;
+}
+
+/**
+ * Parser de respuestas de agentes según documentación v2
+ */
+function parseAgentResponse(response: string): ParsedAgentResponse {
+  if (!response) return { type: 'unknown' };
+  
+  const trimmed = response.trim().toLowerCase();
+  
+  // Step completado: "finished" o "step X finished"
+  const stepFinishedMatch = trimmed.match(/(?:step\s+(\d+)\s+)?finished/i);
+  if (stepFinishedMatch) {
+    return {
+      type: 'step_completed',
+      stepNumber: stepFinishedMatch[1] ? parseInt(stepFinishedMatch[1]) : undefined
+    };
+  }
+  
+  // Step fallido: "failed" o "step X failed"
+  const stepFailedMatch = trimmed.match(/(?:step\s+(\d+)\s+)?failed/i);
+  if (stepFailedMatch) {
+    return {
+      type: 'step_failed',
+      stepNumber: stepFailedMatch[1] ? parseInt(stepFailedMatch[1]) : undefined
+    };
+  }
+  
+  // Step cancelado: "canceled" o "step X canceled"
+  const stepCanceledMatch = trimmed.match(/(?:step\s+(\d+)\s+)?canceled/i);
+  if (stepCanceledMatch) {
+    return {
+      type: 'step_canceled',
+      stepNumber: stepCanceledMatch[1] ? parseInt(stepCanceledMatch[1]) : undefined
+    };
+  }
+  
+  // Plan fallido: "plan failed: [reason]"
+  const planFailedMatch = response.match(/plan\s+failed:\s*(.+)/i);
+  if (planFailedMatch) {
+    return {
+      type: 'plan_failed',
+      reason: planFailedMatch[1].trim()
+    };
+  }
+  
+  // Nuevo plan requerido: "new plan"
+  if (trimmed.includes('new plan')) {
+    return { type: 'new_plan' };
+  }
+  
+  // Nueva sesión adquirida: "new [platform] session acquired"
+  const newSessionMatch = response.match(/new\s+(\w+)\s+session\s+acquired/i);
+  if (newSessionMatch) {
+    return {
+      type: 'new_session',
+      platform: newSessionMatch[1]
+    };
+  }
+  
+  // Sesión requerida: "session needed [platform] [domain]"
+  const sessionNeededMatch = response.match(/session\s+needed\s+(\w+)(?:\s+([^\s]+))?/i);
+  if (sessionNeededMatch) {
+    return {
+      type: 'session_needed',
+      platform: sessionNeededMatch[1],
+      domain: sessionNeededMatch[2]
+    };
+  }
+  
+  // Atención del usuario requerida: "user attention required: [explanation]"
+  const userAttentionMatch = response.match(/user\s+attention\s+required:\s*(.+)/i);
+  if (userAttentionMatch) {
+    return {
+      type: 'user_attention',
+      explanation: userAttentionMatch[1].trim()
+    };
+  }
+  
+  return { type: 'unknown' };
+}
+
 /**
  * Workflow to execute robot plan in a loop until completion
  * 
  * This workflow continuously calls the robot plan act API until plan_completed is true:
  * - POST /api/robots/plan/act - Executes robot plan actions in a loop
  * - Waits 30 seconds between each API call to avoid overwhelming the external service
+ * - Maneja nuevos tipos de respuestas según documentación v2
+ * - Implementa lógica de retry para user attention required
+ * - Llama human intervention workflow cuando sea necesario
+ * - Crea nuevos planes cuando se requiera
+ * - Guarda nuevas sesiones de autenticación
  * 
  * Input requires: site_id, activity, instance_id, and optionally instance_plan_id and user_id
  * 
@@ -105,11 +219,14 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
     const planResults: any[] = [];
     let totalPlanCycles = 0;
     let planCompleted = false;
+    let planFailed = false;
+    let userAttentionRetries = 0; // Contador de reintentos para user attention
     const maxCycles = 100; // Safety limit to prevent infinite loops
+    const maxUserAttentionRetries = 1; // Máximo 1 retry antes de human intervention
 
-    console.log(`🔄 Starting robot plan execution loop...`);
+    console.log(`🔄 Starting robot plan execution loop with v2 response handling...`);
 
-    while (!planCompleted && totalPlanCycles < maxCycles) {
+    while (!planCompleted && !planFailed && totalPlanCycles < maxCycles) {
       totalPlanCycles++;
       console.log(`🔃 Robot plan execution cycle ${totalPlanCycles} for site ${site_id}...`);
 
@@ -133,6 +250,10 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
           };
         }
 
+        // Parse agent response según documentación v2
+        const agentResponse = planResult.data?.agent_response || planResult.data?.message || '';
+        const parsedResponse = parseAgentResponse(agentResponse);
+
         // Extract and structure important data from the response
         const stepData = {
           cycle: totalPlanCycles,
@@ -143,16 +264,41 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
           steps_executed: planResult.data?.steps_executed,
           token_usage: planResult.data?.token_usage,
           remote_instance_id: planResult.data?.remote_instance_id,
+          // Estados originales
           is_blocked: planResult.data?.is_blocked,
           waiting_for_session: planResult.data?.waiting_for_session,
           requires_continuation: planResult.data?.requires_continuation,
+          // Nuevos estados v2
+          plan_completed: planResult.plan_completed || planResult.data?.plan_completed,
+          plan_failed: planResult.data?.plan_failed,
+          failure_reason: planResult.data?.failure_reason || parsedResponse.reason,
+          new_plan_required: planResult.data?.new_plan_required,
+          new_session: planResult.data?.new_session,
+          new_session_info: planResult.data?.new_session_info,
+          session_needed: planResult.data?.session_needed,
+          session_request: planResult.data?.session_request,
+          user_attention_required: planResult.data?.user_attention_required,
+          user_attention_info: planResult.data?.user_attention_info,
+          waiting_for_user: planResult.data?.waiting_for_user,
+          // Datos de parsing
+          agent_response: agentResponse,
+          response_type: parsedResponse.type,
           timestamp: new Date().toISOString()
         };
         
         planResults.push(stepData);
-        planCompleted = planResult.plan_completed ?? false;
+        
+        // Determinar estado del plan según respuesta parseada y API
+        planCompleted = stepData.plan_completed ?? false;
+        
+        // Si no hay plan_completed explícito, verificar si es una respuesta de step completado final
+        if (!planCompleted && parsedResponse.type === 'step_completed' && stepData.plan_progress?.percentage === 100) {
+          planCompleted = true;
+          console.log(`✅ Plan marcado como completado por step finished con 100% de progreso`);
+        }
 
         console.log(`📊 Cycle ${totalPlanCycles} completed. Plan completed: ${planCompleted}`);
+        console.log(`🔍 Response type detected: ${parsedResponse.type}`);
         
         // Log progress if available
         if (planResult.data?.plan_progress) {
@@ -171,7 +317,139 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
           console.log(`⏱️ Execution time: ${planResult.data.execution_time_ms}ms`);
         }
         
-        // Log any blocking conditions
+        // Manejo específico según tipo de respuesta v2
+        if (parsedResponse.type === 'plan_failed') {
+          console.log(`💥 Plan failed: ${parsedResponse.reason}`);
+          planFailed = true;
+          
+          // Llamar human intervention workflow
+          console.log(`👤 Triggering human intervention workflow due to plan failure...`);
+          try {
+            await startChild(humanInterventionWorkflow, {
+              args: [{
+                conversationId: `robot-plan-${instance_id}-${totalPlanCycles}`,
+                message: `Robot plan failed: ${parsedResponse.reason}. Instance: ${instance_id}, Site: ${site_id}, Activity: ${activity}`,
+                user_id: user_id || 'system',
+                agentId: 'robot-agent',
+                conversation_title: `Robot Plan Failure - ${activity}`,
+                site_id,
+                origin: 'whatsapp' as const
+              }],
+              workflowId: `human-intervention-robot-${instance_id}-${Date.now()}`,
+              taskQueue: 'default'
+            });
+            console.log(`✅ Human intervention workflow triggered for plan failure`);
+          } catch (interventionError) {
+            console.error(`❌ Failed to trigger human intervention: ${interventionError}`);
+          }
+          
+          break; // Salir del loop
+        } 
+        else if (parsedResponse.type === 'new_plan') {
+          console.log(`🔄 New plan required, calling growth/robot/plan with error context...`);
+          try {
+            // Crear contexto del error para el nuevo plan
+            const errorContext = {
+              previous_plan_id: instance_plan_id,
+              error_cycle: totalPlanCycles,
+              error_reason: 'Plan requires replacement',
+              previous_results: planResults.slice(-3) // Últimos 3 resultados para contexto
+            };
+            
+            const newPlanResult = await callRobotPlanActivity({
+              site_id,
+              activity,
+              instance_id,
+              user_id,
+              error_context: JSON.stringify(errorContext)
+            });
+            
+            if (newPlanResult.success && newPlanResult.instance_plan_id) {
+              planParams.instance_plan_id = newPlanResult.instance_plan_id;
+              console.log(`✅ New plan created with ID: ${newPlanResult.instance_plan_id}`);
+              // Reset contadores de retry
+              userAttentionRetries = 0;
+            } else {
+              console.error(`❌ Failed to create new plan: ${newPlanResult.error}`);
+              planFailed = true;
+              break;
+            }
+          } catch (newPlanError) {
+            console.error(`❌ Error creating new plan: ${newPlanError}`);
+            planFailed = true;
+            break;
+          }
+        }
+        else if (parsedResponse.type === 'new_session') {
+          console.log(`🔐 New session acquired for ${parsedResponse.platform}, saving authentication...`);
+          try {
+            await callRobotAuthActivity({
+              instance_id,
+              name: parsedResponse.platform || 'unknown-platform',
+              domain: stepData.new_session_info?.domain || 'unknown-domain'
+            });
+            console.log(`✅ Authentication session saved for ${parsedResponse.platform}`);
+          } catch (authError) {
+            console.error(`❌ Failed to save authentication session: ${authError}`);
+            // No fallar el plan por esto, solo loguear
+          }
+        }
+        else if (parsedResponse.type === 'session_needed') {
+          console.log(`🔑 Session needed for ${parsedResponse.platform}${parsedResponse.domain ? ` (${parsedResponse.domain})` : ''}`);
+          // El API debería pausar automáticamente hasta que el usuario proporcione la sesión
+        }
+        else if (parsedResponse.type === 'user_attention') {
+          console.log(`👤 User attention required: ${parsedResponse.explanation}`);
+          
+          if (userAttentionRetries < maxUserAttentionRetries) {
+            console.log(`⏳ Waiting 5 minutes before retry (attempt ${userAttentionRetries + 1}/${maxUserAttentionRetries})...`);
+            await sleep('5m');
+            userAttentionRetries++;
+            console.log(`🔄 Retrying after user attention wait...`);
+            // Continúa el loop para hacer retry
+          } else {
+            console.log(`⚠️ Maximum user attention retries reached, triggering human intervention...`);
+            
+            try {
+              await startChild(humanInterventionWorkflow, {
+                args: [{
+                  conversationId: `robot-attention-${instance_id}-${totalPlanCycles}`,
+                  message: `Robot requires human attention: ${parsedResponse.explanation}. Instance: ${instance_id}, Site: ${site_id}, Activity: ${activity}`,
+                  user_id: user_id || 'system',
+                  agentId: 'robot-agent',
+                  conversation_title: `Robot Attention Required - ${activity}`,
+                  site_id,
+                  origin: 'whatsapp' as const
+                }],
+                workflowId: `human-intervention-attention-${instance_id}-${Date.now()}`,
+                taskQueue: 'default'
+              });
+              console.log(`✅ Human intervention workflow triggered for persistent user attention`);
+            } catch (interventionError) {
+              console.error(`❌ Failed to trigger human intervention: ${interventionError}`);
+            }
+            
+            planFailed = true;
+            break;
+          }
+        }
+        else if (parsedResponse.type === 'step_completed') {
+          console.log(`✅ Step ${parsedResponse.stepNumber || 'unknown'} completed successfully`);
+          // Reset retry counter en caso de éxito
+          userAttentionRetries = 0;
+        }
+        else if (parsedResponse.type === 'step_failed') {
+          console.log(`❌ Step ${parsedResponse.stepNumber || 'unknown'} failed`);
+          // Reset retry counter
+          userAttentionRetries = 0;
+        }
+        else if (parsedResponse.type === 'step_canceled') {
+          console.log(`🚫 Step ${parsedResponse.stepNumber || 'unknown'} canceled`);
+          // Reset retry counter
+          userAttentionRetries = 0;
+        }
+        
+        // Log any blocking conditions (estados originales)
         if (planResult.data?.is_blocked) {
           console.log(`⚠️ Plan is blocked`);
         }
@@ -218,6 +496,23 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
       return {
         success: false,
         error: `Plan act execution loop reached maximum cycles (${maxCycles})`,
+        instance_id,
+        instance_plan_id,
+        planResults,
+        totalPlanCycles,
+        site_id,
+        activity,
+        user_id,
+        executedAt: new Date().toISOString()
+      };
+    }
+
+    if (planFailed) {
+      console.error(`❌ Robot plan execution failed for site ${site_id}`);
+      
+      return {
+        success: false,
+        error: 'Plan execution failed - check planResults for details',
         instance_id,
         instance_plan_id,
         planResults,

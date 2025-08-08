@@ -1114,7 +1114,7 @@ export async function updateMessageStatusToSentActivity(request: {
     
     // If no message_id provided, try to find the most recent message in the conversation
     if (!messageId && request.conversation_id) {
-      console.log(`🔍 No message ID provided, searching for recent message in conversation...`);
+      console.log(`🔍 No message ID provided, searching for recent message in conversation ${request.conversation_id}...`);
       
       const { data: recentMessage, error: findError } = await supabaseServiceRole
         .from('messages')
@@ -1134,12 +1134,57 @@ export async function updateMessageStatusToSentActivity(request: {
 
       if (recentMessage) {
         messageId = recentMessage.id;
-        console.log(`✅ Found recent message: ${messageId}`);
+        console.log(`✅ Found recent message in conversation: ${messageId}`);
+      }
+    }
+    
+    // If still no message_id, try to find pending messages for this lead
+    if (!messageId) {
+      console.log(`🔍 No message ID from conversation, searching for pending messages for lead ${request.lead_id}...`);
+      
+      const { data: pendingMessages, error: findPendingError } = await supabaseServiceRole
+        .from('messages')
+        .select('id, conversation_id, custom_data, created_at')
+        .eq('site_id', request.site_id)
+        .eq('role', 'assistant') // Messages sent by the assistant
+        .order('created_at', { ascending: false })
+        .limit(10); // Get recent messages
+
+      if (findPendingError) {
+        console.error(`❌ Error finding pending messages:`, findPendingError);
+        return {
+          success: false,
+          error: `Failed to find pending messages: ${findPendingError.message}`
+        };
+      }
+
+      if (pendingMessages && pendingMessages.length > 0) {
+        // Look for messages with pending status that belong to this lead
+        for (const msg of pendingMessages) {
+          const customData = msg.custom_data || {};
+          const messageStatus = customData.status;
+          
+          // Check if this message is pending and belongs to our lead
+          if (messageStatus === 'pending') {
+            // Get the conversation to check if it belongs to our lead
+            const { data: conversation, error: convError } = await supabaseServiceRole
+              .from('conversations')
+              .select('lead_id')
+              .eq('id', msg.conversation_id)
+              .single();
+              
+            if (!convError && conversation && conversation.lead_id === request.lead_id) {
+              messageId = msg.id;
+              console.log(`✅ Found pending message for lead ${request.lead_id}: ${messageId}`);
+              break;
+            }
+          }
+        }
       }
     }
 
     if (!messageId) {
-      console.log(`⚠️ No message found to update - this is normal for some follow-ups`);
+      console.log(`⚠️ No message found to update for lead ${request.lead_id} - this may indicate the message was not properly created`);
       return {
         success: true, // Don't fail the workflow for missing message
         error: 'No message found to update'

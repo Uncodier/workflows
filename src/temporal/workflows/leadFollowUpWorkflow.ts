@@ -1091,9 +1091,22 @@ export async function leadFollowUpWorkflow(
       
       // Use actual conversation_id and message_id from logs if available
       const conversationId = logsResult?.conversation_ids?.[0];
-      const messageId = logsResult?.message_ids?.[0];
+      let messageId = logsResult?.message_ids?.[0];
       
-      console.log(`🔍 Updating message status using: conversation_id=${conversationId}, message_id=${messageId}`);
+      console.log(`🔍 Initial IDs from logs: conversation_id=${conversationId}, message_id=${messageId}`);
+      
+      // Fallback: If logs didn't provide IDs, try to get them from the message sent result
+      if (!messageId && messageSent.messageId) {
+        console.log(`🔍 Logs didn't provide message_id, using messageId from send result: ${messageSent.messageId}`);
+        messageId = messageSent.messageId;
+      }
+      
+      // Additional fallback: Search for recent messages for this lead if we still don't have IDs
+      if (!messageId && !conversationId) {
+        console.log(`🔍 No IDs available from logs or send result, will let updateMessageStatusToSentActivity search by lead_id`);
+      }
+      
+      console.log(`🔍 Final IDs for message status update: conversation_id=${conversationId}, message_id=${messageId}`);
       
       const messageUpdateResult = await updateMessageStatusToSentActivity({
         message_id: messageId,
@@ -1129,9 +1142,15 @@ export async function leadFollowUpWorkflow(
     if (messageSent && messageSent.success) {
       console.log(`⏰ Step 5.4.1: Syncing message timestamp with actual delivery time...`);
       
-      // Use actual conversation_id and message_id from logs if available
+      // Use the same fallback logic as the status update
       const conversationId = logsResult?.conversation_ids?.[0];
-      const messageId = logsResult?.message_ids?.[0];
+      let messageId = logsResult?.message_ids?.[0];
+      
+      // Fallback: If logs didn't provide IDs, try to get them from the message sent result
+      if (!messageId && messageSent.messageId) {
+        console.log(`🔍 Using messageId from send result for timestamp sync: ${messageSent.messageId}`);
+        messageId = messageSent.messageId;
+      }
       
       console.log(`🔍 Updating message timestamp using: conversation_id=${conversationId}, message_id=${messageId}`);
       
