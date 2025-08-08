@@ -156,7 +156,7 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
             testMode: false, // PRODUCTION: Full production mode
             businessHoursAnalysis, // PASS business hours analysis for filtering
             hoursThreshold: 48, // Look for leads older than 48 hours
-            maxLeads: 100 // Limit to 100 leads per site (doubled from 50)
+            maxLeads: 30 // Limit to 30 leads per site
           });
           
           console.log(`🎯 Daily prospection workflows execution completed:`);
@@ -320,7 +320,7 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
             {
               timezone: 'America/Mexico_City',
               hoursThreshold: 48, // Look for leads older than 48 hours
-              maxLeads: 100 // Limit to 100 leads per site (doubled from 50)
+              maxLeads: 30 // Limit to 30 leads per site
             }
           );
           
