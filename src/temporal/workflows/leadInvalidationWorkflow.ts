@@ -1,5 +1,6 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, startChild } from '@temporalio/workflow';
 import type { Activities } from '../activities';
+import { leadFollowUpWorkflow, type LeadFollowUpOptions } from './leadFollowUpWorkflow';
 
 // Define the activity interface and options
 const { 
@@ -8,6 +9,7 @@ const {
   getLeadActivity,
   invalidateLeadActivity,
   findLeadsBySharedContactActivity,
+  updateTaskStatusToCompletedActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '3 minutes', // Reasonable timeout for lead invalidation
   retry: {
@@ -231,6 +233,91 @@ export async function leadInvalidationWorkflow(
       completedAt: new Date().toISOString()
     };
 
+    // Step 4: Delete initial task regardless of outcome
+    console.log(`📝 Step 4: Deleting initial task for lead ${lead_id}...`);
+    
+    try {
+      const taskDeleteResult = await updateTaskStatusToCompletedActivity({
+        lead_id: lead_id,
+        site_id: originalSiteId,
+        stage: 'awareness', // Initial tasks are typically in awareness stage
+        status: 'completed',
+        notes: `Task completed after lead invalidation workflow (${reason})`
+      });
+      
+      if (taskDeleteResult.success) {
+        if (taskDeleteResult.updated_task_id) {
+          console.log(`✅ Initial task ${taskDeleteResult.updated_task_id} marked as completed after invalidation`);
+        } else {
+          console.log(`✅ Task completion update completed (${taskDeleteResult.task_found ? 'no task to update' : 'no task found'})`);
+        }
+      } else {
+        const errorMsg = `Failed to mark initial task as completed: ${taskDeleteResult.error}`;
+        console.error(`⚠️ ${errorMsg}`);
+        errors.push(errorMsg);
+        // Note: We don't throw here as the invalidation was successful
+      }
+    } catch (taskError) {
+      const taskErrorMessage = taskError instanceof Error ? taskError.message : String(taskError);
+      console.error(`⚠️ Exception deleting initial task: ${taskErrorMessage}`);
+      errors.push(`Task deletion exception: ${taskErrorMessage}`);
+      // Note: We don't throw here as the invalidation was successful
+    }
+
+    // Step 5: If lead has valid phone number after invalidation, schedule follow-up
+    console.log(`📞 Step 5: Checking if lead has valid phone number for follow-up...`);
+    
+    try {
+      // Re-fetch lead to get current state after invalidation
+      const updatedLeadResult = await getLeadActivity(lead_id);
+      
+      if (updatedLeadResult.success && updatedLeadResult.lead) {
+        const updatedLead = updatedLeadResult.lead;
+        const hasValidPhone = updatedLead.phone && 
+                            updatedLead.phone.trim() !== '' && 
+                            updatedLead.phone !== options.telephone; // Different from failed phone
+        
+        console.log(`📋 Post-invalidation lead contact check:`);
+        console.log(`   - Phone: ${updatedLead.phone || 'N/A'}`);
+        console.log(`   - Failed phone: ${options.telephone || 'N/A'}`);
+        console.log(`   - Has valid phone: ${hasValidPhone}`);
+        
+        if (hasValidPhone) {
+          console.log(`🚀 Lead has valid phone number, scheduling follow-up workflow...`);
+          
+          const followUpOptions: LeadFollowUpOptions = {
+            lead_id: lead_id,
+            site_id: originalSiteId,
+            userId: options.userId,
+            additionalData: {
+              source: 'lead_invalidation_recovery',
+              previous_failed_contact: options.telephone || options.email,
+              invalidation_reason: reason
+            }
+          };
+          
+          await startChild(leadFollowUpWorkflow, {
+            args: [followUpOptions],
+            workflowId: `lead-follow-up-recovery-${lead_id}-${Date.now()}`
+          });
+          
+          console.log(`✅ Lead follow-up workflow started for lead ${lead_id} with valid phone number`);
+          console.log(`📞 Will attempt follow-up via WhatsApp to: ${updatedLead.phone}`);
+          
+          // Don't wait for the result, just start it and continue
+        } else {
+          console.log(`ℹ️ Lead ${lead_id} has no valid phone number for follow-up after invalidation`);
+        }
+      } else {
+        console.log(`⚠️ Could not re-fetch lead information for follow-up check: ${updatedLeadResult.error}`);
+      }
+    } catch (followUpError) {
+      const followUpErrorMessage = followUpError instanceof Error ? followUpError.message : String(followUpError);
+      console.error(`⚠️ Exception checking for follow-up opportunity: ${followUpErrorMessage}`);
+      errors.push(`Follow-up check exception: ${followUpErrorMessage}`);
+      // Note: We don't throw here as the invalidation was successful
+    }
+
     console.log(`🎉 Lead invalidation workflow completed successfully!`);
     console.log(`📊 Summary: Lead ${lead_id} - Invalidated: ${leadInvalidated}, Shared leads: ${invalidatedSharedLeads}`);
     console.log(`⏱️ Execution time: ${executionTime}`);
@@ -261,6 +348,34 @@ export async function leadInvalidationWorkflow(
     console.error(`❌ Lead invalidation workflow failed: ${errorMessage}`);
     
     const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+    
+    // Step 4: Even if workflow failed, try to delete initial task
+    console.log(`📝 Step 4: Attempting to delete initial task for lead ${lead_id} despite workflow failure...`);
+    
+    try {
+      const taskDeleteResult = await updateTaskStatusToCompletedActivity({
+        lead_id: lead_id,
+        site_id: site_id,
+        stage: 'awareness', // Initial tasks are typically in awareness stage
+        status: 'completed',
+        notes: `Task completed after failed lead invalidation workflow (${errorMessage})`
+      });
+      
+      if (taskDeleteResult.success) {
+        if (taskDeleteResult.updated_task_id) {
+          console.log(`✅ Initial task ${taskDeleteResult.updated_task_id} marked as completed despite workflow failure`);
+        } else {
+          console.log(`✅ Task completion update completed (${taskDeleteResult.task_found ? 'no task to update' : 'no task found'})`);
+        }
+      } else {
+        console.error(`⚠️ Failed to mark initial task as completed: ${taskDeleteResult.error}`);
+        errors.push(`Task deletion after failure: ${taskDeleteResult.error}`);
+      }
+    } catch (taskError) {
+      const taskErrorMessage = taskError instanceof Error ? taskError.message : String(taskError);
+      console.error(`⚠️ Exception deleting initial task after workflow failure: ${taskErrorMessage}`);
+      errors.push(`Task deletion exception after failure: ${taskErrorMessage}`);
+    }
     
     // Update cron status to indicate failure
     await saveCronStatusActivity({
