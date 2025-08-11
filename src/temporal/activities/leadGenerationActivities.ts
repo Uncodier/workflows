@@ -155,13 +155,25 @@ export async function callRegionSearchApiActivity(
       userId: options.userId
     });
 
+    // Optimize request body by only sending essential data to avoid 414 errors
     const requestBody = {
       site_id: options.site_id,
       userId: options.userId,
-      ...options.additionalData
+      // Only include essential additionalData to avoid large request bodies
+      siteName: options.additionalData?.siteName,
+      siteUrl: options.additionalData?.siteUrl,
+      region: options.additionalData?.region,
+      keywords: options.additionalData?.keywords
+      // Exclude large objects that could cause 414 errors
     };
 
-    console.log('📤 Sending region search request:', JSON.stringify(requestBody, null, 2));
+    const requestBodySize = JSON.stringify(requestBody).length;
+    console.log(`📤 Sending region search request (${requestBodySize} bytes):`, JSON.stringify(requestBody, null, 2));
+    
+    // Warn if request body is getting large
+    if (requestBodySize > 50000) { // 50KB warning threshold
+      console.warn(`⚠️ Large request body detected (${requestBodySize} bytes). This might cause 414 errors.`);
+    }
 
     const response = await apiService.post('/api/agents/sales/regionSearch', requestBody);
 
@@ -423,10 +435,19 @@ export async function callRegionVenuesApiActivity(
         bestTimeToContact: 'business_hours',
         contactPerson: 'business_owner'
       },
-      ...options.additionalData
+      // Only include essential additionalData to avoid 414 errors
+      siteName: options.additionalData?.siteName,
+      siteUrl: options.additionalData?.siteUrl
+      // Exclude large objects like regionSearchResult, businessTypes arrays, etc.
     };
 
-    console.log('📤 Sending region venues request:', JSON.stringify(requestBody, null, 2));
+    const requestBodySize = JSON.stringify(requestBody).length;
+    console.log(`📤 Sending region venues request (${requestBodySize} bytes):`, JSON.stringify(requestBody, null, 2));
+    
+    // Warn if request body is getting large
+    if (requestBodySize > 50000) { // 50KB warning threshold
+      console.warn(`⚠️ Large request body detected (${requestBodySize} bytes). This might cause 414 errors.`);
+    }
 
     const response = await apiService.post('/api/agents/sales/regionVenues', requestBody);
 
@@ -532,10 +553,13 @@ export async function callRegionVenuesWithMultipleSearchTermsActivity(
         priority: options.priority || 'high',
         excludeNames: combinedExcludeNames,
         additionalData: {
-          ...options.additionalData,
+          // Only include essential data to avoid 414 errors
+          siteName: options.additionalData?.siteName,
+          siteUrl: options.additionalData?.siteUrl,
           searchIteration: 1,
           businessType: firstBusinessTypeName,
           isMultipleSearchStrategy: true
+          // Exclude large objects like regionSearchResult, businessTypes arrays, etc.
         }
       };
 
@@ -600,10 +624,13 @@ export async function callRegionVenuesWithMultipleSearchTermsActivity(
           priority: options.priority || 'high',
           excludeNames: combinedExcludeNames,
           additionalData: {
-            ...options.additionalData,
+            // Only include essential data to avoid 414 errors
+            siteName: options.additionalData?.siteName,
+            siteUrl: options.additionalData?.siteUrl,
             searchIteration: i + 1,
             businessType: businessTypeName,
             isMultipleSearchStrategy: true
+            // Exclude large objects like regionSearchResult, businessTypes arrays, etc.
           }
         };
 
@@ -743,13 +770,39 @@ export async function callLeadGenerationApiActivity(
       userId: options.userId
     });
 
+    // Optimize request body by only sending essential data to avoid 414 errors
     const requestBody = {
       site_id: options.site_id,
       userId: options.userId,
-      ...options.additionalData
+      // Only include essential data, filter out large objects that might cause 414 errors
+      company: options.additionalData?.company ? {
+        name: options.additionalData.company.name,
+        industry: options.additionalData.company.industry,
+        location: options.additionalData.company.location,
+        website: options.additionalData.company.website
+      } : undefined,
+      targetCompany: options.additionalData?.targetCompany,
+      targetIndustry: options.additionalData?.targetIndustry,
+      targetLocation: options.additionalData?.targetLocation,
+      siteName: options.additionalData?.siteName,
+      siteUrl: options.additionalData?.siteUrl,
+      // Include only business type names, not full objects
+      businessTypes: options.additionalData?.businessTypes?.map((bt: any) => 
+        typeof bt === 'string' ? bt : bt?.name || bt
+      ) || undefined
+      // Explicitly exclude large objects that could cause 414 errors:
+      // - regionSearchResult (can be very large)
+      // - venuesResult (can be very large) 
+      // - businessTypes full objects (only include names)
     };
 
-    console.log('📤 Sending lead generation request:', JSON.stringify(requestBody, null, 2));
+    const requestBodySize = JSON.stringify(requestBody).length;
+    console.log(`📤 Sending lead generation request (${requestBodySize} bytes):`, JSON.stringify(requestBody, null, 2));
+    
+    // Warn if request body is getting large (approaching URL limits for some servers)
+    if (requestBodySize > 50000) { // 50KB warning threshold
+      console.warn(`⚠️ Large request body detected (${requestBodySize} bytes). This might cause 414 errors if data ends up in URL.`);
+    }
 
     const response = await apiService.post('/api/agents/sales/leadGeneration', requestBody);
 
@@ -879,9 +932,13 @@ export async function saveLeadsFromDeepResearchActivity(
       userId: options.userId,
       segment_id: options.segment_id,
       additionalData: {
-        ...options.additionalData,
+        // Only include essential data to avoid 414 errors
+        siteName: options.additionalData?.siteName,
+        siteUrl: options.additionalData?.siteUrl,
+        workflowId: options.additionalData?.workflowId,
         company: options.company,
         workflowStep: 'save_leads_from_deep_research'
+        // Exclude large objects like regionSearchResult, businessTypes arrays, etc.
       }
     };
 
@@ -2305,15 +2362,32 @@ export async function notifyNewLeadsActivity(
       };
     }
 
+    // Optimize request body by only sending essential data to avoid 414 errors
     const requestBody = {
       site_id: options.site_id,
       names: options.leadNames,
       userId: options.userId,
       timestamp: new Date().toISOString(),
-      ...options.additionalData
+      // Only include essential additionalData to avoid large request bodies
+      source: options.additionalData?.source,
+      workflowStep: options.additionalData?.workflowStep,
+      siteName: options.additionalData?.siteName,
+      siteUrl: options.additionalData?.siteUrl,
+      targetCity: options.additionalData?.targetCity,
+      targetRegion: options.additionalData?.targetRegion,
+      companiesProcessed: options.additionalData?.companiesProcessed,
+      executionTime: options.additionalData?.executionTime,
+      workflowId: options.additionalData?.workflowId
+      // Exclude large objects like businessTypes arrays, regionSearchResult, etc.
     };
 
-    console.log('📤 Sending new leads notification:', JSON.stringify(requestBody, null, 2));
+    const requestBodySize = JSON.stringify(requestBody).length;
+    console.log(`📤 Sending new leads notification (${requestBodySize} bytes):`, JSON.stringify(requestBody, null, 2));
+    
+    // Warn if request body is getting large
+    if (requestBodySize > 50000) { // 50KB warning threshold
+      console.warn(`⚠️ Large request body detected (${requestBodySize} bytes). This might cause 414 errors.`);
+    }
 
     const response = await apiService.post('/api/notifications/newLeadsAlert', requestBody);
 

@@ -92,7 +92,21 @@ class ApiService {
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
-      console.log(`🚀 Initiating fetch request...`);
+      console.log(`🚀 Initiating fetch request to: ${endpoint}`);
+      
+      // Log request details for debugging 414 errors
+      const bodySize = body ? JSON.stringify(body).length : 0;
+      const urlLength = url.length;
+      console.log(`📊 Request details: URL length: ${urlLength} chars, Body size: ${bodySize} bytes`);
+      
+      if (urlLength > 2000) {
+        console.warn(`⚠️ Long URL detected (${urlLength} chars). Some servers limit URLs to ~2048 chars.`);
+      }
+      
+      if (bodySize > 100000) { // 100KB
+        console.warn(`⚠️ Large request body (${bodySize} bytes). This could cause server issues.`);
+      }
+      
       const response = await fetch(url, {
         method,
         headers: requestHeaders,
@@ -105,6 +119,44 @@ class ApiService {
 
       if (!response.ok) {
         const errorText = await response.text();
+        
+        // Special handling for 414 Request-URI Too Large
+        if (response.status === 414) {
+          const error = {
+            code: `HTTP_414`,
+            message: `Request-URI Too Large (414): The URL length exceeds the server limit. This usually indicates that too much data is being sent in the URL parameters. Error details: ${errorText}`,
+            status: 414
+          };
+          
+          console.error(`🚨 CRITICAL: 414 Request-URI Too Large detected on endpoint: ${endpoint}`);
+          console.error(`🔧 URL length: ${url.length} chars, Body size: ${body ? JSON.stringify(body).length : 0} bytes`);
+          console.error(`🔧 SOLUTION: Consider using POST body instead of URL parameters for large data payloads`);
+          console.error(`🔧 Error details:`, error);
+          
+          return {
+            success: false,
+            error
+          };
+        }
+        
+        // Special handling for HTML error responses (typically from Cloudflare)
+        if (errorText.includes('<html>') || errorText.includes('cloudflare')) {
+          const error = {
+            code: `HTTP_${response.status}`,
+            message: `Server returned HTML error page (likely from Cloudflare): ${response.status} ${response.statusText}. This often indicates a 414 Request-URI Too Large error. Raw response: ${errorText}`,
+            status: response.status
+          };
+          
+          console.error(`🚨 CRITICAL: HTML error page detected on endpoint: ${endpoint}`);
+          console.error(`🔧 This is likely a 414 Request-URI Too Large error from Cloudflare`);
+          console.error(`🔧 URL length: ${url.length} chars, Body size: ${body ? JSON.stringify(body).length : 0} bytes`);
+          
+          return {
+            success: false,
+            error
+          };
+        }
+        
         const error = {
           code: `HTTP_${response.status}`,
           message: `API call failed: ${response.status} ${response.statusText}. ${errorText}`,

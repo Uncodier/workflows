@@ -580,7 +580,25 @@ export async function leadGenerationWorkflow(
     console.log('🔍 Region search result received:', JSON.stringify(regionSearchResult, null, 2));
     
     if (!regionSearchResult.success) {
-      const warningMsg = `Region search API call failed: ${regionSearchResult.error}, proceeding with generic search`;
+      const errorMsg = String(regionSearchResult.error || 'Unknown error');
+      
+      // Check for critical 414 errors that should fail the entire workflow
+      if (errorMsg.includes('414') || 
+          errorMsg.includes('Request-URI Too Large') ||
+          errorMsg.includes('<html>') || 
+          errorMsg.includes('cloudflare') ||
+          errorMsg.includes('HTTP_414') ||
+          errorMsg.includes('Server returned HTML error page')) {
+        
+        const criticalError = `Critical API error (414 Request-URI Too Large) in Region Search API: ${errorMsg}`;
+        console.error(`🚨 CRITICAL ERROR: ${criticalError}`);
+        console.error(`🛑 This error requires immediate attention and workflow termination`);
+        
+        errors.push(criticalError);
+        throw new Error(criticalError);
+      }
+      
+      const warningMsg = `Region search API call failed: ${errorMsg}, proceeding with generic search`;
       console.warn(`⚠️ ${warningMsg}`);
       errors.push(warningMsg);
       // Don't throw error, continue with generic search
@@ -716,6 +734,31 @@ export async function leadGenerationWorkflow(
       console.log(`🔍 Using multiple search terms strategy with ${businessTypes.length} business types (city + region + country)`);
       venuesResult = await callRegionVenuesWithMultipleSearchTermsActivity(regionVenuesMultipleOptions);
       
+      if (!venuesResult.success) {
+        const errorMsg = String(venuesResult.error || 'Unknown error');
+        
+        // Check for critical 414 errors that should fail the entire workflow
+        if (errorMsg.includes('414') || 
+            errorMsg.includes('Request-URI Too Large') ||
+            errorMsg.includes('<html>') || 
+            errorMsg.includes('cloudflare') ||
+            errorMsg.includes('HTTP_414') ||
+            errorMsg.includes('Server returned HTML error page')) {
+          
+          const criticalError = `Critical API error (414 Request-URI Too Large) in Region Venues API: ${errorMsg}`;
+          console.error(`🚨 CRITICAL ERROR: ${criticalError}`);
+          console.error(`🛑 This error requires immediate attention and workflow termination`);
+          
+          errors.push(criticalError);
+          throw new Error(criticalError);
+        }
+        
+        const normalErrorMsg = `Region venues API call failed: ${errorMsg}`;
+        console.error(`❌ ${normalErrorMsg}`);
+        errors.push(normalErrorMsg);
+        // Continue to handle this as a normal error
+      }
+      
       if (venuesResult.success && venuesResult.data && venuesResult.data.venues) {
         venuesFound = venuesResult.data.venues;
   
@@ -783,6 +826,30 @@ export async function leadGenerationWorkflow(
                     hasError: !!companyLeadGenResult.error,
                     error: companyLeadGenResult.error
                   });
+                  
+                  // Check for critical errors that should fail the entire workflow
+                  if (!companyLeadGenResult.success && companyLeadGenResult.error) {
+                    const errorMsg = String(companyLeadGenResult.error);
+                    
+                    // Check for 414 Request-URI Too Large or similar critical errors
+                    if (errorMsg.includes('414') || 
+                        errorMsg.includes('Request-URI Too Large') ||
+                        errorMsg.includes('URL too long') ||
+                        errorMsg.includes('<html>') || // HTML error pages from Cloudflare
+                        errorMsg.includes('cloudflare') ||
+                        errorMsg.includes('HTTP_414') ||
+                        errorMsg.includes('Server returned HTML error page')) {
+                      
+                      const criticalError = `Critical API error (414 Request-URI Too Large) in Lead Generation API: ${errorMsg}`;
+                      console.error(`🚨 CRITICAL ERROR: ${criticalError}`);
+                      console.error(`🛑 This error requires immediate attention and workflow termination`);
+                      console.error(`🔧 The API request payload is too large. Check recent optimizations.`);
+                      
+                      // Add to main errors array and throw to fail entire workflow
+                      errors.push(criticalError);
+                      throw new Error(criticalError);
+                    }
+                  }
                   
                   if (companyLeadGenResult.success && companyLeadGenResult.searchTopic) {
                     console.log(`✅ Lead generation for ${company.name} successful`);
