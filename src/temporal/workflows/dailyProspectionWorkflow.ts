@@ -399,17 +399,37 @@ export async function dailyProspectionWorkflow(
       userId: options.userId || site.user_id,
       hoursThreshold: hoursThreshold,
       additionalData: {
-        ...options.additionalData,
+        // Only include essential data to avoid 414 errors
         siteName: siteName,
-        siteUrl: siteUrl
+        siteUrl: siteUrl,
+        workflowType: 'dailyProspection'
+        // Exclude large objects that could cause 414 errors
       }
     });
     
     if (!prospectionLeadsResult.success) {
-      const errorMsg = `Failed to get prospection leads: ${prospectionLeadsResult.error}`;
-      console.error(`❌ ${errorMsg}`);
-      errors.push(errorMsg);
-      throw new Error(errorMsg);
+      const errorMsg = String(prospectionLeadsResult.error || 'Unknown error');
+      
+      // Check for critical 414 errors that should fail the entire workflow
+      if (errorMsg.includes('414') || 
+          errorMsg.includes('Request-URI Too Large') ||
+          errorMsg.includes('<html>') || 
+          errorMsg.includes('cloudflare') ||
+          errorMsg.includes('HTTP_414') ||
+          errorMsg.includes('Server returned HTML error page')) {
+        
+        const criticalError = `Critical API error (414 Request-URI Too Large) in Get Prospection Leads: ${errorMsg}`;
+        console.error(`🚨 CRITICAL ERROR: ${criticalError}`);
+        console.error(`🛑 This error requires immediate attention and workflow termination`);
+        
+        errors.push(criticalError);
+        throw new Error(criticalError);
+      }
+      
+      const fullErrorMsg = `Failed to get prospection leads: ${errorMsg}`;
+      console.error(`❌ ${fullErrorMsg}`);
+      errors.push(fullErrorMsg);
+      throw new Error(fullErrorMsg);
     }
     
     const rawLeads = prospectionLeadsResult.leads || [];
@@ -456,10 +476,12 @@ export async function dailyProspectionWorkflow(
         leads: leads,
         userId: options.userId || site.user_id,
         additionalData: {
-          ...options.additionalData,
+          // Only include essential data to avoid 414 errors
           siteName: siteName,
           siteUrl: siteUrl,
-          workflowId: realWorkflowId
+          workflowId: realWorkflowId,
+          workflowType: 'dailyProspection'
+          // Exclude large objects that could cause 414 errors
         }
       });
 
@@ -496,9 +518,27 @@ export async function dailyProspectionWorkflow(
           console.log(`⚠️ Continuing with prospection despite assignment failure`);
         }
       } else {
-        const errorMsg = `Sales agent processing failed: ${salesAgentResult.error}`;
-        console.error(`❌ ${errorMsg}`);
-        errors.push(errorMsg);
+        const errorMsg = String(salesAgentResult.error || 'Unknown error');
+        
+        // Check for critical 414 errors that should fail the entire workflow
+        if (errorMsg.includes('414') || 
+            errorMsg.includes('Request-URI Too Large') ||
+            errorMsg.includes('<html>') || 
+            errorMsg.includes('cloudflare') ||
+            errorMsg.includes('HTTP_414') ||
+            errorMsg.includes('Server returned HTML error page')) {
+          
+          const criticalError = `Critical API error (414 Request-URI Too Large) in Sales Agent API: ${errorMsg}`;
+          console.error(`🚨 CRITICAL ERROR: ${criticalError}`);
+          console.error(`🛑 This error requires immediate attention and workflow termination`);
+          
+          errors.push(criticalError);
+          throw new Error(criticalError);
+        }
+        
+        const fullErrorMsg = `Sales agent processing failed: ${errorMsg}`;
+        console.error(`❌ ${fullErrorMsg}`);
+        errors.push(fullErrorMsg);
         // Continue with all leads if sales agent fails
         selectedLeads = leads;
         console.log(`⚠️ Continuing with all ${leads.length} leads due to sales agent failure`);

@@ -690,14 +690,24 @@ export async function sendLeadsToSalesAgentActivity(
       userId: userId,
       additionalData: {
         workflowType: 'dailyProspection',
-        ...options.additionalData
+        // Only include essential data to avoid 414 errors
+        siteName: options.additionalData?.siteName,
+        siteUrl: options.additionalData?.siteUrl,
+        workflowId: options.additionalData?.workflowId
+        // Exclude large objects that could cause 414 errors
       }
     };
 
-    console.log('📤 Sending leads to sales agent API:', {
+    const requestBodySize = JSON.stringify(requestBody).length;
+    console.log(`📤 Sending leads to sales agent API (${requestBodySize} bytes):`, {
       leadCount: leads.length,
       endpoint: '/api/agents/sales/leadSelection'
     });
+    
+    // Warn if request body is getting large
+    if (requestBodySize > 50000) { // 50KB warning threshold
+      console.warn(`⚠️ Large request body detected (${requestBodySize} bytes). This might cause 414 errors.`);
+    }
 
     // Call the sales agent API with reasonable timeout (2 minutes)
     const response = await apiService.request('/api/agents/sales/leadSelection', {
