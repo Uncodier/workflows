@@ -498,12 +498,14 @@ export async function dailyProspectionWorkflow(
           site_id: site_id,
           salesAgentResponse: salesAgentResponse,
           userId: options.userId || site.user_id,
-                  additionalData: {
-          ...options.additionalData,
-          siteName: siteName,
-          siteUrl: siteUrl,
-          workflowId: realWorkflowId
-        }
+          additionalData: {
+            // Only include essential data to avoid 414 errors
+            siteName: siteName,
+            siteUrl: siteUrl,
+            workflowId: realWorkflowId,
+            workflowType: 'dailyProspection'
+            // Exclude large objects that could cause 414 errors
+          }
         });
 
         if (assignmentResult.success) {

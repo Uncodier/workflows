@@ -228,6 +228,15 @@ export async function getProspectionLeadsActivity(
   console.log(`🔍 Getting prospection leads for site: ${site_id}`);
   console.log(`   - Hours threshold: ${hoursThreshold} hours`);
   
+  // Debug: Log the exact input to identify if there's anything large
+  const inputSize = JSON.stringify(options).length;
+  console.log(`📊 Input payload size: ${inputSize} bytes`);
+  console.log(`📋 Full input:`, JSON.stringify(options, null, 2));
+  
+  if (inputSize > 50000) {
+    console.warn(`⚠️ Large input detected (${inputSize} bytes). This might cause issues.`);
+  }
+  
   try {
     const supabaseService = getSupabaseService();
     
@@ -863,15 +872,26 @@ export async function assignPriorityLeadsActivity(
             account_value: account.account_value,
             priority_score: priorityLead?.priority_score,
             company: account.company,
-            workflow_id: options.additionalData?.workflowId
+            workflow_id: options.additionalData?.workflowId,
+            // Only include essential data to avoid 414 errors
+            siteName: options.additionalData?.siteName,
+            siteUrl: options.additionalData?.siteUrl,
+            workflowType: options.additionalData?.workflowType
+            // Exclude large objects that could cause 414 errors
           }
         };
 
-        console.log('📤 Sending lead assignment notification:', {
+        const requestBodySize = JSON.stringify(notificationBody).length;
+        console.log(`📤 Sending lead assignment notification (${requestBodySize} bytes):`, {
           lead_id: leadId,
           assignee_id: assigneeId,
           company: account.company
         });
+        
+        // Warn if request body is getting large
+        if (requestBodySize > 50000) { // 50KB warning threshold
+          console.warn(`⚠️ Large request body detected (${requestBodySize} bytes). This might cause 414 errors.`);
+        }
 
         const notificationResponse = await apiService.request('/api/notifications/leadAssignment', {
           method: 'POST',
