@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, workflowInfo } from '@temporalio/workflow';
+import { proxyActivities, startChild, workflowInfo, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { leadGenerationWorkflow, type LeadGenerationOptions, type LeadGenerationResult } from './leadGenerationWorkflow';
 
@@ -183,6 +183,7 @@ export async function dailyStrategicAccountsWorkflow(
     const leadGenHandle = await startChild(leadGenerationWorkflow, {
       args: [leadGenOptions],
       workflowId: `strategic-lead-generation-${site_id}-${Date.now()}`,
+      parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON, // ✅ Child continues independently
     });
     
     const leadGenResult: LeadGenerationResult = await leadGenHandle.result();

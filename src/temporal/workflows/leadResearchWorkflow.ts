@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, workflowInfo } from '@temporalio/workflow';
+import { proxyActivities, startChild, workflowInfo, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { deepResearchWorkflow, type DeepResearchOptions } from './deepResearchWorkflow';
 
@@ -726,6 +726,7 @@ export async function leadResearchWorkflow(
       const deepResearchHandle = await startChild(deepResearchWorkflow, {
         args: [deepResearchOptions],
         workflowId: `deep-research-lead-${lead_id}-${site_id}-${Date.now()}`,
+        parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON, // ✅ Child continues independently
       });
       
       deepResearchResult = await deepResearchHandle.result();

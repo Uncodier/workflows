@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, workflowInfo } from '@temporalio/workflow';
+import { proxyActivities, startChild, workflowInfo, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { deepResearchWorkflow, type DeepResearchOptions } from './deepResearchWorkflow';
 import type { 
@@ -955,6 +955,7 @@ export async function leadGenerationWorkflow(
                     const employeeResearchHandle = await startChild(deepResearchWorkflow, {
                       args: [employeeResearchOptions],
                       workflowId: `employee-research-${company.name.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
+                      parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON, // ✅ Child continues independently
                     });
                     
                     const employeeResearchResult = await employeeResearchHandle.result();
@@ -1351,6 +1352,7 @@ export async function leadGenerationWorkflow(
         const retryWorkflowHandle = await startChild(leadGenerationWorkflow, {
           args: [retryOptions],
           workflowId: `lead-generation-retry-${site_id}-${Date.now()}`,
+          parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON, // ✅ Child continues independently
         });
         
         retryWorkflowStarted = true;
