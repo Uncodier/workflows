@@ -398,6 +398,7 @@ export async function dailyProspectionWorkflow(
       site_id: site_id,
       userId: options.userId || site.user_id,
       hoursThreshold: hoursThreshold,
+      maxLeads: options.maxLeads, // Pass the maxLeads parameter from activityPrioritizationEngine
       additionalData: {
         // Only include essential data to avoid 414 errors
         siteName: siteName,

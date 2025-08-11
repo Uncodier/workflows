@@ -1,4 +1,4 @@
-import { proxyActivities, startChild } from '@temporalio/workflow';
+import { proxyActivities, startChild, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { leadGenerationWorkflow, type LeadGenerationOptions, type LeadGenerationResult } from './leadGenerationWorkflow';
 
@@ -15,6 +15,35 @@ const {
     maximumAttempts: 3,
   },
 });
+
+/**
+ * Extract schedule ID from workflow info
+ * This function attempts to identify if the workflow was triggered by a schedule
+ * or executed manually/as a child workflow
+ */
+function extractScheduleId(info: any): string {
+  // Check if workflow was triggered by a schedule
+  // Temporal schedules typically set search attributes or memo data
+  const searchAttributes = info.searchAttributes || {};
+  const memo = info.memo || {};
+  
+  // Look for common schedule-related attributes
+  const scheduleId = 
+    searchAttributes['TemporalScheduledById'] || 
+    searchAttributes['ScheduleId'] ||
+    memo['TemporalScheduledById'] ||
+    memo['scheduleId'] ||
+    memo['scheduleName'];
+    
+  if (scheduleId) {
+    console.log(`✅ Real schedule ID found: ${scheduleId}`);
+    return scheduleId;
+  }
+  
+  // If no schedule ID found, it might be a manual execution or child workflow
+  console.log(`⚠️ No schedule ID found in workflow info - likely manual execution or child workflow`);
+  return 'manual-execution';
+}
 
 export interface DailyStrategicAccountsOptions {
   site_id: string;                    // Required: Site ID
@@ -95,20 +124,20 @@ export async function dailyStrategicAccountsWorkflow(
     throw new Error('No site ID provided');
   }
   
-  const workflowId = `daily-strategic-accounts-${site_id}`;
+  // Get REAL workflow information from Temporal
+  const workflowInfo_real = workflowInfo();
+  const realWorkflowId = workflowInfo_real.workflowId;
+  const realScheduleId = extractScheduleId(workflowInfo_real);
   const startTime = Date.now();
-  
-  // Extract scheduleId from additionalData.scheduleType (passed by scheduling activities)
-  // Fallback to generic format if not provided
-  const scheduleId = options.additionalData?.scheduleType || `daily-strategic-accounts-${site_id}`;
   
   console.log(`🎯 Starting daily strategic accounts workflow for site ${site_id}`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
-  console.log(`📋 Schedule ID: ${scheduleId} (from ${options.additionalData?.scheduleType ? 'scheduleType' : 'fallback'})`);
+  console.log(`📋 REAL Workflow ID: ${realWorkflowId} (from Temporal)`);
+  console.log(`📋 REAL Schedule ID: ${realScheduleId} (from ${realScheduleId === 'manual-execution' ? 'manual execution' : 'schedule'})`);
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({
-    workflowId,
+    workflowId: realWorkflowId,
     workflowType: 'dailyStrategicAccountsWorkflow',
     status: 'STARTED',
     input: options,
@@ -117,8 +146,8 @@ export async function dailyStrategicAccountsWorkflow(
   // Update cron status to indicate the workflow is running
   await saveCronStatusActivity({
     siteId: site_id,
-    workflowId,
-    scheduleId: scheduleId,
+    workflowId: realWorkflowId,
+    scheduleId: realScheduleId,
     activityName: 'dailyStrategicAccountsWorkflow',
     status: 'RUNNING',
     lastRun: new Date().toISOString()
@@ -145,7 +174,7 @@ export async function dailyStrategicAccountsWorkflow(
       additionalData: {
         ...options.additionalData,
         leadType: 'strategic_accounts',
-        workflowId: workflowId
+        workflowId: realWorkflowId
       }
     };
     
@@ -256,8 +285,8 @@ export async function dailyStrategicAccountsWorkflow(
     // Update cron status to indicate successful completion
     await saveCronStatusActivity({
       siteId: site_id,
-      workflowId,
-      scheduleId: scheduleId,
+      workflowId: realWorkflowId,
+      scheduleId: realScheduleId,
       activityName: 'dailyStrategicAccountsWorkflow',
       status: 'COMPLETED',
       lastRun: new Date().toISOString()
@@ -265,7 +294,7 @@ export async function dailyStrategicAccountsWorkflow(
 
     // Log successful completion
     await logWorkflowExecutionActivity({
-      workflowId,
+      workflowId: realWorkflowId,
       workflowType: 'dailyStrategicAccountsWorkflow',
       status: 'COMPLETED',
       input: options,
@@ -283,8 +312,8 @@ export async function dailyStrategicAccountsWorkflow(
     // Update cron status to indicate failure
     await saveCronStatusActivity({
       siteId: site_id,
-      workflowId,
-      scheduleId: scheduleId,
+      workflowId: realWorkflowId,
+      scheduleId: realScheduleId,
       activityName: 'dailyStrategicAccountsWorkflow',
       status: 'FAILED',
       lastRun: new Date().toISOString(),
@@ -294,7 +323,7 @@ export async function dailyStrategicAccountsWorkflow(
 
     // Log workflow execution failure
     await logWorkflowExecutionActivity({
-      workflowId,
+      workflowId: realWorkflowId,
       workflowType: 'dailyStrategicAccountsWorkflow',
       status: 'FAILED',
       input: options,

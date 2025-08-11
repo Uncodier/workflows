@@ -28,6 +28,7 @@ export interface DailyProspectionOptions {
   site_id: string;
   userId?: string;
   hoursThreshold?: number; // Default 48 hours
+  maxLeads?: number; // Maximum leads to process per site (default 30)
   additionalData?: any;
 }
 
@@ -223,10 +224,11 @@ export async function validateCommunicationChannelsActivity(
 export async function getProspectionLeadsActivity(
   options: DailyProspectionOptions
 ): Promise<GetProspectionLeadsResult> {
-  const { site_id, hoursThreshold = 48 } = options;
+  const { site_id, hoursThreshold = 48, maxLeads } = options;
   
   console.log(`🔍 Getting prospection leads for site: ${site_id}`);
   console.log(`   - Hours threshold: ${hoursThreshold} hours`);
+  console.log(`   - Max leads limit: ${maxLeads || 30} leads`);
   
   // Debug: Log the exact input to identify if there's anything large
   const inputSize = JSON.stringify(options).length;
@@ -265,14 +267,19 @@ export async function getProspectionLeadsActivity(
     
     console.log(`📅 Looking for leads created before: ${createdBefore}`);
     
-    // First, get all leads with status 'new' and older than threshold
+    // Use the maxLeads parameter from workflow (default 30 from activityPrioritizationEngine)
+    const leadsLimit = maxLeads || 30; // Use workflow parameter or default to 30
+    console.log(`🎯 Using leads limit: ${leadsLimit} (from workflow parameter)`);
+    
+    // First, get leads with status 'new' and older than threshold (with configured limit)
     const { data: candidateLeads, error: leadsError } = await supabaseServiceRole
       .from('leads')
       .select('*')
       .eq('site_id', site_id)
       .eq('status', 'new')
       .lt('created_at', createdBefore)
-      .order('created_at', { ascending: true }); // Oldest first for prospection
+      .order('created_at', { ascending: true }) // Oldest first for prospection
+      .limit(leadsLimit); // Use the configured leads limit
     
     if (leadsError) {
       logger.error('❌ Error fetching candidate leads', {
@@ -289,6 +296,12 @@ export async function getProspectionLeadsActivity(
     }
     
     console.log(`📋 Found ${candidateLeads?.length || 0} candidate leads with status 'new' older than ${hoursThreshold} hours`);
+    
+    // Warn if we hit the configured limit
+    if (candidateLeads && candidateLeads.length === leadsLimit) {
+      console.warn(`⚠️ Hit configured limit of ${leadsLimit} leads. There might be more leads available.`);
+      console.warn(`   Consider running daily prospection more frequently to process older leads.`);
+    }
     
     if (!candidateLeads || candidateLeads.length === 0) {
       console.log('✅ No candidate leads found for prospection');
@@ -308,13 +321,46 @@ export async function getProspectionLeadsActivity(
     // Get lead IDs for task filtering
     const leadIds = candidateLeads.map(lead => lead.id);
     
-    // Now check which of these leads have tasks in 'awareness' stage
-    const { data: awarenessTasksData, error: tasksError } = await supabaseServiceRole
-      .from('tasks')
-      .select('lead_id, id, status, stage')
-      .eq('site_id', site_id)
-      .eq('stage', 'awareness')
-      .in('lead_id', leadIds);
+    console.log(`🔍 Checking awareness tasks for ${leadIds.length} leads...`);
+    
+    // Split large lead ID arrays into smaller batches to avoid 414 errors with large IN clauses
+    const BATCH_SIZE = 100; // Limit to 100 IDs per query to avoid URL length issues
+    const leadIdBatches = [];
+    for (let i = 0; i < leadIds.length; i += BATCH_SIZE) {
+      leadIdBatches.push(leadIds.slice(i, i + BATCH_SIZE));
+    }
+    
+    console.log(`📊 Split ${leadIds.length} lead IDs into ${leadIdBatches.length} batches of max ${BATCH_SIZE} each`);
+    
+    // Query tasks in batches and combine results
+    const allAwarenessTasksData: any[] = [];
+    let tasksError: any = null;
+    
+    for (let batchIndex = 0; batchIndex < leadIdBatches.length; batchIndex++) {
+      const batch = leadIdBatches[batchIndex];
+      console.log(`🔍 Processing batch ${batchIndex + 1}/${leadIdBatches.length} with ${batch.length} lead IDs...`);
+      
+      const { data: batchTasksData, error: batchTasksError } = await supabaseServiceRole
+        .from('tasks')
+        .select('lead_id, id, status, stage')
+        .eq('site_id', site_id)
+        .eq('stage', 'awareness')
+        .in('lead_id', batch);
+      
+      if (batchTasksError) {
+        console.error(`❌ Error in batch ${batchIndex + 1}:`, batchTasksError.message);
+        tasksError = batchTasksError;
+        break; // Stop on first error
+      }
+      
+      if (batchTasksData) {
+        allAwarenessTasksData.push(...batchTasksData);
+        console.log(`✅ Batch ${batchIndex + 1} completed: found ${batchTasksData.length} awareness tasks`);
+      }
+    }
+    
+    // Use combined results
+    const awarenessTasksData = allAwarenessTasksData;
     
     if (tasksError) {
       logger.error('❌ Error checking awareness tasks', {
