@@ -334,8 +334,6 @@ export async function buildSegmentsWorkflow(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Build segments workflow failed: ${errorMessage}`);
     
-    const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-    
     // Update cron status to indicate failure
     await saveCronStatusActivity({
       siteId: siteId,
@@ -357,21 +355,7 @@ export async function buildSegmentsWorkflow(
       error: errorMessage,
     });
 
-    // Return failed result instead of throwing to provide more information
-    const result: BuildSegmentsResult = {
-      success: false,
-      siteId: siteId,
-      siteName,
-      siteUrl,
-      segmentsBuilt,
-      mode: 'create', // Default mode for new API
-      segments,
-      analysis,
-      errors: [...errors, errorMessage],
-      executionTime,
-      completedAt: new Date().toISOString()
-    };
-
-    return result;
+    // Throw error to properly fail the workflow
+    throw new Error(`Build segments workflow failed: ${errorMessage}`);
   }
 } 

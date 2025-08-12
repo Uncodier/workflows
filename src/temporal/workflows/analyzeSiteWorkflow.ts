@@ -1328,8 +1328,6 @@ export async function analyzeSiteWorkflow(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Company and project research workflow failed: ${errorMessage}`);
     
-    const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-    
     // Update cron status to indicate failure
     await saveCronStatusActivity({
       siteId: site_id,
@@ -1351,21 +1349,7 @@ export async function analyzeSiteWorkflow(
       error: errorMessage,
     });
 
-    // Return failed result instead of throwing to provide more information
-    const result: AnalyzeSiteResult = {
-      success: false,
-      siteId: site_id,
-      siteName,
-      siteUrl,
-      deepResearchResult,
-      uxAnalysisResult,
-      settingsUpdates,
-      notificationResult,
-      errors: [...errors, errorMessage],
-      executionTime,
-      completedAt: new Date().toISOString()
-    };
-
-    return result;
+    // Throw error to properly fail the workflow
+    throw new Error(`Analyze site workflow failed: ${errorMessage}`);
   }
 } 

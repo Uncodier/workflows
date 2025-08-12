@@ -1166,8 +1166,6 @@ export async function leadResearchWorkflow(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Lead research workflow failed: ${errorMessage}`);
     
-    const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-    
     // Update cron status to indicate failure
     await saveCronStatusActivity({
       siteId: site_id,
@@ -1189,43 +1187,7 @@ export async function leadResearchWorkflow(
       error: errorMessage,
     });
 
-    // Clean up the deep research result even in error cases
-    let cleanedDeepResearchResult = null;
-    if (deepResearchResult) {
-      cleanedDeepResearchResult = {
-        success: deepResearchResult.success,
-        siteId: deepResearchResult.siteId,
-        researchTopic: deepResearchResult.researchTopic,
-        siteName: deepResearchResult.siteName,
-        siteUrl: deepResearchResult.siteUrl,
-        operations: deepResearchResult.operations || [],
-        operationResults: deepResearchResult.operationResults || [],
-        analysis: deepResearchResult.analysis,
-        insights: deepResearchResult.insights || [],
-        recommendations: deepResearchResult.recommendations || [],
-        errors: deepResearchResult.errors || [],
-        executionTime: deepResearchResult.executionTime,
-        completedAt: deepResearchResult.completedAt
-      };
-    }
-
-    // Return failed result instead of throwing to provide more information
-    const result: LeadResearchResult = {
-      success: false,
-      leadId: lead_id,
-      siteId: site_id,
-      siteName,
-      siteUrl,
-      leadInfo,
-      deepResearchResult: cleanedDeepResearchResult,
-      researchQuery,
-      leadSegmentationResult: null, // Set to null on error
-      data: cleanedDeepResearchResult,
-      errors: [...errors, errorMessage],
-      executionTime,
-      completedAt: new Date().toISOString()
-    };
-
-    return result;
+    // Throw error to properly fail the workflow
+    throw new Error(`Lead research workflow failed: ${errorMessage}`);
   }
 } 

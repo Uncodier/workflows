@@ -100,24 +100,16 @@ export async function dailyStandUpWorkflow(
   if (!cronValidation.canProceed) {
     console.log('⏳ Another daily standup is likely running for this site - terminating');
     
-    const result: DailyStandUpResult = {
-      success: false,
-      siteId: site_id,
-      errors: [`Workflow blocked: ${cronValidation.reason}`],
-      executionTime: `${Date.now() - startTime}ms`,
-      completedAt: new Date().toISOString()
-    };
-
     // Log termination
     await logWorkflowExecutionActivity({
       workflowId,
       workflowType: 'dailyStandUpWorkflow',
       status: 'BLOCKED',
       input: options,
-      output: result,
+      error: `Workflow blocked: ${cronValidation.reason}`,
     });
 
-    return result;
+    throw new Error(`Workflow blocked: ${cronValidation.reason}`);
   }
 
   // Log workflow execution start

@@ -132,19 +132,11 @@ export async function humanInterventionWorkflow(
     return result;
 
   } catch (error) {
-    const endTime = new Date();
-    const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
     const errorMessage = error instanceof Error ? error.message : String(error);
     
     console.error(`❌ Human intervention workflow failed: ${errorMessage}`);
 
-    return {
-      success: false,
-      conversationId: params.conversationId,
-      origin: params.origin,
-      executionTime,
-      timestamp: new Date().toISOString(),
-      error: errorMessage
-    };
+    // Throw error to properly fail the workflow
+    throw new Error(`Human intervention workflow failed: ${errorMessage}`);
   }
 } 

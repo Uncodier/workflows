@@ -194,19 +194,11 @@ export async function deepResearchWorkflow(
   const { site_id, research_topic } = options;
   
   if (!site_id) {
-    return {
-      success: false,
-      data: null,
-      error: 'No site ID provided'
-    };
+    throw new Error('No site ID provided');
   }
   
   if (!research_topic) {
-    return {
-      success: false,
-      data: null,
-      error: 'No research topic provided'
-    };
+    throw new Error('No research topic provided');
   }
   
   // Get REAL workflow information from Temporal
@@ -846,40 +838,6 @@ export async function deepResearchWorkflow(
       error: errorMessage,
     });
 
-    // Prepare flattened error result data
-    const errorResearchAnalysis = research_analysis || { // Ensure research_analysis is always present even in error cases
-      success: false,
-      error: errorMessage,
-      site_id: site_id,
-      research_topic: research_topic,
-      deliverables: enhancedDeliverables || options.deliverables,
-      timestamp: new Date().toISOString(),
-      fallback: false
-    };
-    
-    // Check if any operations completed in fallback mode before the error
-    const hadFallbackOperations = operationResults.some(result => result.fallback || false);
-    
-    const errorData = {
-      // Spread error research analysis content directly at root level
-      ...errorResearchAnalysis,
-      // Keep deliverables at top level for consistency
-      // Use the deliverables from errorResearchAnalysis (which already contains appropriate deliverables)
-      deliverables: errorResearchAnalysis?.deliverables || enhancedDeliverables || options.deliverables,
-      // Add execution metadata
-      execution_time: `${((Date.now() - startTime) / 1000).toFixed(2)}s`,
-      completed_at: new Date().toISOString(),
-      // Add fallback information
-      workflow_fallback_mode: hadFallbackOperations,
-      fallback_operations: operationResults.filter(result => result.fallback).length,
-      api_status: 'error',
-      error_stage: research_analysis ? 'post_analysis' : 'pre_analysis'
-    };
-
-    return {
-      success: false,
-      data: errorData,
-      error: errorMessage
-    };
+    throw new Error(`Deep research workflow failed: ${errorMessage}`);
   }
 } 

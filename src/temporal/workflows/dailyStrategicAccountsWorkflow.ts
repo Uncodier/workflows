@@ -308,8 +308,6 @@ export async function dailyStrategicAccountsWorkflow(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Daily strategic accounts workflow failed: ${errorMessage}`);
     
-    const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-    
     // Update cron status to indicate failure
     await saveCronStatusActivity({
       siteId: site_id,
@@ -331,46 +329,7 @@ export async function dailyStrategicAccountsWorkflow(
       error: errorMessage,
     });
 
-    // Return failed result instead of throwing to provide more information
-    const result: DailyStrategicAccountsResult = {
-      success: false,
-      siteId: site_id,
-      siteName,
-      siteUrl,
-      strategicCriteria: {
-        region: 'world',
-        keywords: 'key accounts',
-        searchType: 'strategic_accounts'
-      },
-      leadsGenerated,
-      leadsProcessed,
-      tasksCreated: 0,
-      statusUpdated: 0,
-      strategicAccountResults: [],
-      salesAgentResponse: null,
-      selectedLeads: [],
-      leadsPriority: null,
-      assignedLeads: [],
-      notificationResults: [],
-
-      // Add channel filtering fields
-      leadsFiltered: 0,
-      filteredLeads: [],
-      channelFilteringInfo: {
-        hasEmailChannel: false,
-        hasWhatsappChannel: false,
-        leadsWithEmail: 0,
-        leadsWithPhone: 0,
-        leadsWithBoth: 0,
-        leadsWithNeither: 0,
-        leadsFilteredOut: 0
-      },
-      regionSearchResult,
-      errors: [...errors, errorMessage],
-      executionTime,
-      completedAt: new Date().toISOString()
-    };
-
-    return result;
+    // Throw error to properly fail the workflow
+    throw new Error(`Daily strategic accounts workflow failed: ${errorMessage}`);
   }
 } 

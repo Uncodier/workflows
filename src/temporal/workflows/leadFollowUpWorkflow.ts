@@ -610,21 +610,7 @@ export async function leadFollowUpWorkflow(
 
       // Complete workflow without processing or creating logs
       const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-      const result: LeadFollowUpResult = {
-        success: false, // Mark as failed since we can't proceed
-        leadId: lead_id,
-        siteId: site_id,
-        siteName,
-        siteUrl,
-        followUpActions,
-        nextSteps,
-        data: response,
-        messageSent: undefined,
-        errors: [...errors, 'Workflow stopped due to contact validation failure'],
-        executionTime,
-        completedAt: new Date().toISOString()
-      };
-
+      
       console.log(`⚠️ Lead follow-up workflow stopped due to contact validation failure`);
       console.log(`📊 Summary: Lead ${lead_id} validation failed for ${siteName} in ${executionTime}`);
 
@@ -634,20 +620,21 @@ export async function leadFollowUpWorkflow(
         workflowId,
         scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
         activityName: 'leadFollowUpWorkflow',
-        status: 'COMPLETED', // Use COMPLETED since this is expected behavior
+        status: 'FAILED',
         lastRun: new Date().toISOString()
       });
 
-      // Log completion with validation failure
+      // Log failure with validation failure
       await logWorkflowExecutionActivity({
         workflowId,
         workflowType: 'leadFollowUpWorkflow',
-        status: 'COMPLETED',
+        status: 'FAILED',
         input: options,
-        output: result,
+        error: `Contact validation failed: ${validationResult.message} (${validationResult.validationType})`,
       });
 
-      return result;
+      // Throw error to properly fail the workflow
+      throw new Error(`Contact validation failed: ${validationResult.message} (${validationResult.validationType})`);
     }
 
     console.log(`✅ Contact validation passed - proceeding with logs and message delivery`);
@@ -1257,8 +1244,6 @@ export async function leadFollowUpWorkflow(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Lead follow-up workflow failed: ${errorMessage}`);
     
-    const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-    
     // Update cron status to indicate failure
     await saveCronStatusActivity({
       siteId: site_id,
@@ -1280,22 +1265,7 @@ export async function leadFollowUpWorkflow(
       error: errorMessage,
     });
 
-    // Return failed result instead of throwing to provide more information
-    const result: LeadFollowUpResult = {
-      success: false,
-      leadId: lead_id,
-      siteId: site_id,
-      siteName,
-      siteUrl,
-      followUpActions,
-      nextSteps,
-      data: response,
-      messageSent,
-      errors: [...errors, errorMessage],
-      executionTime,
-      completedAt: new Date().toISOString()
-    };
-
-    return result;
+    // Throw error to properly fail the workflow
+    throw new Error(`Lead follow-up workflow failed: ${errorMessage}`);
   }
 } 

@@ -149,15 +149,7 @@ export async function buildContentWorkflow(options: BuildContentOptions): Promis
   
   if (!siteId) {
     console.error('❌ No site ID provided');
-    return {
-      success: false,
-      siteId: '',
-      recommendationsGenerated: 0,
-      operationType: 'calendar',
-      errors: ['No site ID provided'],
-      executionTime: '0s',
-      completedAt: new Date().toISOString()
-    };
+    throw new Error('No site ID provided');
   }
   
   console.log(`📝 Starting buildContentWorkflow for site: ${siteId}`);
@@ -349,16 +341,8 @@ export async function buildContentWorkflow(options: BuildContentOptions): Promis
       console.warn('⚠️  Failed to log workflow failure:', logError);
     }
 
-    // Return failure result
-    const executionTime = `${(Date.now() - startTime) / 1000}s`;
-    return {
-      success: false,
-      siteId: siteId,
-      recommendationsGenerated: 0,
-      operationType: hasDraftContent ? 'improve' : 'calendar',
-      errors,
-      executionTime,
-      completedAt: new Date().toISOString()
-    };
+    // Throw error to properly fail the workflow
+    const allErrors = errors.length > 0 ? errors.join(', ') : 'Unknown error in build content workflow';
+    throw new Error(`Build content workflow failed: ${allErrors}`);
   }
 } 

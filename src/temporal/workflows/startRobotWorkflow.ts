@@ -74,30 +74,13 @@ export async function startRobotWorkflow(input: StartRobotInput): Promise<StartR
 
     if (!instanceResult.success) {
       console.error(`❌ Robot instance call failed for site ${site_id}:`, instanceResult.error);
-      
-      return {
-        success: false,
-        error: `Instance call failed: ${instanceResult.error}`,
-        site_id,
-        activity,
-        user_id,
-        executedAt: new Date().toISOString()
-      };
+      throw new Error(`Instance call failed: ${instanceResult.error}`);
     }
 
     // Validate instance_id was returned
     if (!instanceResult.instance_id) {
       console.error(`❌ No instance_id returned from robot instance API for site ${site_id}`);
-      
-      return {
-        success: false,
-        error: 'Instance API did not return instance_id',
-        instanceData: instanceResult.data,
-        site_id,
-        activity,
-        user_id,
-        executedAt: new Date().toISOString()
-      };
+      throw new Error('Instance API did not return instance_id');
     }
 
     const instance_id = instanceResult.instance_id;
@@ -120,16 +103,7 @@ export async function startRobotWorkflow(input: StartRobotInput): Promise<StartR
 
     if (!planResult.success) {
       console.error(`❌ Robot plan call failed for site ${site_id}:`, planResult.error);
-      
-      return {
-        success: false,
-        error: `Plan call failed: ${planResult.error}`,
-        instanceData: instanceResult.data,
-        site_id,
-        activity,
-        user_id,
-        executedAt: new Date().toISOString()
-      };
+      throw new Error(`Plan call failed: ${planResult.error}`);
     }
 
     // Extract instance_plan_id from plan call
@@ -198,13 +172,6 @@ export async function startRobotWorkflow(input: StartRobotInput): Promise<StartR
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Robot workflow exception for site ${site_id}:`, errorMessage);
 
-    return {
-      success: false,
-      error: errorMessage,
-      site_id,
-      activity,
-      user_id,
-      executedAt: new Date().toISOString()
-    };
+    throw new Error(`Start robot workflow failed: ${errorMessage}`);
   }
 }

@@ -75,32 +75,12 @@ export async function sendNewsletterWorkflow(params: SendNewsletterParams): Prom
     
     if (!emailConfigResult.success) {
       console.error('❌ Failed to validate email configuration:', emailConfigResult.error);
-      return {
-        success: false,
-        emailsSent: 0,
-        emailsFailed: 0,
-        totalLeads: 0,
-        leadsProcessed: 0,
-        emailConfigValid: false,
-        executionTime: `${new Date().getTime() - startTime.getTime()}ms`,
-        timestamp: new Date().toISOString(),
-        error: `Email configuration validation failed: ${emailConfigResult.error}`
-      };
+      throw new Error(`Email configuration validation failed: ${emailConfigResult.error}`);
     }
     
     if (!emailConfigResult.hasEmailConfig) {
       console.error('❌ Email configuration not found or invalid');
-      return {
-        success: false,
-        emailsSent: 0,
-        emailsFailed: 0,
-        totalLeads: 0,
-        leadsProcessed: 0,
-        emailConfigValid: false,
-        executionTime: `${new Date().getTime() - startTime.getTime()}ms`,
-        timestamp: new Date().toISOString(),
-        error: `Email configuration not found or invalid: ${emailConfigResult.error}`
-      };
+      throw new Error(`Email configuration not found or invalid: ${emailConfigResult.error}`);
     }
     
     console.log('✅ Email configuration validated successfully');
@@ -117,17 +97,7 @@ export async function sendNewsletterWorkflow(params: SendNewsletterParams): Prom
     
     if (!leadsResult.success) {
       console.error('❌ Failed to fetch leads:', leadsResult.error);
-      return {
-        success: false,
-        emailsSent: 0,
-        emailsFailed: 0,
-        totalLeads: 0,
-        leadsProcessed: 0,
-        emailConfigValid: true,
-        executionTime: `${new Date().getTime() - startTime.getTime()}ms`,
-        timestamp: new Date().toISOString(),
-        error: `Failed to fetch leads: ${leadsResult.error}`
-      };
+      throw new Error(`Failed to fetch leads: ${leadsResult.error}`);
     }
     
     if (leadsResult.leads.length === 0) {
@@ -160,18 +130,7 @@ export async function sendNewsletterWorkflow(params: SendNewsletterParams): Prom
     
     if (!emailResult.success) {
       console.error('❌ Newsletter sending failed:', emailResult.error);
-      return {
-        success: false,
-        emailsSent: emailResult.emailsSent,
-        emailsFailed: emailResult.emailsFailed,
-        totalLeads: leadsResult.leads.length,
-        leadsProcessed: emailResult.emailsSent + emailResult.emailsFailed,
-        emailConfigValid: true,
-        executionTime: `${new Date().getTime() - startTime.getTime()}ms`,
-        timestamp: new Date().toISOString(),
-        error: `Newsletter sending failed: ${emailResult.error}`,
-        results: emailResult.results
-      };
+      throw new Error(`Newsletter sending failed: ${emailResult.error}`);
     }
     
     const endTime = new Date();
@@ -197,22 +156,10 @@ export async function sendNewsletterWorkflow(params: SendNewsletterParams): Prom
     };
 
   } catch (error) {
-    const endTime = new Date();
-    const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
     const errorMessage = error instanceof Error ? error.message : String(error);
     
     console.error('❌ Send newsletter workflow failed:', errorMessage);
     
-    return {
-      success: false,
-      emailsSent: 0,
-      emailsFailed: 0,
-      totalLeads: 0,
-      leadsProcessed: 0,
-      emailConfigValid: false,
-      executionTime,
-      timestamp: new Date().toISOString(),
-      error: errorMessage
-    };
+    throw new Error(`Send newsletter workflow failed: ${errorMessage}`);
   }
 } 

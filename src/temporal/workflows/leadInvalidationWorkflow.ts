@@ -347,8 +347,6 @@ export async function leadInvalidationWorkflow(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Lead invalidation workflow failed: ${errorMessage}`);
     
-    const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-    
     // Step 4: Even if workflow failed, try to delete initial task
     console.log(`📝 Step 4: Attempting to delete initial task for lead ${lead_id} despite workflow failure...`);
     
@@ -398,21 +396,8 @@ export async function leadInvalidationWorkflow(
       error: errorMessage,
     });
 
-    // Return failed result instead of throwing to provide more information
-    const result: LeadInvalidationResult = {
-      success: false,
-      leadId: lead_id,
-      originalSiteId,
-      invalidatedLead: leadInvalidated,
-      sharedContactLeads,
-      invalidatedSharedLeads,
-      reason,
-      errors: [...errors, errorMessage],
-      executionTime,
-      completedAt: new Date().toISOString()
-    };
-
-    return result;
+    // Throw error to properly fail the workflow
+    throw new Error(`Lead invalidation workflow failed: ${errorMessage}`);
   }
 }
 

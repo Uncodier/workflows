@@ -137,11 +137,8 @@ export async function answerWhatsappMessageWorkflow(
     
   } catch (error) {
     console.error('❌ WhatsApp message workflow failed:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-      workflow_id: workflowId
-    };
+    // Throw error to properly fail the workflow
+    throw new Error(`WhatsApp message workflow failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

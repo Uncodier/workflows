@@ -62,12 +62,7 @@ export async function buildCampaignsWorkflow(
   if (!siteId) {
     const errorMessage = 'Site ID is required but not provided';
     console.error(`❌ ${errorMessage}`);
-    return {
-      success: false,
-      processed: false,
-      reason: 'Invalid parameters',
-      error: errorMessage
-    };
+    throw new Error(errorMessage);
   }
   
   try {
@@ -84,12 +79,7 @@ export async function buildCampaignsWorkflow(
         throw new Error(`Site ${siteId} not found`);
       }
       
-      return {
-        success: false,
-        processed: false,
-        reason: 'Site validation failed',
-        error: siteResult.error || 'Site validation failed'
-      };
+      throw new Error(siteResult.error || 'Site validation failed');
     }
     
     if (!siteResult.site) {

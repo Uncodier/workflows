@@ -1395,8 +1395,6 @@ export async function leadGenerationWorkflow(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ NEW Lead generation workflow failed: ${errorMessage}`);
     
-    const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-    
     // Update cron status to indicate failure
     await saveCronStatusActivity({
       siteId: site_id,
@@ -1418,30 +1416,7 @@ export async function leadGenerationWorkflow(
       error: errorMessage,
     });
 
-    // Return failed result instead of throwing to provide more information
-    const result: LeadGenerationResult = {
-      success: false,
-      siteId: site_id,
-      siteName,
-      siteUrl,
-      regionSearchResult,
-      businessTypes,
-      enhancedSearchTopic,
-      targetCity,
-      targetRegion,
-      venuesResult,
-      venuesFound,
-      companiesCreated,
-      companyResults,
-      totalLeadsGenerated,
-      leadCreationResults,
-      retryWorkflowStarted,
-      retryWorkflowId: retryWorkflowStarted ? retryWorkflowId : undefined,
-      errors: [...errors, errorMessage],
-      executionTime,
-      completedAt: new Date().toISOString()
-    };
-
-    return result;
+    // Throw error to properly fail the workflow
+    throw new Error(`Lead generation workflow failed: ${errorMessage}`);
   }
 } 

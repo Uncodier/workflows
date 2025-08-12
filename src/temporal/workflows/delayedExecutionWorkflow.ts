@@ -69,11 +69,6 @@ export async function delayedExecutionWorkflow(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Failed to execute delayed workflow ${targetWorkflow}: ${errorMessage}`);
     
-    return {
-      success: false,
-      delayedFor: `${(delayMs / 1000 / 60).toFixed(1)} minutes`,
-      targetWorkflow,
-      error: errorMessage
-    };
+    throw new Error(`Delayed execution workflow failed: ${errorMessage}`);
   }
 } 

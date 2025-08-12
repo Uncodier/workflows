@@ -320,9 +320,7 @@ export async function siteSetupWorkflow(params: SiteSetupParams): Promise<SiteSe
   } catch (error) {
     console.error('❌ Site setup workflow failed:', error);
     
-    result.error = error instanceof Error ? error.message : String(error);
-    result.success = false;
-    
-    return result;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Site setup workflow failed: ${errorMessage}`);
   }
 } 

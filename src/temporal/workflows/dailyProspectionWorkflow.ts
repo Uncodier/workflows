@@ -848,8 +848,6 @@ export async function dailyProspectionWorkflow(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Daily prospection workflow failed: ${errorMessage}`);
     
-    const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-    
     // Update cron status to indicate failure
     await saveCronStatusActivity({
       siteId: site_id,
@@ -871,36 +869,7 @@ export async function dailyProspectionWorkflow(
       error: errorMessage,
     });
 
-    // Return failed result instead of throwing to provide more information
-    const result: DailyProspectionResult = {
-      success: false,
-      siteId: site_id,
-      siteName,
-      siteUrl,
-      prospectionCriteria,
-      leadsFound,
-      leadsProcessed,
-      tasksCreated,
-      statusUpdated,
-      prospectionResults,
-      salesAgentResponse,
-      selectedLeads,
-      leadsPriority,
-      assignedLeads,
-      notificationResults,
-      // Add follow-up fields with default values for error case
-      followUpWorkflowsStarted: 0,
-      followUpResults: [],
-      unassignedLeads: [],
-      // Add channel filtering fields
-      leadsFiltered,
-      filteredLeads: leads,
-      channelFilteringInfo: filteringInfo,
-      errors: [...errors, errorMessage],
-      executionTime,
-      completedAt: new Date().toISOString()
-    };
-
-    return result;
+    // Throw error to properly fail the workflow
+    throw new Error(`Daily prospection workflow failed: ${errorMessage}`);
   }
 }
