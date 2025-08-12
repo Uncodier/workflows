@@ -75,13 +75,21 @@ export async function dailyStandUpWorkflow(
   const workflowId = `daily-standup-${site_id}-${Date.now()}`;
   const startTime = Date.now();
   
-  // Extract scheduleId from additionalData.scheduleType (passed by scheduling activities)
-  // Fallback to generic format if not provided
-  const scheduleId = options.additionalData?.scheduleType || `daily-standup-${site_id}`;
+  // Extract scheduleId - prioritize parent schedule ID from dailyOperations
+  // Check if a parent schedule ID was passed through additionalData (from dailyOperationsWorkflow)
+  const parentScheduleId = options.additionalData?.parentScheduleId || 
+                          options.additionalData?.originalScheduleId ||
+                          options.additionalData?.dailyOperationsScheduleId;
+  
+  const scheduleId = parentScheduleId || 
+                    options.additionalData?.scheduleType || 
+                    `daily-standup-${site_id}`;
   
   console.log(`🎯 Starting CMO daily stand up workflow for site ${site_id}`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
-  console.log(`📋 Schedule ID: ${scheduleId} (from ${options.additionalData?.scheduleType ? 'scheduleType' : 'fallback'})`);
+  const scheduleSource = parentScheduleId ? 'parent dailyOperations' : 
+                       (options.additionalData?.scheduleType ? 'scheduleType' : 'fallback');
+  console.log(`📋 Schedule ID: ${scheduleId} (from ${scheduleSource})`);
 
   // Validate and clean any stuck cron status records before execution
   console.log('🔍 Validating cron status before daily standup execution...');

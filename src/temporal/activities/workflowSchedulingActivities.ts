@@ -954,6 +954,7 @@ async function executeDailyStandUpWorkflow(
     scheduleType: string;
     businessHoursAnalysis?: any;
     scheduledBy: string;
+    parentScheduleId?: string;
   }
 ): Promise<ScheduleWorkflowResult> {
   const workflowId = `daily-standup-${site.id}-${Date.now()}`;
@@ -977,7 +978,9 @@ async function executeDailyStandUpWorkflow(
           executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
           timezone: 'UTC',
           executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
-          businessHoursAnalysis: executionOptions.businessHoursAnalysis
+          businessHoursAnalysis: executionOptions.businessHoursAnalysis,
+          parentScheduleId: executionOptions.parentScheduleId,
+          dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
         }
       }],
       taskQueue: temporalConfig.taskQueue,
@@ -1159,7 +1162,7 @@ export async function scheduleDailyOperationsWorkflowActivity(
  */
 export async function scheduleIndividualDailyStandUpsActivity(
   businessHoursAnalysis: any,
-  options: { timezone?: string } = {}
+  options: { timezone?: string; parentScheduleId?: string } = {}
 ): Promise<{
   scheduled: number;
   failed: number;
@@ -1317,7 +1320,9 @@ export async function scheduleIndividualDailyStandUpsActivity(
             delayMs,
             targetTimeUTC: finalTargetUTC.toISOString(),
             workflowVersion: '2.0', // Add version tracking
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            parentScheduleId: options.parentScheduleId,
+            dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
           }
         }];
 
@@ -1442,7 +1447,7 @@ export async function scheduleIndividualDailyStandUpsActivity(
  */
 export async function scheduleIndividualSiteAnalysisActivity(
   businessHoursAnalysis: any,
-  options: { timezone?: string } = {}
+  options: { timezone?: string; parentScheduleId?: string } = {}
 ): Promise<{
   scheduled: number;
   skipped: number;
@@ -1640,7 +1645,9 @@ export async function scheduleIndividualSiteAnalysisActivity(
             targetTimeUTC: finalTargetUTC.toISOString(),
             analysisType: 'initial-site-analysis',
             originalDailyStandupTime: scheduledTime,
-            analysisExecutesOneHourEarlier: true
+            analysisExecutesOneHourEarlier: true,
+            parentScheduleId: options.parentScheduleId,
+            dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
           }
         }];
 
@@ -1737,7 +1744,7 @@ export async function scheduleIndividualSiteAnalysisActivity(
  */
 export async function scheduleIndividualLeadGenerationActivity(
   businessHoursAnalysis: any,
-  options: { timezone?: string } = {}
+  options: { timezone?: string; parentScheduleId?: string } = {}
 ): Promise<{
   scheduled: number;
   skipped: number;
@@ -1909,7 +1916,9 @@ export async function scheduleIndividualLeadGenerationActivity(
             leadGenerationType: 'post-standup-lead-generation',
             originalDailyStandupTime: scheduledTime,
             leadGenExecutesOneHourLater: true,
-            executesAfterDailyStandup: true
+            executesAfterDailyStandup: true,
+            parentScheduleId: options.parentScheduleId,
+            dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
           }
         }];
 
@@ -2020,7 +2029,9 @@ export async function scheduleIndividualLeadGenerationActivity(
             strategicAccountsType: 'post-leadgeneration-strategic-accounts',
             originalDailyStandupTime: scheduledTime,
             leadGenTime: leadGenScheduledTime,
-            executesAfterLeadGeneration: true
+            executesAfterLeadGeneration: true,
+            parentScheduleId: options.parentScheduleId,
+            dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
           }
         }];
 
@@ -2123,6 +2134,7 @@ export async function executeDailyProspectionWorkflowsActivity(
     businessHoursAnalysis?: any;
     hoursThreshold?: number;
     maxLeads?: number;
+    parentScheduleId?: string;
   } = {}
 ): Promise<{
   scheduled: number;
@@ -2265,7 +2277,8 @@ export async function executeDailyProspectionWorkflowsActivity(
           scheduledBy: 'activityPrioritizationEngine',
           hoursThreshold,
           maxLeads,
-          dryRun: options.dryRun
+          dryRun: options.dryRun,
+          parentScheduleId: options.parentScheduleId
         });
         
         results.push(prospectionResult);
@@ -2343,6 +2356,7 @@ async function executeDailyProspectionWorkflow(
     hoursThreshold?: number;
     maxLeads?: number;
     dryRun?: boolean;
+    parentScheduleId?: string;
   }
 ): Promise<ScheduleWorkflowResult> {
   const workflowId = `daily-prospection-${site.id}-${Date.now()}`;
@@ -2384,7 +2398,9 @@ async function executeDailyProspectionWorkflow(
           executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
           businessHoursAnalysis: executionOptions.businessHoursAnalysis,
           triggeredBy: 'activityPrioritizationEngine',
-          followsAfter: 'dailyStandUpWorkflow'
+          followsAfter: 'dailyStandUpWorkflow',
+          parentScheduleId: executionOptions.parentScheduleId,
+          dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
         }
       }],
       taskQueue: temporalConfig.taskQueue,
@@ -2417,6 +2433,7 @@ export async function scheduleIndividualDailyProspectionActivity(
     timezone?: string;
     hoursThreshold?: number;
     maxLeads?: number;
+    parentScheduleId?: string;
   } = {}
 ): Promise<{
   scheduled: number;
@@ -2599,7 +2616,9 @@ export async function scheduleIndividualDailyProspectionActivity(
             executesAfterDailyStandup: true,
             executesAfterLeadGeneration: true,
             hoursThreshold,
-            maxLeads
+            maxLeads,
+            parentScheduleId: options.parentScheduleId,
+            dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
           }
         }];
 

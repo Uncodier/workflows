@@ -1,4 +1,4 @@
-import { executeChild, proxyActivities } from '@temporalio/workflow';
+import { executeChild, proxyActivities, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 const { 
@@ -12,6 +12,34 @@ const {
 } = proxyActivities<Activities>({
   startToCloseTimeout: '10 minutes',
 });
+
+/**
+ * Extract the real schedule ID from workflow info
+ * This is the schedule that triggers the entire daily operations pipeline
+ */
+function extractScheduleId(info: any): string {
+  // Check if workflow was triggered by a schedule
+  // Temporal schedules typically set search attributes or memo data
+  const searchAttributes = info.searchAttributes || {};
+  const memo = info.memo || {};
+  
+  // Look for common schedule-related attributes
+  const scheduleId = 
+    searchAttributes['TemporalScheduledById'] || 
+    searchAttributes['ScheduleId'] ||
+    memo['TemporalScheduledById'] ||
+    memo['scheduleId'] ||
+    memo['scheduleName'];
+    
+  if (scheduleId) {
+    console.log(`✅ Activity Prioritization Engine - Real schedule ID found: ${scheduleId}`);
+    return scheduleId;
+  }
+  
+  // If no schedule ID found, it might be a manual execution or child workflow
+  console.log(`⚠️ Activity Prioritization Engine - No schedule ID found - likely manual execution`);
+  return 'manual-execution';
+}
 
 /**
  * Activity Prioritization Engine Workflow
@@ -35,6 +63,16 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
 }> {
   console.log('🎯 Starting activity prioritization engine workflow...');
   const startTime = new Date();
+  
+  // Get REAL workflow information and schedule ID from Temporal
+  const workflowInfo_real = workflowInfo();
+  const realWorkflowId = workflowInfo_real.workflowId;
+  const realScheduleId = extractScheduleId(workflowInfo_real);
+  
+  console.log(`📋 Activity Prioritization Engine Info:`);
+  console.log(`   - REAL Workflow ID: ${realWorkflowId}`);
+  console.log(`   - REAL Schedule ID: ${realScheduleId} (${realScheduleId === 'manual-execution' ? 'manual execution' : 'from schedule'})`);
+  console.log(`   - This schedule ID will be propagated to all child workflows`);
 
   try {
     // Step 0: Validate and clean any stuck cron status records
@@ -156,7 +194,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
             testMode: false, // PRODUCTION: Full production mode
             businessHoursAnalysis, // PASS business hours analysis for filtering
             hoursThreshold: 48, // Look for leads older than 48 hours
-            maxLeads: 30 // Limit to 30 leads per site
+            maxLeads: 30, // Limit to 30 leads per site
+            parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
           });
           
           console.log(`🎯 Daily prospection workflows execution completed:`);
@@ -193,7 +232,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           const siteAnalysisResult = await scheduleIndividualSiteAnalysisActivity(
             businessHoursAnalysis,
             {
-              timezone: 'America/Mexico_City'
+              timezone: 'America/Mexico_City',
+              parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
             }
           );
           
@@ -230,7 +270,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           const leadGenerationResult = await scheduleIndividualLeadGenerationActivity(
             businessHoursAnalysis,
             {
-              timezone: 'America/Mexico_City'
+              timezone: 'America/Mexico_City',
+              parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
             }
           );
           
@@ -275,7 +316,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
         const scheduleResult = await scheduleIndividualDailyStandUpsActivity(
           businessHoursAnalysis,
           {
-            timezone: 'America/Mexico_City'
+            timezone: 'America/Mexico_City',
+            parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
           }
         );
         
@@ -320,7 +362,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
             {
               timezone: 'America/Mexico_City',
               hoursThreshold: 48, // Look for leads older than 48 hours
-              maxLeads: 30 // Limit to 30 leads per site
+              maxLeads: 30, // Limit to 30 leads per site
+              parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
             }
           );
           
@@ -357,7 +400,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           const siteAnalysisResult = await scheduleIndividualSiteAnalysisActivity(
             businessHoursAnalysis,
             {
-              timezone: 'America/Mexico_City'
+              timezone: 'America/Mexico_City',
+              parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
             }
           );
           
@@ -394,7 +438,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           const leadGenerationResult = await scheduleIndividualLeadGenerationActivity(
             businessHoursAnalysis,
             {
-              timezone: 'America/Mexico_City'
+              timezone: 'America/Mexico_City',
+              parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
             }
           );
           

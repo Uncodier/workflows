@@ -43,6 +43,8 @@ export interface DailyProspectionOptions {
   maxLeads?: number;                 // Limit number of leads to process
   createTasks?: boolean;             // Default true to create tasks, set false for validation only
   updateStatus?: boolean;            // Default false - whether to update lead status
+  maxPages?: number;                 // Maximum pages to search (default 10 to prevent infinite loops)
+  minLeadsRequired?: number;         // Minimum leads required to stop pagination (default 1)
   additionalData?: any;
 }
 
@@ -63,6 +65,8 @@ export interface DailyProspectionResult {
     status: string;
     hoursThreshold: number;
     createdBefore: string;
+    pagesSearched?: number;
+    totalCandidatesInDB?: number;
   };
   leadsFound: number;
   leadsProcessed: number;
@@ -90,6 +94,14 @@ export interface DailyProspectionResult {
     leadsWithNeither: number;
     leadsFilteredOut: number;
   };
+  // New fields for pagination
+  paginationInfo?: {
+    totalPagesSearched: number;
+    maxPagesConfigured: number;
+    minLeadsRequired: number;
+    stoppedReason: 'found_leads' | 'max_pages_reached' | 'no_more_pages';
+    paginationLog: string[];
+  };
   errors: string[];
   executionTime: string;
   completedAt: string;
@@ -100,11 +112,22 @@ export interface DailyProspectionResult {
  * Only includes leads that have contact info compatible with enabled channels
  */
 /**
- * Extract the real schedule ID from workflow info
- * This looks for evidence of schedule execution in search attributes or memo
+ * Extract the real schedule ID from workflow info or parent schedule
+ * Prioritizes parent schedule ID over workflow's own schedule attributes
  */
-function extractScheduleId(info: any): string {
-  // Check if workflow was triggered by a schedule
+function extractScheduleId(info: any, options: DailyProspectionOptions): string {
+  // First, check if a parent schedule ID was passed through additionalData
+  // This is the case when launched by dailyOperationsWorkflow
+  const parentScheduleId = options.additionalData?.parentScheduleId || 
+                          options.additionalData?.originalScheduleId ||
+                          options.additionalData?.dailyOperationsScheduleId;
+  
+  if (parentScheduleId) {
+    console.log(`✅ Using parent schedule ID: ${parentScheduleId} (from dailyOperations)`);
+    return parentScheduleId;
+  }
+  
+  // Fallback: Check if workflow was triggered by its own schedule
   // Temporal schedules typically set search attributes or memo data
   const searchAttributes = info.searchAttributes || {};
   const memo = info.memo || {};
@@ -225,6 +248,153 @@ function filterLeadsByAvailableChannels(
 }
 
 /**
+ * Auxiliary function to handle paginated lead prospection
+ * Continues searching through pages until at least minLeadsRequired leads are found
+ * 
+ * @param options - Base prospection options
+ * @param maxPages - Maximum pages to search 
+ * @param minLeadsRequired - Minimum leads required to stop pagination
+ * @param channelsValidation - Validation results for communication channels
+ * @param site - Site information
+ * @returns Combined leads from all pages searched and pagination info
+ */
+async function searchLeadsWithPagination(
+  options: DailyProspectionOptions,
+  maxPages: number,
+  minLeadsRequired: number,
+  channelsValidation: any,
+  site: any
+): Promise<{
+  allLeads: any[];
+  totalPagesSearched: number;
+  totalCandidatesFound: number;
+  stopped: 'found_leads' | 'max_pages_reached' | 'no_more_pages';
+  paginationLog: string[];
+}> {
+  const { site_id, hoursThreshold } = options;
+  const allLeads: any[] = [];
+  const paginationLog: string[] = [];
+  let currentPage = 0;
+  let totalCandidatesFound = 0;
+  let hasMorePages = true;
+  
+  console.log(`🔄 Starting paginated lead search:`);
+  console.log(`   - Max pages to search: ${maxPages}`);
+  console.log(`   - Min leads required: ${minLeadsRequired}`);
+  console.log(`   - Page size: 30 leads per page`);
+  
+  while (currentPage < maxPages && hasMorePages && allLeads.length < minLeadsRequired) {
+    console.log(`📄 Searching page ${currentPage}...`);
+    paginationLog.push(`Page ${currentPage}: Searching...`);
+    
+    try {
+      const prospectionLeadsResult = await getProspectionLeadsActivity({
+        site_id: site_id,
+        userId: options.userId || site.user_id,
+        hoursThreshold: hoursThreshold,
+        page: currentPage,
+        pageSize: 30,
+        additionalData: {
+          siteName: site.name,
+          siteUrl: site.url,
+          workflowType: 'dailyProspection'
+        }
+      });
+      
+      if (!prospectionLeadsResult.success) {
+        const errorMsg = `Failed to get prospection leads on page ${currentPage}: ${prospectionLeadsResult.error}`;
+        console.error(`❌ ${errorMsg}`);
+        paginationLog.push(`Page ${currentPage}: ERROR - ${prospectionLeadsResult.error}`);
+        throw new Error(errorMsg);
+      }
+      
+      const rawLeads = prospectionLeadsResult.leads || [];
+      hasMorePages = prospectionLeadsResult.hasMorePages || false;
+      totalCandidatesFound = prospectionLeadsResult.totalCandidatesFound || 0;
+      
+      console.log(`📋 Page ${currentPage} results:`);
+      console.log(`   - Raw leads found: ${rawLeads.length}`);
+      console.log(`   - Has more pages: ${hasMorePages}`);
+      console.log(`   - Total candidates in DB: ${totalCandidatesFound}`);
+      
+      // Apply channel filtering
+      const { filteredLeads, warnings } = filterLeadsByAvailableChannels(
+        rawLeads, 
+        channelsValidation
+      );
+      
+      console.log(`📊 Page ${currentPage} after channel filtering:`);
+      console.log(`   - Leads after filtering: ${filteredLeads.length}`);
+      console.log(`   - Leads filtered out: ${rawLeads.length - filteredLeads.length}`);
+      
+      // Add filtered leads to our collection
+      allLeads.push(...filteredLeads);
+      
+      const pageLog = `Page ${currentPage}: Found ${rawLeads.length} raw, ${filteredLeads.length} after filtering. Total so far: ${allLeads.length}`;
+      paginationLog.push(pageLog);
+      console.log(`📄 ${pageLog}`);
+      
+      // Add filtering warnings to log
+      warnings.forEach(warning => {
+        const warningLog = `Page ${currentPage} warning: ${warning}`;
+        paginationLog.push(warningLog);
+        console.log(`⚠️ ${warningLog}`);
+      });
+      
+      currentPage++;
+      
+      // Check if we found enough leads
+      if (allLeads.length >= minLeadsRequired) {
+        const successLog = `✅ Found ${allLeads.length} leads (>= ${minLeadsRequired} required) after searching ${currentPage} page(s)`;
+        console.log(successLog);
+        paginationLog.push(successLog);
+        return {
+          allLeads,
+          totalPagesSearched: currentPage,
+          totalCandidatesFound,
+          stopped: 'found_leads',
+          paginationLog
+        };
+      }
+      
+      // Check if no more pages available
+      if (!hasMorePages) {
+        const endLog = `📄 No more pages available. Found ${allLeads.length} total leads after searching ${currentPage} page(s)`;
+        console.log(endLog);
+        paginationLog.push(endLog);
+        return {
+          allLeads,
+          totalPagesSearched: currentPage,
+          totalCandidatesFound,
+          stopped: 'no_more_pages',
+          paginationLog
+        };
+      }
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorLog = `❌ Error on page ${currentPage}: ${errorMessage}`;
+      console.error(errorLog);
+      paginationLog.push(errorLog);
+      throw error;
+    }
+  }
+  
+  // Reached max pages without finding enough leads
+  const maxPagesLog = `🛑 Reached maximum pages limit (${maxPages}). Found ${allLeads.length} total leads after searching ${currentPage} page(s)`;
+  console.log(maxPagesLog);
+  paginationLog.push(maxPagesLog);
+  
+  return {
+    allLeads,
+    totalPagesSearched: currentPage,
+    totalCandidatesFound,
+    stopped: 'max_pages_reached',
+    paginationLog
+  };
+}
+
+/**
  * Daily Prospection Workflow
  * 
  * Este workflow ejecuta la prospección diaria:
@@ -232,13 +402,22 @@ function filterLeadsByAvailableChannels(
  * 2. Para cada lead encontrado, crea una tarea de awareness
  * 3. Opcionalmente actualiza el status del lead
  * 4. Retorna estadísticas del proceso
+ * 5. NUEVO: Incluye paginación para continuar buscando hasta encontrar leads válidos
  * 
  * @param options - Configuration options for daily prospection
  */
 export async function dailyProspectionWorkflow(
   options: DailyProspectionOptions
 ): Promise<DailyProspectionResult> {
-  const { site_id, hoursThreshold = 48, maxLeads = 30, createTasks = true, updateStatus = false } = options;
+  const { 
+    site_id, 
+    hoursThreshold = 48, 
+    maxLeads = 30, 
+    createTasks = true, 
+    updateStatus = false,
+    maxPages = 10,
+    minLeadsRequired = 1
+  } = options;
   
   if (!site_id) {
     throw new Error('No site ID provided');
@@ -247,7 +426,7 @@ export async function dailyProspectionWorkflow(
   // Get REAL workflow information from Temporal
   const workflowInfo_real = workflowInfo();
   const realWorkflowId = workflowInfo_real.workflowId;
-  const realScheduleId = extractScheduleId(workflowInfo_real);
+  const realScheduleId = extractScheduleId(workflowInfo_real, options);
   const startTime = Date.now();
   
   console.log(`🎯 Starting daily prospection workflow for site ${site_id}`);
@@ -391,25 +570,67 @@ export async function dailyProspectionWorkflow(
     
     console.log(`✅ Retrieved site information: ${siteName} (${siteUrl})`);
 
-    console.log(`🔍 Step 2: Getting prospection leads...`);
+    console.log(`🔍 Step 2: Getting prospection leads with pagination...`);
+    console.log(`📋 Pagination configuration:`);
+    console.log(`   - Max pages to search: ${maxPages}`);
+    console.log(`   - Min leads required: ${minLeadsRequired}`);
     
-    // Get leads that need prospection
-    const prospectionLeadsResult = await getProspectionLeadsActivity({
-      site_id: site_id,
-      userId: options.userId || site.user_id,
-      hoursThreshold: hoursThreshold,
-      maxLeads: options.maxLeads, // Pass the maxLeads parameter from activityPrioritizationEngine
-      additionalData: {
-        // Only include essential data to avoid 414 errors
-        siteName: siteName,
-        siteUrl: siteUrl,
-        workflowType: 'dailyProspection'
-        // Exclude large objects that could cause 414 errors
-      }
-    });
-    
-    if (!prospectionLeadsResult.success) {
-      const errorMsg = String(prospectionLeadsResult.error || 'Unknown error');
+    let paginationResults;
+    try {
+      // Use the new paginated search function
+      paginationResults = await searchLeadsWithPagination(
+        options,
+        maxPages,
+        minLeadsRequired,
+        channelsValidation,
+        site
+      );
+      
+      // Extract results from pagination
+      leads = paginationResults.allLeads;
+      leadsFound = leads.length; // This is now leads after filtering
+      leadsFiltered = leads.length;
+      
+      console.log(`🎉 Pagination search completed:`);
+      console.log(`   - Total pages searched: ${paginationResults.totalPagesSearched}`);
+      console.log(`   - Total candidates in DB: ${paginationResults.totalCandidatesFound}`);
+      console.log(`   - Final leads after filtering: ${leadsFiltered}`);
+      console.log(`   - Stopped reason: ${paginationResults.stopped}`);
+      
+      // Log detailed pagination information
+      console.log(`📄 Pagination log:`);
+      paginationResults.paginationLog.forEach((log, index) => {
+        console.log(`   ${index + 1}. ${log}`);
+      });
+      
+      // Add pagination info to errors for tracking (these are informational, not actual errors)
+      errors.push(`Pagination: Searched ${paginationResults.totalPagesSearched} page(s), found ${leadsFiltered} valid leads`);
+      errors.push(`Pagination stopped: ${paginationResults.stopped}`);
+      
+      // Set mock criteria for compatibility
+      prospectionCriteria = {
+        site_id,
+        status: 'new',
+        hoursThreshold,
+        createdBefore: new Date(Date.now() - hoursThreshold * 60 * 60 * 1000).toISOString(),
+        pagesSearched: paginationResults.totalPagesSearched,
+        totalCandidatesInDB: paginationResults.totalCandidatesFound
+      };
+      
+      // Since we already applied filtering in the pagination function, 
+      // we just need to set the filtering info for reporting
+      filteringInfo = {
+        hasEmailChannel: channelsValidation.hasEmailChannel,
+        hasWhatsappChannel: channelsValidation.hasWhatsappChannel,
+        leadsWithEmail: 0, // These are calculated in the pagination function
+        leadsWithPhone: 0,
+        leadsWithBoth: 0,
+        leadsWithNeither: 0,
+        leadsFilteredOut: paginationResults.totalCandidatesFound - leadsFiltered
+      };
+      
+    } catch (paginationError) {
+      const errorMsg = paginationError instanceof Error ? paginationError.message : String(paginationError);
       
       // Check for critical 414 errors that should fail the entire workflow
       if (errorMsg.includes('414') || 
@@ -419,7 +640,7 @@ export async function dailyProspectionWorkflow(
           errorMsg.includes('HTTP_414') ||
           errorMsg.includes('Server returned HTML error page')) {
         
-        const criticalError = `Critical API error (414 Request-URI Too Large) in Get Prospection Leads: ${errorMsg}`;
+        const criticalError = `Critical API error (414 Request-URI Too Large) in Paginated Lead Search: ${errorMsg}`;
         console.error(`🚨 CRITICAL ERROR: ${criticalError}`);
         console.error(`🛑 This error requires immediate attention and workflow termination`);
         
@@ -427,46 +648,11 @@ export async function dailyProspectionWorkflow(
         throw new Error(criticalError);
       }
       
-      const fullErrorMsg = `Failed to get prospection leads: ${errorMsg}`;
+      const fullErrorMsg = `Failed to get prospection leads via pagination: ${errorMsg}`;
       console.error(`❌ ${fullErrorMsg}`);
       errors.push(fullErrorMsg);
       throw new Error(fullErrorMsg);
     }
-    
-    const rawLeads = prospectionLeadsResult.leads || [];
-    leadsFound = rawLeads.length;
-    prospectionCriteria = prospectionLeadsResult.criteria;
-    
-    console.log(`✅ Found ${leadsFound} raw leads for prospection`);
-    
-    // Step 2.1: Filter leads by available communication channels
-    console.log(`🔍 Step 2.1: Filtering leads by available communication channels...`);
-    
-    const { filteredLeads, filteringInfo: channelFilteringInfo, warnings } = filterLeadsByAvailableChannels(
-      rawLeads, 
-      channelsValidation
-    );
-    
-    // Update variables that are declared at workflow scope
-    filteringInfo = channelFilteringInfo;
-    leads = filteredLeads;
-    leadsFiltered = filteredLeads.length;
-    const leadsFilteredOut = leadsFound - leadsFiltered;
-    
-    console.log(`📊 Channel filtering results:`);
-    console.log(`   - Original leads found: ${leadsFound}`);
-    console.log(`   - Leads after filtering: ${leadsFiltered}`);
-    console.log(`   - Leads filtered out: ${leadsFilteredOut}`);
-    console.log(`   - Leads with email only: ${filteringInfo.leadsWithEmail}`);
-    console.log(`   - Leads with phone only: ${filteringInfo.leadsWithPhone}`);
-    console.log(`   - Leads with both: ${filteringInfo.leadsWithBoth}`);
-    console.log(`   - Leads with neither: ${filteringInfo.leadsWithNeither}`);
-    
-    // Add filtering warnings to errors array
-    warnings.forEach(warning => {
-      console.log(`⚠️ Channel filtering warning: ${warning}`);
-      errors.push(warning);
-    });
 
     // Step 2.5: Send leads to sales agent for selection and prioritization
     if (leadsFiltered > 0) {
@@ -571,6 +757,13 @@ export async function dailyProspectionWorkflow(
         leadsFiltered,
         filteredLeads: leads,
         channelFilteringInfo: filteringInfo,
+        paginationInfo: paginationResults ? {
+          totalPagesSearched: paginationResults.totalPagesSearched,
+          maxPagesConfigured: maxPages,
+          minLeadsRequired: minLeadsRequired,
+          stoppedReason: paginationResults.stopped,
+          paginationLog: paginationResults.paginationLog
+        } : undefined,
         errors,
         executionTime: `${((Date.now() - startTime) / 1000).toFixed(2)}s`,
         completedAt: new Date().toISOString()
@@ -714,6 +907,13 @@ export async function dailyProspectionWorkflow(
       leadsFiltered,
       filteredLeads: leads,
       channelFilteringInfo: filteringInfo,
+      paginationInfo: paginationResults ? {
+        totalPagesSearched: paginationResults.totalPagesSearched,
+        maxPagesConfigured: maxPages,
+        minLeadsRequired: minLeadsRequired,
+        stoppedReason: paginationResults.stopped,
+        paginationLog: paginationResults.paginationLog
+      } : undefined,
       errors,
       executionTime,
       completedAt: new Date().toISOString()
@@ -815,6 +1015,10 @@ export async function dailyProspectionWorkflow(
     console.log(`   - Notifications sent: ${notificationResults.filter(r => r.success).length}/${notificationResults.length}`);
     console.log(`   - Follow-up workflows started: ${followUpWorkflowsStarted}/${unassignedLeads.length}`);
     console.log(`   - Unassigned leads (auto follow-up): ${unassignedLeads.length}`);
+    if (paginationResults) {
+      console.log(`   - Pagination: Searched ${paginationResults.totalPagesSearched} page(s), stopped: ${paginationResults.stopped}`);
+      console.log(`   - Total candidates in DB: ${paginationResults.totalCandidatesFound}`);
+    }
     
     if (errors.length > 0) {
       console.log(`   - Errors encountered: ${errors.length}`);

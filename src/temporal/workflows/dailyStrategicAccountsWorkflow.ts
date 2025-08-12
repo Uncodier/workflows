@@ -17,12 +17,22 @@ const {
 });
 
 /**
- * Extract schedule ID from workflow info
- * This function attempts to identify if the workflow was triggered by a schedule
- * or executed manually/as a child workflow
+ * Extract schedule ID from workflow info or parent schedule
+ * Prioritizes parent schedule ID over workflow's own schedule attributes
  */
-function extractScheduleId(info: any): string {
-  // Check if workflow was triggered by a schedule
+function extractScheduleId(info: any, options: DailyStrategicAccountsOptions): string {
+  // First, check if a parent schedule ID was passed through additionalData
+  // This is the case when launched by dailyOperationsWorkflow
+  const parentScheduleId = options.additionalData?.parentScheduleId || 
+                          options.additionalData?.originalScheduleId ||
+                          options.additionalData?.dailyOperationsScheduleId;
+  
+  if (parentScheduleId) {
+    console.log(`✅ Using parent schedule ID: ${parentScheduleId} (from dailyOperations)`);
+    return parentScheduleId;
+  }
+  
+  // Fallback: Check if workflow was triggered by its own schedule
   // Temporal schedules typically set search attributes or memo data
   const searchAttributes = info.searchAttributes || {};
   const memo = info.memo || {};
@@ -127,7 +137,7 @@ export async function dailyStrategicAccountsWorkflow(
   // Get REAL workflow information from Temporal
   const workflowInfo_real = workflowInfo();
   const realWorkflowId = workflowInfo_real.workflowId;
-  const realScheduleId = extractScheduleId(workflowInfo_real);
+  const realScheduleId = extractScheduleId(workflowInfo_real, options);
   const startTime = Date.now();
   
   console.log(`🎯 Starting daily strategic accounts workflow for site ${site_id}`);

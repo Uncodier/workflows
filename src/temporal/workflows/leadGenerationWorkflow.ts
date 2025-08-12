@@ -58,6 +58,8 @@ export interface LeadGenerationOptions {
   create?: boolean;                   // Default true to create leads, set false for validation only
   region?: string;                    // Optional: Override region for regionSearch (e.g., "world" for strategic accounts)
   keywords?: string | string[];       // Optional: Override keywords for regionSearch (e.g., "key accounts" or ["key", "accounts"])
+  retryCount?: number;                // Current retry attempt (0 = first attempt, 1-3 = retries)
+  maxRetries?: number;                // Maximum retry attempts allowed (default 3)
   additionalData?: any;
 }
 
@@ -96,6 +98,12 @@ export interface LeadGenerationResult {
   leadCreationResults?: any[];       // Results from lead creation/validation
   retryWorkflowStarted?: boolean;    // Whether a retry workflow was started
   retryWorkflowId?: string;          // ID of the retry workflow if started
+  retryInfo?: {                      // Information about retry attempts
+    currentAttempt: number;          // Current attempt number (1-based)
+    maxRetries: number;              // Maximum retries allowed
+    isRetry: boolean;                // Whether this is a retry attempt
+    canRetry: boolean;               // Whether more retries are possible
+  };
   errors: string[];
   executionTime: string;
   completedAt: string;
@@ -436,8 +444,19 @@ function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
  * Extract the real schedule ID from workflow info
  * This looks for evidence of schedule execution in search attributes or memo
  */
-function extractScheduleId(info: any): string {
-  // Check if workflow was triggered by a schedule
+function extractScheduleId(info: any, options: LeadGenerationOptions): string {
+  // First, check if a parent schedule ID was passed through additionalData
+  // This is the case when launched by dailyOperationsWorkflow
+  const parentScheduleId = options.additionalData?.parentScheduleId || 
+                          options.additionalData?.originalScheduleId ||
+                          options.additionalData?.dailyOperationsScheduleId;
+  
+  if (parentScheduleId) {
+    console.log(`✅ Lead Generation - Using parent schedule ID: ${parentScheduleId} (from dailyOperations)`);
+    return parentScheduleId;
+  }
+  
+  // Fallback: Check if workflow was triggered by its own schedule
   // Temporal schedules typically set search attributes or memo data
   const searchAttributes = info.searchAttributes || {};
   const memo = info.memo || {};
@@ -477,7 +496,7 @@ function extractScheduleId(info: any): string {
 export async function leadGenerationWorkflow(
   options: LeadGenerationOptions
 ): Promise<LeadGenerationResult> {
-  const { site_id } = options;
+  const { site_id, retryCount = 0, maxRetries = 3 } = options;
   
   if (!site_id) {
     throw new Error('No site ID provided');
@@ -486,7 +505,7 @@ export async function leadGenerationWorkflow(
   // Get workflow information from Temporal to extract schedule ID
   const workflowInfo_real = workflowInfo();
   const realWorkflowId = workflowInfo_real.workflowId;
-  const realScheduleId = extractScheduleId(workflowInfo_real);
+  const realScheduleId = extractScheduleId(workflowInfo_real, options);
   
   const workflowId = `lead-generation-${site_id}`;
   const startTime = Date.now();
@@ -495,11 +514,12 @@ export async function leadGenerationWorkflow(
   // Fallback to generic format if not provided
   const scheduleId = options.additionalData?.scheduleType || `lead-generation-${site_id}`;
   
-  console.log(`🔥 Starting NEW lead generation workflow for site ${site_id}`);
+  console.log(`🔥 Starting ${retryCount > 0 ? 'RETRY' : 'NEW'} lead generation workflow for site ${site_id}`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
   console.log(`📋 REAL Workflow ID: ${realWorkflowId} (from Temporal)`);
   console.log(`📋 REAL Schedule ID: ${realScheduleId} (from ${realScheduleId === 'manual-execution' ? 'manual execution' : 'schedule'})`);
   console.log(`📋 Schedule ID: ${scheduleId} (from ${options.additionalData?.scheduleType ? 'scheduleType' : 'fallback'})`);
+  console.log(`🔄 Retry Info: Attempt ${retryCount + 1}/${maxRetries + 1} (${retryCount === 0 ? 'First attempt' : `Retry ${retryCount}`})`);
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({
@@ -1260,14 +1280,21 @@ export async function leadGenerationWorkflow(
       leadCreationResults,
       retryWorkflowStarted,
       retryWorkflowId: retryWorkflowStarted ? retryWorkflowId : undefined,
+      retryInfo: {
+        currentAttempt: retryCount + 1,
+        maxRetries: maxRetries,
+        isRetry: retryCount > 0,
+        canRetry: retryCount < maxRetries
+      },
       errors,
       executionTime,
       completedAt: new Date().toISOString()
     };
 
-    console.log(`🎉 NEW Lead generation workflow completed successfully!`);
+    console.log(`🎉 ${retryCount > 0 ? 'RETRY' : 'NEW'} Lead generation workflow completed successfully!`);
     console.log(`📊 Summary: Lead generation for site ${siteName} completed in ${executionTime}`);
     console.log(`   - Site: ${siteName} (${siteUrl})`);
+    console.log(`   - Retry Info: Attempt ${retryCount + 1}/${maxRetries + 1} (${retryCount === 0 ? 'First attempt' : `Retry ${retryCount}`})`);
     console.log(`   - Business types received: ${businessTypes.length}`);
     console.log(`   - Enhanced search topic: ${enhancedSearchTopic}`);
     console.log(`   - Target location: ${targetCity && targetRegion ? `${targetCity}, ${targetRegion}` : targetCity || targetRegion || 'Not specified'}`);
@@ -1278,7 +1305,9 @@ export async function leadGenerationWorkflow(
     console.log(`   - Lead creation results: ${leadCreationResults.length}`);
     
     if (retryWorkflowStarted) {
-      console.log(`   - Retry workflow started: ${retryWorkflowId} (reason: no leads found)`);
+      console.log(`   - Next retry workflow started: ${retryWorkflowId} (attempt ${retryCount + 2}/${maxRetries + 1})`);
+    } else if (totalLeadsGenerated === 0 && retryCount >= maxRetries) {
+      console.log(`   - No more retries: Maximum attempts (${maxRetries + 1}) reached`);
     }
 
     // Step Final: Send notification for all leads generated in this workflow
@@ -1332,41 +1361,63 @@ export async function leadGenerationWorkflow(
         console.log(`⚠️ No lead names found for notification despite ${totalLeadsGenerated} leads generated`);
       }
     } else {
-      console.log(`ℹ️ No leads generated, starting retry workflow...`);
+      console.log(`ℹ️ No leads generated, checking retry eligibility...`);
       
-      // Step Retry: If no valid leads found, automatically start a new workflow execution
-      try {
-        console.log(`🔄 Step Retry: Starting new lead generation workflow for site ${site_id} (no leads found)...`);
+      // Check if we can retry (haven't exceeded max retries)
+      if (retryCount < maxRetries) {
+        console.log(`🔄 Step Retry: Starting retry ${retryCount + 1}/${maxRetries} for site ${site_id} (no leads found)...`);
         
-        const retryOptions: LeadGenerationOptions = {
-          ...options,
-          additionalData: {
-            ...options.additionalData,
-            retryReason: 'no_leads_found',
-            originalWorkflowId: workflowId,
-            originalExecutionTime: executionTime,
-            retriedAt: new Date().toISOString()
-          }
-        };
+        // Step Retry: If no valid leads found and retries available, start a new workflow execution
+        try {
+          const retryOptions: LeadGenerationOptions = {
+            ...options,
+            retryCount: retryCount + 1,
+            maxRetries: maxRetries,
+            additionalData: {
+              ...options.additionalData,
+              retryReason: 'no_leads_found',
+              originalWorkflowId: workflowId,
+              originalExecutionTime: executionTime,
+              retriedAt: new Date().toISOString(),
+              previousRetryCount: retryCount
+            }
+          };
+          
+          const retryWorkflowHandle = await startChild(leadGenerationWorkflow, {
+            args: [retryOptions],
+            workflowId: `lead-generation-retry-${site_id}-${retryCount + 1}-${Date.now()}`,
+            parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON, // ✅ Child continues independently
+          });
+          
+          retryWorkflowStarted = true;
+          retryWorkflowId = retryWorkflowHandle.workflowId;
+          
+          console.log(`✅ Successfully started retry workflow ${retryCount + 1}/${maxRetries}: ${retryWorkflowHandle.workflowId}`);
+          
+          // Don't await the result to avoid blocking this workflow completion
+          // The retry workflow will run independently
+          
+        } catch (retryError) {
+          const errorMessage = retryError instanceof Error ? retryError.message : String(retryError);
+          console.error(`❌ Failed to start retry workflow: ${errorMessage}`);
+          errors.push(`Retry workflow failed: ${errorMessage}`);
+        }
+      } else {
+        console.log(`🛑 Maximum retries (${maxRetries}) reached for site ${site_id}. No more retry attempts will be made.`);
+        console.log(`📊 Final result: No leads generated after ${retryCount + 1} attempts (1 initial + ${retryCount} retries)`);
+        errors.push(`Maximum retries reached: ${retryCount + 1} attempts completed without generating leads`);
         
-        const retryWorkflowHandle = await startChild(leadGenerationWorkflow, {
-          args: [retryOptions],
-          workflowId: `lead-generation-retry-${site_id}-${Date.now()}`,
-          parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON, // ✅ Child continues independently
+        // Update cron status to indicate retry limit reached
+        await saveCronStatusActivity({
+          siteId: site_id,
+          workflowId,
+          scheduleId: scheduleId,
+          activityName: 'leadGenerationWorkflow',
+          status: 'FAILED',
+          lastRun: new Date().toISOString(),
+          errorMessage: `Maximum retries (${maxRetries}) reached - no leads generated after ${retryCount + 1} attempts`,
+          retryCount: retryCount + 1
         });
-        
-        retryWorkflowStarted = true;
-        retryWorkflowId = retryWorkflowHandle.workflowId;
-        
-        console.log(`✅ Successfully started retry workflow: ${retryWorkflowHandle.workflowId}`);
-        
-        // Don't await the result to avoid blocking this workflow completion
-        // The retry workflow will run independently
-        
-      } catch (retryError) {
-        const errorMessage = retryError instanceof Error ? retryError.message : String(retryError);
-        console.error(`❌ Failed to start retry workflow: ${errorMessage}`);
-        errors.push(`Retry workflow failed: ${errorMessage}`);
       }
     }
 
@@ -1404,7 +1455,7 @@ export async function leadGenerationWorkflow(
       status: 'FAILED',
       lastRun: new Date().toISOString(),
       errorMessage: errorMessage,
-      retryCount: 1
+      retryCount: retryCount + 1
     });
 
     // Log workflow execution failure

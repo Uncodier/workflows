@@ -29,6 +29,8 @@ export interface DailyProspectionOptions {
   userId?: string;
   hoursThreshold?: number; // Default 48 hours
   maxLeads?: number; // Maximum leads to process per site (default 30)
+  page?: number; // Page number for pagination (0-based, default 0)
+  pageSize?: number; // Page size for pagination (default 30)
   additionalData?: any;
 }
 
@@ -51,12 +53,18 @@ export interface GetProspectionLeadsResult {
   success: boolean;
   leads: ProspectionLead[];
   total: number;
+  hasMorePages?: boolean; // Indicates if there are more pages available
+  currentPage?: number; // Current page number (0-based)
+  pageSize?: number; // Page size used for this query
+  totalCandidatesFound?: number; // Total candidates before filtering
   error?: string;
   criteria?: {
     site_id: string;
     status: string;
     hoursThreshold: number;
     createdBefore: string;
+    page?: number;
+    pageSize?: number;
   };
 }
 
@@ -224,11 +232,13 @@ export async function validateCommunicationChannelsActivity(
 export async function getProspectionLeadsActivity(
   options: DailyProspectionOptions
 ): Promise<GetProspectionLeadsResult> {
-  const { site_id, hoursThreshold = 48, maxLeads } = options;
+  const { site_id, hoursThreshold = 48, maxLeads, page = 0, pageSize = 30 } = options;
   
   console.log(`🔍 Getting prospection leads for site: ${site_id}`);
   console.log(`   - Hours threshold: ${hoursThreshold} hours`);
   console.log(`   - Max leads limit: ${maxLeads || 30} leads`);
+  console.log(`   - Page: ${page} (0-based)`);
+  console.log(`   - Page size: ${pageSize}`);
   
   // Debug: Log the exact input to identify if there's anything large
   const inputSize = JSON.stringify(options).length;
@@ -267,11 +277,47 @@ export async function getProspectionLeadsActivity(
     
     console.log(`📅 Looking for leads created before: ${createdBefore}`);
     
-    // Use the maxLeads parameter from workflow (default 30 from activityPrioritizationEngine)
-    const leadsLimit = maxLeads || 30; // Use workflow parameter or default to 30
-    console.log(`🎯 Using leads limit: ${leadsLimit} (from workflow parameter)`);
+    // Calculate pagination offset
+    const offset = page * pageSize;
+    console.log(`📄 Pagination settings:`);
+    console.log(`   - Page: ${page} (0-based)`);
+    console.log(`   - Page size: ${pageSize}`);
+    console.log(`   - Offset: ${offset}`);
     
-    // First, get leads with status 'new' and older than threshold (with configured limit)
+    // Use the maxLeads parameter from workflow (default 30 from activityPrioritizationEngine)
+    // For pagination, we use pageSize instead of maxLeads for the LIMIT
+    const leadsLimit = pageSize; // Use pageSize for pagination
+    console.log(`🎯 Using leads limit: ${leadsLimit} (page size for pagination)`);
+    
+    // First, get total count of candidates to determine if there are more pages
+    const { count: totalCandidatesCount, error: countError } = await supabaseServiceRole
+      .from('leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('site_id', site_id)
+      .eq('status', 'new')
+      .lt('created_at', createdBefore);
+    
+    if (countError) {
+      logger.error('❌ Error counting candidate leads', {
+        error: countError.message,
+        site_id,
+        hoursThreshold
+      });
+      return {
+        success: false,
+        leads: [],
+        total: 0,
+        error: countError.message
+      };
+    }
+    
+    const totalCandidatesFound = totalCandidatesCount || 0;
+    const hasMorePages = (offset + pageSize) < totalCandidatesFound;
+    
+    console.log(`📊 Total candidates available: ${totalCandidatesFound}`);
+    console.log(`📄 Has more pages: ${hasMorePages}`);
+    
+    // Now get the paginated leads with status 'new' and older than threshold
     const { data: candidateLeads, error: leadsError } = await supabaseServiceRole
       .from('leads')
       .select('*')
@@ -279,7 +325,7 @@ export async function getProspectionLeadsActivity(
       .eq('status', 'new')
       .lt('created_at', createdBefore)
       .order('created_at', { ascending: true }) // Oldest first for prospection
-      .limit(leadsLimit); // Use the configured leads limit
+      .range(offset, offset + leadsLimit - 1); // Use range for pagination
     
     if (leadsError) {
       logger.error('❌ Error fetching candidate leads', {
@@ -295,25 +341,34 @@ export async function getProspectionLeadsActivity(
       };
     }
     
-    console.log(`📋 Found ${candidateLeads?.length || 0} candidate leads with status 'new' older than ${hoursThreshold} hours`);
+    console.log(`📋 Found ${candidateLeads?.length || 0} candidate leads with status 'new' older than ${hoursThreshold} hours (page ${page})`);
     
-    // Warn if we hit the configured limit
-    if (candidateLeads && candidateLeads.length === leadsLimit) {
-      console.warn(`⚠️ Hit configured limit of ${leadsLimit} leads. There might be more leads available.`);
-      console.warn(`   Consider running daily prospection more frequently to process older leads.`);
+    // Log pagination status
+    if (candidateLeads && candidateLeads.length === leadsLimit && hasMorePages) {
+      console.log(`📄 Page ${page} complete: Found ${candidateLeads.length} leads (more pages available)`);
+    } else if (candidateLeads && candidateLeads.length < leadsLimit) {
+      console.log(`📄 Page ${page} complete: Found ${candidateLeads.length} leads (last page or sparse page)`);
+    } else if (candidateLeads && candidateLeads.length === leadsLimit && !hasMorePages) {
+      console.log(`📄 Page ${page} complete: Found ${candidateLeads.length} leads (final page)`);
     }
     
     if (!candidateLeads || candidateLeads.length === 0) {
-      console.log('✅ No candidate leads found for prospection');
+      console.log(`✅ No candidate leads found for prospection on page ${page}`);
       return {
         success: true,
         leads: [],
         total: 0,
+        hasMorePages,
+        currentPage: page,
+        pageSize,
+        totalCandidatesFound,
         criteria: {
           site_id,
           status: 'new',
           hoursThreshold,
-          createdBefore
+          createdBefore,
+          page,
+          pageSize
         }
       };
     }
@@ -507,11 +562,17 @@ export async function getProspectionLeadsActivity(
       success: true,
       leads: prospectionLeads,
       total: prospectionLeads.length,
+      hasMorePages,
+      currentPage: page,
+      pageSize,
+      totalCandidatesFound,
       criteria: {
         site_id,
         status: 'new',
         hoursThreshold,
-        createdBefore
+        createdBefore,
+        page,
+        pageSize
       }
     };
     
