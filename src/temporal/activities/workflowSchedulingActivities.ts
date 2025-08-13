@@ -2385,6 +2385,7 @@ async function executeDailyProspectionWorkflow(
         userId: site.user_id,
         hoursThreshold: executionOptions.hoursThreshold || 48,
         maxLeads: executionOptions.maxLeads || 30,
+        minLeadsRequired: 30,
         updateStatus: false,
         additionalData: {
           scheduledBy: executionOptions.scheduledBy,
@@ -2587,6 +2588,7 @@ export async function scheduleIndividualDailyProspectionActivity(
           userId: site.user_id,
           hoursThreshold,
           maxLeads,
+          minLeadsRequired: 30,
           updateStatus: false,
           additionalData: {
             scheduledBy: 'activityPrioritizationEngine-dailyProspection',
