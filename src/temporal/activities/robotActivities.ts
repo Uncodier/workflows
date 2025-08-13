@@ -304,23 +304,21 @@ export async function callRobotPlanActActivity(params: {
  * Activity to call the robot auth API for saving authentication sessions
  */
 export async function callRobotAuthActivity(params: {
-  instance_id: string;
-  name: string;
-  domain: string;
+  remote_instance_id: string;
+  site_id: string;
 }): Promise<{
   success: boolean;
   data?: any;
   error?: string;
 }> {
-  const { instance_id, name, domain } = params;
+  const { remote_instance_id, site_id } = params;
 
-  console.log(`🔐 Calling robot auth API for instance: ${instance_id}, name: ${name}, domain: ${domain}`);
+  console.log(`🔐 Calling robot auth API for remote_instance: ${remote_instance_id}, site: ${site_id}`);
 
   try {
     const payload = {
-      instance_id,
-      name,
-      domain
+      remote_instance_id,
+      site_id
     };
 
     const response = await apiService.post('/api/robots/auth', payload);

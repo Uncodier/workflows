@@ -1,6 +1,6 @@
 // Tipos de respuesta según documentación v2
 export interface ParsedAgentResponse {
-  type: 'step_completed' | 'step_failed' | 'step_canceled' | 'plan_failed' | 'new_plan' | 'new_session' | 'session_needed' | 'user_attention' | 'unknown';
+  type: 'step_completed' | 'step_failed' | 'step_canceled' | 'plan_failed' | 'new_plan' | 'new_session' | 'session_needed' | 'session_saved' | 'user_attention' | 'unknown';
   stepNumber?: number;
   reason?: string;
   explanation?: string;
@@ -74,6 +74,11 @@ export function parseAgentResponse(response: string): ParsedAgentResponse {
       platform: sessionNeededMatch[1],
       domain: sessionNeededMatch[2]
     };
+  }
+  
+  // Sesión guardada: "session saved" o "authentication session saved"
+  if (trimmed.includes('session saved') || trimmed.includes('authentication session')) {
+    return { type: 'session_saved' };
   }
   
   // Atención del usuario requerida: "user attention required: [explanation]"

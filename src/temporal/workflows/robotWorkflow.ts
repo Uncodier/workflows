@@ -64,12 +64,15 @@ export interface RobotWorkflowResult {
     new_session_info?: any;
     session_needed?: boolean;
     session_request?: any;
+    session_saved?: boolean;
+    session_save_info?: any;
     user_attention_required?: boolean;
     user_attention_info?: any;
     waiting_for_user?: boolean;
+    instance_status?: string;
     // Respuesta cruda del agente para parsing
     agent_response?: string;
-    response_type?: 'step_completed' | 'step_failed' | 'step_canceled' | 'plan_failed' | 'new_plan' | 'new_session' | 'session_needed' | 'user_attention';
+    response_type?: 'step_completed' | 'step_failed' | 'step_canceled' | 'plan_failed' | 'new_plan' | 'new_session' | 'session_needed' | 'session_saved' | 'user_attention';
     timestamp: string;
   }[];
   totalPlanCycles?: number;
@@ -178,9 +181,12 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
           new_session_info: planResult.data?.new_session_info,
           session_needed: planResult.data?.session_needed,
           session_request: planResult.data?.session_request,
+          session_saved: planResult.data?.session_saved,
+          session_save_info: planResult.data?.session_save_info,
           user_attention_required: planResult.data?.user_attention_required,
           user_attention_info: planResult.data?.user_attention_info,
           waiting_for_user: planResult.data?.waiting_for_user,
+          instance_status: planResult.data?.instance_status,
           // Datos de parsing
           agent_response: agentResponse,
           response_type: parsedResponse.type,
@@ -191,6 +197,20 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
         
         // Determinar estado del plan según respuesta parseada y API
         planCompleted = stepData.plan_completed ?? false;
+        planFailed = stepData.plan_failed ?? false;
+        
+        // Si el plan falló, verificar si es por instancia apagada y terminar inmediatamente
+        if (planFailed) {
+          const instanceStatus = planResult.data?.instance_status;
+          const failureReason = stepData.failure_reason || planResult.data?.failure_reason;
+          
+          console.log(`💥 Plan failed detected. Reason: ${failureReason}`);
+          if (instanceStatus === 'stopped') {
+            console.log(`🛑 Instance is stopped (${instanceStatus}), terminating workflow immediately`);
+            console.log(`📊 Final progress: ${stepData.plan_progress?.completed_steps}/${stepData.plan_progress?.total_steps} (${stepData.plan_progress?.percentage}%)`);
+            break; // Salir del loop inmediatamente
+          }
+        }
         
         // Si no hay plan_completed explícito, verificar si es una respuesta de step completado final
         if (!planCompleted && parsedResponse.type === 'step_completed' && stepData.plan_progress?.percentage === 100) {
@@ -281,61 +301,153 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
             break;
           }
         }
-        else if (parsedResponse.type === 'new_session') {
-          console.log(`🔐 New session acquired for ${parsedResponse.platform}, saving authentication...`);
-          try {
-            await callRobotAuthActivity({
-              instance_id,
-              name: parsedResponse.platform || 'unknown-platform',
-              domain: stepData.new_session_info?.domain || 'unknown-domain'
-            });
-            console.log(`✅ Authentication session saved for ${parsedResponse.platform}`);
-          } catch (authError) {
-            console.error(`❌ Failed to save authentication session: ${authError}`);
-            // No fallar el plan por esto, solo loguear
+        else if (parsedResponse.type === 'new_session' || planResult.data?.new_session) {
+          console.log(`🔐 New session acquired, triggering session save...`);
+          console.log(`📋 Session info:`, stepData.new_session_info);
+          
+          // El plan ya debería incluir automáticamente un paso de session_save después del login
+          // Solo logueamos que se detectó una nueva sesión
+          console.log(`✅ New session detected, continuing to next step (should be session_save)`);
+        }
+        else if (planResult.data?.session_saved) {
+          console.log(`💾 Session saved successfully`);
+          console.log(`📋 Session save info:`, planResult.data?.session_save_info);
+          
+          if (planResult.data.session_save_info?.auth_session_id) {
+            console.log(`✅ Authentication session saved with ID: ${planResult.data.session_save_info.auth_session_id}`);
           }
         }
-        else if (parsedResponse.type === 'session_needed') {
-          console.log(`🔑 Session needed for ${parsedResponse.platform}${parsedResponse.domain ? ` (${parsedResponse.domain})` : ''}`);
-          // El API debería pausar automáticamente hasta que el usuario proporcione la sesión
+        else if (parsedResponse.type === 'session_needed' || planResult.data?.session_needed) {
+          console.log(`🔑 Session needed detected`);
+          if (parsedResponse.platform) {
+            console.log(`Platform: ${parsedResponse.platform}${parsedResponse.domain ? `, Domain: ${parsedResponse.domain}` : ''}`);
+          }
+          
+          console.log(`⏳ Waiting 5 minutes for user to provide session/login...`);
+          await sleep('5m');
+          
+          // Después de 5 minutos, triggear human intervention
+          console.log(`⚠️ Session timeout reached, triggering human intervention...`);
+          
+          try {
+            await startChild(humanInterventionWorkflow, {
+              args: [{
+                conversationId: `robot-session-timeout-${instance_id}-${totalPlanCycles}`,
+                message: `Robot requires session/login after 5-minute timeout. User failed to provide authentication. Instance: ${instance_id}, Site: ${site_id}, Activity: ${activity}`,
+                user_id: user_id || 'system',
+                agentId: 'robot-agent',
+                conversation_title: `Session Required Timeout - ${activity}`,
+                site_id,
+                origin: 'whatsapp' as const
+              }],
+              workflowId: `human-intervention-session-timeout-${instance_id}-${Date.now()}`,
+              taskQueue: 'default'
+            });
+            console.log(`✅ Human intervention workflow triggered for session timeout`);
+          } catch (interventionError) {
+            console.error(`❌ Failed to trigger human intervention: ${interventionError}`);
+          }
+          
+          planFailed = true;
+          break;
         }
         else if (parsedResponse.type === 'user_attention') {
           console.log(`👤 User attention required: ${parsedResponse.explanation}`);
           
-          if (userAttentionRetries < maxUserAttentionRetries) {
-            console.log(`⏳ Waiting 5 minutes before retry (attempt ${userAttentionRetries + 1}/${maxUserAttentionRetries})...`);
+          // Verificar si es un paso de autenticación para aplicar timeout de 5 minutos
+          const isAuthStep = planResult.data?.step?.type === 'authentication';
+          
+          if (isAuthStep) {
+            console.log(`🔐 Authentication step detected, applying 5-minute timeout before human intervention...`);
+            console.log(`⏳ Waiting 5 minutes for user authentication...`);
             await sleep('5m');
-            userAttentionRetries++;
-            console.log(`🔄 Retrying after user attention wait...`);
-            // Continúa el loop para hacer retry
-          } else {
-            console.log(`⚠️ Maximum user attention retries reached, triggering human intervention...`);
+            
+            // Después de 5 minutos, triggear human intervention para autenticación
+            console.log(`⚠️ Authentication timeout reached, triggering human intervention...`);
             
             try {
               await startChild(humanInterventionWorkflow, {
                 args: [{
-                  conversationId: `robot-attention-${instance_id}-${totalPlanCycles}`,
-                  message: `Robot requires human attention: ${parsedResponse.explanation}. Instance: ${instance_id}, Site: ${site_id}, Activity: ${activity}`,
+                  conversationId: `robot-auth-timeout-${instance_id}-${totalPlanCycles}`,
+                  message: `Robot authentication timed out after 5 minutes. User failed to complete login process. Instance: ${instance_id}, Site: ${site_id}, Activity: ${activity}`,
                   user_id: user_id || 'system',
                   agentId: 'robot-agent',
-                  conversation_title: `Robot Attention Required - ${activity}`,
+                  conversation_title: `Authentication Timeout - ${activity}`,
                   site_id,
                   origin: 'whatsapp' as const
                 }],
-                workflowId: `human-intervention-attention-${instance_id}-${Date.now()}`,
+                workflowId: `human-intervention-auth-timeout-${instance_id}-${Date.now()}`,
                 taskQueue: 'default'
               });
-              console.log(`✅ Human intervention workflow triggered for persistent user attention`);
+              console.log(`✅ Human intervention workflow triggered for authentication timeout`);
             } catch (interventionError) {
               console.error(`❌ Failed to trigger human intervention: ${interventionError}`);
             }
             
             planFailed = true;
             break;
+          } else {
+            // Comportamiento normal para pasos no de autenticación
+            if (userAttentionRetries < maxUserAttentionRetries) {
+              console.log(`⏳ Waiting 5 minutes before retry (attempt ${userAttentionRetries + 1}/${maxUserAttentionRetries})...`);
+              await sleep('5m');
+              userAttentionRetries++;
+              console.log(`🔄 Retrying after user attention wait...`);
+              // Continúa el loop para hacer retry
+            } else {
+              console.log(`⚠️ Maximum user attention retries reached, triggering human intervention...`);
+              
+              try {
+                await startChild(humanInterventionWorkflow, {
+                  args: [{
+                    conversationId: `robot-attention-${instance_id}-${totalPlanCycles}`,
+                    message: `Robot requires human attention: ${parsedResponse.explanation}. Instance: ${instance_id}, Site: ${site_id}, Activity: ${activity}`,
+                    user_id: user_id || 'system',
+                    agentId: 'robot-agent',
+                    conversation_title: `Robot Attention Required - ${activity}`,
+                    site_id,
+                    origin: 'whatsapp' as const
+                  }],
+                  workflowId: `human-intervention-attention-${instance_id}-${Date.now()}`,
+                  taskQueue: 'default'
+                });
+                console.log(`✅ Human intervention workflow triggered for persistent user attention`);
+              } catch (interventionError) {
+                console.error(`❌ Failed to trigger human intervention: ${interventionError}`);
+              }
+              
+              planFailed = true;
+              break;
+            }
           }
         }
         else if (parsedResponse.type === 'step_completed') {
           console.log(`✅ Step ${parsedResponse.stepNumber || 'unknown'} completed successfully`);
+          
+          // Verificar si este es un paso de session_save que necesita llamar la API
+          const currentStep = planResult.data?.step;
+          if (currentStep?.type === 'session_save') {
+            console.log(`💾 Executing session save step...`);
+            
+            try {
+              // Obtener remote_instance_id del resultado del plan
+              const remote_instance_id = stepData.remote_instance_id;
+              
+              if (remote_instance_id) {
+                await callRobotAuthActivity({
+                  remote_instance_id,
+                  site_id
+                });
+                console.log(`✅ Session save activity completed successfully`);
+              } else {
+                console.error(`❌ No remote_instance_id available for session save`);
+              }
+            } catch (authError) {
+              console.error(`❌ Failed to execute session save activity: ${authError}`);
+              // No fallar el plan completamente por esto, solo loguear
+            }
+          }
+          
           // Reset retry counter en caso de éxito
           userAttentionRetries = 0;
         }
