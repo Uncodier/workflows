@@ -799,9 +799,9 @@ export async function sendLeadsToSalesAgentActivity(
     }
 
     // Prepare request body for the sales agent API
-    // Send only lead IDs and site_id at root level
+    // Send only lead IDs and siteId at root level (converted to camelCase for API)
     const requestBody = {
-      site_id: site_id,
+      siteId: site_id,  // Convert to camelCase for API consistency
       leads: leads.map(lead => lead.id), // Send only the IDs
       userId: userId,
       additionalData: {

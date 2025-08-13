@@ -2004,10 +2004,9 @@ export async function scheduleIndividualLeadGenerationActivity(
         
         // Prepare workflow arguments for dailyStrategicAccountsWorkflow
         const strategicWorkflowArgs = [{
-          site_id: site.id,
-          userId: site.user_id,
-          createTasks: true,
-          additionalData: {
+                  site_id: site.id,
+        userId: site.user_id,
+        additionalData: {
             scheduledBy: 'activityPrioritizationEngine-strategicAccounts',
             executeReason: `post-leadgeneration-strategic-accounts-${businessHoursSource}-${strategicScheduledTime}`,
             scheduleType: `strategic-accounts-${businessHoursSource}`,
@@ -2386,7 +2385,6 @@ async function executeDailyProspectionWorkflow(
         userId: site.user_id,
         hoursThreshold: executionOptions.hoursThreshold || 48,
         maxLeads: executionOptions.maxLeads || 30,
-        createTasks: true,
         updateStatus: false,
         additionalData: {
           scheduledBy: executionOptions.scheduledBy,
@@ -2589,7 +2587,6 @@ export async function scheduleIndividualDailyProspectionActivity(
           userId: site.user_id,
           hoursThreshold,
           maxLeads,
-          createTasks: true,
           updateStatus: false,
           additionalData: {
             scheduledBy: 'activityPrioritizationEngine-dailyProspection',

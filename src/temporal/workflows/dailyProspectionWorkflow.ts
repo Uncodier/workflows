@@ -5,14 +5,12 @@ import type { Activities } from '../activities';
 const {
   validateCommunicationChannelsActivity,
   getProspectionLeadsActivity,
-  checkLeadExistingTasksActivity,
   updateLeadProspectionStatusActivity,
   sendLeadsToSalesAgentActivity,
   assignPriorityLeadsActivity,
 } = proxyActivities<{
   validateCommunicationChannelsActivity: (options: any) => Promise<any>;
   getProspectionLeadsActivity: (options: any) => Promise<any>;
-  checkLeadExistingTasksActivity: (options: any) => Promise<any>;
   updateLeadProspectionStatusActivity: (options: any) => Promise<any>;
   sendLeadsToSalesAgentActivity: (options: any) => Promise<any>;
   assignPriorityLeadsActivity: (options: any) => Promise<any>;
@@ -41,10 +39,9 @@ export interface DailyProspectionOptions {
   userId?: string;
   hoursThreshold?: number;           // Default 48 hours
   maxLeads?: number;                 // Limit number of leads to process
-  createTasks?: boolean;             // Default true to create tasks, set false for validation only
   updateStatus?: boolean;            // Default false - whether to update lead status
   maxPages?: number;                 // Maximum pages to search (default 10 to prevent infinite loops)
-  minLeadsRequired?: number;         // Minimum leads required to stop pagination (default 1)
+  minLeadsRequired?: number;         // Minimum leads required to stop pagination (default 30)
   additionalData?: any;
 }
 
@@ -413,10 +410,9 @@ export async function dailyProspectionWorkflow(
     site_id, 
     hoursThreshold = 48, 
     maxLeads = 30, 
-    createTasks = true, 
     updateStatus = false,
     maxPages = 10,
-    minLeadsRequired = 1
+    minLeadsRequired = 30
   } = options;
   
   if (!site_id) {
@@ -821,36 +817,12 @@ export async function dailyProspectionWorkflow(
       };
       
       try {
-        // Step 3a: Check if lead already has tasks before creating new one
-        if (createTasks) {
-          console.log(`🔍 Step 3a.1: Checking existing tasks for lead: ${lead.name || lead.email}`);
-          
-          const existingTasksCheck = await checkLeadExistingTasksActivity({
-            lead_id: lead.id,
-            site_id: site_id
-          });
-          
-          if (!existingTasksCheck.success) {
-            const errorMsg = `Failed to check existing tasks for ${lead.name || lead.email}: ${existingTasksCheck.error}`;
-            console.error(`❌ ${errorMsg}`);
-            prospectionResult.errors.push(errorMsg);
-          } else if (existingTasksCheck.hasExistingTasks) {
-            // Lead already has tasks, skip creating new one
-            console.log(`⚠️ Lead ${lead.name || lead.email} already has ${existingTasksCheck.existingTasks.length} existing task(s) - skipping task creation`);
-            prospectionResult.taskCreated = false;
-            prospectionResult.errors.push(`Skipped: Lead already has ${existingTasksCheck.existingTasks.length} existing task(s)`);
-          } else {
-            // Lead has no existing tasks - task creation disabled
-            console.log(`📝 Step 3a.2: Task creation disabled for lead: ${lead.name || lead.email} (no existing tasks found)`);
-            prospectionResult.taskCreated = false;
-            prospectionResult.errors.push(`Task creation disabled - would have created awareness task`);
-          }
-        } else {
-          console.log(`ℹ️ Skipping task creation (createTasks=false) for ${lead.name || lead.email}`);
-        }
+        // Step 3a: Task creation is disabled for this workflow
+        console.log(`ℹ️ Processing lead for prospection: ${lead.name || lead.email}`);
+        prospectionResult.taskCreated = false;
         
         // Step 3b: Optionally update lead status
-        if (updateStatus && prospectionResult.taskCreated) {
+        if (updateStatus) {
           console.log(`📝 Step 3b: Updating lead status for: ${lead.name || lead.email}`);
           
           const updateStatusResult = await updateLeadProspectionStatusActivity({
@@ -858,7 +830,7 @@ export async function dailyProspectionWorkflow(
             site_id: site_id,
             newStatus: 'contacted',
             userId: options.userId || site.user_id,
-            notes: `Lead incluido en prospección diaria - tarea de awareness creada`
+            notes: `Lead incluido en prospección diaria`
           });
           
           if (updateStatusResult.success) {
@@ -870,8 +842,6 @@ export async function dailyProspectionWorkflow(
             console.error(`❌ ${errorMsg}`);
             prospectionResult.errors.push(errorMsg);
           }
-        } else if (updateStatus && !prospectionResult.taskCreated) {
-          console.log(`⚠️ Skipping status update for ${lead.name || lead.email} (task not created)`);
         } else {
           console.log(`ℹ️ Skipping status update (updateStatus=false) for ${lead.name || lead.email}`);
         }

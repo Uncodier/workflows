@@ -22,7 +22,6 @@ async function testDailyStrategicAccountsWorkflow() {
       site_id: testSiteId,
       userId: process.env.TEST_USER_ID, // Optional
       maxLeads: 10, // Limit to 10 strategic leads for testing
-      createTasks: true, // Actually create awareness tasks
       updateStatus: false, // Don't update lead status for testing
       additionalData: {
         testRun: true,

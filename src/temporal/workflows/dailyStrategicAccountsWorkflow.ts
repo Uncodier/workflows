@@ -59,7 +59,6 @@ export interface DailyStrategicAccountsOptions {
   site_id: string;                    // Required: Site ID
   userId?: string;
   maxLeads?: number;                 // Limit number of leads to process
-  createTasks?: boolean;             // Default true to create tasks, set false for validation only
   updateStatus?: boolean;            // Default false - whether to update lead status
   additionalData?: any;
 }
@@ -128,7 +127,7 @@ export interface DailyStrategicAccountsResult {
 export async function dailyStrategicAccountsWorkflow(
   options: DailyStrategicAccountsOptions
 ): Promise<DailyStrategicAccountsResult> {
-  const { site_id, createTasks = true } = options;
+  const { site_id } = options;
   
   if (!site_id) {
     throw new Error('No site ID provided');
@@ -178,7 +177,7 @@ export async function dailyStrategicAccountsWorkflow(
     const leadGenOptions: LeadGenerationOptions = {
       site_id: site_id,
       userId: options.userId,
-      create: createTasks,
+      create: false,
       region: 'world',
       keywords: ['key accounts'], // ✅ Fixed: Pass as array instead of string
       additionalData: {

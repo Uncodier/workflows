@@ -157,7 +157,7 @@ export async function callRegionSearchApiActivity(
 
     // Optimize request body by only sending essential data to avoid 414 errors
     const requestBody = {
-      site_id: options.site_id,
+      siteId: options.site_id,  // Convert to camelCase for API consistency
       userId: options.userId,
       // Only include essential additionalData to avoid large request bodies
       siteName: options.additionalData?.siteName,
@@ -772,7 +772,7 @@ export async function callLeadGenerationApiActivity(
 
     // Optimize request body by only sending essential data to avoid 414 errors
     const requestBody = {
-      site_id: options.site_id,
+      siteId: options.site_id,  // Convert to camelCase for API consistency
       userId: options.userId,
       // Only include essential data, filter out large objects that might cause 414 errors
       company: options.additionalData?.company ? {

@@ -23,7 +23,6 @@ async function testDailyProspectionWorkflow() {
       userId: process.env.TEST_USER_ID, // Optional
       hoursThreshold: 48, // Look for leads older than 48 hours
       maxLeads: 20, // Limit to 20 leads for testing (doubled)
-      createTasks: true, // Actually create awareness tasks
       updateStatus: false, // Don't update lead status for testing
       additionalData: {
         testRun: true,
