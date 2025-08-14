@@ -111,14 +111,70 @@ export interface RobotWorkflowResult {
  * 
  * The workflow will continue calling the plan act API until the response contains plan_completed: true
  */
+/**
+ * Helper function to ensure workflow always completes with proper cleanup and logging
+ */
+function finalizeWorkflow(
+  success: boolean,
+  reason: string,
+  input: RobotWorkflowInput,
+  planResults: any[],
+  totalPlanCycles: number,
+  planParams: any
+): RobotWorkflowResult {
+  const { site_id, activity, instance_id, user_id } = input;
+  
+  // Calculate aggregate metrics
+  const totalExecutionTime = planResults.reduce((sum, result) => sum + (result.execution_time_ms || 0), 0);
+  const totalTokenUsage = planResults.reduce((acc, result) => {
+    if (result.token_usage) {
+      acc.input_tokens += result.token_usage.input_tokens || 0;
+      acc.output_tokens += result.token_usage.output_tokens || 0;
+    }
+    return acc;
+  }, { input_tokens: 0, output_tokens: 0 });
+  
+  const finalProgress = planResults.length > 0 ? planResults[planResults.length - 1].plan_progress : undefined;
+  
+  // Log final state
+  console.log(`📊 Workflow finalization - State: ${success ? 'SUCCESS' : 'FAILED'}`);
+  console.log(`📝 Reason: ${reason}`);
+  console.log(`🔢 Total cycles: ${totalPlanCycles}`);
+  console.log(`⏱️ Total execution time: ${totalExecutionTime}ms`);
+  console.log(`🎯 Token usage: ${totalTokenUsage.input_tokens + totalTokenUsage.output_tokens} total`);
+  console.log(`📈 Final progress: ${finalProgress?.completed_steps || 0}/${finalProgress?.total_steps || 0} (${finalProgress?.percentage || 0}%)`);
+  console.log(`🏁 Workflow ${success ? 'completed successfully' : 'terminated with failure'} at ${new Date().toISOString()}`);
+  
+  return {
+    success,
+    instance_id,
+    instance_plan_id: input.instance_plan_id || planParams?.instance_plan_id,
+    planResults,
+    totalPlanCycles,
+    finalProgress,
+    totalExecutionTime,
+    totalTokenUsage,
+    error: success ? undefined : reason,
+    site_id,
+    activity,
+    user_id,
+    executedAt: new Date().toISOString()
+  };
+}
+
 export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWorkflowResult> {
   const { site_id, activity, instance_id, instance_plan_id, user_id } = input;
   
   console.log(`🤖 Starting robot execution workflow for site: ${site_id}, activity: ${activity}, instance: ${instance_id}${instance_plan_id ? `, plan: ${instance_plan_id}` : ''}${user_id ? `, user: ${user_id}` : ''}`);
 
+  // Declare variables outside try-catch for error handling scope
+  const planResults: any[] = [];
+  let totalPlanCycles = 0;
+  let planParams: any = {};
+
   try {
     // Prepare activity parameters
-    const planParams: any = {
+    planParams = {
       site_id,
       activity,
       instance_id
@@ -131,9 +187,6 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
     if (user_id) {
       planParams.user_id = user_id;
     }
-
-    const planResults: any[] = [];
-    let totalPlanCycles = 0;
     let planCompleted = false;
     let planFailed = false;
     let userAttentionRetries = 0; // Contador de reintentos para user attention
@@ -205,10 +258,14 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
           const failureReason = stepData.failure_reason || planResult.data?.failure_reason;
           
           console.log(`💥 Plan failed detected. Reason: ${failureReason}`);
+          console.log(`🔍 Instance status: ${instanceStatus || 'unknown'}`);
+          console.log(`📊 Current progress: ${stepData.plan_progress?.completed_steps || 0}/${stepData.plan_progress?.total_steps || 0} (${stepData.plan_progress?.percentage || 0}%)`);
+          
           if (instanceStatus === 'stopped') {
             console.log(`🛑 Instance is stopped (${instanceStatus}), terminating workflow immediately`);
-            console.log(`📊 Final progress: ${stepData.plan_progress?.completed_steps}/${stepData.plan_progress?.total_steps} (${stepData.plan_progress?.percentage}%)`);
             break; // Salir del loop inmediatamente
+          } else {
+            console.log(`⚠️ Plan failed but instance status is: ${instanceStatus || 'unknown'}, will process failure handling`);
           }
         }
         
@@ -494,59 +551,58 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Robot plan act exception on cycle ${totalPlanCycles} for site ${site_id}:`, errorMessage);
+        console.log(`🔍 Error details - Cycle: ${totalPlanCycles}, Instance: ${instance_id}, Activity: ${activity}`);
         
-        throw new Error(`Plan act exception on cycle ${totalPlanCycles}: ${errorMessage}`);
+        // Agregar información del error al planResults para trazabilidad
+        const errorStepData = {
+          cycle: totalPlanCycles,
+          step: null,
+          plan_progress: null,
+          message: `Exception during plan act call: ${errorMessage}`,
+          execution_time_ms: 0,
+          steps_executed: 0,
+          token_usage: null,
+          remote_instance_id: null,
+          plan_completed: false,
+          plan_failed: true,
+          failure_reason: `Plan act exception on cycle ${totalPlanCycles}: ${errorMessage}`,
+          response_type: 'step_failed' as const,
+          timestamp: new Date().toISOString()
+        };
+        
+        planResults.push(errorStepData);
+        planFailed = true;
+        console.log(`📝 Error information added to planResults for traceability`);
+        break; // Salir del loop en lugar de lanzar excepción
       }
     }
 
     if (totalPlanCycles >= maxCycles) {
-      console.warn(`⚠️ Robot plan act execution loop reached maximum cycles (${maxCycles}) for site ${site_id}`);
-      
-      throw new Error(`Plan act execution loop reached maximum cycles (${maxCycles})`);
+      const failureReason = `Plan act execution loop reached maximum cycles (${maxCycles})`;
+      return finalizeWorkflow(false, failureReason, input, planResults, totalPlanCycles, planParams);
     }
 
     if (planFailed) {
-      console.error(`❌ Robot plan execution failed for site ${site_id}`);
+      const lastResult = planResults.length > 0 ? planResults[planResults.length - 1] : null;
+      const failureReason = lastResult?.failure_reason || 'Plan execution failed - check planResults for details';
       
-      throw new Error('Plan execution failed - check planResults for details');
+      return finalizeWorkflow(false, failureReason, input, planResults, totalPlanCycles, planParams);
     }
 
-    console.log(`✅ Robot execution workflow completed successfully for site: ${site_id}. Total plan act cycles: ${totalPlanCycles}`);
-
-    // Calculate aggregate metrics
-    const totalExecutionTime = planResults.reduce((sum, result) => sum + (result.execution_time_ms || 0), 0);
-    const totalTokenUsage = planResults.reduce((acc, result) => {
-      if (result.token_usage) {
-        acc.input_tokens += result.token_usage.input_tokens || 0;
-        acc.output_tokens += result.token_usage.output_tokens || 0;
-      }
-      return acc;
-    }, { input_tokens: 0, output_tokens: 0 });
-    
-    // Get final progress from last result
-    const finalProgress = planResults.length > 0 ? planResults[planResults.length - 1].plan_progress : undefined;
-    
-    console.log(`📊 Final metrics: ${totalExecutionTime}ms total, ${totalTokenUsage.input_tokens + totalTokenUsage.output_tokens} tokens used`);
-
-    return {
-      success: true,
-      instance_id,
-      instance_plan_id: instance_plan_id || planParams.instance_plan_id,
-      planResults,
-      totalPlanCycles,
-      finalProgress,
-      totalExecutionTime,
-      totalTokenUsage,
-      site_id,
-      activity,
-      user_id,
-      executedAt: new Date().toISOString()
-    };
+    return finalizeWorkflow(true, 'Plan completed successfully with all steps executed', input, planResults, totalPlanCycles, planParams);
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Robot execution workflow exception for site ${site_id}:`, errorMessage);
-
-    throw new Error(`Robot execution workflow failed: ${errorMessage}`);
+    
+    // Use la función de finalización incluso en casos de excepción
+    return finalizeWorkflow(
+      false, 
+      `Robot execution workflow failed: ${errorMessage}`, 
+      input, 
+      planResults, 
+      totalPlanCycles, 
+      planParams
+    );
   }
 }

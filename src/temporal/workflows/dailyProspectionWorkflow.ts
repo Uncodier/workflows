@@ -27,6 +27,7 @@ const {
   saveCronStatusActivity,
   getSiteActivity,
   startLeadFollowUpWorkflowActivity,
+  validateAndCleanStuckCronStatusActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -429,6 +430,35 @@ export async function dailyProspectionWorkflow(
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
   console.log(`📋 REAL Workflow ID: ${realWorkflowId} (from Temporal)`);
   console.log(`📋 REAL Schedule ID: ${realScheduleId} (from ${realScheduleId === 'manual-execution' ? 'manual execution' : 'schedule'})`);
+
+  // Validate and clean any stuck cron status records before execution
+  console.log('🔍 Validating cron status before daily prospection execution...');
+  
+  const cronValidation = await validateAndCleanStuckCronStatusActivity(
+    'dailyProspectionWorkflow',
+    site_id,
+    24 // 24 hours threshold - daily prospection should not be stuck longer than 24h
+  );
+  
+  console.log(`📋 Cron validation result: ${cronValidation.reason}`);
+  if (cronValidation.wasStuck) {
+    console.log(`🧹 Cleaned stuck record that was ${cronValidation.hoursStuck?.toFixed(1)}h old`);
+  }
+  
+  if (!cronValidation.canProceed) {
+    console.log('⏳ Another daily prospection is likely running for this site - terminating');
+    
+    // Log termination
+    await logWorkflowExecutionActivity({
+      workflowId: realWorkflowId,
+      workflowType: 'dailyProspectionWorkflow',
+      status: 'BLOCKED',
+      input: options,
+      error: `Workflow blocked: ${cronValidation.reason}`,
+    });
+
+    throw new Error(`Workflow blocked: ${cronValidation.reason}`);
+  }
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({

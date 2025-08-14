@@ -14,6 +14,7 @@ import type {
 const { 
   logWorkflowExecutionActivity,
   saveCronStatusActivity,
+  validateAndCleanStuckCronStatusActivity,
   getSiteActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
@@ -520,6 +521,39 @@ export async function leadGenerationWorkflow(
   console.log(`📋 REAL Schedule ID: ${realScheduleId} (from ${realScheduleId === 'manual-execution' ? 'manual execution' : 'schedule'})`);
   console.log(`📋 Schedule ID: ${scheduleId} (from ${options.additionalData?.scheduleType ? 'scheduleType' : 'fallback'})`);
   console.log(`🔄 Retry Info: Attempt ${retryCount + 1}/${maxRetries + 1} (${retryCount === 0 ? 'First attempt' : `Retry ${retryCount}`})`);
+
+  // Validate and clean any stuck cron status records before execution (skip for retries)
+  if (retryCount === 0) {
+    console.log('🔍 Validating cron status before lead generation execution...');
+    
+    const cronValidation = await validateAndCleanStuckCronStatusActivity(
+      'leadGenerationWorkflow',
+      site_id,
+      18 // 18 hours threshold - lead generation should not be stuck longer than 18h
+    );
+    
+    console.log(`📋 Cron validation result: ${cronValidation.reason}`);
+    if (cronValidation.wasStuck) {
+      console.log(`🧹 Cleaned stuck record that was ${cronValidation.hoursStuck?.toFixed(1)}h old`);
+    }
+    
+    if (!cronValidation.canProceed) {
+      console.log('⏳ Another lead generation is likely running for this site - terminating');
+      
+      // Log termination
+      await logWorkflowExecutionActivity({
+        workflowId,
+        workflowType: 'leadGenerationWorkflow',
+        status: 'BLOCKED',
+        input: options,
+        error: `Workflow blocked: ${cronValidation.reason}`,
+      });
+
+      throw new Error(`Workflow blocked: ${cronValidation.reason}`);
+    }
+  } else {
+    console.log('⏩ Skipping cron validation for retry workflow');
+  }
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({
