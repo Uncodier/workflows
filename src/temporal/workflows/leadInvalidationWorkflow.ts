@@ -25,6 +25,7 @@ export interface LeadInvalidationOptions {
   reason?: 'whatsapp_failed' | 'email_failed' | 'invalid_contact' | 'invalid_email' | 'invalid_phone'; // Optional: Reason for invalidation
   userId?: string;                    // Optional: User ID for logging
   additionalData?: any;               // Optional: Additional context data
+  response_message?: string;          // Optional: Message to concatenate with existing notes
 }
 
 export interface LeadInvalidationResult {
@@ -148,7 +149,8 @@ export async function leadInvalidationWorkflow(
         telephone: options.telephone,
         email: options.email
       },
-      userId: options.userId
+      userId: options.userId,
+      response_message: options.response_message
     });
     
     if (invalidationResult.success) {
@@ -190,7 +192,8 @@ export async function leadInvalidationWorkflow(
                 email: options.email
               },
               userId: options.userId,
-              shared_with_lead_id: lead_id
+              shared_with_lead_id: lead_id,
+              response_message: options.response_message ? `${options.response_message} (shared contact invalidation)` : undefined
             });
             
             if (sharedInvalidationResult.success) {

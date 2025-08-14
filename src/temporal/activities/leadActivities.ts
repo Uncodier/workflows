@@ -1696,6 +1696,7 @@ export async function invalidateLeadActivity(request: {
   };
   userId?: string;
   shared_with_lead_id?: string;
+  response_message?: string; // New parameter for the message that will be concatenated to notes
 }): Promise<{ success: boolean; error?: string }> {
   console.log(`🚫 Invalidating lead ${request.lead_id} - reason: ${request.reason}`);
   
@@ -1718,6 +1719,22 @@ export async function invalidateLeadActivity(request: {
     // Import supabase service role client (bypasses RLS)
     const { supabaseServiceRole } = await import('../../lib/supabase/client');
 
+    // First get current lead data to preserve existing notes
+    console.log(`📝 Fetching current lead data to preserve existing notes...`);
+    const { data: currentLead, error: fetchError } = await supabaseServiceRole
+      .from('leads')
+      .select('notes')
+      .eq('id', request.lead_id)
+      .single();
+
+    if (fetchError) {
+      console.error(`❌ Error fetching current lead data:`, fetchError);
+      return {
+        success: false,
+        error: fetchError.message
+      };
+    }
+
     // Only add metadata for email_failed or whatsapp_failed reasons
     const shouldAddMetadata = request.reason === 'email_failed' || request.reason === 'whatsapp_failed';
     
@@ -1725,6 +1742,24 @@ export async function invalidateLeadActivity(request: {
       site_id: null, // Remove site_id to remove lead from site
       updated_at: new Date().toISOString()
     };
+
+    // Handle notes concatenation if response_message is provided
+    if (request.response_message) {
+      const invalidationNote = "Lead invalidated due to invalid email and no WhatsApp available (early validation)";
+      const existingNotes = currentLead.notes || '';
+      
+      // Concatenate existing notes with invalidation note and response message
+      if (existingNotes.trim()) {
+        updateData.notes = `${existingNotes}\n\n${invalidationNote}\n${request.response_message}`;
+      } else {
+        updateData.notes = `${invalidationNote}\n${request.response_message}`;
+      }
+      
+      console.log(`📝 Concatenating notes:`);
+      console.log(`   - Existing notes: ${existingNotes ? '"' + existingNotes.substring(0, 100) + '..."' : 'None'}`);
+      console.log(`   - Adding invalidation note: "${invalidationNote}"`);
+      console.log(`   - Adding response message: "${request.response_message}"`);
+    }
 
     if (shouldAddMetadata) {
       // Prepare invalidation metadata only for communication failures
