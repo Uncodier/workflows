@@ -392,10 +392,10 @@ export async function leadFollowUpWorkflow(
           errors.push(`Lead invalidation exception: ${invalidationErrorMessage}`);
         }
         
-        // Stop the workflow here since there's no valid communication channel
+        // Complete the workflow successfully after invalidation since there's no valid communication channel
         const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         const result: LeadFollowUpResult = {
-          success: false,
+          success: true, // Changed to true since invalidation completed successfully
           leadId: lead_id,
           siteId: site_id,
           siteName,
@@ -450,47 +450,107 @@ export async function leadFollowUpWorkflow(
       }
     }
     
-    // If early validation fails completely and we shouldn't proceed, stop before research
-    if (!earlyValidationResult.shouldProceed && !(earlyValidationResult.validationType === 'email' && !earlyValidationResult.isValid && leadPhone)) {
-      console.log(`🚫 Early contact validation failed - stopping workflow before research to save resources`);
-      console.log(`❌ Early validation failure details:`);
-      console.log(`   - Type: ${earlyValidationResult.validationType}`);
-      console.log(`   - Valid: ${earlyValidationResult.isValid}`);
-      console.log(`   - Message: ${earlyValidationResult.message}`);
-      console.log(`   - Email: ${leadEmail || 'undefined'}`);
-      console.log(`   - Phone: ${leadPhone || 'undefined'}`);
+    // Check if the validation API itself failed (not just invalid email)
+    if (!earlyValidationResult.success) {
+      console.log(`❌ Contact validation API failed - failing workflow`);
+      console.log(`🔍 API failure details:`);
+      console.log(`   - Error: ${earlyValidationResult.error}`);
+      console.log(`   - Reason: ${earlyValidationResult.reason}`);
       
-      // Create appropriate error message
-      const validationError = `Early contact validation failed: ${earlyValidationResult.message} (${earlyValidationResult.validationType})`;
-      errors.push(validationError);
+      // Create appropriate error message for API failure
+      const apiFailureError = `Contact validation API failed: ${earlyValidationResult.error || earlyValidationResult.reason}`;
+      errors.push(apiFailureError);
 
-      // Complete workflow without processing or research
-      const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-      
-      console.log(`⚠️ Lead follow-up workflow stopped due to early contact validation failure (research skipped)`);
-      console.log(`📊 Summary: Lead ${lead_id} early validation failed for ${siteName} in ${executionTime}`);
-
-      // Update cron status to indicate validation failure
+      // Update cron status to indicate API failure
       await saveCronStatusActivity({
         siteId: site_id,
         workflowId,
         scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
         activityName: 'leadFollowUpWorkflow',
         status: 'FAILED',
-        lastRun: new Date().toISOString()
+        lastRun: new Date().toISOString(),
+        errorMessage: apiFailureError
       });
 
-      // Log failure with validation failure
+      // Log workflow failure due to API failure
       await logWorkflowExecutionActivity({
         workflowId,
         workflowType: 'leadFollowUpWorkflow',
         status: 'FAILED',
         input: options,
-        error: `Early contact validation failed: ${earlyValidationResult.message} (${earlyValidationResult.validationType})`,
+        error: apiFailureError,
       });
 
-      // Throw error to properly fail the workflow
-      throw new Error(`Early contact validation failed: ${earlyValidationResult.message} (${earlyValidationResult.validationType})`);
+      // Throw error to properly fail the workflow when API fails
+      throw new Error(apiFailureError);
+    }
+    
+    // If API worked but we shouldn't proceed (e.g., invalid email + no WhatsApp), complete successfully
+    if (!earlyValidationResult.shouldProceed && !(earlyValidationResult.validationType === 'email' && !earlyValidationResult.isValid && leadPhone)) {
+      console.log(`✅ Contact validation API worked but email is invalid - completing workflow after successful invalidation`);
+      console.log(`📋 Validation details:`);
+      console.log(`   - Type: ${earlyValidationResult.validationType}`);
+      console.log(`   - Valid: ${earlyValidationResult.isValid}`);
+      console.log(`   - Reason: ${earlyValidationResult.reason}`);
+      console.log(`   - Email: ${leadEmail || 'undefined'}`);
+      console.log(`   - Phone: ${leadPhone || 'undefined'}`);
+      
+      // Create appropriate message for successful validation but invalid contact
+      const validationMessage = `Contact validation completed: ${earlyValidationResult.reason}`;
+      
+      // Complete workflow successfully since validation API worked correctly
+      const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+      
+      console.log(`🎉 Lead follow-up workflow completed successfully after contact validation (invalid email, no alternative contact)`);
+      console.log(`📊 Summary: Lead ${lead_id} validation completed for ${siteName} in ${executionTime}`);
+
+      // Update cron status to indicate successful completion
+      await saveCronStatusActivity({
+        siteId: site_id,
+        workflowId,
+        scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+        activityName: 'leadFollowUpWorkflow',
+        status: 'COMPLETED',
+        lastRun: new Date().toISOString()
+      });
+
+      // Log successful completion
+      await logWorkflowExecutionActivity({
+        workflowId,
+        workflowType: 'leadFollowUpWorkflow',
+        status: 'COMPLETED',
+        input: options,
+        output: {
+          success: true,
+          leadId: lead_id,
+          siteId: site_id,
+          siteName,
+          siteUrl,
+          followUpActions: [],
+          nextSteps: [],
+          data: null,
+          messageSent: undefined,
+          errors: [validationMessage],
+          executionTime,
+          completedAt: new Date().toISOString()
+        },
+      });
+
+      // Return success result since validation worked correctly
+      return {
+        success: true,
+        leadId: lead_id,
+        siteId: site_id,
+        siteName,
+        siteUrl,
+        followUpActions: [],
+        nextSteps: [],
+        data: null,
+        messageSent: undefined,
+        errors: [validationMessage],
+        executionTime,
+        completedAt: new Date().toISOString()
+      };
     }
     
     console.log(`✅ Early contact validation passed - proceeding with research and follow-up`);
