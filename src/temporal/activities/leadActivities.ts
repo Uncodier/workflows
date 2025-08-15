@@ -946,10 +946,11 @@ export async function validateMessageAndConversationActivity(request: {
     // Import supabase service role client (bypasses RLS)
     const { supabaseServiceRole } = await import('../../lib/supabase/client');
 
-    // Step 1: Find conversation ID if not provided
-    let conversationId = request.response_data?.conversation_id || 
-                        request.response_data?.lead?.conversation_id ||
-                        request.additional_data?.conversation_id;
+    // Step 1: Find conversation ID if not provided - prioritize additional_data which comes from logs
+    let conversationId = request.additional_data?.conversation_id ||
+                        request.additional_data?.conversation_ids?.[0] ||
+                        request.response_data?.conversation_id || 
+                        request.response_data?.lead?.conversation_id;
     
     let conversationExists = false;
     
@@ -985,6 +986,31 @@ export async function validateMessageAndConversationActivity(request: {
          console.log(`   - Last updated: ${conversation.updated_at}`);
          console.log(`   - Last message: ${conversation.last_message_at}`);
          console.log(`   - Custom data:`, conversation.custom_data);
+       } else {
+         console.log(`❌ No conversation found by lead_id - conversation may have been deleted by user`);
+         console.log(`🔍 This could happen if:`);
+         console.log(`   - User manually deleted the conversation`);
+         console.log(`   - Conversation was cleaned up by another process`);
+         console.log(`   - Conversation never existed for this lead`);
+         
+         // Check if there are ANY conversations for this lead (not just the most recent)
+         console.log(`🔍 Checking for ANY conversations for this lead...`);
+         const { data: allConversations, error: allConversationsError } = await supabaseServiceRole
+           .from('conversations')
+           .select('id, created_at, status')
+           .eq('lead_id', request.lead_id)
+           .eq('site_id', request.site_id)
+           .order('created_at', { ascending: false });
+
+         if (!allConversationsError && allConversations && allConversations.length > 0) {
+           console.log(`📊 Found ${allConversations.length} total conversations for this lead:`);
+           allConversations.forEach((conv, index) => {
+             console.log(`   ${index + 1}. ID: ${conv.id}, Status: ${conv.status}, Created: ${conv.created_at}`);
+           });
+           console.log(`💡 User may have deleted the specific conversation but others exist`);
+         } else {
+           console.log(`📊 No conversations found for this lead at all`);
+         }
        }
     } else {
       console.log(`🔍 Validating provided conversation ID: ${conversationId}...`);
@@ -998,6 +1024,10 @@ export async function validateMessageAndConversationActivity(request: {
 
        if (validateError) {
          console.error(`❌ Conversation ${conversationId} not found or invalid:`, validateError);
+         console.error(`💬 Specific conversation was deleted - this is likely user action`);
+         console.error(`🔍 Error details:`);
+         console.error(`   - Error code: ${validateError.code}`);
+         console.error(`   - Error message: ${validateError.message}`);
          conversationExists = false;
        } else {
          conversationExists = true;
@@ -1009,16 +1039,19 @@ export async function validateMessageAndConversationActivity(request: {
        }
     }
 
-    // Step 2: Validate message if message_id provided
+    // Step 2: Validate message if message_id provided - prioritize additional_data which comes from logs
     let messageExists = false;
-    const messageId = request.message_id || request.response_data?.message_id;
+    let messageIsValid = false;
+    const messageId = request.message_id || 
+                     request.additional_data?.message_ids?.[0] ||
+                     request.response_data?.message_id;
     
     if (messageId && conversationId) {
       console.log(`🔍 Validating message ID: ${messageId}...`);
       
       const { data: message, error: messageError } = await supabaseServiceRole
         .from('messages')
-        .select('id, custom_data')
+        .select('id, custom_data, created_at, updated_at, conversation_id')
         .eq('id', messageId)
         .eq('conversation_id', conversationId)
         .single();
@@ -1026,31 +1059,77 @@ export async function validateMessageAndConversationActivity(request: {
       if (messageError) {
         console.error(`❌ Message ${messageId} not found:`, messageError);
         messageExists = false;
+        messageIsValid = false;
       } else {
         messageExists = true;
-        console.log(`✅ Message ${messageId} exists in conversation`);
-        console.log(`📊 Message custom_data:`, message.custom_data);
+        console.log(`✅ Message ${messageId} exists in conversation ${conversationId}`);
+        console.log(`📊 Message details:`);
+        console.log(`   - Created: ${message.created_at}`);
+        console.log(`   - Updated: ${message.updated_at}`);
+        console.log(`   - Custom data:`, JSON.stringify(message.custom_data, null, 2));
+        
+        // Validate message status - should be 'pending' or ready for sending
+        const customData = message.custom_data || {};
+        const messageStatus = customData.status;
+        const alreadyProcessed = customData.follow_up?.processed;
+        
+        console.log(`🔍 Message status validation:`);
+        console.log(`   - Current status: ${messageStatus || 'undefined'}`);
+        console.log(`   - Already processed: ${alreadyProcessed || false}`);
+        
+        if (alreadyProcessed && messageStatus === 'sent') {
+          console.log(`⚠️ Message was already sent - this might be a duplicate workflow`);
+          messageIsValid = false;
+        } else if (messageStatus && messageStatus !== 'pending' && messageStatus !== 'sent') {
+          console.log(`⚠️ Message has unexpected status: ${messageStatus}`);
+          messageIsValid = false;
+        } else {
+          console.log(`✅ Message is ready for processing (status: ${messageStatus || 'pending'})`);
+          messageIsValid = true;
+        }
       }
-    } else {
+    } else if (!messageId) {
       console.log(`⚠️ No message ID provided for validation - skipping message check`);
       messageExists = true; // Don't fail validation for missing message ID
+      messageIsValid = true;
+    } else {
+      console.log(`❌ Message ID provided but no conversation ID - cannot validate message`);
+      messageExists = false;
+      messageIsValid = false;
     }
 
-    // Step 3: Final validation result
-    const validationSuccess = conversationExists; // Message is optional
+    // Step 3: Final validation result - require both conversation and valid message (if message_id provided)
+    const validationSuccess = conversationExists && (messageId ? (messageExists && messageIsValid) : true);
+    
+    // Prepare specific error details
+    const errorDetails: string[] = [];
+    if (!conversationExists) {
+      // Check if we had a specific conversation_id from logs (vs searching by lead_id)
+      const hadSpecificConversationId = request.additional_data?.conversation_id || 
+                                       request.additional_data?.conversation_ids?.[0];
+      if (hadSpecificConversationId) {
+        errorDetails.push('conversation was deleted (likely by user action)');
+      } else {
+        errorDetails.push('no conversation found for this lead');
+      }
+    }
+    if (messageId && !messageExists) errorDetails.push('message not found');
+    if (messageId && messageExists && !messageIsValid) errorDetails.push('message already processed or invalid status');
     
     if (validationSuccess) {
       console.log(`✅ Validation successful - ready for follow-up message sending`);
       if (conversationId) {
         console.log(`💬 Conversation ${conversationId} is ready for new messages`);
       }
-      if (messageId && messageExists) {
-        console.log(`📝 Message ${messageId} exists and can be updated`);
+      if (messageId && messageExists && messageIsValid) {
+        console.log(`📝 Message ${messageId} exists and is ready for processing`);
       }
     } else {
       console.log(`❌ Validation failed - cannot proceed with follow-up`);
       console.log(`   - Conversation exists: ${conversationExists}`);
       console.log(`   - Message exists: ${messageExists}`);
+      console.log(`   - Message is valid: ${messageIsValid}`);
+      console.log(`🔍 Validation failure reasons: ${errorDetails.join(', ')}`);
     }
     
     return {
@@ -1059,7 +1138,7 @@ export async function validateMessageAndConversationActivity(request: {
       message_id: messageId,
       conversation_exists: conversationExists,
       message_exists: messageExists,
-      error: validationSuccess ? undefined : 'Validation failed - required entities do not exist'
+      error: validationSuccess ? undefined : `Validation failed: ${errorDetails.join(', ')}`
     };
     
   } catch (error) {

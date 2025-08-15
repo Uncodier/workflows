@@ -798,34 +798,57 @@ export async function leadFollowUpWorkflow(
             // Step 5.1: Final validation before sending - ensure messages still exist after the 2-hour wait
       console.log(`🔍 Step 5.1: Performing final validation before message sending...`);
       console.log(`📝 Validating message IDs from logs: ${logsResult?.message_ids?.join(', ') || 'None'}`);
+      console.log(`💬 Validating conversation IDs from logs: ${logsResult?.conversation_ids?.join(', ') || 'None'}`);
+      console.log(`🎯 Primary message_id for validation: ${logsResult?.message_ids?.[0] || 'None'}`);
+      console.log(`🎯 Primary conversation_id for validation: ${logsResult?.conversation_ids?.[0] || 'None'}`);
       
       const messageValidationResult = await validateMessageAndConversationActivity({
         lead_id: lead_id,
         site_id: site_id,
+        message_id: logsResult?.message_ids?.[0], // Pass specific message_id to validate
         response_data: response,
         additional_data: {
           ...options.additionalData,
           message_ids: logsResult?.message_ids,
           conversation_ids: logsResult?.conversation_ids,
+          conversation_id: logsResult?.conversation_ids?.[0], // Also pass conversation_id directly
           validate_before_send: true
         }
       });
       
       if (!messageValidationResult.success) {
-        const errorMsg = `Final validation failed - messages no longer exist: ${messageValidationResult.error}`;
+        const errorMsg = `Final validation failed: ${messageValidationResult.error}`;
         console.error(`❌ ${errorMsg}`);
+        console.error(`🔍 Validation details:`);
+        console.error(`   - Conversation exists: ${messageValidationResult.conversation_exists}`);
+        console.error(`   - Message exists: ${messageValidationResult.message_exists}`);
+        console.error(`   - Conversation ID: ${messageValidationResult.conversation_id || 'None'}`);
+        console.error(`   - Message ID: ${messageValidationResult.message_id || 'None'}`);
         errors.push(errorMsg);
         
-        // Execute cleanup since messages are gone
-        console.log(`🧹 Messages no longer exist after 2-hour wait, executing cleanup...`);
+        // Execute cleanup since messages/conversation no longer exist
+        console.log(`🧹 Validation failed after 2-hour wait - executing cleanup...`);
+        console.log(`📋 Validation failure type: ${messageValidationResult.error}`);
         
         try {
+          // Determine specific failure reason based on validation result
+          let failureReason = 'validation_failed_after_wait_period';
+          if (messageValidationResult.error?.includes('conversation was deleted')) {
+            failureReason = 'conversation_deleted_by_user_during_wait_period';
+          } else if (messageValidationResult.error?.includes('message not found')) {
+            failureReason = 'message_deleted_during_wait_period';
+          } else if (messageValidationResult.error?.includes('no conversation found')) {
+            failureReason = 'no_conversation_exists_for_lead';
+          }
+          
+          console.log(`🔍 Using failure reason: ${failureReason}`);
+          
           const cleanupResult = await cleanupFailedFollowUpActivity({
             lead_id: lead_id,
             site_id: site_id,
             conversation_id: logsResult?.conversation_ids?.[0],
             message_id: logsResult?.message_ids?.[0],
-            failure_reason: 'messages_deleted_during_wait_period',
+            failure_reason: failureReason,
             delivery_channel: undefined
           });
           
@@ -853,12 +876,15 @@ export async function leadFollowUpWorkflow(
           nextSteps,
           data: response,
           messageSent: undefined,
-          errors: [...errors, 'Messages no longer exist after wait period - delivery cancelled'],
+          errors: [...errors, `Validation failed after wait period: ${messageValidationResult.error} - delivery cancelled`],
           executionTime,
           completedAt: new Date().toISOString()
         };
 
-        console.log(`⚠️ Lead follow-up workflow completed - messages were deleted during wait period`);
+        console.log(`⚠️ Lead follow-up workflow completed - validation failed: ${messageValidationResult.error}`);
+        if (messageValidationResult.error?.includes('conversation was deleted')) {
+          console.log(`💬 User likely deleted the conversation during the 2-hour wait period`);
+        }
 
         // Update cron status
         await saveCronStatusActivity({
@@ -882,6 +908,9 @@ export async function leadFollowUpWorkflow(
         return result;
       } else {
         console.log(`✅ Final validation successful - proceeding with message delivery`);
+        console.log(`📊 Validation confirmed:`);
+        console.log(`   - Conversation ${messageValidationResult.conversation_id} exists and is ready`);
+        console.log(`   - Message ${messageValidationResult.message_id} exists and is ready for processing`);
       }
       
               console.log(`📤 Step 5.2: Now sending follow-up message based on communication channel...`);
@@ -1282,26 +1311,41 @@ export async function leadFollowUpWorkflow(
     // Step 5.5: Activate conversation after successful follow-up
     if (messageSent && messageSent.success) {
       console.log(`💬 Step 5.5: Activating conversation after successful lead follow-up...`);
-      console.log(`🔍 Searching for conversation associated with lead ${lead_id}...`);
+      console.log(`🔍 Conversation IDs from logs: ${logsResult?.conversation_ids?.join(', ') || 'None'}`);
+      console.log(`📝 Message IDs from logs: ${logsResult?.message_ids?.join(', ') || 'None'}`);
+      console.log(`🔍 Using conversation_id: ${logsResult?.conversation_ids?.[0] || 'None (will search by lead_id)'}`);
       
       const conversationUpdateResult = await updateConversationStatusAfterFollowUpActivity({
+        conversation_id: logsResult?.conversation_ids?.[0], // Pass the conversation_id from logs
         lead_id: lead_id,
         site_id: site_id,
         response_data: response,
-        additional_data: options.additionalData
+        additional_data: {
+          ...options.additionalData,
+          conversation_ids: logsResult?.conversation_ids,
+          message_ids: logsResult?.message_ids
+        }
       });
       
       if (conversationUpdateResult.success) {
         if (conversationUpdateResult.conversation_id) {
           console.log(`✅ Successfully activated conversation ${conversationUpdateResult.conversation_id}`);
         } else {
-          console.log(`✅ Conversation activation completed (no conversation found)`);
+          console.log(`✅ Conversation activation completed (no conversation found to update)`);
+          console.log(`📋 This is normal for leads without existing conversations`);
         }
       } else {
         const errorMsg = `Failed to activate conversation: ${conversationUpdateResult.error}`;
-        console.error(`⚠️ ${errorMsg}`);
+        console.error(`❌ ${errorMsg}`);
+        console.error(`🔍 Debug info for conversation update failure:`);
+        console.error(`   - Lead ID: ${lead_id}`);
+        console.error(`   - Site ID: ${site_id}`);
+        console.error(`   - Conversation ID from logs: ${logsResult?.conversation_ids?.[0] || 'None'}`);
+        console.error(`   - Available conversation IDs: ${logsResult?.conversation_ids?.join(', ') || 'None'}`);
+        console.error(`   - Available message IDs: ${logsResult?.message_ids?.join(', ') || 'None'}`);
         errors.push(errorMsg);
-        // Note: We don't throw here as the main operation was successful
+        // Note: We don't throw here as the main operation (message sending) was successful
+        // The message status has already been updated to 'sent' which is the primary goal
       }
     } else {
       console.log(`⚠️ Skipping conversation activation - no successful message delivery`);
