@@ -38,6 +38,7 @@ import { dailyStrategicAccountsWorkflow } from './dailyStrategicAccountsWorkflow
 import { leadInvalidationWorkflow } from './leadInvalidationWorkflow';
 import { startRobotWorkflow } from './startRobotWorkflow';
 import { robotWorkflow } from './robotWorkflow';
+import { promptRobotWorkflow } from './promptRobotWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -52,6 +53,7 @@ export * from './scheduleCustomerSupportMessagesWorkflow';
 export * from './sendEmailFromAgentWorkflow';
 export * from './startRobotWorkflow';
 export * from './robotWorkflow';
+export * from './promptRobotWorkflow';
 export * from './sendWhatsappFromAgentWorkflow';
 export * from './answerWhatsappMessageWorkflow';
 export * from './siteSetupWorkflow';
@@ -111,6 +113,7 @@ export const workflows = {
   leadInvalidationWorkflow,
   startRobotWorkflow,
   robotWorkflow,
+  promptRobotWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
   // ✅ Aliases for agent workflows with different naming conventions
@@ -156,6 +159,7 @@ export const workflowNames = {
   leadInvalidationWorkflow: 'leadInvalidationWorkflow',
   startRobotWorkflow: 'startRobotWorkflow',
   robotWorkflow: 'robotWorkflow',
+  promptRobotWorkflow: 'promptRobotWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',
   // ✅ Aliases for agent workflows with different naming conventions

@@ -16,6 +16,7 @@ const {
   saveCronStatusActivity,
   validateAndCleanStuckCronStatusActivity,
   getSiteActivity,
+
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -35,6 +36,7 @@ const {
   upsertVenueFailedActivity,
   determineMaxVenuesActivity,
   notifyNewLeadsActivity,
+  validateAndGenerateEmployeeContactsActivity,
 } = proxyActivities<{
   callRegionSearchApiActivity: (options: RegionSearchApiOptions) => Promise<any>;
   callRegionVenuesWithMultipleSearchTermsActivity: (options: RegionVenuesMultipleSearchOptions) => Promise<any>;
@@ -46,6 +48,7 @@ const {
   upsertVenueFailedActivity: (options: { site_id: string; city: string; region?: string; venueName: string; userId?: string }) => Promise<{ success: boolean; error?: string }>;
   determineMaxVenuesActivity: (options: { site_id: string; userId?: string }) => Promise<{ success: boolean; maxVenues?: number; plan?: string; hasChannels?: boolean; error?: string }>;
   notifyNewLeadsActivity: (options: { site_id: string; leadNames: string[]; userId?: string; additionalData?: any }) => Promise<{ success: boolean; error?: string }>;
+  validateAndGenerateEmployeeContactsActivity: (options: { employees: any[]; companyInfo: any; site_id: string; userId?: string }) => Promise<{ success: boolean; validatedEmployees: LeadData[]; emailsGenerated: number; emailsValidated: number; employeesSkipped: number; error?: string }>;
 }>({
   startToCloseTimeout: '10 minutes', // Longer timeout for lead generation processes
   retry: {
@@ -284,125 +287,41 @@ function extractCompaniesFromDeliverables(deliverables: any): CompanyData[] {
 }
 */
 
-/**
- * Normalize name for duplicate detection
- */
-function normalizeName(name: string): string {
-  return name.toLowerCase().trim().replace(/\s+/g, ' ');
-}
+
+
+
 
 /**
- * Validate if telephone is obfuscated with asterisks
+ * Extract raw employees from deep research deliverables (no validation)
  */
-function isPhoneObfuscated(phone: string | null): boolean {
-  if (!phone) return false;
-  // Check if phone contains asterisks or is mostly asterisks
-  return phone.includes('*') || phone.includes('***') || /^\*+$/.test(phone.trim());
-}
-
-/**
- * Validate if email is obfuscated with asterisks
- */
-function isEmailObfuscated(email: string | null): boolean {
-  if (!email) return false;
-  // Check if email contains asterisks in the local part (before @)
-  // Examples: c******@domain.com, john***@example.com, ***@domain.com
-  return email.includes('*') && email.includes('@');
-}
-
-/**
- * Extract employees from deep research deliverables with validation
- */
-function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
-  const employees: LeadData[] = [];
-  const seenNames = new Set<string>(); // Track processed names to avoid duplicates
-  let duplicatesSkipped = 0;
-  let obfuscatedPhonesSkipped = 0;
-  let obfuscatedEmailsSkipped = 0;
-  
-  /**
-   * Validate and add employee if valid
-   */
-  function validateAndAddEmployee(leadData: any, businessData?: any): void {
-    if (!leadData || typeof leadData !== 'object' || !leadData.name) {
-      return;
-    }
-
-    const normalizedName = normalizeName(leadData.name);
-    
-    // Validation 1: Check for duplicate names
-    if (seenNames.has(normalizedName)) {
-      console.log(`🔄 Skipping duplicate lead: ${leadData.name}`);
-      duplicatesSkipped++;
-      return;
-    }
-
-    const telephone = leadData.telephone || leadData.phone || null;
-    const email = leadData.email || null;
-    
-    // Validation 2: Check for obfuscated phone numbers
-    if (telephone && isPhoneObfuscated(telephone)) {
-      console.log(`📞 Skipping lead with obfuscated phone: ${leadData.name} (${telephone})`);
-      obfuscatedPhonesSkipped++;
-      return;
-    }
-
-    // Validation 3: Check for obfuscated email addresses
-    if (email && isEmailObfuscated(email)) {
-      console.log(`📧 Skipping lead with obfuscated email: ${leadData.name} (${email})`);
-      obfuscatedEmailsSkipped++;
-      return;
-    }
-
-    // All validations passed, add the lead
-    seenNames.add(normalizedName);
-    employees.push({
-      name: leadData.name,
-      telephone: telephone,
-      email: email,
-      company_name: businessData?.name || leadData.company?.name || leadData.company_name || undefined,
-      address: leadData.address || businessData?.location || businessData?.address || null,
-      web: businessData?.website || leadData.company?.website || leadData.web || null,
-      position: leadData.position || leadData.job_title || null
-    });
-  }
+function extractEmployeesFromDeliverablesRaw(deliverables: any): any[] {
+  const employees: any[] = [];
   
   try {
     // Try direct array structure first (new ultra-simplified format)
     if (deliverables && Array.isArray(deliverables)) {
       console.log(`🔍 Found leads in direct array structure (ultra-simplified format)`);
-      for (const leadData of deliverables) {
-        validateAndAddEmployee(leadData);
-      }
+      employees.push(...deliverables);
     }
     // Try simplified leads structure (backup)
     else if (deliverables && deliverables.leads && Array.isArray(deliverables.leads)) {
       console.log(`🔍 Found leads in deliverables.leads structure (backup format)`);
-      for (const leadData of deliverables.leads) {
-        validateAndAddEmployee(leadData);
-      }
+      employees.push(...deliverables.leads);
     }
     // Try business.employees structure (legacy support)
     else if (deliverables && deliverables.business && deliverables.business.employees && Array.isArray(deliverables.business.employees)) {
       console.log(`🔍 Found employees in deliverables.business.employees structure (legacy)`);
-      const business = deliverables.business;
-      for (const employeeData of deliverables.business.employees) {
-        validateAndAddEmployee(employeeData, business);
-      }
+      employees.push(...deliverables.business.employees);
     }
     // Try lead.employees structure (legacy support)
     else if (deliverables && deliverables.lead && deliverables.lead.employees && Array.isArray(deliverables.lead.employees)) {
       console.log(`🔍 Found employees in deliverables.lead.employees structure (legacy)`);
-      for (const employeeData of deliverables.lead.employees) {
-        validateAndAddEmployee(employeeData);
-      }
+      employees.push(...deliverables.lead.employees);
     }
     // Try direct employees structure
     else if (deliverables && deliverables.employees && Array.isArray(deliverables.employees)) {
       console.log(`🔍 Found employees in deliverables.employees structure`);
-      for (const employeeData of deliverables.employees) {
-        validateAndAddEmployee(employeeData);
-      }
+      employees.push(...deliverables.employees);
     }
     // Alternative structure fallbacks
     else if (deliverables && typeof deliverables === 'object') {
@@ -416,9 +335,7 @@ function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
       
       for (const possibleArray of possibleEmployeeArrays) {
         if (Array.isArray(possibleArray)) {
-          for (const item of possibleArray) {
-            validateAndAddEmployee(item);
-          }
+          employees.push(...possibleArray);
           break; // Use first valid array found
         }
       }
@@ -427,19 +344,11 @@ function extractEmployeesFromDeliverables(deliverables: any): LeadData[] {
     console.error('⚠️ Error extracting employees from deliverables:', error);
   }
   
-  console.log(`📊 Extracted ${employees.length} valid employees from deliverables`);
-  if (duplicatesSkipped > 0) {
-    console.log(`🔄 Skipped ${duplicatesSkipped} duplicate leads by name`);
-  }
-  if (obfuscatedPhonesSkipped > 0) {
-    console.log(`📞 Skipped ${obfuscatedPhonesSkipped} leads with obfuscated phone numbers`);
-  }
-  if (obfuscatedEmailsSkipped > 0) {
-    console.log(`📧 Skipped ${obfuscatedEmailsSkipped} leads with obfuscated email addresses`);
-  }
-  
+  console.log(`📊 Extracted ${employees.length} raw employees from deliverables`);
   return employees;
 }
+
+
 
 /**
  * Extract the real schedule ID from workflow info
@@ -1025,10 +934,34 @@ export async function leadGenerationWorkflow(
                       }
                       
                       if (empDeliverables) {
-                        const employeeLeads = extractEmployeesFromDeliverables(empDeliverables);
-                        companyResult.leadsGenerated = employeeLeads;
+                        // Extract raw employees from deliverables
+                        const rawEmployees = extractEmployeesFromDeliverablesRaw(empDeliverables);
                         
-                        console.log(`👥 Extracted ${employeeLeads.length} potential leads for ${company.name}`);
+                        console.log(`📧 Step 4b.3a: Validating and generating contacts for ${rawEmployees.length} employees from ${company.name}...`);
+                        
+                        // Use new activity to validate and generate emails
+                        const contactValidationResult = await validateAndGenerateEmployeeContactsActivity({
+                          employees: rawEmployees,
+                          companyInfo: company,
+                          site_id: site_id,
+                          userId: options.userId || site.user_id
+                        });
+                        
+                        if (contactValidationResult.success) {
+                          console.log(`✅ Contact validation completed for ${company.name}:`);
+                          console.log(`   - Employees processed: ${rawEmployees.length}`);
+                          console.log(`   - Valid leads generated: ${contactValidationResult.validatedEmployees.length}`);
+                          console.log(`   - Emails generated: ${contactValidationResult.emailsGenerated}`);
+                          console.log(`   - Emails validated: ${contactValidationResult.emailsValidated}`);
+                          console.log(`   - Employees skipped: ${contactValidationResult.employeesSkipped}`);
+                          
+                          companyResult.leadsGenerated = contactValidationResult.validatedEmployees;
+                        } else {
+                          console.error(`❌ Contact validation failed for ${company.name}: ${contactValidationResult.error}`);
+                          companyResult.leadsGenerated = [];
+                        }
+                        
+                        const employeeLeads = contactValidationResult.validatedEmployees;
                         
                         // Step 4b.4: If no leads generated, save venue as failed in system_memories
                         if (employeeLeads.length === 0) {

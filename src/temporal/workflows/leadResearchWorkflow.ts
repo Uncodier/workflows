@@ -11,6 +11,9 @@ const {
   updateLeadActivity,
   upsertCompanyActivity,
   leadSegmentationActivity,
+  validateContactInformation,
+  leadContactGenerationActivity,
+  updateLeadEmailVerificationActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes', // Reasonable timeout for lead research
   retry: {
@@ -67,6 +70,149 @@ function extractScheduleId(info: any): string {
   // If no schedule ID found, it might be a manual execution or child workflow
   console.log(`⚠️ Lead Research - No schedule ID found in workflow info - likely manual execution`);
   return 'manual-execution';
+}
+
+/**
+ * Helper function to validate and generate emails for leads
+ */
+async function validateAndGenerateEmails(
+  leadInfo: any,
+  siteInfo: any,
+  options: LeadResearchOptions
+): Promise<{ success: boolean; validEmail?: string; error?: string }> {
+  console.log(`📧 Starting email validation and generation for lead ${leadInfo.id}...`);
+
+  // Check if email is already verified
+  if (leadInfo.metadata?.emailVerified) {
+    console.log(`✅ Email already verified for lead ${leadInfo.id}, skipping validation`);
+    return { success: true, validEmail: leadInfo.email };
+  }
+
+  const leadEmail = leadInfo.email;
+  const leadPhone = leadInfo.phone || leadInfo.phone_number;
+
+  // Step 1: If lead has email, validate it first
+  if (leadEmail && leadEmail.trim() !== '') {
+    console.log(`📧 Validating existing email: ${leadEmail}`);
+    
+    const emailValidationResult = await validateContactInformation({
+      email: leadEmail,
+      hasEmailMessage: true, // We want to validate email
+      hasWhatsAppMessage: false,
+      leadId: leadInfo.id,
+      phone: leadPhone,
+      leadMetadata: leadInfo.metadata
+    });
+
+    if (emailValidationResult.success && emailValidationResult.isValid) {
+      console.log(`✅ Existing email is valid: ${leadEmail}`);
+      
+      // Mark email as verified
+      await updateLeadEmailVerificationActivity({
+        lead_id: leadInfo.id,
+        emailVerified: true,
+        validatedEmail: leadEmail,
+        userId: options.userId
+      });
+
+      return { success: true, validEmail: leadEmail };
+    } else {
+      console.log(`❌ Existing email is invalid: ${leadEmail}`);
+      console.log(`🔍 Reason: ${emailValidationResult.reason}`);
+    }
+  }
+
+  // Step 2: Generate new emails using leadContactGeneration
+  console.log(`🔄 Generating new emails for lead ${leadInfo.name}...`);
+  
+  // Extract domain from company website or use generic approach
+  let domain = '';
+  if (leadInfo.company_name || leadInfo.company) {
+    // Try to extract domain from website if available
+    const website = leadInfo.web || siteInfo?.url;
+    if (website) {
+      try {
+        const url = new URL(website.startsWith('http') ? website : `https://${website}`);
+        domain = url.hostname.replace('www.', '');
+      } catch {
+        // If URL parsing fails, use company name
+        domain = (leadInfo.company_name || leadInfo.company).toLowerCase().replace(/\s+/g, '') + '.com';
+      }
+    } else {
+      domain = (leadInfo.company_name || leadInfo.company).toLowerCase().replace(/\s+/g, '') + '.com';
+    }
+  } else {
+    console.log(`⚠️ No company information available for domain extraction`);
+    return { success: false, error: 'No company information available for email generation' };
+  }
+
+  // Build context for email generation
+  const context = `
+    Name: ${leadInfo.name}
+    Company: ${leadInfo.company_name || leadInfo.company}
+    Position: ${leadInfo.position || leadInfo.job_title || 'Unknown'}
+    Current Email: ${leadEmail || 'None'}
+    Domain: ${domain}
+    Context: Lead research workflow email generation
+  `.trim();
+
+  const emailGenerationResult = await leadContactGenerationActivity({
+    name: leadInfo.name,
+    domain: domain,
+    context: context,
+    site_id: options.site_id,
+    leadId: leadInfo.id
+  });
+
+  if (!emailGenerationResult.success || !emailGenerationResult.email_generation_analysis) {
+    console.log(`❌ Email generation failed: ${emailGenerationResult.error}`);
+    return { success: false, error: emailGenerationResult.error };
+  }
+
+  const generatedEmails = emailGenerationResult.email_generation_analysis;
+  console.log(`🔄 Generated ${generatedEmails.length} potential emails to validate`);
+  
+  // Log additional analysis data if available
+  if (emailGenerationResult.emailAnalysisData) {
+    const analysisData = emailGenerationResult.emailAnalysisData;
+    console.log(`🎯 Analysis for ${analysisData.contact_name} @ ${analysisData.domain}`);
+    if (analysisData.recommendations && analysisData.recommendations.length > 0) {
+      console.log(`💡 Top AI recommendation: ${analysisData.recommendations[0]}`);
+    }
+  }
+
+  // Step 3: Validate each generated email
+  for (const email of generatedEmails) {
+    console.log(`📧 Validating generated email: ${email}`);
+    
+    const validationResult = await validateContactInformation({
+      email: email,
+      hasEmailMessage: true,
+      hasWhatsAppMessage: false,
+      leadId: leadInfo.id,
+      phone: leadPhone,
+      leadMetadata: null // New generated email, no existing metadata
+    });
+
+    if (validationResult.success && validationResult.isValid) {
+      console.log(`✅ Valid email found: ${email}`);
+      
+      // Update lead with verified email
+      await updateLeadEmailVerificationActivity({
+        lead_id: leadInfo.id,
+        emailVerified: true,
+        validatedEmail: email,
+        userId: options.userId
+      });
+
+      return { success: true, validEmail: email };
+    } else {
+      console.log(`❌ Invalid email: ${email} (${validationResult.reason})`);
+    }
+  }
+
+  console.log(`❌ No valid emails found after validation`);
+  return { success: false, error: 'No valid emails found after generation and validation' };
 }
 
 /**
@@ -685,6 +831,34 @@ export async function leadResearchWorkflow(
     console.log(`   - Position: ${leadInfo.job_title || leadInfo.position || 'N/A'}`);
     console.log(`   - Industry: ${leadInfo.industry || 'N/A'}`);
     console.log(`   - Location: ${leadInfo.location || 'N/A'}`);
+
+    console.log(`📧 Step 2.5: Validating and generating lead email if needed...`);
+    
+    // Validate and generate emails for the lead
+    try {
+      const emailValidationResult = await validateAndGenerateEmails(leadInfo, site, options);
+      
+      if (emailValidationResult.success) {
+        console.log(`✅ Email validation completed successfully`);
+        if (emailValidationResult.validEmail) {
+          console.log(`📧 Valid email confirmed: ${emailValidationResult.validEmail}`);
+          // Update leadInfo with the validated email for use in research
+          if (leadInfo.email !== emailValidationResult.validEmail) {
+            leadInfo.email = emailValidationResult.validEmail;
+            console.log(`📧 Updated lead email for research context`);
+          }
+        }
+      } else {
+        console.log(`⚠️ Email validation failed: ${emailValidationResult.error}`);
+        errors.push(`Email validation error: ${emailValidationResult.error}`);
+        // Continue with research even if email validation fails
+      }
+    } catch (emailValidationError) {
+      const emailErrorMessage = emailValidationError instanceof Error ? emailValidationError.message : String(emailValidationError);
+      console.error(`❌ Email validation exception: ${emailErrorMessage}`);
+      errors.push(`Email validation exception: ${emailErrorMessage}`);
+      // Continue with research even if email validation throws an error
+    }
 
     console.log(`🔍 Step 3: Generating research query from lead information...`);
     

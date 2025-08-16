@@ -1197,6 +1197,392 @@ function validateLeadData(lead: LeadData): { valid: boolean; errors: string[]; w
 }
 
 /**
+ * Activity to validate and generate emails for employees found in deep research
+ */
+export async function validateAndGenerateEmployeeContactsActivity(
+  options: {
+    employees: any[];
+    companyInfo: any;
+    site_id: string;
+    userId?: string;
+  }
+): Promise<{
+  success: boolean;
+  validatedEmployees: LeadData[];
+  emailsGenerated: number;
+  emailsValidated: number;
+  employeesSkipped: number;
+  error?: string;
+}> {
+  console.log(`📧 Starting email validation and generation for ${options.employees.length} employees...`);
+  
+  const validatedEmployees: LeadData[] = [];
+  const seenNames = new Set<string>();
+  let emailsGenerated = 0;
+  let emailsValidated = 0;
+  let employeesSkipped = 0;
+  let duplicatesSkipped = 0;
+  let obfuscatedPhonesSkipped = 0;
+  let obfuscatedEmailsSkipped = 0;
+  let deepResearchEmailsCount = 0;
+  let aiGeneratedEmailsCount = 0;
+
+  try {
+    for (const employeeData of options.employees) {
+      if (!employeeData || typeof employeeData !== 'object' || !employeeData.name) {
+        employeesSkipped++;
+        continue;
+      }
+
+      const normalizedName = normalizeName(employeeData.name);
+      
+      // Check for duplicate names
+      if (seenNames.has(normalizedName)) {
+        console.log(`🔄 Skipping duplicate employee: ${employeeData.name}`);
+        duplicatesSkipped++;
+        employeesSkipped++;
+        continue;
+      }
+
+      const telephone = employeeData.telephone || employeeData.phone || null;
+      const email = employeeData.email || null;
+      
+      // Check for obfuscated phone numbers
+      if (telephone && isPhoneObfuscated(telephone)) {
+        console.log(`📞 Skipping employee with obfuscated phone: ${employeeData.name} (${telephone})`);
+        obfuscatedPhonesSkipped++;
+        employeesSkipped++;
+        continue;
+      }
+
+      // Check for obfuscated email addresses
+      if (email && isEmailObfuscated(email)) {
+        console.log(`📧 Skipping employee with obfuscated email: ${employeeData.name} (${email})`);
+        obfuscatedEmailsSkipped++;
+        employeesSkipped++;
+        continue;
+      }
+
+      // Email validation and generation
+      let emailVerified = false;
+      let validatedEmail = email;
+      let emailSource = 'deepResearch'; // Default to deepResearch if email exists
+
+      // If no email, generate one
+      if (!email || email.trim() === '') {
+        console.log(`📧 No email found for ${employeeData.name}, attempting to generate...`);
+        
+        try {
+          // Extract domain from company website
+          let domain = '';
+          if (options.companyInfo?.website) {
+            try {
+              const url = new URL(options.companyInfo.website.startsWith('http') ? 
+                options.companyInfo.website : `https://${options.companyInfo.website}`);
+              domain = url.hostname.replace('www.', '');
+            } catch {
+              domain = options.companyInfo.name.toLowerCase().replace(/\s+/g, '') + '.com';
+            }
+          } else if (options.companyInfo?.name) {
+            domain = options.companyInfo.name.toLowerCase().replace(/\s+/g, '') + '.com';
+          } else {
+            console.log(`⚠️ No company information available for domain extraction for ${employeeData.name}`);
+            employeesSkipped++;
+            continue;
+          }
+
+          const context = `
+            Name: ${employeeData.name}
+            Company: ${options.companyInfo?.name || 'Unknown'}
+            Position: ${employeeData.position || employeeData.job_title || 'Unknown'}
+            Current Email: None
+            Domain: ${domain}
+            Context: Lead generation workflow email generation for employee
+          `.trim();
+
+          // Call leadContactGeneration API directly
+          const response = await apiService.post('/api/agents/dataAnalyst/leadContactGeneration', {
+            name: employeeData.name,
+            domain: domain,
+            context: context,
+            site_id: options.site_id
+          });
+
+          const emailGenerationResult = {
+            success: response.success,
+            email_generation_analysis: response.success ? 
+              (response.data?.data?.email_generation_analysis?.generated_emails || 
+               response.data?.email_generation_analysis?.generated_emails || []) : [],
+            error: response.success ? undefined : (response.error?.message || 'Email generation failed')
+          };
+
+          if (emailGenerationResult.success && emailGenerationResult.email_generation_analysis) {
+            const generatedEmails = emailGenerationResult.email_generation_analysis;
+            console.log(`🔄 Generated ${generatedEmails.length} potential emails for ${employeeData.name}`);
+            emailsGenerated += generatedEmails.length;
+
+            // Validate each generated email
+            for (const generatedEmail of generatedEmails) {
+              console.log(`📧 Validating generated email: ${generatedEmail}`);
+              
+              // Call email validation API directly
+              const validationResponse = await apiService.post('/api/integrations/neverbounce/validate', { 
+                email: generatedEmail 
+              });
+
+              const validationResult = {
+                success: validationResponse.success,
+                isValid: validationResponse.success ? (validationResponse.data?.data?.isValid || false) : false,
+                reason: validationResponse.success ? 
+                  (validationResponse.data?.data?.result || 'Validation completed') :
+                  (validationResponse.error?.message || 'Validation failed')
+              };
+
+              if (validationResult.success && validationResult.isValid) {
+                console.log(`✅ Valid email found for ${employeeData.name}: ${generatedEmail}`);
+                validatedEmail = generatedEmail;
+                emailVerified = true;
+                emailSource = 'AI_Generated'; // Mark as AI generated
+                emailsValidated++;
+                break;
+              } else {
+                console.log(`❌ Invalid email: ${generatedEmail} (${validationResult.reason})`);
+              }
+            }
+          } else {
+            console.log(`❌ Email generation failed for ${employeeData.name}: ${emailGenerationResult.error}`);
+          }
+        } catch (emailError) {
+          console.error(`❌ Email generation error for ${employeeData.name}:`, emailError);
+        }
+      } else {
+        // Validate existing email
+        console.log(`📧 Validating existing email for ${employeeData.name}: ${email}`);
+        
+        try {
+          // Call email validation API directly
+          const validationResponse = await apiService.post('/api/integrations/neverbounce/validate', { 
+            email: email 
+          });
+
+          const emailValidationResult = {
+            success: validationResponse.success,
+            isValid: validationResponse.success ? (validationResponse.data?.data?.isValid || false) : false,
+            reason: validationResponse.success ? 
+              (validationResponse.data?.data?.result || 'Validation completed') :
+              (validationResponse.error?.message || 'Validation failed')
+          };
+
+          if (emailValidationResult.success && emailValidationResult.isValid) {
+            console.log(`✅ Existing email is valid for ${employeeData.name}: ${email}`);
+            validatedEmail = email;
+            emailVerified = true;
+            emailSource = 'deepResearch'; // Keep as deepResearch since it was valid
+            emailsValidated++;
+          } else {
+            console.log(`❌ Existing email is invalid for ${employeeData.name}: ${email}, attempting to generate new one...`);
+            
+            // Try to generate new email if existing one is invalid
+            try {
+              // Extract domain from company website
+              let domain = '';
+              if (options.companyInfo?.website) {
+                try {
+                  const url = new URL(options.companyInfo.website.startsWith('http') ? 
+                    options.companyInfo.website : `https://${options.companyInfo.website}`);
+                  domain = url.hostname.replace('www.', '');
+                } catch {
+                  domain = options.companyInfo.name.toLowerCase().replace(/\s+/g, '') + '.com';
+                }
+              } else if (options.companyInfo?.name) {
+                domain = options.companyInfo.name.toLowerCase().replace(/\s+/g, '') + '.com';
+              } else {
+                console.log(`⚠️ No company info for fallback generation for ${employeeData.name}`);
+                validatedEmail = email; // Keep original invalid email
+                emailSource = 'deepResearch'; // Keep original source
+              }
+
+              if (domain) {
+                const context = `
+                  Name: ${employeeData.name}
+                  Company: ${options.companyInfo?.name || 'Unknown'}
+                  Position: ${employeeData.position || employeeData.job_title || 'Unknown'}
+                  Current Email: ${email} (invalid)
+                  Domain: ${domain}
+                  Context: Lead generation workflow email generation for employee (fallback)
+                `.trim();
+
+                const fallbackGenerationResult = await apiService.post('/api/agents/dataAnalyst/leadContactGeneration', {
+                  name: employeeData.name,
+                  domain: domain,
+                  context: context,
+                  site_id: options.site_id
+                });
+
+                const fallbackEmailResult = {
+                  success: fallbackGenerationResult.success,
+                  email_generation_analysis: fallbackGenerationResult.success ? 
+                    (fallbackGenerationResult.data?.data?.email_generation_analysis?.generated_emails || 
+                     fallbackGenerationResult.data?.email_generation_analysis?.generated_emails || []) : [],
+                  error: fallbackGenerationResult.success ? undefined : (fallbackGenerationResult.error?.message || 'Email generation failed')
+                };
+
+                if (fallbackEmailResult.success && fallbackEmailResult.email_generation_analysis) {
+                  const fallbackEmails = fallbackEmailResult.email_generation_analysis;
+                  console.log(`🔄 Generated ${fallbackEmails.length} fallback emails for ${employeeData.name}`);
+                  emailsGenerated += fallbackEmails.length;
+
+                  // Validate each generated email
+                  for (const fallbackEmail of fallbackEmails) {
+                    console.log(`📧 Validating fallback email: ${fallbackEmail}`);
+                    
+                    const fallbackValidationResponse = await apiService.post('/api/integrations/neverbounce/validate', { 
+                      email: fallbackEmail 
+                    });
+
+                    const fallbackValidationResult = {
+                      success: fallbackValidationResponse.success,
+                      isValid: fallbackValidationResponse.success ? (fallbackValidationResponse.data?.data?.isValid || false) : false,
+                      reason: fallbackValidationResponse.success ? 
+                        (fallbackValidationResponse.data?.data?.result || 'Validation completed') :
+                        (fallbackValidationResponse.error?.message || 'Validation failed')
+                    };
+
+                    if (fallbackValidationResult.success && fallbackValidationResult.isValid) {
+                      console.log(`✅ Valid fallback email found for ${employeeData.name}: ${fallbackEmail}`);
+                      validatedEmail = fallbackEmail;
+                      emailVerified = true;
+                      emailSource = 'AI_Generated'; // Mark as AI generated (fallback)
+                      emailsValidated++;
+                      break;
+                    } else {
+                      console.log(`❌ Invalid fallback email: ${fallbackEmail} (${fallbackValidationResult.reason})`);
+                    }
+                  }
+                }
+              }
+
+              // If no valid email found via generation, keep original
+              if (!emailVerified) {
+                validatedEmail = email; // Keep original invalid email
+                emailSource = 'deepResearch'; // Keep original source
+              }
+            } catch (fallbackError) {
+              console.error(`❌ Fallback email generation error for ${employeeData.name}:`, fallbackError);
+              validatedEmail = email; // Keep original invalid email
+              emailSource = 'deepResearch'; // Keep original source
+            }
+          }
+        } catch (emailError) {
+          console.error(`❌ Email validation error for ${employeeData.name}:`, emailError);
+          validatedEmail = email;
+        }
+      }
+
+      // Add validated employee
+      seenNames.add(normalizedName);
+      
+      const employeeDataResult: LeadData = {
+        name: employeeData.name,
+        telephone: telephone,
+        email: validatedEmail,
+        company_name: options.companyInfo?.name || employeeData.company?.name || employeeData.company_name || undefined,
+        address: employeeData.address || options.companyInfo?.location || options.companyInfo?.address || null,
+        web: options.companyInfo?.website || employeeData.company?.website || employeeData.web || null,
+        position: employeeData.position || employeeData.job_title || null
+      };
+
+      // Add metadata if email was verified
+      if (emailVerified) {
+        (employeeDataResult as any).metadata = {
+          emailVerified: true,
+          emailVerificationTimestamp: new Date().toISOString(),
+          emailVerificationWorkflow: 'leadGenerationWorkflow',
+          emailSource: emailSource // 'deepResearch' or 'AI_Generated'
+        };
+      } else {
+        // Even if not verified, add the source information
+        (employeeDataResult as any).metadata = {
+          emailVerified: false,
+          emailVerificationTimestamp: new Date().toISOString(),
+          emailVerificationWorkflow: 'leadGenerationWorkflow',
+          emailSource: emailSource // 'deepResearch' or 'AI_Generated'
+        };
+      }
+
+      // Count by email source
+      if (emailSource === 'deepResearch') {
+        deepResearchEmailsCount++;
+      } else if (emailSource === 'AI_Generated') {
+        aiGeneratedEmailsCount++;
+      }
+
+      validatedEmployees.push(employeeDataResult);
+    }
+
+    console.log(`📊 Email validation and generation completed:`);
+    console.log(`   - Total employees processed: ${options.employees.length}`);
+    console.log(`   - Valid employees extracted: ${validatedEmployees.length}`);
+    console.log(`   - Emails generated: ${emailsGenerated}`);
+    console.log(`   - Emails validated: ${emailsValidated}`);
+    console.log(`   - Deep Research emails: ${deepResearchEmailsCount}`);
+    console.log(`   - AI Generated emails: ${aiGeneratedEmailsCount}`);
+    console.log(`   - Employees skipped: ${employeesSkipped}`);
+    if (duplicatesSkipped > 0) console.log(`   - Duplicates skipped: ${duplicatesSkipped}`);
+    if (obfuscatedPhonesSkipped > 0) console.log(`   - Obfuscated phones skipped: ${obfuscatedPhonesSkipped}`);
+    if (obfuscatedEmailsSkipped > 0) console.log(`   - Obfuscated emails skipped: ${obfuscatedEmailsSkipped}`);
+
+    return {
+      success: true,
+      validatedEmployees,
+      emailsGenerated,
+      emailsValidated,
+      employeesSkipped
+    };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception during employee contact validation:`, errorMessage);
+    
+    return {
+      success: false,
+      validatedEmployees: [],
+      emailsGenerated: 0,
+      emailsValidated: 0,
+      employeesSkipped: options.employees.length,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * Helper function to check if phone number is obfuscated
+ */
+function isPhoneObfuscated(phone: string | null): boolean {
+  if (!phone) return false;
+  
+  // Check if phone contains asterisks or other obfuscation patterns
+  return phone.includes('*') || phone.includes('xxx') || phone.includes('XXX');
+}
+
+/**
+ * Helper function to normalize names for duplicate detection
+ */
+function normalizeName(name: string): string {
+  return name.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Helper function to check if email is obfuscated
+ */
+function isEmailObfuscated(email: string | null): boolean {
+  if (!email) return false;
+  
+  // Check if email contains asterisks in the local part (before @)
+  return email.includes('*') && email.includes('@');
+}
+
+/**
  * Create a single lead in the database
  */
 export async function createSingleLead(
@@ -2435,6 +2821,8 @@ export async function notifyNewLeadsActivity(
  * - 2 venues if free plan but has at least one channel configured
  * - 10 venues for startup plan
  * - 30 venues for enterprise plan
+ * 
+ * Note: Limits reduced by 50% due to email validation providing higher quality leads
  */
 export async function determineMaxVenuesActivity(
   options: {
@@ -2506,24 +2894,24 @@ export async function determineMaxVenuesActivity(
         channel && typeof channel === 'object' && channel.enabled === true
       );
 
-    let maxVenues = 2; // Default for free plan without channels (doubled)
+    let maxVenues = 1; // Default for free plan without channels (reduced by half due to email validation quality improvement)
 
-    // Apply business logic for venue limits (doubled from original values)
+    // Apply business logic for venue limits (reduced by half due to higher quality validated leads)
     switch (plan.toLowerCase()) {
       case 'free':
       case 'commission': // ✅ Commission plan treated as free plan
-        maxVenues = hasChannels ? 4 : 2;
+        maxVenues = hasChannels ? 2 : 1;
         break;
       case 'startup':
-        maxVenues = 20;
+        maxVenues = 10;
         break;
       case 'enterprise':
-        maxVenues = 60;
+        maxVenues = 30;
         break;
       default:
         // For any unknown plan, treat as free without channels
-        maxVenues = 2;
-        logger.warn('⚠️ Unknown billing plan, defaulting to 2 venues', {
+        maxVenues = 1;
+        logger.warn('⚠️ Unknown billing plan, defaulting to 1 venue', {
           site_id: options.site_id,
           plan: plan
         });

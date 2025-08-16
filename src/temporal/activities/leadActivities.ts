@@ -2893,4 +2893,109 @@ export async function cleanupFailedFollowUpActivity(request: {
       error: errorMessage
     };
   }
+}
+
+/**
+ * Activity to update lead metadata with email verification status
+ */
+export async function updateLeadEmailVerificationActivity(request: {
+  lead_id: string;
+  emailVerified: boolean;
+  validatedEmail?: string;
+  userId?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  console.log(`📧✅ Updating email verification status for lead ${request.lead_id}: ${request.emailVerified}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot update email verification');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, updating email verification status...');
+    
+    // Import supabase service role client (bypasses RLS)
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    // Get current lead data to merge with existing metadata
+    const { data: currentLead, error: fetchError } = await supabaseServiceRole
+      .from('leads')
+      .select('metadata, email')
+      .eq('id', request.lead_id)
+      .single();
+
+    if (fetchError) {
+      console.error(`❌ Error fetching current lead data: ${fetchError.message}`);
+      return {
+        success: false,
+        error: fetchError.message
+      };
+    }
+
+    // Prepare updated metadata
+    const currentMetadata = currentLead?.metadata || {};
+    const updatedMetadata = {
+      ...currentMetadata,
+      emailVerified: request.emailVerified,
+      emailVerificationTimestamp: new Date().toISOString(),
+      emailVerificationWorkflow: 'leadResearchWorkflow'
+    };
+
+    // If a validated email is provided and it's different from current, update it
+    const updateData: any = {
+      metadata: updatedMetadata,
+      updated_at: new Date().toISOString()
+    };
+
+    if (request.validatedEmail && request.validatedEmail !== currentLead?.email) {
+      updateData.email = request.validatedEmail;
+      console.log(`📧 Updating email from ${currentLead?.email} to ${request.validatedEmail}`);
+    }
+
+    const { data, error } = await supabaseServiceRole
+      .from('leads')
+      .update(updateData)
+      .eq('id', request.lead_id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error(`❌ Error updating email verification for lead ${request.lead_id}:`, error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+
+    if (!data) {
+      return {
+        success: false,
+        error: `Lead ${request.lead_id} not found or update failed`
+      };
+    }
+
+    console.log(`✅ Successfully updated email verification for lead ${request.lead_id}`);
+    console.log(`📝 Email verified status: ${request.emailVerified}`);
+    
+    return {
+      success: true
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception updating email verification for lead ${request.lead_id}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
 } 

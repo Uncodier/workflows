@@ -346,7 +346,8 @@ export async function leadFollowUpWorkflow(
       hasEmailMessage: true, // Assume we will have messages for now
       hasWhatsAppMessage: true, // Assume we will have messages for now
       leadId: lead_id,
-      phone: leadPhone
+      phone: leadPhone,
+      leadMetadata: leadInfo.metadata // Pass lead metadata to check emailVerified flag
     });
     
     console.log(`📊 Early validation completed: type=${earlyValidationResult.validationType}, shouldProceed=${earlyValidationResult.shouldProceed}`);

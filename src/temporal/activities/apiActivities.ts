@@ -62,6 +62,7 @@ export async function validateContactInformation(request: {
   hasWhatsAppMessage?: boolean;
   leadId?: string;
   phone?: string;
+  leadMetadata?: any; // Add metadata to check emailVerified flag
 }): Promise<{
   success: boolean;
   isValid: boolean;
@@ -75,11 +76,24 @@ export async function validateContactInformation(request: {
   validationType: 'email' | 'whatsapp' | 'none';
   reason?: string;
 }> {
-  const { email, hasEmailMessage, hasWhatsAppMessage, leadId, phone } = request;
+  const { email, hasEmailMessage, hasWhatsAppMessage, leadId, phone, leadMetadata } = request;
   
   console.log(`🔍 Contact Information Validation Activity Started`);
   console.log(`📋 Context: lead=${leadId}, email=${email}, phone=${!!phone}`);
   console.log(`📨 Messages: email=${!!hasEmailMessage}, whatsapp=${!!hasWhatsAppMessage}`);
+  console.log(`📦 Metadata emailVerified: ${leadMetadata?.emailVerified || false}`);
+  
+  // Check if email is already verified
+  if (leadMetadata?.emailVerified && hasEmailMessage && email && email.trim() !== '') {
+    console.log(`✅ Email already verified for lead ${leadId}, skipping validation`);
+    return {
+      success: true,
+      isValid: true,
+      shouldProceed: true,
+      validationType: 'email',
+      reason: 'Email already verified in metadata'
+    };
+  }
   
   // Always audit what's happening
   if (!hasEmailMessage && !hasWhatsAppMessage) {
@@ -167,6 +181,87 @@ export async function validateContactInformation(request: {
       validationType: 'email',
       error: errorMessage,
       reason: 'Validation exception, proceeding with send'
+    };
+  }
+}
+
+/**
+ * Activity to generate contact information for leads without email
+ * Calls the dataAnalyst leadContactGeneration API
+ */
+export async function leadContactGenerationActivity(request: {
+  name: string;
+  domain: string;
+  context: string;
+  site_id: string;
+  leadId?: string;
+}): Promise<{
+  success: boolean;
+  email_generation_analysis?: string[];
+  emailAnalysisData?: {
+    domain: string;
+    contact_name: string;
+    recommendations: string[];
+    generated_emails: string[];
+  };
+  data?: any;
+  error?: string;
+}> {
+  const { name, domain, context, site_id, leadId } = request;
+  
+  console.log(`🔍 Lead Contact Generation Activity Started`);
+  console.log(`📋 Context: lead=${leadId}, name=${name}, domain=${domain}, site=${site_id}`);
+  console.log(`📝 Context details: ${context}`);
+  
+  try {
+    const response = await apiService.post('/api/agents/dataAnalyst/leadContactGeneration', {
+      name,
+      domain,
+      context,
+      site_id
+    });
+    
+    if (!response.success) {
+      console.error(`❌ Lead contact generation API call failed: ${response.error?.message}`);
+      return {
+        success: false,
+        error: response.error?.message || 'Lead contact generation failed'
+      };
+    }
+    
+    // Handle case where API response wraps data in a 'data' property
+    const data = response.data?.data || response.data;
+    console.log(`✅ Lead contact generation response:`, data);
+    
+    // Extract emails from the new structure
+    const emailAnalysis = data?.email_generation_analysis;
+    const emailList = emailAnalysis?.generated_emails || [];
+    
+    console.log(`📧 Generated ${emailList.length} potential emails for ${emailAnalysis?.contact_name || 'contact'}`);
+    if (emailAnalysis?.domain) {
+      console.log(`🌐 Target domain: ${emailAnalysis.domain}`);
+    }
+    if (emailAnalysis?.recommendations && emailAnalysis.recommendations.length > 0) {
+      console.log(`💡 AI Recommendations:`);
+      emailAnalysis.recommendations.forEach((rec: string, index: number) => {
+        console.log(`   ${index + 1}. ${rec}`);
+      });
+    }
+    
+    return {
+      success: true,
+      email_generation_analysis: emailList,
+      emailAnalysisData: emailAnalysis,
+      data: data
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception during lead contact generation: ${errorMessage}`);
+    
+    return {
+      success: false,
+      error: errorMessage
     };
   }
 }

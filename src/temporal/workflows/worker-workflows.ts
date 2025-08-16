@@ -39,4 +39,5 @@ export * from './dailyProspectionWorkflow';
 export * from './dailyStrategicAccountsWorkflow';
 export * from './leadInvalidationWorkflow';
 export * from './startRobotWorkflow';
-export * from './robotWorkflow'; 
+export * from './robotWorkflow';
+export * from './promptRobotWorkflow'; 

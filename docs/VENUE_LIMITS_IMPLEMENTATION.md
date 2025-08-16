@@ -10,12 +10,14 @@ The venue limits are determined by the following rules:
 
 | Billing Plan | Channels Configured | Max Venues |
 |-------------|-------------------|------------|
-| Free        | No                | 2          |
-| Free        | Yes               | 4          |
-| Commission  | No                | 2          |
-| Commission  | Yes               | 4          |
-| Startup     | Any               | 20         |
-| Enterprise  | Any               | 60         |
+| Free        | No                | 1          |
+| Free        | Yes               | 2          |
+| Commission  | No                | 1          |
+| Commission  | Yes               | 2          |
+| Startup     | Any               | 10         |
+| Enterprise  | Any               | 30         |
+
+**Note:** Limits were reduced by 50% to account for higher quality leads with validated emails through the new email validation and generation system.
 
 ## Implementation
 

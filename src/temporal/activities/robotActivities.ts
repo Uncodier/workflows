@@ -340,3 +340,65 @@ export async function callRobotAuthActivity(params: {
   }
 }
 
+/**
+ * Activity to call the robot instance act API for prompting robot actions
+ */
+export async function callRobotInstanceActActivity(params: {
+  instance_id: string;
+  message: string;
+  step_status: string;
+  site_id: string;
+  context?: string;
+}): Promise<{
+  success: boolean;
+  data?: any;
+  error?: string;
+  plan_completed?: boolean;
+  instance_status?: string;
+}> {
+  const { instance_id, message, step_status, site_id, context } = params;
+
+  console.log(`🎯 Calling robot instance act API for instance: ${instance_id}, site: ${site_id}`);
+  console.log(`📝 Message: ${message}`);
+  console.log(`📊 Step status: ${step_status}`);
+
+  try {
+    const payload = {
+      instance_id,
+      message,
+      step_status,
+      site_id,
+      ...(context && { context })
+    };
+
+    const response = await apiService.post('/api/robots/instance/act', payload);
+
+    if (!response.success) {
+      throw new Error(`Robot instance act API call failed: ${response.error?.message || 'Unknown error'}`);
+    }
+
+    console.log('✅ Robot instance act API call successful');
+    
+    // Handle nested data structure
+    const actualData = response.data?.data || response.data;
+    
+    // Extract plan completion status and instance status
+    const plan_completed = actualData?.plan_completed ?? false;
+    const instance_status = actualData?.instance_status;
+    
+    console.log(`📊 Plan completion status: ${plan_completed}`);
+    console.log(`🔍 Instance status: ${instance_status || 'unknown'}`);
+    
+    return {
+      success: true,
+      data: actualData,
+      plan_completed,
+      instance_status
+    };
+    
+  } catch (error) {
+    console.error('❌ Robot instance act operation failed:', error);
+    throw new Error(`Robot instance act activity failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
