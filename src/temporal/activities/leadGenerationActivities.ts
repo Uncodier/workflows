@@ -1326,15 +1326,15 @@ export async function validateAndGenerateEmployeeContactsActivity(
               console.log(`📧 Validating generated email: ${generatedEmail}`);
               
               // Call email validation API directly
-              const validationResponse = await apiService.post('/api/integrations/neverbounce/validate', { 
+              const validationResponse = await apiService.post('/api/agents/tools/validateEmail', { 
                 email: generatedEmail 
               });
 
               const validationResult = {
                 success: validationResponse.success,
-                isValid: validationResponse.success ? (validationResponse.data?.data?.isValid || false) : false,
+                isValid: validationResponse.success ? (validationResponse.data?.isValid || false) : false,
                 reason: validationResponse.success ? 
-                  (validationResponse.data?.data?.result || 'Validation completed') :
+                  (validationResponse.data?.result || 'Validation completed') :
                   (validationResponse.error?.message || 'Validation failed')
               };
 
@@ -1361,15 +1361,15 @@ export async function validateAndGenerateEmployeeContactsActivity(
         
         try {
           // Call email validation API directly
-          const validationResponse = await apiService.post('/api/integrations/neverbounce/validate', { 
+          const validationResponse = await apiService.post('/api/agents/tools/validateEmail', { 
             email: email 
           });
 
           const emailValidationResult = {
             success: validationResponse.success,
-            isValid: validationResponse.success ? (validationResponse.data?.data?.isValid || false) : false,
+            isValid: validationResponse.success ? (validationResponse.data?.isValid || false) : false,
             reason: validationResponse.success ? 
-              (validationResponse.data?.data?.result || 'Validation completed') :
+              (validationResponse.data?.result || 'Validation completed') :
               (validationResponse.error?.message || 'Validation failed')
           };
 
@@ -1436,15 +1436,15 @@ export async function validateAndGenerateEmployeeContactsActivity(
                   for (const fallbackEmail of fallbackEmails) {
                     console.log(`📧 Validating fallback email: ${fallbackEmail}`);
                     
-                    const fallbackValidationResponse = await apiService.post('/api/integrations/neverbounce/validate', { 
+                    const fallbackValidationResponse = await apiService.post('/api/agents/tools/validateEmail', { 
                       email: fallbackEmail 
                     });
 
                     const fallbackValidationResult = {
                       success: fallbackValidationResponse.success,
-                      isValid: fallbackValidationResponse.success ? (fallbackValidationResponse.data?.data?.isValid || false) : false,
+                      isValid: fallbackValidationResponse.success ? (fallbackValidationResponse.data?.isValid || false) : false,
                       reason: fallbackValidationResponse.success ? 
-                        (fallbackValidationResponse.data?.data?.result || 'Validation completed') :
+                        (fallbackValidationResponse.data?.result || 'Validation completed') :
                         (fallbackValidationResponse.error?.message || 'Validation failed')
                     };
 

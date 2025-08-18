@@ -1203,7 +1203,7 @@ export async function scheduleIndividualDailyStandUpsActivity(
     
     // Determine if fallback should be used based on day of week
     const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
-    const isWeekend = currentDay === 5 || currentDay === 6; // Friday = 5, Saturday = 6
+    const isWeekend = currentDay === 0 || currentDay === 6; // Sunday = 0, Saturday = 6
     const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
     
     console.log(`   - Current day: ${dayName} (${currentDay})`);
@@ -1490,7 +1490,7 @@ export async function scheduleIndividualSiteAnalysisActivity(
     
     // Determine if fallback should be used based on day of week
     const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
-    const isWeekend = currentDay === 5 || currentDay === 6; // Friday = 5, Saturday = 6
+    const isWeekend = currentDay === 0 || currentDay === 6; // Sunday = 0, Saturday = 6
     const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
     
     console.log(`   - Current day: ${dayName} (${currentDay})`);
@@ -1787,7 +1787,7 @@ export async function scheduleIndividualLeadGenerationActivity(
     
     // Determine if fallback should be used based on day of week
     const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
-    const isWeekend = currentDay === 5 || currentDay === 6; // Friday = 5, Saturday = 6
+    const isWeekend = currentDay === 0 || currentDay === 6; // Sunday = 0, Saturday = 6
     const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
     
     console.log(`   - Current day: ${dayName} (${currentDay})`);
@@ -2478,7 +2478,7 @@ export async function scheduleIndividualDailyProspectionActivity(
     
     // Determine if fallback should be used based on day of week
     const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
-    const isWeekend = currentDay === 5 || currentDay === 6; // Friday = 5, Saturday = 6
+    const isWeekend = currentDay === 0 || currentDay === 6; // Sunday = 0, Saturday = 6
     const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
     
     console.log(`   - Current day: ${dayName} (${currentDay})`);

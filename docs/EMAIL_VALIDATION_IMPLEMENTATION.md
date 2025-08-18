@@ -1,8 +1,8 @@
-# Email Validation Implementation - NeverBounce Integration
+# Email Validation Implementation - validateEmail Tool Integration
 
 ## Resumen
 
-Se ha implementado una nueva funcionalidad que valida emails usando la API de NeverBounce antes de enviar correos en el `leadFollowUpWorkflow`. Esta implementación incluye lógica inteligente para manejar diferentes escenarios de invalidación basados en los métodos de contacto alternativos disponibles.
+Se ha implementado una nueva funcionalidad que valida emails usando la herramienta `/api/agents/tools/validateEmail` antes de enviar correos en el `leadFollowUpWorkflow`. Esta implementación incluye lógica inteligente para manejar diferentes escenarios de invalidación basados en los métodos de contacto alternativos disponibles.
 
 ## Componentes Implementados
 
@@ -31,8 +31,8 @@ validateContactInformation(request: {
 
 **Funcionalidad:**
 - Acepta contexto completo (email, teléfono, mensajes disponibles)
-- Llama a `/api/integrations/neverbounce/validate` para validar emails
-- Procesa la respuesta de NeverBounce
+- Llama a `/api/agents/tools/validateEmail` para validar emails
+- Procesa la respuesta del servicio de validación
 - Maneja errores de la API gracefulmente
 - Toma decisiones inteligentes basadas en métodos de contacto alternativos
 - Preparado para futuras validaciones (WhatsApp, etc.)
@@ -61,7 +61,7 @@ invalidateEmailOnlyActivity(request: {
 
 **Flujo de validación:**
 
-1. **Antes del envío de email:** Se valida el email con NeverBounce
+1. **Antes del envío de email:** Se valida el email con `/api/agents/tools/validateEmail`
 2. **Si la validación falla:** Se procede con el envío (servicio no disponible)
 3. **Si el email es inválido:**
    - Se obtiene información del lead para verificar WhatsApp
@@ -107,20 +107,36 @@ Validación: service_error
 Acción: Proceder con envío de email (fallback)
 ```
 
-## Respuesta Esperada de NeverBounce
+## Respuesta Esperada de validateEmail
 
 ```json
 {
   "success": true,
   "data": {
-    "email": "test@example.com",
+    "email": "xxx@500.co",
     "isValid": true,
-    "result": "valid",
-    "flags": ["has_dns", "has_dns_mx"],
+    "deliverable": false,
+    "result": "catchall",
+    "flags": [
+      "catchall_domain",
+      "catchall_detected",
+      "confidence_100%"
+    ],
     "suggested_correction": null,
-    "execution_time": 245,
-    "message": "Email is valid",
-    "timestamp": "2024-01-15T10:30:00.000Z"
+    "execution_time": 6506,
+    "message": "Email accepted but domain is catchall (100% confidence) - delivery uncertain",
+    "timestamp": "2025-08-18T18:41:52.716Z",
+    "bounceRisk": "low",
+    "reputationFlags": [],
+    "riskFactors": [],
+    "confidence": 65,
+    "confidenceLevel": "medium",
+    "reasoning": [
+      "SMTP server accepts email (+30)",
+      "Low bounce risk domain (+10)",
+      "Catchall domain detected (-25)"
+    ],
+    "aggressiveMode": false
   }
 }
 ```
@@ -129,7 +145,7 @@ Acción: Proceder con envío de email (fallback)
 
 El workflow incluye logging detallado para facilitar el debugging:
 
-- `🔍 Step 5.2.1: Validating email with NeverBounce`
+- `🔍 Step 5.2.1: Validating email with validateEmail tool`
 - `✅ Email is valid` / `❌ Email is invalid`
 - `📱 Lead has WhatsApp: true/false`
 - `📧🚫 Lead has WhatsApp, invalidating only email field`
@@ -160,7 +176,7 @@ Se ha creado un script de prueba en `src/scripts/test-email-validation-workflow.
 ## Configuración Requerida
 
 Asegúrese de que:
-1. La API `/api/integrations/neverbounce/validate` esté disponible
+1. La API `/api/agents/tools/validateEmail` esté disponible
 2. Las credenciales de NeverBounce estén configuradas
 3. Los timeouts estén ajustados apropiadamente
 

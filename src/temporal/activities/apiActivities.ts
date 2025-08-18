@@ -133,7 +133,7 @@ export async function validateContactInformation(request: {
   console.log(`📧 Validating email: ${email}`);
   
   try {
-    const response = await apiService.post('/api/integrations/neverbounce/validate', { email });
+    const response = await apiService.post('/api/agents/tools/validateEmail', { email });
     
     if (!response.success) {
       console.error(`❌ Email validation API call failed: ${response.error?.message}`);
@@ -147,8 +147,8 @@ export async function validateContactInformation(request: {
       };
     }
     
-    // Handle case where API response wraps data in a 'data' property
-    const data = response.data?.data || response.data;
+    // Handle the new API response structure
+    const data = response.data;
     console.log(`✅ Email validation response:`, data);
     console.log(`🔍 Full API response structure:`, JSON.stringify(response, null, 2));
     
