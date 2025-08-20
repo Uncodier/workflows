@@ -4,6 +4,44 @@ This document explains the JSONb field structures used in the Market Fit applica
 
 ## ⚠️ Cambios Estructurales Importantes
 
+### 🔄 NUEVA ESTRUCTURA DE DIRECCIONES (BREAKING CHANGE)
+
+**Fecha de cambio:** 2024-12-30
+
+La estructura de direcciones en las tablas `leads` y `companies` ha sido **ACTUALIZADA**. Si trabajas en otros proyectos que interactúan con esta base de datos:
+
+#### **Estructura ANTERIOR (DEPRECATED):**
+```json
+{
+  "street": "123 Main St",
+  "city": "New York", 
+  "zipcode": "10001",
+  "address1": "123 Main St"  // ← CAMPO REMOVIDO
+}
+```
+
+#### **Estructura NUEVA (ACTUAL):**
+```json
+{
+  "full_address": "Dirección completa como string",
+  "street": "Nombre de calle y colonia", 
+  "external_number": "123",     // ← NUEVO
+  "internal_number": "A",       // ← NUEVO  
+  "city": "Nombre de ciudad",
+  "state": "Estado/Provincia",
+  "zip": "Código postal",
+  "country": "País",
+  "coordinates": { "lat": 0, "lng": 0 }
+}
+```
+
+#### **📋 Acción Requerida:**
+- Actualiza tu código para usar `street`, `external_number`, `internal_number` en lugar de `address1`
+- Ejecuta scripts de migración si trabajas con datos existentes
+- Todos los registros nuevos usarán la estructura actualizada
+
+---
+
 ### Migración de Campos de Tracking: `visitors` → `visitor_sessions`
 
 **Fecha de cambio:** 2024-12-19
@@ -78,17 +116,25 @@ Physical address information for the lead.
 **Structure:**
 ```json
 {
-  "street": "123 Main St",
-  "city": "New York",
-  "state": "NY",
-  "zipcode": "10001",
-  "country": "USA",
+  "zip": "08700",
+  "city": "Ciudad de México",
+  "state": "CDMX",
+  "country": "Mexico",
+  "street": "Sur 113-B, Juventino Rosas, Iztacalco",
+  "external_number": "2183",
+  "internal_number": "B",
   "coordinates": {
-    "lat": 40.7128,
-    "lng": -74.0060
-  }
+    "lat": 19.3900935,
+    "lng": -99.10837719999999
+  },
+  "full_address": "Sur 113-B 2183, Juventino Rosas, Iztacalco, 08700 Ciudad de México, CDMX, Mexico"
 }
 ```
+
+**New fields added:**
+- `external_number`: Building/house number (e.g., "2183")
+- `internal_number`: Apartment/suite number (e.g., "B", "18")
+- `street`: Street name without numbers (replaces deprecated `address1`)
 
 ### `company` (jsonb)
 Company information when the lead is not linked to the companies table.
@@ -1108,17 +1154,25 @@ Company address information.
 **Structure:**
 ```json
 {
-  "street": "123 Business Ave",
-  "city": "San Francisco",
-  "state": "CA",
-  "zipcode": "94105",
-  "country": "USA",
+  "zip": "08700",
+  "city": "Ciudad de México",
+  "state": "CDMX",
+  "country": "Mexico",
+  "street": "Sur 113-B, Juventino Rosas, Iztacalco",
+  "external_number": "2183",
+  "internal_number": "B",
   "coordinates": {
-    "lat": 37.7749,
-    "lng": -122.4194
-  }
+    "lat": 19.3900935,
+    "lng": -99.10837719999999
+  },
+  "full_address": "Sur 113-B 2183, Juventino Rosas, Iztacalco, 08700 Ciudad de México, CDMX, Mexico"
 }
 ```
+
+**New fields added:**
+- `external_number`: Building/house number (e.g., "2183")
+- `internal_number`: Apartment/suite number (e.g., "B", "18")
+- `street`: Street name without numbers (replaces deprecated `address1`)
 
 ### `social_media` (jsonb)
 Company social media profiles.

@@ -1170,8 +1170,8 @@ function validateLeadData(lead: LeadData): { valid: boolean; errors: string[]; w
     warnings.push('Company name should be a string');
   }
 
-  if (lead.address && typeof lead.address !== 'string') {
-    warnings.push('Address should be a string');
+  if (lead.address && typeof lead.address !== 'object') {
+    warnings.push('Address should be an object');
   }
 
   if (lead.web && typeof lead.web !== 'string') {
@@ -1326,15 +1326,15 @@ export async function validateAndGenerateEmployeeContactsActivity(
               console.log(`📧 Validating generated email: ${generatedEmail}`);
               
               // Call email validation API directly
-              const validationResponse = await apiService.post('/api/agents/tools/validateEmail', { 
+              const validationResponse = await apiService.post('/api/integrations/neverbounce/validate', { 
                 email: generatedEmail 
               });
 
               const validationResult = {
                 success: validationResponse.success,
-                isValid: validationResponse.success ? (validationResponse.data?.isValid || false) : false,
+                isValid: validationResponse.success ? (validationResponse.data?.data?.isValid || false) : false,
                 reason: validationResponse.success ? 
-                  (validationResponse.data?.result || 'Validation completed') :
+                  (validationResponse.data?.data?.result || 'Validation completed') :
                   (validationResponse.error?.message || 'Validation failed')
               };
 
@@ -1361,15 +1361,15 @@ export async function validateAndGenerateEmployeeContactsActivity(
         
         try {
           // Call email validation API directly
-          const validationResponse = await apiService.post('/api/agents/tools/validateEmail', { 
+          const validationResponse = await apiService.post('/api/integrations/neverbounce/validate', { 
             email: email 
           });
 
           const emailValidationResult = {
             success: validationResponse.success,
-            isValid: validationResponse.success ? (validationResponse.data?.isValid || false) : false,
+            isValid: validationResponse.success ? (validationResponse.data?.data?.isValid || false) : false,
             reason: validationResponse.success ? 
-              (validationResponse.data?.result || 'Validation completed') :
+              (validationResponse.data?.data?.result || 'Validation completed') :
               (validationResponse.error?.message || 'Validation failed')
           };
 
@@ -1436,15 +1436,15 @@ export async function validateAndGenerateEmployeeContactsActivity(
                   for (const fallbackEmail of fallbackEmails) {
                     console.log(`📧 Validating fallback email: ${fallbackEmail}`);
                     
-                    const fallbackValidationResponse = await apiService.post('/api/agents/tools/validateEmail', { 
+                    const fallbackValidationResponse = await apiService.post('/api/integrations/neverbounce/validate', { 
                       email: fallbackEmail 
                     });
 
                     const fallbackValidationResult = {
                       success: fallbackValidationResponse.success,
-                      isValid: fallbackValidationResponse.success ? (fallbackValidationResponse.data?.isValid || false) : false,
+                      isValid: fallbackValidationResponse.success ? (fallbackValidationResponse.data?.data?.isValid || false) : false,
                       reason: fallbackValidationResponse.success ? 
-                        (fallbackValidationResponse.data?.result || 'Validation completed') :
+                        (fallbackValidationResponse.data?.data?.result || 'Validation completed') :
                         (fallbackValidationResponse.error?.message || 'Validation failed')
                     };
 
@@ -1685,7 +1685,7 @@ export async function createSingleLead(
       } : (lead.web ? { website: lead.web } : {}), // Store company info in company jsonb field
       company_id: companyId || null, // Add company_id to lead data
       segment_id: segmentId || null, // Add segment_id to lead data
-      address: lead.address ? { full_address: lead.address } : {}, // Store address exactly as provided
+      address: lead.address || {}, // Store complete address structure as provided
       position: lead.position || null,
       site_id: site_id,
       user_id: userId || null,
@@ -2305,11 +2305,12 @@ function parseGoogleMapsAddress(addressString: string, targetCity?: string): any
     const parts = addressString.split(',').map(part => part.trim());
     
     if (parts.length < 2) {
-      // If we can't parse, just store the full address
+      // If we can't parse, return basic structure with new fields only
       return {
         full_address: addressString,
-        address1: addressString,
-        city: targetCity || null, // Always use target_city if available
+        street: addressString,
+        external_number: null,
+        internal_number: null
       };
     }
     
@@ -2368,8 +2369,8 @@ function parseGoogleMapsAddress(addressString: string, targetCity?: string): any
       }
     }
     
-    // ✅ FIXED: Everything BEFORE the zip/city parts goes to address1
-    const address1Parts: string[] = [];
+    // ✅ NEW: Extract street address and numbers from the first parts
+    const streetParts: string[] = [];
     const maxIndex = Math.max(zipPartIndex, cityPartIndex);
     
     for (let i = 0; i < Math.min(maxIndex === -1 ? parts.length - 2 : maxIndex, parts.length - 2); i++) {
@@ -2381,12 +2382,12 @@ function parseGoogleMapsAddress(addressString: string, targetCity?: string): any
         if (zipMatch) {
           const beforeZip = part.substring(0, part.indexOf(zipMatch[0])).trim();
           if (beforeZip) {
-            address1Parts.push(beforeZip);
+            streetParts.push(beforeZip);
           }
         }
       } else if (i !== cityPartIndex) {
-        // This part goes entirely to address1
-        address1Parts.push(parts[i]);
+        // This part goes entirely to street
+        streetParts.push(parts[i]);
       }
     }
     
@@ -2408,10 +2409,30 @@ function parseGoogleMapsAddress(addressString: string, targetCity?: string): any
       }
     }
     
-    // Build address1 from collected parts
-    if (address1Parts.length > 0) {
-      parsed.address1 = address1Parts.join(', ');
+    // Build street address and extract numbers
+    if (streetParts.length > 0) {
+      const fullStreet = streetParts.join(', ');
+      parsed.street = fullStreet;
+      
+      // Try to extract external and internal numbers from street
+      // Pattern for external number (e.g., "Núm. 171", "No. 123", "123")
+      const externalMatch = fullStreet.match(/(?:núm\.?|no\.?|#)\s*(\d+)/i) || 
+                           fullStreet.match(/\b(\d+)\b/);
+      if (externalMatch) {
+        parsed.external_number = externalMatch[1];
+      }
+      
+      // Pattern for internal number (e.g., "int 18", "interior 5", "depto A")
+      const internalMatch = fullStreet.match(/(?:int\.?|interior|depto\.?|dept\.?|apt\.?)\s*([a-zA-Z0-9]+)/i);
+      if (internalMatch) {
+        parsed.internal_number = internalMatch[1];
+      }
     }
+    
+    // Set default null values for missing fields
+    parsed.street = parsed.street || null;
+    parsed.external_number = parsed.external_number || null;
+    parsed.internal_number = parsed.internal_number || null;
     
     console.log(`🗺️ Parsed address: "${addressString}" → ${JSON.stringify(parsed)}`);
     
@@ -2420,11 +2441,12 @@ function parseGoogleMapsAddress(addressString: string, targetCity?: string): any
   } catch (error) {
     console.error(`❌ Error parsing address: ${addressString}`, error);
     
-    // Fallback: return basic structure with target_city
+    // Fallback: return basic structure with new fields only
     return {
       full_address: addressString,
-      address1: addressString,
-      city: targetCity || null,
+      street: addressString,
+      external_number: null,
+      internal_number: null
     };
   }
 }

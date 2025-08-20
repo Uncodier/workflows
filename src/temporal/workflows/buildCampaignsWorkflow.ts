@@ -12,13 +12,20 @@ const {
   retry: RETRY_POLICIES.DEFAULT,
 });
 
-// Configure non-critical campaign activities with no retry policy
+// Configure campaign activities with retry policy for critical campaign creation
 const {
-  createCampaignsActivity,
+  createCampaignsActivity
+} = proxyActivities<Activities>({
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.DEFAULT,
+  retry: RETRY_POLICIES.DEFAULT, // Enable retries for campaign creation
+});
+
+// Configure non-critical campaign requirements with no retry policy
+const {
   createCampaignRequirementsActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.DEFAULT,
-  retry: RETRY_POLICIES.NO_RETRY, // No retries for campaign creation failures
+  retry: RETRY_POLICIES.NO_RETRY, // No retries for campaign requirements creation
 });
 
 export interface BuildCampaignsWorkflowParams {
@@ -136,68 +143,52 @@ export async function buildCampaignsWorkflow(
     
     console.log('📋 Final campaign request:', JSON.stringify(campaignRequest, null, 2));
     
-    // Try to create campaigns - treat as non-critical operation
-    let campaignResult;
-    let campaignCreated = false;
+    // Create campaigns - this is now a critical operation with retries
+    console.log('🚀 Creating campaigns (critical operation with retries)...');
+    const campaignResult = await createCampaignsActivity(campaignRequest);
     
-    try {
-      campaignResult = await createCampaignsActivity(campaignRequest);
-      
-      if (campaignResult.success) {
-        console.log('✅ Campaigns created successfully');
-        console.log(`📈 Campaign result:`, JSON.stringify(campaignResult.campaign, null, 2));
-        campaignCreated = true;
-      } else {
-        console.warn('⚠️ Campaign creation failed (non-critical):', campaignResult.error);
-        console.log('🔄 Continuing workflow execution without campaigns...');
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.warn('⚠️ Campaign creation threw error (non-critical):', errorMessage);
-      console.log('🔄 Continuing workflow execution without campaigns...');
+    if (!campaignResult.success) {
+      const errorMessage = `Campaign creation failed: ${campaignResult.error}`;
+      console.error(`❌ ${errorMessage}`);
+      throw new Error(errorMessage);
     }
     
-    // Try to create campaign requirements - also non-critical
+    console.log('✅ Campaigns created successfully');
+    console.log(`📈 Campaign result:`, JSON.stringify(campaignResult.campaign, null, 2));
+    
+    // Try to create campaign requirements - non-critical operation
     let requirementsResult;
     let requirementsCreated = false;
     
-    // Only attempt requirements if campaigns were created successfully
-    if (campaignCreated && campaignResult?.campaign) {
-      try {
-        console.log('📋 Creating campaign requirements...');
-        requirementsResult = await createCampaignRequirementsActivity(campaignRequest);
-        
-        if (requirementsResult.success) {
-          console.log('✅ Campaign requirements created successfully');
-          console.log(`📋 Requirements result:`, JSON.stringify(requirementsResult.requirements, null, 2));
-          requirementsCreated = true;
-        } else {
-          console.warn('⚠️ Campaign requirements creation failed (non-critical):', requirementsResult.error);
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.warn('⚠️ Campaign requirements creation threw error (non-critical):', errorMessage);
+    try {
+      console.log('📋 Creating campaign requirements...');
+      requirementsResult = await createCampaignRequirementsActivity(campaignRequest);
+      
+      if (requirementsResult.success) {
+        console.log('✅ Campaign requirements created successfully');
+        console.log(`📋 Requirements result:`, JSON.stringify(requirementsResult.requirements, null, 2));
+        requirementsCreated = true;
+      } else {
+        console.warn('⚠️ Campaign requirements creation failed (non-critical):', requirementsResult.error);
       }
-    } else {
-      console.log('⏭️ Skipping campaign requirements creation (campaigns not created)');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn('⚠️ Campaign requirements creation threw error (non-critical):', errorMessage);
     }
     
-    // Return success even if campaigns/requirements failed (they are non-critical)
+    // Build final result - campaigns creation is now critical, requirements are optional
     const warnings = [];
-    if (!campaignCreated) {
-      warnings.push('Campaign creation failed');
-    }
-    if (!requirementsCreated && campaignCreated) {
+    if (!requirementsCreated) {
       warnings.push('Campaign requirements creation failed');
     }
     
     const warningMessage = warnings.length > 0 ? ` (warnings: ${warnings.join(', ')})` : '';
     
     return {
-      success: true, // Always success as campaign creation is non-critical
+      success: true, // Success because campaigns were created successfully
       processed: true,
       reason: `Workflow completed successfully${warningMessage}`,
-      campaign: campaignCreated ? campaignResult?.campaign : undefined,
+      campaign: campaignResult.campaign,
       requirements: requirementsCreated ? requirementsResult?.requirements : undefined,
       siteInfo: siteResult.site,
       segmentsUsed,
