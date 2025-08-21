@@ -282,3 +282,4 @@ SELECT
 FROM leads 
 WHERE address->>'external_number' IS NOT NULL
 LIMIT 5;
+

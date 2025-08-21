@@ -192,3 +192,4 @@ SELECT
   ) as external_extraction_percentage
 FROM companies 
 WHERE address IS NOT NULL AND address != '{}'::jsonb;
+

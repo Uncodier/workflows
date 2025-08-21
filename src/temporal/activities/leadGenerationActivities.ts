@@ -1326,7 +1326,7 @@ export async function validateAndGenerateEmployeeContactsActivity(
               console.log(`📧 Validating generated email: ${generatedEmail}`);
               
               // Call email validation API directly
-              const validationResponse = await apiService.post('/api/integrations/neverbounce/validate', { 
+              const validationResponse = await apiService.post('/api/agents/tools/validateEmail', { 
                 email: generatedEmail 
               });
 
@@ -1361,7 +1361,7 @@ export async function validateAndGenerateEmployeeContactsActivity(
         
         try {
           // Call email validation API directly
-          const validationResponse = await apiService.post('/api/integrations/neverbounce/validate', { 
+          const validationResponse = await apiService.post('/api/agents/tools/validateEmail', { 
             email: email 
           });
 
@@ -1436,7 +1436,7 @@ export async function validateAndGenerateEmployeeContactsActivity(
                   for (const fallbackEmail of fallbackEmails) {
                     console.log(`📧 Validating fallback email: ${fallbackEmail}`);
                     
-                    const fallbackValidationResponse = await apiService.post('/api/integrations/neverbounce/validate', { 
+                    const fallbackValidationResponse = await apiService.post('/api/agents/tools/validateEmail', { 
                       email: fallbackEmail 
                     });
 
