@@ -2998,4 +2998,187 @@ export async function updateLeadEmailVerificationActivity(request: {
       error: errorMessage
     };
   }
+}
+
+/**
+ * Activity to invalidate referred leads when a lead with referral_lead_id is invalidated
+ * 
+ * This activity:
+ * 1. Finds all leads that have the same referral_lead_id as the invalidated lead
+ * 2. Finds the referral lead itself (the lead that referral_lead_id points to)
+ * 3. Invalidates only those leads that share the same email or phone as the original lead
+ */
+export async function invalidateReferredLeads(request: {
+  lead_id: string;
+  referral_lead_id: string;
+  original_site_id: string;
+  reason: string;
+  original_email?: string;
+  original_phone?: string;
+  userId?: string;
+  response_message?: string;
+}): Promise<{ success: boolean; invalidated_leads: string[]; errors: string[] }> {
+  console.log(`🔗 Invalidating referred leads for referral_lead_id: ${request.referral_lead_id}`);
+  
+  const invalidatedLeads: string[] = [];
+  const errors: string[] = [];
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot invalidate referred leads');
+      return {
+        success: false,
+        invalidated_leads: [],
+        errors: ['Database not available']
+      };
+    }
+
+    console.log('✅ Database connection confirmed, finding referred leads...');
+    
+    // Import supabase service role client (bypasses RLS)
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    // Step 1: Find all leads with the same referral_lead_id (excluding the original lead)
+    console.log(`🔍 Finding leads with referral_lead_id: ${request.referral_lead_id}...`);
+    const { data: referredLeads, error: referredError } = await supabaseServiceRole
+      .from('leads')
+      .select('id, email, phone, site_id')
+      .eq('referral_lead_id', request.referral_lead_id)
+      .neq('id', request.lead_id) // Exclude the original invalidated lead
+      .not('site_id', 'is', null); // Only get leads that are still active (have site_id)
+
+    if (referredError) {
+      console.error(`❌ Error finding referred leads:`, referredError);
+      errors.push(`Failed to find referred leads: ${referredError.message}`);
+    } else if (referredLeads && referredLeads.length > 0) {
+      console.log(`📋 Found ${referredLeads.length} leads with same referral_lead_id`);
+      
+      // Filter leads that share the same email or phone as the original lead
+      const leadsToInvalidate = referredLeads.filter(lead => {
+        const sameEmail = request.original_email && lead.email === request.original_email;
+        const samePhone = request.original_phone && lead.phone === request.original_phone;
+        return sameEmail || samePhone;
+      });
+      
+      console.log(`🎯 ${leadsToInvalidate.length} leads share contact info and will be invalidated`);
+      
+      // Invalidate each matching lead
+      for (const leadToInvalidate of leadsToInvalidate) {
+        try {
+          console.log(`🚫 Invalidating referred lead ${leadToInvalidate.id}...`);
+          
+          const invalidationResult = await invalidateLeadActivity({
+            lead_id: leadToInvalidate.id,
+            original_site_id: leadToInvalidate.site_id,
+            reason: `referral_${request.reason}`,
+            failed_contact: {
+              email: request.original_email,
+              telephone: request.original_phone
+            },
+            userId: request.userId,
+            shared_with_lead_id: request.lead_id,
+            response_message: request.response_message ? 
+              `${request.response_message} (referred lead invalidation)` : 
+              undefined
+          });
+          
+          if (invalidationResult.success) {
+            invalidatedLeads.push(leadToInvalidate.id);
+            console.log(`✅ Successfully invalidated referred lead ${leadToInvalidate.id}`);
+          } else {
+            const errorMsg = `Failed to invalidate referred lead ${leadToInvalidate.id}: ${invalidationResult.error}`;
+            console.error(`❌ ${errorMsg}`);
+            errors.push(errorMsg);
+          }
+        } catch (leadError) {
+          const errorMessage = leadError instanceof Error ? leadError.message : String(leadError);
+          console.error(`❌ Exception invalidating referred lead ${leadToInvalidate.id}:`, errorMessage);
+          errors.push(`Exception invalidating referred lead ${leadToInvalidate.id}: ${errorMessage}`);
+        }
+      }
+    } else {
+      console.log(`ℹ️ No referred leads found with referral_lead_id: ${request.referral_lead_id}`);
+    }
+
+    // Step 2: Check and invalidate the referral lead itself if it shares contact info
+    console.log(`🔍 Checking referral lead ${request.referral_lead_id}...`);
+    const { data: referralLead, error: referralError } = await supabaseServiceRole
+      .from('leads')
+      .select('id, email, phone, site_id')
+      .eq('id', request.referral_lead_id)
+      .not('site_id', 'is', null) // Only if still active
+      .single();
+
+    if (referralError) {
+      if (referralError.code === 'PGRST116') {
+        console.log(`ℹ️ Referral lead ${request.referral_lead_id} not found or already invalidated`);
+      } else {
+        console.error(`❌ Error finding referral lead:`, referralError);
+        errors.push(`Failed to find referral lead: ${referralError.message}`);
+      }
+    } else if (referralLead) {
+      // Check if referral lead shares contact info with original lead
+      const sameEmail = request.original_email && referralLead.email === request.original_email;
+      const samePhone = request.original_phone && referralLead.phone === request.original_phone;
+      
+      if (sameEmail || samePhone) {
+        console.log(`🎯 Referral lead ${request.referral_lead_id} shares contact info, invalidating...`);
+        
+        try {
+          const referralInvalidationResult = await invalidateLeadActivity({
+            lead_id: referralLead.id,
+            original_site_id: referralLead.site_id,
+            reason: `referral_source_${request.reason}`,
+            failed_contact: {
+              email: request.original_email,
+              telephone: request.original_phone
+            },
+            userId: request.userId,
+            shared_with_lead_id: request.lead_id,
+            response_message: request.response_message ? 
+              `${request.response_message} (referral source invalidation)` : 
+              undefined
+          });
+          
+          if (referralInvalidationResult.success) {
+            invalidatedLeads.push(referralLead.id);
+            console.log(`✅ Successfully invalidated referral lead ${referralLead.id}`);
+          } else {
+            const errorMsg = `Failed to invalidate referral lead ${referralLead.id}: ${referralInvalidationResult.error}`;
+            console.error(`❌ ${errorMsg}`);
+            errors.push(errorMsg);
+          }
+        } catch (referralLeadError) {
+          const errorMessage = referralLeadError instanceof Error ? referralLeadError.message : String(referralLeadError);
+          console.error(`❌ Exception invalidating referral lead ${referralLead.id}:`, errorMessage);
+          errors.push(`Exception invalidating referral lead ${referralLead.id}: ${errorMessage}`);
+        }
+      } else {
+        console.log(`ℹ️ Referral lead ${request.referral_lead_id} does not share contact info, skipping invalidation`);
+      }
+    }
+
+    console.log(`🎉 Referred leads invalidation completed. Invalidated: ${invalidatedLeads.length}, Errors: ${errors.length}`);
+    
+    return {
+      success: true,
+      invalidated_leads: invalidatedLeads,
+      errors
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception in invalidateReferredLeads:`, errorMessage);
+    
+    return {
+      success: false,
+      invalidated_leads: invalidatedLeads,
+      errors: [...errors, errorMessage]
+    };
+  }
 } 

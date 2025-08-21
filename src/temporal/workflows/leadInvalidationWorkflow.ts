@@ -8,6 +8,7 @@ const {
   saveCronStatusActivity,
   getLeadActivity,
   invalidateLeadActivity,
+  invalidateReferredLeads,
   findLeadsBySharedContactActivity,
   updateTaskStatusToCompletedActivity,
 } = proxyActivities<Activities>({
@@ -217,6 +218,47 @@ export async function leadInvalidationWorkflow(
       }
     } else {
       console.log(`⚠️ No contact information provided for shared lead search`);
+    }
+
+    // Step 3b: Check and invalidate referred leads if lead has referral_lead_id
+    console.log(`🔍 Step 3b: Checking for referral relationships...`);
+    
+    if (lead.referral_lead_id) {
+      console.log(`🔗 Lead has referral_lead_id: ${lead.referral_lead_id}, invalidating related leads...`);
+      
+      try {
+        const referralInvalidationResult = await invalidateReferredLeads({
+          lead_id: lead_id,
+          referral_lead_id: lead.referral_lead_id,
+          original_site_id: originalSiteId,
+          reason: reason,
+          original_email: lead.email,
+          original_phone: lead.phone,
+          userId: options.userId,
+          response_message: options.response_message
+        });
+        
+        if (referralInvalidationResult.success) {
+          console.log(`✅ Referral invalidation completed successfully`);
+          console.log(`📊 Invalidated ${referralInvalidationResult.invalidated_leads.length} referred leads`);
+          
+          if (referralInvalidationResult.errors.length > 0) {
+            console.log(`⚠️ Some errors occurred during referral invalidation:`);
+            referralInvalidationResult.errors.forEach(error => console.log(`   - ${error}`));
+            errors.push(...referralInvalidationResult.errors);
+          }
+        } else {
+          const errorMsg = `Referral invalidation failed: ${referralInvalidationResult.errors.join(', ')}`;
+          console.error(`❌ ${errorMsg}`);
+          errors.push(errorMsg);
+        }
+      } catch (referralError) {
+        const errorMessage = referralError instanceof Error ? referralError.message : String(referralError);
+        console.error(`❌ Exception during referral invalidation: ${errorMessage}`);
+        errors.push(`Referral invalidation exception: ${errorMessage}`);
+      }
+    } else {
+      console.log(`ℹ️ Lead has no referral_lead_id, skipping referral invalidation`);
     }
 
     console.log(`✅ Lead invalidation process completed - skipping company null list functionality`);
