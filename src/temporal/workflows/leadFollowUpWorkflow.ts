@@ -236,6 +236,7 @@ export async function leadFollowUpWorkflow(
   let siteUrl = '';
   let response: any = null;
   let messageSent: { channel: 'email' | 'whatsapp'; recipient: string; success: boolean; messageId?: string } | undefined;
+  let emailInvalidatedInEarlyValidation = false; // Track if email was invalidated during early validation
 
   try {
     console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
@@ -442,6 +443,7 @@ export async function leadFollowUpWorkflow(
         
         if (emailInvalidationResult.success) {
           console.log(`✅ Email invalidated successfully (early validation), site_id preserved for WhatsApp communication`);
+          emailInvalidatedInEarlyValidation = true; // Mark email as invalidated to prevent sending later
         } else {
           console.error(`❌ Failed to invalidate email (early validation): ${emailInvalidationResult.error}`);
           errors.push(`Email invalidation failed: ${emailInvalidationResult.error}`);
@@ -938,8 +940,8 @@ export async function leadFollowUpWorkflow(
         let emailSent = false;
         let whatsappSent = false;
         
-        // Send email if available (contact validation was already performed in Step 4.5)
-        if (email && emailMessage) {
+        // Send email if available and not invalidated during early validation
+        if (email && emailMessage && !emailInvalidatedInEarlyValidation) {
           console.log(`📧 Sending follow-up email to ${email} (contact validation already performed)...`);
           
           const emailResult = await sendEmailFromAgentActivity({
@@ -998,6 +1000,9 @@ export async function leadFollowUpWorkflow(
               errors.push(`Cleanup exception: ${cleanupErrorMessage}`);
             }
           }
+        } else if (email && emailMessage && emailInvalidatedInEarlyValidation) {
+          console.log(`🚫 Skipping email sending - email was invalidated during early validation: ${email}`);
+          console.log(`📱 Will attempt WhatsApp delivery if available instead`);
         }
         
         // Send WhatsApp if available
