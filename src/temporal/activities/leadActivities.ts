@@ -2717,12 +2717,16 @@ export async function cleanupFailedFollowUpActivity(request: {
         } else {
           messageDeleted = true;
           console.log(`✅ Successfully deleted message ${request.message_id}`);
+          
+          // Update message count after deletion for accurate conversation cleanup decision
+          cleanupSummary.messages_in_conversation = Math.max(0, cleanupSummary.messages_in_conversation - 1);
+          console.log(`📊 Updated message count after deletion: ${cleanupSummary.messages_in_conversation} messages remaining`);
         }
       }
 
-      // Step 3.2: Delete conversation if it only has one message (the failed one) or no messages
-      if (cleanupSummary.messages_in_conversation <= 1) {
-        console.log(`🗑️ Deleting conversation ${targetConversationId} (${cleanupSummary.messages_in_conversation} messages)...`);
+      // Step 3.2: Delete conversation if it has no messages remaining (especially important for lead generation)
+      if (cleanupSummary.messages_in_conversation === 0) {
+        console.log(`🗑️ Deleting conversation ${targetConversationId} (${cleanupSummary.messages_in_conversation} messages remaining - empty conversation cleanup)...`);
         
         // First delete any remaining messages
         const { error: deleteMessagesError } = await supabaseServiceRole
@@ -2748,7 +2752,7 @@ export async function cleanupFailedFollowUpActivity(request: {
           console.log(`✅ Successfully deleted conversation ${targetConversationId}`);
         }
       } else {
-        console.log(`⚠️ Keeping conversation ${targetConversationId} (has ${cleanupSummary.messages_in_conversation} messages)`);
+        console.log(`⚠️ Keeping conversation ${targetConversationId} (has ${cleanupSummary.messages_in_conversation} messages remaining - preserving conversation with history)`);
       }
     }
 
