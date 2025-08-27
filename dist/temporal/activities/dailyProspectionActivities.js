@@ -179,9 +179,19 @@ async function validateCommunicationChannelsActivity(params) {
  * - No active tasks in 'awareness' stage (pending tasks are allowed)
  */
 async function getProspectionLeadsActivity(options) {
-    const { site_id, hoursThreshold = 48 } = options;
+    const { site_id, hoursThreshold = 48, maxLeads, page = 0, pageSize = 30 } = options;
     console.log(`🔍 Getting prospection leads for site: ${site_id}`);
     console.log(`   - Hours threshold: ${hoursThreshold} hours`);
+    console.log(`   - Max leads limit: ${maxLeads || 30} leads`);
+    console.log(`   - Page: ${page} (0-based)`);
+    console.log(`   - Page size: ${pageSize}`);
+    // Debug: Log the exact input to identify if there's anything large
+    const inputSize = JSON.stringify(options).length;
+    console.log(`📊 Input payload size: ${inputSize} bytes`);
+    console.log(`📋 Full input:`, JSON.stringify(options, null, 2));
+    if (inputSize > 50000) {
+        console.warn(`⚠️ Large input detected (${inputSize} bytes). This might cause issues.`);
+    }
     try {
         const supabaseService = (0, supabaseService_1.getSupabaseService)();
         console.log('🔍 Checking database connection...');
@@ -203,14 +213,49 @@ async function getProspectionLeadsActivity(options) {
         thresholdDate.setHours(thresholdDate.getHours() - hoursThreshold);
         const createdBefore = thresholdDate.toISOString();
         console.log(`📅 Looking for leads created before: ${createdBefore}`);
-        // First, get all leads with status 'new' and older than threshold
+        // Calculate pagination offset
+        const offset = page * pageSize;
+        console.log(`📄 Pagination settings:`);
+        console.log(`   - Page: ${page} (0-based)`);
+        console.log(`   - Page size: ${pageSize}`);
+        console.log(`   - Offset: ${offset}`);
+        // Use the maxLeads parameter from workflow (default 30 from activityPrioritizationEngine)
+        // For pagination, we use pageSize instead of maxLeads for the LIMIT
+        const leadsLimit = pageSize; // Use pageSize for pagination
+        console.log(`🎯 Using leads limit: ${leadsLimit} (page size for pagination)`);
+        // First, get total count of candidates to determine if there are more pages
+        const { count: totalCandidatesCount, error: countError } = await supabaseServiceRole
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('site_id', site_id)
+            .eq('status', 'new')
+            .lt('created_at', createdBefore);
+        if (countError) {
+            logger_1.logger.error('❌ Error counting candidate leads', {
+                error: countError.message,
+                site_id,
+                hoursThreshold
+            });
+            return {
+                success: false,
+                leads: [],
+                total: 0,
+                error: countError.message
+            };
+        }
+        const totalCandidatesFound = totalCandidatesCount || 0;
+        const hasMorePages = (offset + pageSize) < totalCandidatesFound;
+        console.log(`📊 Total candidates available: ${totalCandidatesFound}`);
+        console.log(`📄 Has more pages: ${hasMorePages}`);
+        // Now get the paginated leads with status 'new' and older than threshold
         const { data: candidateLeads, error: leadsError } = await supabaseServiceRole
             .from('leads')
             .select('*')
             .eq('site_id', site_id)
             .eq('status', 'new')
             .lt('created_at', createdBefore)
-            .order('created_at', { ascending: true }); // Oldest first for prospection
+            .order('created_at', { ascending: true }) // Oldest first for prospection
+            .range(offset, offset + leadsLimit - 1); // Use range for pagination
         if (leadsError) {
             logger_1.logger.error('❌ Error fetching candidate leads', {
                 error: leadsError.message,
@@ -224,30 +269,71 @@ async function getProspectionLeadsActivity(options) {
                 error: leadsError.message
             };
         }
-        console.log(`📋 Found ${candidateLeads?.length || 0} candidate leads with status 'new' older than ${hoursThreshold} hours`);
+        console.log(`📋 Found ${candidateLeads?.length || 0} candidate leads with status 'new' older than ${hoursThreshold} hours (page ${page})`);
+        // Log pagination status
+        if (candidateLeads && candidateLeads.length === leadsLimit && hasMorePages) {
+            console.log(`📄 Page ${page} complete: Found ${candidateLeads.length} leads (more pages available)`);
+        }
+        else if (candidateLeads && candidateLeads.length < leadsLimit) {
+            console.log(`📄 Page ${page} complete: Found ${candidateLeads.length} leads (last page or sparse page)`);
+        }
+        else if (candidateLeads && candidateLeads.length === leadsLimit && !hasMorePages) {
+            console.log(`📄 Page ${page} complete: Found ${candidateLeads.length} leads (final page)`);
+        }
         if (!candidateLeads || candidateLeads.length === 0) {
-            console.log('✅ No candidate leads found for prospection');
+            console.log(`✅ No candidate leads found for prospection on page ${page}`);
             return {
                 success: true,
                 leads: [],
                 total: 0,
+                hasMorePages,
+                currentPage: page,
+                pageSize,
+                totalCandidatesFound,
                 criteria: {
                     site_id,
                     status: 'new',
                     hoursThreshold,
-                    createdBefore
+                    createdBefore,
+                    page,
+                    pageSize
                 }
             };
         }
         // Get lead IDs for task filtering
         const leadIds = candidateLeads.map(lead => lead.id);
-        // Now check which of these leads have tasks in 'awareness' stage
-        const { data: awarenessTasksData, error: tasksError } = await supabaseServiceRole
-            .from('tasks')
-            .select('lead_id, id, status, stage')
-            .eq('site_id', site_id)
-            .eq('stage', 'awareness')
-            .in('lead_id', leadIds);
+        console.log(`🔍 Checking awareness tasks for ${leadIds.length} leads...`);
+        // Split large lead ID arrays into smaller batches to avoid 414 errors with large IN clauses
+        const BATCH_SIZE = 100; // Limit to 100 IDs per query to avoid URL length issues
+        const leadIdBatches = [];
+        for (let i = 0; i < leadIds.length; i += BATCH_SIZE) {
+            leadIdBatches.push(leadIds.slice(i, i + BATCH_SIZE));
+        }
+        console.log(`📊 Split ${leadIds.length} lead IDs into ${leadIdBatches.length} batches of max ${BATCH_SIZE} each`);
+        // Query tasks in batches and combine results
+        const allAwarenessTasksData = [];
+        let tasksError = null;
+        for (let batchIndex = 0; batchIndex < leadIdBatches.length; batchIndex++) {
+            const batch = leadIdBatches[batchIndex];
+            console.log(`🔍 Processing batch ${batchIndex + 1}/${leadIdBatches.length} with ${batch.length} lead IDs...`);
+            const { data: batchTasksData, error: batchTasksError } = await supabaseServiceRole
+                .from('tasks')
+                .select('lead_id, id, status, stage')
+                .eq('site_id', site_id)
+                .eq('stage', 'awareness')
+                .in('lead_id', batch);
+            if (batchTasksError) {
+                console.error(`❌ Error in batch ${batchIndex + 1}:`, batchTasksError.message);
+                tasksError = batchTasksError;
+                break; // Stop on first error
+            }
+            if (batchTasksData) {
+                allAwarenessTasksData.push(...batchTasksData);
+                console.log(`✅ Batch ${batchIndex + 1} completed: found ${batchTasksData.length} awareness tasks`);
+            }
+        }
+        // Use combined results
+        const awarenessTasksData = allAwarenessTasksData;
         if (tasksError) {
             logger_1.logger.error('❌ Error checking awareness tasks', {
                 error: tasksError.message,
@@ -364,11 +450,17 @@ async function getProspectionLeadsActivity(options) {
             success: true,
             leads: prospectionLeads,
             total: prospectionLeads.length,
+            hasMorePages,
+            currentPage: page,
+            pageSize,
+            totalCandidatesFound,
             criteria: {
                 site_id,
                 status: 'new',
                 hoursThreshold,
-                createdBefore
+                createdBefore,
+                page,
+                pageSize
             }
         };
     }
@@ -539,20 +631,29 @@ async function sendLeadsToSalesAgentActivity(options) {
             };
         }
         // Prepare request body for the sales agent API
-        // Send only lead IDs and site_id at root level
+        // Send only lead IDs and siteId at root level (converted to camelCase for API)
         const requestBody = {
-            site_id: site_id,
+            siteId: site_id, // Convert to camelCase for API consistency
             leads: leads.map(lead => lead.id), // Send only the IDs
             userId: userId,
             additionalData: {
                 workflowType: 'dailyProspection',
-                ...options.additionalData
+                // Only include essential data to avoid 414 errors
+                siteName: options.additionalData?.siteName,
+                siteUrl: options.additionalData?.siteUrl,
+                workflowId: options.additionalData?.workflowId
+                // Exclude large objects that could cause 414 errors
             }
         };
-        console.log('📤 Sending leads to sales agent API:', {
+        const requestBodySize = JSON.stringify(requestBody).length;
+        console.log(`📤 Sending leads to sales agent API (${requestBodySize} bytes):`, {
             leadCount: leads.length,
             endpoint: '/api/agents/sales/leadSelection'
         });
+        // Warn if request body is getting large
+        if (requestBodySize > 50000) { // 50KB warning threshold
+            console.warn(`⚠️ Large request body detected (${requestBodySize} bytes). This might cause 414 errors.`);
+        }
         // Call the sales agent API with reasonable timeout (2 minutes)
         const response = await apiService_1.apiService.request('/api/agents/sales/leadSelection', {
             method: 'POST',
@@ -667,14 +768,24 @@ async function assignPriorityLeadsActivity(options) {
                         account_value: account.account_value,
                         priority_score: priorityLead?.priority_score,
                         company: account.company,
-                        workflow_id: options.additionalData?.workflowId
+                        workflow_id: options.additionalData?.workflowId,
+                        // Only include essential data to avoid 414 errors
+                        siteName: options.additionalData?.siteName,
+                        siteUrl: options.additionalData?.siteUrl,
+                        workflowType: options.additionalData?.workflowType
+                        // Exclude large objects that could cause 414 errors
                     }
                 };
-                console.log('📤 Sending lead assignment notification:', {
+                const requestBodySize = JSON.stringify(notificationBody).length;
+                console.log(`📤 Sending lead assignment notification (${requestBodySize} bytes):`, {
                     lead_id: leadId,
                     assignee_id: assigneeId,
                     company: account.company
                 });
+                // Warn if request body is getting large
+                if (requestBodySize > 50000) { // 50KB warning threshold
+                    console.warn(`⚠️ Large request body detected (${requestBodySize} bytes). This might cause 414 errors.`);
+                }
                 const notificationResponse = await apiService_1.apiService.request('/api/notifications/leadAssignment', {
                     method: 'POST',
                     body: notificationBody,

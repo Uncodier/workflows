@@ -61,6 +61,8 @@ exports.checkCompanyValidLeadsActivity = checkCompanyValidLeadsActivity;
 exports.addCompanyToNullListActivity = addCompanyToNullListActivity;
 exports.getCompanyInfoFromLeadActivity = getCompanyInfoFromLeadActivity;
 exports.cleanupFailedFollowUpActivity = cleanupFailedFollowUpActivity;
+exports.updateLeadEmailVerificationActivity = updateLeadEmailVerificationActivity;
+exports.invalidateReferredLeads = invalidateReferredLeads;
 const apiService_1 = require("../services/apiService");
 const supabaseService_1 = require("../services/supabaseService");
 const client_1 = require("../client");
@@ -695,10 +697,11 @@ async function validateMessageAndConversationActivity(request) {
         console.log('✅ Database connection confirmed, validating existence...');
         // Import supabase service role client (bypasses RLS)
         const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
-        // Step 1: Find conversation ID if not provided
-        let conversationId = request.response_data?.conversation_id ||
-            request.response_data?.lead?.conversation_id ||
-            request.additional_data?.conversation_id;
+        // Step 1: Find conversation ID if not provided - prioritize additional_data which comes from logs
+        let conversationId = request.additional_data?.conversation_id ||
+            request.additional_data?.conversation_ids?.[0] ||
+            request.response_data?.conversation_id ||
+            request.response_data?.lead?.conversation_id;
         let conversationExists = false;
         if (!conversationId) {
             console.log(`🔍 No conversation ID provided, searching by lead_id...`);
@@ -730,6 +733,31 @@ async function validateMessageAndConversationActivity(request) {
                 console.log(`   - Last message: ${conversation.last_message_at}`);
                 console.log(`   - Custom data:`, conversation.custom_data);
             }
+            else {
+                console.log(`❌ No conversation found by lead_id - conversation may have been deleted by user`);
+                console.log(`🔍 This could happen if:`);
+                console.log(`   - User manually deleted the conversation`);
+                console.log(`   - Conversation was cleaned up by another process`);
+                console.log(`   - Conversation never existed for this lead`);
+                // Check if there are ANY conversations for this lead (not just the most recent)
+                console.log(`🔍 Checking for ANY conversations for this lead...`);
+                const { data: allConversations, error: allConversationsError } = await supabaseServiceRole
+                    .from('conversations')
+                    .select('id, created_at, status')
+                    .eq('lead_id', request.lead_id)
+                    .eq('site_id', request.site_id)
+                    .order('created_at', { ascending: false });
+                if (!allConversationsError && allConversations && allConversations.length > 0) {
+                    console.log(`📊 Found ${allConversations.length} total conversations for this lead:`);
+                    allConversations.forEach((conv, index) => {
+                        console.log(`   ${index + 1}. ID: ${conv.id}, Status: ${conv.status}, Created: ${conv.created_at}`);
+                    });
+                    console.log(`💡 User may have deleted the specific conversation but others exist`);
+                }
+                else {
+                    console.log(`📊 No conversations found for this lead at all`);
+                }
+            }
         }
         else {
             console.log(`🔍 Validating provided conversation ID: ${conversationId}...`);
@@ -741,6 +769,10 @@ async function validateMessageAndConversationActivity(request) {
                 .single();
             if (validateError) {
                 console.error(`❌ Conversation ${conversationId} not found or invalid:`, validateError);
+                console.error(`💬 Specific conversation was deleted - this is likely user action`);
+                console.error(`🔍 Error details:`);
+                console.error(`   - Error code: ${validateError.code}`);
+                console.error(`   - Error message: ${validateError.message}`);
                 conversationExists = false;
             }
             else {
@@ -752,46 +784,97 @@ async function validateMessageAndConversationActivity(request) {
                 console.log(`   - Custom data:`, conversation.custom_data);
             }
         }
-        // Step 2: Validate message if message_id provided
+        // Step 2: Validate message if message_id provided - prioritize additional_data which comes from logs
         let messageExists = false;
-        const messageId = request.message_id || request.response_data?.message_id;
+        let messageIsValid = false;
+        const messageId = request.message_id ||
+            request.additional_data?.message_ids?.[0] ||
+            request.response_data?.message_id;
         if (messageId && conversationId) {
             console.log(`🔍 Validating message ID: ${messageId}...`);
             const { data: message, error: messageError } = await supabaseServiceRole
                 .from('messages')
-                .select('id, custom_data')
+                .select('id, custom_data, created_at, updated_at, conversation_id')
                 .eq('id', messageId)
                 .eq('conversation_id', conversationId)
                 .single();
             if (messageError) {
                 console.error(`❌ Message ${messageId} not found:`, messageError);
                 messageExists = false;
+                messageIsValid = false;
             }
             else {
                 messageExists = true;
-                console.log(`✅ Message ${messageId} exists in conversation`);
-                console.log(`📊 Message custom_data:`, message.custom_data);
+                console.log(`✅ Message ${messageId} exists in conversation ${conversationId}`);
+                console.log(`📊 Message details:`);
+                console.log(`   - Created: ${message.created_at}`);
+                console.log(`   - Updated: ${message.updated_at}`);
+                console.log(`   - Custom data:`, JSON.stringify(message.custom_data, null, 2));
+                // Validate message status - should be 'pending' or ready for sending
+                const customData = message.custom_data || {};
+                const messageStatus = customData.status;
+                const alreadyProcessed = customData.follow_up?.processed;
+                console.log(`🔍 Message status validation:`);
+                console.log(`   - Current status: ${messageStatus || 'undefined'}`);
+                console.log(`   - Already processed: ${alreadyProcessed || false}`);
+                if (alreadyProcessed && messageStatus === 'sent') {
+                    console.log(`⚠️ Message was already sent - this might be a duplicate workflow`);
+                    messageIsValid = false;
+                }
+                else if (messageStatus && messageStatus !== 'pending' && messageStatus !== 'sent') {
+                    console.log(`⚠️ Message has unexpected status: ${messageStatus}`);
+                    messageIsValid = false;
+                }
+                else {
+                    console.log(`✅ Message is ready for processing (status: ${messageStatus || 'pending'})`);
+                    messageIsValid = true;
+                }
             }
         }
-        else {
+        else if (!messageId) {
             console.log(`⚠️ No message ID provided for validation - skipping message check`);
             messageExists = true; // Don't fail validation for missing message ID
+            messageIsValid = true;
         }
-        // Step 3: Final validation result
-        const validationSuccess = conversationExists; // Message is optional
+        else {
+            console.log(`❌ Message ID provided but no conversation ID - cannot validate message`);
+            messageExists = false;
+            messageIsValid = false;
+        }
+        // Step 3: Final validation result - require both conversation and valid message (if message_id provided)
+        const validationSuccess = conversationExists && (messageId ? (messageExists && messageIsValid) : true);
+        // Prepare specific error details
+        const errorDetails = [];
+        if (!conversationExists) {
+            // Check if we had a specific conversation_id from logs (vs searching by lead_id)
+            const hadSpecificConversationId = request.additional_data?.conversation_id ||
+                request.additional_data?.conversation_ids?.[0];
+            if (hadSpecificConversationId) {
+                errorDetails.push('conversation was deleted (likely by user action)');
+            }
+            else {
+                errorDetails.push('no conversation found for this lead');
+            }
+        }
+        if (messageId && !messageExists)
+            errorDetails.push('message not found');
+        if (messageId && messageExists && !messageIsValid)
+            errorDetails.push('message already processed or invalid status');
         if (validationSuccess) {
             console.log(`✅ Validation successful - ready for follow-up message sending`);
             if (conversationId) {
                 console.log(`💬 Conversation ${conversationId} is ready for new messages`);
             }
-            if (messageId && messageExists) {
-                console.log(`📝 Message ${messageId} exists and can be updated`);
+            if (messageId && messageExists && messageIsValid) {
+                console.log(`📝 Message ${messageId} exists and is ready for processing`);
             }
         }
         else {
             console.log(`❌ Validation failed - cannot proceed with follow-up`);
             console.log(`   - Conversation exists: ${conversationExists}`);
             console.log(`   - Message exists: ${messageExists}`);
+            console.log(`   - Message is valid: ${messageIsValid}`);
+            console.log(`🔍 Validation failure reasons: ${errorDetails.join(', ')}`);
         }
         return {
             success: validationSuccess,
@@ -799,7 +882,7 @@ async function validateMessageAndConversationActivity(request) {
             message_id: messageId,
             conversation_exists: conversationExists,
             message_exists: messageExists,
-            error: validationSuccess ? undefined : 'Validation failed - required entities do not exist'
+            error: validationSuccess ? undefined : `Validation failed: ${errorDetails.join(', ')}`
         };
     }
     catch (error) {
@@ -837,7 +920,7 @@ async function updateMessageStatusToSentActivity(request) {
         let messageId = request.message_id;
         // If no message_id provided, try to find the most recent message in the conversation
         if (!messageId && request.conversation_id) {
-            console.log(`🔍 No message ID provided, searching for recent message in conversation...`);
+            console.log(`🔍 No message ID provided, searching for recent message in conversation ${request.conversation_id}...`);
             const { data: recentMessage, error: findError } = await supabaseServiceRole
                 .from('messages')
                 .select('id, custom_data')
@@ -854,11 +937,50 @@ async function updateMessageStatusToSentActivity(request) {
             }
             if (recentMessage) {
                 messageId = recentMessage.id;
-                console.log(`✅ Found recent message: ${messageId}`);
+                console.log(`✅ Found recent message in conversation: ${messageId}`);
+            }
+        }
+        // If still no message_id, try to find pending messages for this lead
+        if (!messageId) {
+            console.log(`🔍 No message ID from conversation, searching for pending messages for lead ${request.lead_id}...`);
+            const { data: pendingMessages, error: findPendingError } = await supabaseServiceRole
+                .from('messages')
+                .select('id, conversation_id, custom_data, created_at')
+                .eq('site_id', request.site_id)
+                .eq('role', 'assistant') // Messages sent by the assistant
+                .order('created_at', { ascending: false })
+                .limit(10); // Get recent messages
+            if (findPendingError) {
+                console.error(`❌ Error finding pending messages:`, findPendingError);
+                return {
+                    success: false,
+                    error: `Failed to find pending messages: ${findPendingError.message}`
+                };
+            }
+            if (pendingMessages && pendingMessages.length > 0) {
+                // Look for messages with pending status that belong to this lead
+                for (const msg of pendingMessages) {
+                    const customData = msg.custom_data || {};
+                    const messageStatus = customData.status;
+                    // Check if this message is pending and belongs to our lead
+                    if (messageStatus === 'pending') {
+                        // Get the conversation to check if it belongs to our lead
+                        const { data: conversation, error: convError } = await supabaseServiceRole
+                            .from('conversations')
+                            .select('lead_id')
+                            .eq('id', msg.conversation_id)
+                            .single();
+                        if (!convError && conversation && conversation.lead_id === request.lead_id) {
+                            messageId = msg.id;
+                            console.log(`✅ Found pending message for lead ${request.lead_id}: ${messageId}`);
+                            break;
+                        }
+                    }
+                }
             }
         }
         if (!messageId) {
-            console.log(`⚠️ No message found to update - this is normal for some follow-ups`);
+            console.log(`⚠️ No message found to update for lead ${request.lead_id} - this may indicate the message was not properly created`);
             return {
                 success: true, // Don't fail the workflow for missing message
                 error: 'No message found to update'
@@ -1280,12 +1402,42 @@ async function invalidateLeadActivity(request) {
         console.log('✅ Database connection confirmed, invalidating lead...');
         // Import supabase service role client (bypasses RLS)
         const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // First get current lead data to preserve existing notes
+        console.log(`📝 Fetching current lead data to preserve existing notes...`);
+        const { data: currentLead, error: fetchError } = await supabaseServiceRole
+            .from('leads')
+            .select('notes')
+            .eq('id', request.lead_id)
+            .single();
+        if (fetchError) {
+            console.error(`❌ Error fetching current lead data:`, fetchError);
+            return {
+                success: false,
+                error: fetchError.message
+            };
+        }
         // Only add metadata for email_failed or whatsapp_failed reasons
         const shouldAddMetadata = request.reason === 'email_failed' || request.reason === 'whatsapp_failed';
         const updateData = {
             site_id: null, // Remove site_id to remove lead from site
             updated_at: new Date().toISOString()
         };
+        // Handle notes concatenation if response_message is provided
+        if (request.response_message) {
+            const invalidationNote = "Lead invalidated due to invalid email and no WhatsApp available (early validation)";
+            const existingNotes = currentLead.notes || '';
+            // Concatenate existing notes with invalidation note and response message
+            if (existingNotes.trim()) {
+                updateData.notes = `${existingNotes}\n\n${invalidationNote}\n${request.response_message}`;
+            }
+            else {
+                updateData.notes = `${invalidationNote}\n${request.response_message}`;
+            }
+            console.log(`📝 Concatenating notes:`);
+            console.log(`   - Existing notes: ${existingNotes ? '"' + existingNotes.substring(0, 100) + '..."' : 'None'}`);
+            console.log(`   - Adding invalidation note: "${invalidationNote}"`);
+            console.log(`   - Adding response message: "${request.response_message}"`);
+        }
         if (shouldAddMetadata) {
             // Prepare invalidation metadata only for communication failures
             const invalidationMetadata = {
@@ -1964,11 +2116,14 @@ async function cleanupFailedFollowUpActivity(request) {
                 else {
                     messageDeleted = true;
                     console.log(`✅ Successfully deleted message ${request.message_id}`);
+                    // Update message count after deletion for accurate conversation cleanup decision
+                    cleanupSummary.messages_in_conversation = Math.max(0, cleanupSummary.messages_in_conversation - 1);
+                    console.log(`📊 Updated message count after deletion: ${cleanupSummary.messages_in_conversation} messages remaining`);
                 }
             }
-            // Step 3.2: Delete conversation if it only has one message (the failed one) or no messages
-            if (cleanupSummary.messages_in_conversation <= 1) {
-                console.log(`🗑️ Deleting conversation ${targetConversationId} (${cleanupSummary.messages_in_conversation} messages)...`);
+            // Step 3.2: Delete conversation if it has no messages remaining (especially important for lead generation)
+            if (cleanupSummary.messages_in_conversation === 0) {
+                console.log(`🗑️ Deleting conversation ${targetConversationId} (${cleanupSummary.messages_in_conversation} messages remaining - empty conversation cleanup)...`);
                 // First delete any remaining messages
                 const { error: deleteMessagesError } = await supabaseServiceRole
                     .from('messages')
@@ -1992,39 +2147,76 @@ async function cleanupFailedFollowUpActivity(request) {
                 }
             }
             else {
-                console.log(`⚠️ Keeping conversation ${targetConversationId} (has ${cleanupSummary.messages_in_conversation} messages)`);
+                console.log(`⚠️ Keeping conversation ${targetConversationId} (has ${cleanupSummary.messages_in_conversation} messages remaining - preserving conversation with history)`);
             }
         }
-        // Step 4: Delete tasks created for this lead (typically first_contact tasks)
-        console.log(`🔍 Searching for tasks to cleanup for lead ${request.lead_id}...`);
-        const { data: tasks, error: tasksError } = await supabaseServiceRole
-            .from('tasks')
-            .select('id, task_id, name, stage, status, custom_data, created_at')
-            .eq('lead_id', request.lead_id)
-            .eq('site_id', request.site_id)
-            .order('created_at', { ascending: false });
-        if (tasksError) {
-            console.error(`❌ Error fetching tasks:`, tasksError);
+        // Step 4: Delete only tasks linked to the specific conversation (if conversation_id provided)
+        if (request.conversation_id) {
+            console.log(`🔍 Searching for tasks linked to conversation ${request.conversation_id}...`);
+            const { data: tasks, error: tasksError } = await supabaseServiceRole
+                .from('tasks')
+                .select('id, task_id, name, stage, status, custom_data, created_at')
+                .eq('lead_id', request.lead_id)
+                .eq('site_id', request.site_id)
+                .eq('conversation_id', request.conversation_id)
+                .order('created_at', { ascending: false });
+            if (tasksError) {
+                console.error(`❌ Error fetching conversation-specific tasks:`, tasksError);
+            }
+            else {
+                cleanupSummary.tasks_found = tasks?.length || 0;
+                console.log(`📊 Found ${cleanupSummary.tasks_found} tasks linked to this conversation`);
+                if (tasks && tasks.length > 0) {
+                    console.log(`🗑️ Deleting ${tasks.length} conversation-specific tasks...`);
+                    for (const task of tasks) {
+                        console.log(`   - Deleting task: ${task.name} (${task.stage}/${task.status}) linked to conversation ${request.conversation_id}`);
+                    }
+                    const { error: deleteTasksError } = await supabaseServiceRole
+                        .from('tasks')
+                        .delete()
+                        .eq('lead_id', request.lead_id)
+                        .eq('site_id', request.site_id)
+                        .eq('conversation_id', request.conversation_id);
+                    if (deleteTasksError) {
+                        console.error(`❌ Error deleting conversation-specific tasks:`, deleteTasksError);
+                    }
+                    else {
+                        taskDeleted = true;
+                        console.log(`✅ Successfully deleted ${tasks.length} conversation-specific tasks`);
+                    }
+                }
+            }
         }
         else {
-            cleanupSummary.tasks_found = tasks?.length || 0;
-            console.log(`📊 Found ${cleanupSummary.tasks_found} tasks for this lead`);
-            if (tasks && tasks.length > 0) {
-                console.log(`🗑️ Deleting ${tasks.length} tasks...`);
-                for (const task of tasks) {
-                    console.log(`   - Deleting task: ${task.name} (${task.stage}/${task.status})`);
-                }
-                const { error: deleteTasksError } = await supabaseServiceRole
-                    .from('tasks')
-                    .delete()
-                    .eq('lead_id', request.lead_id)
-                    .eq('site_id', request.site_id);
-                if (deleteTasksError) {
-                    console.error(`❌ Error deleting tasks:`, deleteTasksError);
-                }
-                else {
-                    taskDeleted = true;
-                    console.log(`✅ Successfully deleted ${tasks.length} tasks`);
+            // Fallback: If no conversation_id provided, find most recent tasks for this lead
+            console.log(`⚠️ No conversation_id provided - searching for recent tasks to cleanup for lead ${request.lead_id}...`);
+            const { data: tasks, error: tasksError } = await supabaseServiceRole
+                .from('tasks')
+                .select('id, task_id, name, stage, status, custom_data, created_at')
+                .eq('lead_id', request.lead_id)
+                .eq('site_id', request.site_id)
+                .order('created_at', { ascending: false })
+                .limit(1); // Only get the most recent task
+            if (tasksError) {
+                console.error(`❌ Error fetching recent tasks:`, tasksError);
+            }
+            else {
+                cleanupSummary.tasks_found = tasks?.length || 0;
+                console.log(`📊 Found ${cleanupSummary.tasks_found} recent task(s) for this lead`);
+                if (tasks && tasks.length > 0) {
+                    const recentTask = tasks[0];
+                    console.log(`🗑️ Deleting most recent task: ${recentTask.name} (${recentTask.stage}/${recentTask.status})...`);
+                    const { error: deleteTasksError } = await supabaseServiceRole
+                        .from('tasks')
+                        .delete()
+                        .eq('id', recentTask.id);
+                    if (deleteTasksError) {
+                        console.error(`❌ Error deleting recent task:`, deleteTasksError);
+                    }
+                    else {
+                        taskDeleted = true;
+                        console.log(`✅ Successfully deleted most recent task for lead ${request.lead_id}`);
+                    }
                 }
             }
         }
@@ -2087,6 +2279,250 @@ async function cleanupFailedFollowUpActivity(request) {
         return {
             success: false,
             error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to update lead metadata with email verification status
+ */
+async function updateLeadEmailVerificationActivity(request) {
+    console.log(`📧✅ Updating email verification status for lead ${request.lead_id}: ${request.emailVerified}`);
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot update email verification');
+            return {
+                success: false,
+                error: 'Database not available'
+            };
+        }
+        console.log('✅ Database connection confirmed, updating email verification status...');
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // Get current lead data to merge with existing metadata
+        const { data: currentLead, error: fetchError } = await supabaseServiceRole
+            .from('leads')
+            .select('metadata, email')
+            .eq('id', request.lead_id)
+            .single();
+        if (fetchError) {
+            console.error(`❌ Error fetching current lead data: ${fetchError.message}`);
+            return {
+                success: false,
+                error: fetchError.message
+            };
+        }
+        // Prepare updated metadata
+        const currentMetadata = currentLead?.metadata || {};
+        const updatedMetadata = {
+            ...currentMetadata,
+            emailVerified: request.emailVerified,
+            emailVerificationTimestamp: new Date().toISOString(),
+            emailVerificationWorkflow: 'leadResearchWorkflow'
+        };
+        // If a validated email is provided and it's different from current, update it
+        const updateData = {
+            metadata: updatedMetadata,
+            updated_at: new Date().toISOString()
+        };
+        if (request.validatedEmail && request.validatedEmail !== currentLead?.email) {
+            updateData.email = request.validatedEmail;
+            console.log(`📧 Updating email from ${currentLead?.email} to ${request.validatedEmail}`);
+        }
+        const { data, error } = await supabaseServiceRole
+            .from('leads')
+            .update(updateData)
+            .eq('id', request.lead_id)
+            .select()
+            .single();
+        if (error) {
+            console.error(`❌ Error updating email verification for lead ${request.lead_id}:`, error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+        if (!data) {
+            return {
+                success: false,
+                error: `Lead ${request.lead_id} not found or update failed`
+            };
+        }
+        console.log(`✅ Successfully updated email verification for lead ${request.lead_id}`);
+        console.log(`📝 Email verified status: ${request.emailVerified}`);
+        return {
+            success: true
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception updating email verification for lead ${request.lead_id}:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to invalidate referred leads when a lead with referral_lead_id is invalidated
+ *
+ * This activity:
+ * 1. Finds all leads that have the same referral_lead_id as the invalidated lead
+ * 2. Finds the referral lead itself (the lead that referral_lead_id points to)
+ * 3. Invalidates only those leads that share the same email or phone as the original lead
+ */
+async function invalidateReferredLeads(request) {
+    console.log(`🔗 Invalidating referred leads for referral_lead_id: ${request.referral_lead_id}`);
+    const invalidatedLeads = [];
+    const errors = [];
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot invalidate referred leads');
+            return {
+                success: false,
+                invalidated_leads: [],
+                errors: ['Database not available']
+            };
+        }
+        console.log('✅ Database connection confirmed, finding referred leads...');
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // Step 1: Find all leads with the same referral_lead_id (excluding the original lead)
+        console.log(`🔍 Finding leads with referral_lead_id: ${request.referral_lead_id}...`);
+        const { data: referredLeads, error: referredError } = await supabaseServiceRole
+            .from('leads')
+            .select('id, email, phone, site_id')
+            .eq('referral_lead_id', request.referral_lead_id)
+            .neq('id', request.lead_id) // Exclude the original invalidated lead
+            .not('site_id', 'is', null); // Only get leads that are still active (have site_id)
+        if (referredError) {
+            console.error(`❌ Error finding referred leads:`, referredError);
+            errors.push(`Failed to find referred leads: ${referredError.message}`);
+        }
+        else if (referredLeads && referredLeads.length > 0) {
+            console.log(`📋 Found ${referredLeads.length} leads with same referral_lead_id`);
+            // Filter leads that share the same email or phone as the original lead
+            const leadsToInvalidate = referredLeads.filter(lead => {
+                const sameEmail = request.original_email && lead.email === request.original_email;
+                const samePhone = request.original_phone && lead.phone === request.original_phone;
+                return sameEmail || samePhone;
+            });
+            console.log(`🎯 ${leadsToInvalidate.length} leads share contact info and will be invalidated`);
+            // Invalidate each matching lead
+            for (const leadToInvalidate of leadsToInvalidate) {
+                try {
+                    console.log(`🚫 Invalidating referred lead ${leadToInvalidate.id}...`);
+                    const invalidationResult = await invalidateLeadActivity({
+                        lead_id: leadToInvalidate.id,
+                        original_site_id: leadToInvalidate.site_id,
+                        reason: `referral_${request.reason}`,
+                        failed_contact: {
+                            email: request.original_email,
+                            telephone: request.original_phone
+                        },
+                        userId: request.userId,
+                        shared_with_lead_id: request.lead_id,
+                        response_message: request.response_message ?
+                            `${request.response_message} (referred lead invalidation)` :
+                            undefined
+                    });
+                    if (invalidationResult.success) {
+                        invalidatedLeads.push(leadToInvalidate.id);
+                        console.log(`✅ Successfully invalidated referred lead ${leadToInvalidate.id}`);
+                    }
+                    else {
+                        const errorMsg = `Failed to invalidate referred lead ${leadToInvalidate.id}: ${invalidationResult.error}`;
+                        console.error(`❌ ${errorMsg}`);
+                        errors.push(errorMsg);
+                    }
+                }
+                catch (leadError) {
+                    const errorMessage = leadError instanceof Error ? leadError.message : String(leadError);
+                    console.error(`❌ Exception invalidating referred lead ${leadToInvalidate.id}:`, errorMessage);
+                    errors.push(`Exception invalidating referred lead ${leadToInvalidate.id}: ${errorMessage}`);
+                }
+            }
+        }
+        else {
+            console.log(`ℹ️ No referred leads found with referral_lead_id: ${request.referral_lead_id}`);
+        }
+        // Step 2: Check and invalidate the referral lead itself if it shares contact info
+        console.log(`🔍 Checking referral lead ${request.referral_lead_id}...`);
+        const { data: referralLead, error: referralError } = await supabaseServiceRole
+            .from('leads')
+            .select('id, email, phone, site_id')
+            .eq('id', request.referral_lead_id)
+            .not('site_id', 'is', null) // Only if still active
+            .single();
+        if (referralError) {
+            if (referralError.code === 'PGRST116') {
+                console.log(`ℹ️ Referral lead ${request.referral_lead_id} not found or already invalidated`);
+            }
+            else {
+                console.error(`❌ Error finding referral lead:`, referralError);
+                errors.push(`Failed to find referral lead: ${referralError.message}`);
+            }
+        }
+        else if (referralLead) {
+            // Check if referral lead shares contact info with original lead
+            const sameEmail = request.original_email && referralLead.email === request.original_email;
+            const samePhone = request.original_phone && referralLead.phone === request.original_phone;
+            if (sameEmail || samePhone) {
+                console.log(`🎯 Referral lead ${request.referral_lead_id} shares contact info, invalidating...`);
+                try {
+                    const referralInvalidationResult = await invalidateLeadActivity({
+                        lead_id: referralLead.id,
+                        original_site_id: referralLead.site_id,
+                        reason: `referral_source_${request.reason}`,
+                        failed_contact: {
+                            email: request.original_email,
+                            telephone: request.original_phone
+                        },
+                        userId: request.userId,
+                        shared_with_lead_id: request.lead_id,
+                        response_message: request.response_message ?
+                            `${request.response_message} (referral source invalidation)` :
+                            undefined
+                    });
+                    if (referralInvalidationResult.success) {
+                        invalidatedLeads.push(referralLead.id);
+                        console.log(`✅ Successfully invalidated referral lead ${referralLead.id}`);
+                    }
+                    else {
+                        const errorMsg = `Failed to invalidate referral lead ${referralLead.id}: ${referralInvalidationResult.error}`;
+                        console.error(`❌ ${errorMsg}`);
+                        errors.push(errorMsg);
+                    }
+                }
+                catch (referralLeadError) {
+                    const errorMessage = referralLeadError instanceof Error ? referralLeadError.message : String(referralLeadError);
+                    console.error(`❌ Exception invalidating referral lead ${referralLead.id}:`, errorMessage);
+                    errors.push(`Exception invalidating referral lead ${referralLead.id}: ${errorMessage}`);
+                }
+            }
+            else {
+                console.log(`ℹ️ Referral lead ${request.referral_lead_id} does not share contact info, skipping invalidation`);
+            }
+        }
+        console.log(`🎉 Referred leads invalidation completed. Invalidated: ${invalidatedLeads.length}, Errors: ${errors.length}`);
+        return {
+            success: true,
+            invalidated_leads: invalidatedLeads,
+            errors
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception in invalidateReferredLeads:`, errorMessage);
+        return {
+            success: false,
+            invalidated_leads: invalidatedLeads,
+            errors: [...errors, errorMessage]
         };
     }
 }

@@ -52,6 +52,8 @@ const dailyProspectionWorkflow_1 = require("./dailyProspectionWorkflow");
 const dailyStrategicAccountsWorkflow_1 = require("./dailyStrategicAccountsWorkflow");
 const leadInvalidationWorkflow_1 = require("./leadInvalidationWorkflow");
 const startRobotWorkflow_1 = require("./startRobotWorkflow");
+const robotWorkflow_1 = require("./robotWorkflow");
+const promptRobotWorkflow_1 = require("./promptRobotWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -64,6 +66,8 @@ __exportStar(require("./sendReportWorkflow"), exports);
 __exportStar(require("./scheduleCustomerSupportMessagesWorkflow"), exports);
 __exportStar(require("./sendEmailFromAgentWorkflow"), exports);
 __exportStar(require("./startRobotWorkflow"), exports);
+__exportStar(require("./robotWorkflow"), exports);
+__exportStar(require("./promptRobotWorkflow"), exports);
 __exportStar(require("./sendWhatsappFromAgentWorkflow"), exports);
 __exportStar(require("./answerWhatsappMessageWorkflow"), exports);
 __exportStar(require("./siteSetupWorkflow"), exports);
@@ -121,6 +125,8 @@ exports.workflows = {
     dailyStrategicAccountsWorkflow: dailyStrategicAccountsWorkflow_1.dailyStrategicAccountsWorkflow,
     leadInvalidationWorkflow: leadInvalidationWorkflow_1.leadInvalidationWorkflow,
     startRobotWorkflow: startRobotWorkflow_1.startRobotWorkflow,
+    robotWorkflow: robotWorkflow_1.robotWorkflow,
+    promptRobotWorkflow: promptRobotWorkflow_1.promptRobotWorkflow,
     // Alias for backward compatibility
     whatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
     // ✅ Aliases for agent workflows with different naming conventions
@@ -164,6 +170,8 @@ exports.workflowNames = {
     dailyStrategicAccountsWorkflow: 'dailyStrategicAccountsWorkflow',
     leadInvalidationWorkflow: 'leadInvalidationWorkflow',
     startRobotWorkflow: 'startRobotWorkflow',
+    robotWorkflow: 'robotWorkflow',
+    promptRobotWorkflow: 'promptRobotWorkflow',
     // Alias for backward compatibility
     whatsappMessageWorkflow: 'whatsappMessageWorkflow',
     // ✅ Aliases for agent workflows with different naming conventions

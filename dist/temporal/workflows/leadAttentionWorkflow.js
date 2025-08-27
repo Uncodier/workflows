@@ -148,11 +148,6 @@ async function leadAttentionWorkflow(params) {
             executionTime
         });
         console.error('❌ WORKFLOW EXCEPTION: Full error details:', error);
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : String(error),
-            executionTime,
-            timestamp: endTime.toISOString()
-        };
+        throw new Error(`Lead attention workflow failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }

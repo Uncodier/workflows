@@ -270,7 +270,6 @@ async function buildSegmentsICPWorkflow(options) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Build ICP segments workflow failed: ${errorMessage}`);
-        const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         // Update cron status to indicate failure
         await saveCronStatusActivity({
             siteId: siteId,
@@ -290,26 +289,7 @@ async function buildSegmentsICPWorkflow(options) {
             input: options,
             error: errorMessage,
         });
-        // Return failed result instead of throwing to provide more information
-        const result = {
-            success: false,
-            siteId: siteId,
-            siteName,
-            siteUrl,
-            icpSegmentsBuilt,
-            segmentIds,
-            segments: icpSegments,
-            analysis: {
-                processedSegments: childWorkflowResults.length,
-                successfulSegments: icpSegmentsBuilt,
-                failedSegments: childWorkflowResults.length - icpSegmentsBuilt,
-                segmentResults: childWorkflowResults,
-                error: errorMessage
-            },
-            errors: [...errors, errorMessage],
-            executionTime,
-            completedAt: new Date().toISOString()
-        };
-        return result;
+        // Throw error to properly fail the workflow
+        throw new Error(`Build segments ICP workflow failed: ${errorMessage}`);
     }
 }

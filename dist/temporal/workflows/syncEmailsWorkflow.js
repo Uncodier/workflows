@@ -4,7 +4,7 @@ exports.syncEmailsWorkflow = syncEmailsWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, analyzeEmailsActivity, syncSentEmailsActivity, deliveryStatusActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, validateAndCleanStuckCronStatusActivity, analyzeEmailsActivity, syncSentEmailsActivity, deliveryStatusActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '15 minutes', // ✅ FIXED: Increased timeout to 15 minutes to handle slow email API
     retry: {
         maximumAttempts: 3,
@@ -22,6 +22,26 @@ async function syncEmailsWorkflow(options) {
     const workflowId = `sync-emails-${userId}`;
     console.log(`📧 Starting email sync workflow for user ${userId} (${options.provider})`);
     console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+    // Validate and clean any stuck cron status records before execution
+    console.log('🔍 Validating cron status before email sync execution...');
+    const cronValidation = await validateAndCleanStuckCronStatusActivity('syncEmailsWorkflow', siteId, 12 // 12 hours threshold - email sync should not be stuck longer than 12h
+    );
+    console.log(`📋 Cron validation result: ${cronValidation.reason}`);
+    if (cronValidation.wasStuck) {
+        console.log(`🧹 Cleaned stuck record that was ${cronValidation.hoursStuck?.toFixed(1)}h old`);
+    }
+    if (!cronValidation.canProceed) {
+        console.log('⏳ Another email sync is likely running for this site - terminating');
+        // Log termination
+        await logWorkflowExecutionActivity({
+            workflowId,
+            workflowType: 'syncEmailsWorkflow',
+            status: 'BLOCKED',
+            input: options,
+            error: `Workflow blocked: ${cronValidation.reason}`,
+        });
+        throw new Error(`Workflow blocked: ${cronValidation.reason}`);
+    }
     // Log workflow execution start
     await logWorkflowExecutionActivity({
         workflowId,

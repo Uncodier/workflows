@@ -161,6 +161,7 @@ async function leadFollowUpWorkflow(options) {
     let siteUrl = '';
     let response = null;
     let messageSent;
+    let emailInvalidatedInEarlyValidation = false; // Track if email was invalidated during early validation
     try {
         console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
         // Get site information to obtain site details
@@ -199,9 +200,244 @@ async function leadFollowUpWorkflow(options) {
             console.log(`   - Origin: ${leadInfo.origin || 'N/A'}`);
             console.log(`   - Has notes: ${leadInfo.notes ? 'Yes' : 'No'}`);
             console.log(`   - Has metadata: ${leadInfo.metadata && Object.keys(leadInfo.metadata).length > 0 ? 'Yes' : 'No'}`);
-            // Check if lead needs research before follow-up
+            console.log(`🔍 Step 2.1: Early validation of contact information before research to save resources...`);
+            // Extract contact information for early validation
+            const leadEmail = leadInfo.email;
+            const leadPhone = leadInfo.phone || leadInfo.phone_number;
+            console.log(`📋 Contact info for early validation:`);
+            console.log(`   - Email: ${leadEmail || 'undefined'}`);
+            console.log(`   - Phone: ${leadPhone || 'undefined'}`);
+            // Only proceed if we have at least one valid contact method
+            if (!leadEmail && !leadPhone) {
+                console.log(`🚫 No contact information available (no email and no phone) - skipping research and follow-up`);
+                const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+                const result = {
+                    success: false,
+                    leadId: lead_id,
+                    siteId: site_id,
+                    siteName,
+                    siteUrl,
+                    followUpActions: [],
+                    nextSteps: [],
+                    data: null,
+                    messageSent: undefined,
+                    errors: ['No contact information available - lead has no email and no phone'],
+                    executionTime,
+                    completedAt: new Date().toISOString()
+                };
+                // Update cron status
+                await saveCronStatusActivity({
+                    siteId: site_id,
+                    workflowId,
+                    scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+                    activityName: 'leadFollowUpWorkflow',
+                    status: 'COMPLETED',
+                    lastRun: new Date().toISOString()
+                });
+                // Log completion
+                await logWorkflowExecutionActivity({
+                    workflowId,
+                    workflowType: 'leadFollowUpWorkflow',
+                    status: 'COMPLETED',
+                    input: options,
+                    output: result,
+                });
+                return result;
+            }
+            // Perform early contact validation (without messages, just contact info)
+            const earlyValidationResult = await validateContactInformation({
+                email: leadEmail,
+                hasEmailMessage: true, // Assume we will have messages for now
+                hasWhatsAppMessage: true, // Assume we will have messages for now
+                leadId: lead_id,
+                phone: leadPhone,
+                leadMetadata: leadInfo.metadata // Pass lead metadata to check emailVerified flag
+            });
+            console.log(`📊 Early validation completed: type=${earlyValidationResult.validationType}, shouldProceed=${earlyValidationResult.shouldProceed}`);
+            console.log(`📋 Reason: ${earlyValidationResult.reason}`);
+            // Handle specific early validation results that require immediate action
+            if (earlyValidationResult.validationType === 'email' && !earlyValidationResult.isValid && earlyValidationResult.success && leadEmail) {
+                console.log(`🚫 Email is invalid in early validation: ${leadEmail}`);
+                const hasWhatsApp = leadPhone && leadPhone.trim() !== '';
+                if (!hasWhatsApp) {
+                    // Lead has no WhatsApp, use full invalidation workflow and stop (no research needed)
+                    console.log(`🚫 Lead has no WhatsApp - using full lead invalidation workflow and stopping before research...`);
+                    const invalidationOptions = {
+                        lead_id: lead_id,
+                        site_id: site_id,
+                        reason: 'invalid_email',
+                        email: leadEmail,
+                        userId: options.userId || site.user_id
+                    };
+                    const invalidationHandle = await (0, workflow_1.startChild)(leadInvalidationWorkflow_1.leadInvalidationWorkflow, {
+                        args: [invalidationOptions],
+                        workflowId: `lead-invalidation-${lead_id}-email-early-${Date.now()}`
+                    });
+                    console.log(`🚀 Lead invalidation workflow started (early validation), waiting for completion...`);
+                    try {
+                        const invalidationResult = await invalidationHandle.result();
+                        if (invalidationResult.success) {
+                            console.log(`✅ Lead invalidation completed successfully (early validation)`);
+                        }
+                        else {
+                            console.error(`⚠️ Lead invalidation failed (early validation): ${invalidationResult.errors.join(', ')}`);
+                            errors.push(`Lead invalidation failed: ${invalidationResult.errors.join(', ')}`);
+                        }
+                    }
+                    catch (invalidationError) {
+                        const invalidationErrorMessage = invalidationError instanceof Error ? invalidationError.message : String(invalidationError);
+                        console.error(`⚠️ Exception during lead invalidation (early validation): ${invalidationErrorMessage}`);
+                        errors.push(`Lead invalidation exception: ${invalidationErrorMessage}`);
+                    }
+                    // Complete the workflow successfully after invalidation since there's no valid communication channel
+                    const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+                    const result = {
+                        success: true, // Changed to true since invalidation completed successfully
+                        leadId: lead_id,
+                        siteId: site_id,
+                        siteName,
+                        siteUrl,
+                        followUpActions: [],
+                        nextSteps: [],
+                        data: null,
+                        messageSent: undefined,
+                        errors: [...errors, 'Lead invalidated due to invalid email and no WhatsApp available (early validation)'],
+                        executionTime,
+                        completedAt: new Date().toISOString()
+                    };
+                    // Update cron status
+                    await saveCronStatusActivity({
+                        siteId: site_id,
+                        workflowId,
+                        scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+                        activityName: 'leadFollowUpWorkflow',
+                        status: 'COMPLETED',
+                        lastRun: new Date().toISOString()
+                    });
+                    // Log completion
+                    await logWorkflowExecutionActivity({
+                        workflowId,
+                        workflowType: 'leadFollowUpWorkflow',
+                        status: 'COMPLETED',
+                        input: options,
+                        output: result,
+                    });
+                    return result;
+                }
+                else {
+                    // Lead has WhatsApp, only invalidate email but continue with research and WhatsApp workflow
+                    console.log(`📧🚫 Email invalid but WhatsApp available - invalidating only email field but continuing with research and WhatsApp...`);
+                    const emailInvalidationResult = await invalidateEmailOnlyActivity({
+                        lead_id: lead_id,
+                        failed_email: leadEmail,
+                        userId: options.userId || site.user_id
+                    });
+                    if (emailInvalidationResult.success) {
+                        console.log(`✅ Email invalidated successfully (early validation), site_id preserved for WhatsApp communication`);
+                        emailInvalidatedInEarlyValidation = true; // Mark email as invalidated to prevent sending later
+                    }
+                    else {
+                        console.error(`❌ Failed to invalidate email (early validation): ${emailInvalidationResult.error}`);
+                        errors.push(`Email invalidation failed: ${emailInvalidationResult.error}`);
+                    }
+                    console.log(`✅ Continuing workflow for WhatsApp communication despite invalid email (early validation)`);
+                }
+            }
+            // Check if the validation API itself failed (not just invalid email)
+            if (!earlyValidationResult.success) {
+                console.log(`❌ Contact validation API failed - failing workflow`);
+                console.log(`🔍 API failure details:`);
+                console.log(`   - Error: ${earlyValidationResult.error}`);
+                console.log(`   - Reason: ${earlyValidationResult.reason}`);
+                // Create appropriate error message for API failure
+                const apiFailureError = `Contact validation API failed: ${earlyValidationResult.error || earlyValidationResult.reason}`;
+                errors.push(apiFailureError);
+                // Update cron status to indicate API failure
+                await saveCronStatusActivity({
+                    siteId: site_id,
+                    workflowId,
+                    scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+                    activityName: 'leadFollowUpWorkflow',
+                    status: 'FAILED',
+                    lastRun: new Date().toISOString(),
+                    errorMessage: apiFailureError
+                });
+                // Log workflow failure due to API failure
+                await logWorkflowExecutionActivity({
+                    workflowId,
+                    workflowType: 'leadFollowUpWorkflow',
+                    status: 'FAILED',
+                    input: options,
+                    error: apiFailureError,
+                });
+                // Throw error to properly fail the workflow when API fails
+                throw new Error(apiFailureError);
+            }
+            // If API worked but we shouldn't proceed (e.g., invalid email + no WhatsApp), complete successfully
+            if (!earlyValidationResult.shouldProceed && !(earlyValidationResult.validationType === 'email' && !earlyValidationResult.isValid && leadPhone)) {
+                console.log(`✅ Contact validation API worked but email is invalid - completing workflow after successful invalidation`);
+                console.log(`📋 Validation details:`);
+                console.log(`   - Type: ${earlyValidationResult.validationType}`);
+                console.log(`   - Valid: ${earlyValidationResult.isValid}`);
+                console.log(`   - Reason: ${earlyValidationResult.reason}`);
+                console.log(`   - Email: ${leadEmail || 'undefined'}`);
+                console.log(`   - Phone: ${leadPhone || 'undefined'}`);
+                // Create appropriate message for successful validation but invalid contact
+                const validationMessage = `Contact validation completed: ${earlyValidationResult.reason}`;
+                // Complete workflow successfully since validation API worked correctly
+                const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+                console.log(`🎉 Lead follow-up workflow completed successfully after contact validation (invalid email, no alternative contact)`);
+                console.log(`📊 Summary: Lead ${lead_id} validation completed for ${siteName} in ${executionTime}`);
+                // Update cron status to indicate successful completion
+                await saveCronStatusActivity({
+                    siteId: site_id,
+                    workflowId,
+                    scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+                    activityName: 'leadFollowUpWorkflow',
+                    status: 'COMPLETED',
+                    lastRun: new Date().toISOString()
+                });
+                // Log successful completion
+                await logWorkflowExecutionActivity({
+                    workflowId,
+                    workflowType: 'leadFollowUpWorkflow',
+                    status: 'COMPLETED',
+                    input: options,
+                    output: {
+                        success: true,
+                        leadId: lead_id,
+                        siteId: site_id,
+                        siteName,
+                        siteUrl,
+                        followUpActions: [],
+                        nextSteps: [],
+                        data: null,
+                        messageSent: undefined,
+                        errors: [validationMessage],
+                        executionTime,
+                        completedAt: new Date().toISOString()
+                    },
+                });
+                // Return success result since validation worked correctly
+                return {
+                    success: true,
+                    leadId: lead_id,
+                    siteId: site_id,
+                    siteName,
+                    siteUrl,
+                    followUpActions: [],
+                    nextSteps: [],
+                    data: null,
+                    messageSent: undefined,
+                    errors: [validationMessage],
+                    executionTime,
+                    completedAt: new Date().toISOString()
+                };
+            }
+            console.log(`✅ Early contact validation passed - proceeding with research and follow-up`);
+            // Check if lead needs research before follow-up (now that we know contact is valid)
             if (shouldExecuteLeadResearch(leadInfo)) {
-                console.log(`🔍 Step 2.1: Executing lead research before follow-up...`);
+                console.log(`🔍 Step 2.2: Executing lead research after contact validation...`);
                 try {
                     const leadResearchOptions = {
                         lead_id: lead_id,
@@ -349,12 +585,30 @@ async function leadFollowUpWorkflow(options) {
             });
             return result;
         }
-        console.log(`✅ Follow-up messages found - proceeding with message sending workflow`);
+        console.log(`✅ Follow-up messages found - proceeding with validation and message sending workflow`);
         console.log(`📧 Email message: ${!!emailMessage}, 📱 WhatsApp message: ${!!whatsappMessage}`);
-        // Step 4: Save lead follow-up logs to database
+        // Step 4: Extract message information from follow-up response (contact already validated early)
+        console.log(`🔍 Step 4: Extracting message information from follow-up response...`);
+        const validationMessages = response?.data?.messages || response?.messages || {};
+        const validationLead = response?.data?.lead || response?.lead || {};
+        const validationEmail = validationLead.email || validationLead.contact_email;
+        const validationPhone = validationLead.phone || validationLead.phone_number;
+        const validationEmailMessage = validationMessages.email?.message;
+        const validationWhatsappMessage = validationMessages.whatsapp?.message;
+        // Debug: Log what we're extracting from the response
+        console.log(`📋 Extracted data from follow-up response:`);
+        console.log(`   - Email: ${validationEmail || 'undefined'}`);
+        console.log(`   - Phone: ${validationPhone || 'undefined'}`);
+        console.log(`   - Has email message: ${!!validationEmailMessage}`);
+        console.log(`   - Has WhatsApp message: ${!!validationWhatsappMessage}`);
+        console.log(`   - Response structure: data=${!!response?.data}, messages=${!!validationMessages}, lead=${!!validationLead}`);
+        // Note: Contact validation was already performed in Step 2.1 (early validation)
+        // Here we just need to verify we have the right message channels based on early validation results
+        console.log(`✅ Contact was already validated in Step 2.1 - proceeding with message preparation`);
+        // Step 4.5: Save lead follow-up logs to database
         let logsResult = null;
         if (response) {
-            console.log(`📝 Step 4: Saving lead follow-up logs to database...`);
+            console.log(`📝 Step 4.5: Saving lead follow-up logs to database...`);
             logsResult = await saveLeadFollowUpLogsActivity({
                 siteId: site_id,
                 leadId: lead_id,
@@ -383,60 +637,6 @@ async function leadFollowUpWorkflow(options) {
             }
         }
         // Note: We trust the logs endpoint - if it returns message_ids, we proceed with delivery
-        // Step 4.5: ALWAYS validate contact information (for auditing and future features)
-        console.log(`🔍 Step 4.5: Validating contact information...`);
-        const validationMessages = response?.data?.messages || response?.messages || {};
-        const validationLead = response?.data?.lead || response?.lead || {};
-        const validationEmail = validationLead.email || validationLead.contact_email;
-        const validationPhone = validationLead.phone || validationLead.phone_number;
-        const validationEmailMessage = validationMessages.email?.message;
-        const validationWhatsappMessage = validationMessages.whatsapp?.message;
-        const validationResult = await validateContactInformation({
-            email: validationEmail,
-            hasEmailMessage: !!validationEmailMessage,
-            hasWhatsAppMessage: !!validationWhatsappMessage,
-            leadId: lead_id,
-            phone: validationPhone
-        });
-        console.log(`📊 Validation completed: type=${validationResult.validationType}, shouldProceed=${validationResult.shouldProceed}`);
-        console.log(`📋 Reason: ${validationResult.reason}`);
-        // Handle validation results for invalid emails
-        if (validationResult.validationType === 'email' && !validationResult.isValid && validationResult.success) {
-            console.log(`🚫 Email is invalid, handling lead invalidation...`);
-            const hasWhatsApp = validationPhone && validationPhone.trim() !== '';
-            if (hasWhatsApp) {
-                // Lead has WhatsApp, only invalidate email but keep site_id
-                console.log(`📧🚫 Lead has WhatsApp, invalidating only email field...`);
-                const emailInvalidationResult = await invalidateEmailOnlyActivity({
-                    lead_id: lead_id,
-                    failed_email: validationEmail,
-                    userId: options.userId || site.user_id
-                });
-                if (emailInvalidationResult.success) {
-                    console.log(`✅ Email invalidated successfully, site_id preserved for WhatsApp communication`);
-                }
-                else {
-                    console.error(`❌ Failed to invalidate email: ${emailInvalidationResult.error}`);
-                    errors.push(`Email invalidation failed: ${emailInvalidationResult.error}`);
-                }
-            }
-            else {
-                // Lead has no WhatsApp, use full invalidation workflow
-                console.log(`🚫 Lead has no WhatsApp, using full lead invalidation workflow...`);
-                const invalidationOptions = {
-                    lead_id: lead_id,
-                    site_id: site_id,
-                    reason: 'invalid_email',
-                    email: validationEmail,
-                    userId: options.userId || site.user_id
-                };
-                await (0, workflow_1.startChild)(leadInvalidationWorkflow_1.leadInvalidationWorkflow, {
-                    args: [invalidationOptions],
-                    workflowId: `lead-invalidation-${lead_id}-email-${Date.now()}`
-                });
-                console.log(`✅ Lead invalidation workflow started for invalid email (no WhatsApp)`);
-            }
-        }
         // Step 5: Wait 2 hours before sending follow-up message
         if (response && (response.data?.messages || response.messages) && (response.data?.lead || response.lead)) {
             console.log(`⏰ Step 5: Waiting 2 hours before sending follow-up message...`);
@@ -445,30 +645,53 @@ async function leadFollowUpWorkflow(options) {
             // Step 5.1: Final validation before sending - ensure messages still exist after the 2-hour wait
             console.log(`🔍 Step 5.1: Performing final validation before message sending...`);
             console.log(`📝 Validating message IDs from logs: ${logsResult?.message_ids?.join(', ') || 'None'}`);
+            console.log(`💬 Validating conversation IDs from logs: ${logsResult?.conversation_ids?.join(', ') || 'None'}`);
+            console.log(`🎯 Primary message_id for validation: ${logsResult?.message_ids?.[0] || 'None'}`);
+            console.log(`🎯 Primary conversation_id for validation: ${logsResult?.conversation_ids?.[0] || 'None'}`);
             const messageValidationResult = await validateMessageAndConversationActivity({
                 lead_id: lead_id,
                 site_id: site_id,
+                message_id: logsResult?.message_ids?.[0], // Pass specific message_id to validate
                 response_data: response,
                 additional_data: {
                     ...options.additionalData,
                     message_ids: logsResult?.message_ids,
                     conversation_ids: logsResult?.conversation_ids,
+                    conversation_id: logsResult?.conversation_ids?.[0], // Also pass conversation_id directly
                     validate_before_send: true
                 }
             });
             if (!messageValidationResult.success) {
-                const errorMsg = `Final validation failed - messages no longer exist: ${messageValidationResult.error}`;
+                const errorMsg = `Final validation failed: ${messageValidationResult.error}`;
                 console.error(`❌ ${errorMsg}`);
+                console.error(`🔍 Validation details:`);
+                console.error(`   - Conversation exists: ${messageValidationResult.conversation_exists}`);
+                console.error(`   - Message exists: ${messageValidationResult.message_exists}`);
+                console.error(`   - Conversation ID: ${messageValidationResult.conversation_id || 'None'}`);
+                console.error(`   - Message ID: ${messageValidationResult.message_id || 'None'}`);
                 errors.push(errorMsg);
-                // Execute cleanup since messages are gone
-                console.log(`🧹 Messages no longer exist after 2-hour wait, executing cleanup...`);
+                // Execute cleanup since messages/conversation no longer exist
+                console.log(`🧹 Validation failed after 2-hour wait - executing cleanup...`);
+                console.log(`📋 Validation failure type: ${messageValidationResult.error}`);
                 try {
+                    // Determine specific failure reason based on validation result
+                    let failureReason = 'validation_failed_after_wait_period';
+                    if (messageValidationResult.error?.includes('conversation was deleted')) {
+                        failureReason = 'conversation_deleted_by_user_during_wait_period';
+                    }
+                    else if (messageValidationResult.error?.includes('message not found')) {
+                        failureReason = 'message_deleted_during_wait_period';
+                    }
+                    else if (messageValidationResult.error?.includes('no conversation found')) {
+                        failureReason = 'no_conversation_exists_for_lead';
+                    }
+                    console.log(`🔍 Using failure reason: ${failureReason}`);
                     const cleanupResult = await cleanupFailedFollowUpActivity({
                         lead_id: lead_id,
                         site_id: site_id,
                         conversation_id: logsResult?.conversation_ids?.[0],
                         message_id: logsResult?.message_ids?.[0],
-                        failure_reason: 'messages_deleted_during_wait_period',
+                        failure_reason: failureReason,
                         delivery_channel: undefined
                     });
                     if (cleanupResult.success) {
@@ -496,11 +719,14 @@ async function leadFollowUpWorkflow(options) {
                     nextSteps,
                     data: response,
                     messageSent: undefined,
-                    errors: [...errors, 'Messages no longer exist after wait period - delivery cancelled'],
+                    errors: [...errors, `Validation failed after wait period: ${messageValidationResult.error} - delivery cancelled`],
                     executionTime,
                     completedAt: new Date().toISOString()
                 };
-                console.log(`⚠️ Lead follow-up workflow completed - messages were deleted during wait period`);
+                console.log(`⚠️ Lead follow-up workflow completed - validation failed: ${messageValidationResult.error}`);
+                if (messageValidationResult.error?.includes('conversation was deleted')) {
+                    console.log(`💬 User likely deleted the conversation during the 2-hour wait period`);
+                }
                 // Update cron status
                 await saveCronStatusActivity({
                     siteId: site_id,
@@ -522,6 +748,9 @@ async function leadFollowUpWorkflow(options) {
             }
             else {
                 console.log(`✅ Final validation successful - proceeding with message delivery`);
+                console.log(`📊 Validation confirmed:`);
+                console.log(`   - Conversation ${messageValidationResult.conversation_id} exists and is ready`);
+                console.log(`   - Message ${messageValidationResult.message_id} exists and is ready for processing`);
             }
             console.log(`📤 Step 5.2: Now sending follow-up message based on communication channel...`);
             try {
@@ -540,8 +769,8 @@ async function leadFollowUpWorkflow(options) {
                 // Note: Contact validation was already performed in Step 4.5, so we can proceed with sending
                 let emailSent = false;
                 let whatsappSent = false;
-                // Send email if available (contact validation was already performed in Step 4.5)
-                if (email && emailMessage) {
+                // Send email if available and not invalidated during early validation
+                if (email && emailMessage && !emailInvalidatedInEarlyValidation) {
                     console.log(`📧 Sending follow-up email to ${email} (contact validation already performed)...`);
                     const emailResult = await sendEmailFromAgentActivity({
                         email: email,
@@ -569,11 +798,15 @@ async function leadFollowUpWorkflow(options) {
                         // Execute cleanup when email delivery fails
                         console.log(`🧹 Email delivery failed, executing cleanup...`);
                         try {
+                            // Use actual conversation_id and message_id from logs if available
+                            const conversationId = logsResult?.conversation_ids?.[0];
+                            const messageId = logsResult?.message_ids?.[0];
+                            console.log(`🔍 Cleanup using: conversation_id=${conversationId}, message_id=${messageId}`);
                             const cleanupResult = await cleanupFailedFollowUpActivity({
                                 lead_id: lead_id,
                                 site_id: site_id,
-                                conversation_id: undefined,
-                                message_id: undefined,
+                                conversation_id: conversationId,
+                                message_id: messageId,
                                 failure_reason: `email_delivery_failed: ${emailResult.messageId}`,
                                 delivery_channel: 'email',
                                 email: email
@@ -592,6 +825,10 @@ async function leadFollowUpWorkflow(options) {
                             errors.push(`Cleanup exception: ${cleanupErrorMessage}`);
                         }
                     }
+                }
+                else if (email && emailMessage && emailInvalidatedInEarlyValidation) {
+                    console.log(`🚫 Skipping email sending - email was invalidated during early validation: ${email}`);
+                    console.log(`📱 Will attempt WhatsApp delivery if available instead`);
                 }
                 // Send WhatsApp if available
                 if (phone && whatsappMessage) {
@@ -675,11 +912,15 @@ async function leadFollowUpWorkflow(options) {
                         // Execute cleanup when WhatsApp delivery fails
                         console.log(`🧹 WhatsApp delivery failed, executing cleanup...`);
                         try {
+                            // Use actual conversation_id and message_id from logs if available
+                            const conversationId = logsResult?.conversation_ids?.[0];
+                            const messageId = logsResult?.message_ids?.[0];
+                            console.log(`🔍 Cleanup using: conversation_id=${conversationId}, message_id=${messageId}`);
                             const cleanupResult = await cleanupFailedFollowUpActivity({
                                 lead_id: lead_id,
                                 site_id: site_id,
-                                conversation_id: undefined,
-                                message_id: undefined,
+                                conversation_id: conversationId,
+                                message_id: messageId,
                                 failure_reason: `whatsapp_delivery_failed: ${whatsappErrorMessage}`,
                                 delivery_channel: 'whatsapp',
                                 phone_number: formattedPhone
@@ -722,11 +963,15 @@ async function leadFollowUpWorkflow(options) {
                         // Execute cleanup when messages are available but delivery failed
                         console.log(`🧹 Message delivery failed (both channels), executing cleanup...`);
                         try {
+                            // Use actual conversation_id and message_id from logs if available
+                            const conversationId = logsResult?.conversation_ids?.[0];
+                            const messageId = logsResult?.message_ids?.[0];
+                            console.log(`🔍 Cleanup using: conversation_id=${conversationId}, message_id=${messageId}`);
                             const cleanupResult = await cleanupFailedFollowUpActivity({
                                 lead_id: lead_id,
                                 site_id: site_id,
-                                conversation_id: undefined,
-                                message_id: undefined,
+                                conversation_id: conversationId,
+                                message_id: messageId,
                                 failure_reason: 'all_message_delivery_failed',
                                 delivery_channel: emailMessage ? 'email' : 'whatsapp',
                                 email: email,
@@ -790,9 +1035,23 @@ async function leadFollowUpWorkflow(options) {
         // Step 5.4: Update message status to 'sent' after successful delivery
         if (messageSent && messageSent.success) {
             console.log(`📝 Step 5.4: Updating message status to 'sent'...`);
+            // Use actual conversation_id and message_id from logs if available
+            const conversationId = logsResult?.conversation_ids?.[0];
+            let messageId = logsResult?.message_ids?.[0];
+            console.log(`🔍 Initial IDs from logs: conversation_id=${conversationId}, message_id=${messageId}`);
+            // Fallback: If logs didn't provide IDs, try to get them from the message sent result
+            if (!messageId && messageSent.messageId) {
+                console.log(`🔍 Logs didn't provide message_id, using messageId from send result: ${messageSent.messageId}`);
+                messageId = messageSent.messageId;
+            }
+            // Additional fallback: Search for recent messages for this lead if we still don't have IDs
+            if (!messageId && !conversationId) {
+                console.log(`🔍 No IDs available from logs or send result, will let updateMessageStatusToSentActivity search by lead_id`);
+            }
+            console.log(`🔍 Final IDs for message status update: conversation_id=${conversationId}, message_id=${messageId}`);
             const messageUpdateResult = await updateMessageStatusToSentActivity({
-                message_id: undefined,
-                conversation_id: undefined,
+                message_id: messageId,
+                conversation_id: conversationId,
                 lead_id: lead_id,
                 site_id: site_id,
                 delivery_channel: messageSent.channel,
@@ -824,9 +1083,18 @@ async function leadFollowUpWorkflow(options) {
         // Step 5.4.1: Update message timestamp to sync with real delivery time
         if (messageSent && messageSent.success) {
             console.log(`⏰ Step 5.4.1: Syncing message timestamp with actual delivery time...`);
+            // Use the same fallback logic as the status update
+            const conversationId = logsResult?.conversation_ids?.[0];
+            let messageId = logsResult?.message_ids?.[0];
+            // Fallback: If logs didn't provide IDs, try to get them from the message sent result
+            if (!messageId && messageSent.messageId) {
+                console.log(`🔍 Using messageId from send result for timestamp sync: ${messageSent.messageId}`);
+                messageId = messageSent.messageId;
+            }
+            console.log(`🔍 Updating message timestamp using: conversation_id=${conversationId}, message_id=${messageId}`);
             const timestampUpdateResult = await updateMessageTimestampActivity({
-                message_id: undefined,
-                conversation_id: undefined,
+                message_id: messageId,
+                conversation_id: conversationId,
                 lead_id: lead_id,
                 site_id: site_id,
                 delivery_timestamp: new Date().toISOString(), // Use actual delivery time
@@ -854,26 +1122,41 @@ async function leadFollowUpWorkflow(options) {
         // Step 5.5: Activate conversation after successful follow-up
         if (messageSent && messageSent.success) {
             console.log(`💬 Step 5.5: Activating conversation after successful lead follow-up...`);
-            console.log(`🔍 Searching for conversation associated with lead ${lead_id}...`);
+            console.log(`🔍 Conversation IDs from logs: ${logsResult?.conversation_ids?.join(', ') || 'None'}`);
+            console.log(`📝 Message IDs from logs: ${logsResult?.message_ids?.join(', ') || 'None'}`);
+            console.log(`🔍 Using conversation_id: ${logsResult?.conversation_ids?.[0] || 'None (will search by lead_id)'}`);
             const conversationUpdateResult = await updateConversationStatusAfterFollowUpActivity({
+                conversation_id: logsResult?.conversation_ids?.[0], // Pass the conversation_id from logs
                 lead_id: lead_id,
                 site_id: site_id,
                 response_data: response,
-                additional_data: options.additionalData
+                additional_data: {
+                    ...options.additionalData,
+                    conversation_ids: logsResult?.conversation_ids,
+                    message_ids: logsResult?.message_ids
+                }
             });
             if (conversationUpdateResult.success) {
                 if (conversationUpdateResult.conversation_id) {
                     console.log(`✅ Successfully activated conversation ${conversationUpdateResult.conversation_id}`);
                 }
                 else {
-                    console.log(`✅ Conversation activation completed (no conversation found)`);
+                    console.log(`✅ Conversation activation completed (no conversation found to update)`);
+                    console.log(`📋 This is normal for leads without existing conversations`);
                 }
             }
             else {
                 const errorMsg = `Failed to activate conversation: ${conversationUpdateResult.error}`;
-                console.error(`⚠️ ${errorMsg}`);
+                console.error(`❌ ${errorMsg}`);
+                console.error(`🔍 Debug info for conversation update failure:`);
+                console.error(`   - Lead ID: ${lead_id}`);
+                console.error(`   - Site ID: ${site_id}`);
+                console.error(`   - Conversation ID from logs: ${logsResult?.conversation_ids?.[0] || 'None'}`);
+                console.error(`   - Available conversation IDs: ${logsResult?.conversation_ids?.join(', ') || 'None'}`);
+                console.error(`   - Available message IDs: ${logsResult?.message_ids?.join(', ') || 'None'}`);
                 errors.push(errorMsg);
-                // Note: We don't throw here as the main operation was successful
+                // Note: We don't throw here as the main operation (message sending) was successful
+                // The message status has already been updated to 'sent' which is the primary goal
             }
         }
         else {
@@ -922,7 +1205,6 @@ async function leadFollowUpWorkflow(options) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Lead follow-up workflow failed: ${errorMessage}`);
-        const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         // Update cron status to indicate failure
         await saveCronStatusActivity({
             siteId: site_id,
@@ -942,21 +1224,7 @@ async function leadFollowUpWorkflow(options) {
             input: options,
             error: errorMessage,
         });
-        // Return failed result instead of throwing to provide more information
-        const result = {
-            success: false,
-            leadId: lead_id,
-            siteId: site_id,
-            siteName,
-            siteUrl,
-            followUpActions,
-            nextSteps,
-            data: response,
-            messageSent,
-            errors: [...errors, errorMessage],
-            executionTime,
-            completedAt: new Date().toISOString()
-        };
-        return result;
+        // Throw error to properly fail the workflow
+        throw new Error(`Lead follow-up workflow failed: ${errorMessage}`);
     }
 }

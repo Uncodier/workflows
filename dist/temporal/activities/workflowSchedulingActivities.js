@@ -824,7 +824,9 @@ async function executeDailyStandUpWorkflow(site, executionOptions) {
                         executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
                         timezone: 'UTC',
                         executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
-                        businessHoursAnalysis: executionOptions.businessHoursAnalysis
+                        businessHoursAnalysis: executionOptions.businessHoursAnalysis,
+                        parentScheduleId: executionOptions.parentScheduleId,
+                        dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
                     }
                 }],
             taskQueue: config_1.temporalConfig.taskQueue,
@@ -998,7 +1000,7 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
         }
         // Determine if fallback should be used based on day of week
         const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
-        const isWeekend = currentDay === 5 || currentDay === 6; // Friday = 5, Saturday = 6
+        const isWeekend = currentDay === 0 || currentDay === 6; // Sunday = 0, Saturday = 6
         const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
         console.log(`   - Current day: ${dayName} (${currentDay})`);
         console.log(`   - Is weekend: ${isWeekend}`);
@@ -1099,7 +1101,9 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
                             delayMs,
                             targetTimeUTC: finalTargetUTC.toISOString(),
                             workflowVersion: '2.0', // Add version tracking
-                            createdAt: new Date().toISOString()
+                            createdAt: new Date().toISOString(),
+                            parentScheduleId: options.parentScheduleId,
+                            dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
                         }
                     }];
                 // Start the DELAYED workflow and capture the actual handle returned by Temporal
@@ -1235,7 +1239,7 @@ async function scheduleIndividualSiteAnalysisActivity(businessHoursAnalysis, opt
         }
         // Determine if fallback should be used based on day of week
         const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
-        const isWeekend = currentDay === 5 || currentDay === 6; // Friday = 5, Saturday = 6
+        const isWeekend = currentDay === 0 || currentDay === 6; // Sunday = 0, Saturday = 6
         const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
         console.log(`   - Current day: ${dayName} (${currentDay})`);
         console.log(`   - Is weekend: ${isWeekend}`);
@@ -1366,7 +1370,9 @@ async function scheduleIndividualSiteAnalysisActivity(businessHoursAnalysis, opt
                             targetTimeUTC: finalTargetUTC.toISOString(),
                             analysisType: 'initial-site-analysis',
                             originalDailyStandupTime: scheduledTime,
-                            analysisExecutesOneHourEarlier: true
+                            analysisExecutesOneHourEarlier: true,
+                            parentScheduleId: options.parentScheduleId,
+                            dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
                         }
                     }];
                 // Start the DELAYED workflow for site analysis
@@ -1478,7 +1484,7 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
         }
         // Determine if fallback should be used based on day of week
         const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
-        const isWeekend = currentDay === 5 || currentDay === 6; // Friday = 5, Saturday = 6
+        const isWeekend = currentDay === 0 || currentDay === 6; // Sunday = 0, Saturday = 6
         const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
         console.log(`   - Current day: ${dayName} (${currentDay})`);
         console.log(`   - Is weekend: ${isWeekend}`);
@@ -1589,7 +1595,9 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                             leadGenerationType: 'post-standup-lead-generation',
                             originalDailyStandupTime: scheduledTime,
                             leadGenExecutesOneHourLater: true,
-                            executesAfterDailyStandup: true
+                            executesAfterDailyStandup: true,
+                            parentScheduleId: options.parentScheduleId,
+                            dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
                         }
                     }];
                 // Start the DELAYED workflow and capture the actual handle returned by Temporal
@@ -1661,7 +1669,6 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                 const strategicWorkflowArgs = [{
                         site_id: site.id,
                         userId: site.user_id,
-                        createTasks: true,
                         additionalData: {
                             scheduledBy: 'activityPrioritizationEngine-strategicAccounts',
                             executeReason: `post-leadgeneration-strategic-accounts-${businessHoursSource}-${strategicScheduledTime}`,
@@ -1684,7 +1691,9 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                             strategicAccountsType: 'post-leadgeneration-strategic-accounts',
                             originalDailyStandupTime: scheduledTime,
                             leadGenTime: leadGenScheduledTime,
-                            executesAfterLeadGeneration: true
+                            executesAfterLeadGeneration: true,
+                            parentScheduleId: options.parentScheduleId,
+                            dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
                         }
                     }];
                 // Start the DELAYED workflow for strategic accounts
@@ -1769,7 +1778,7 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
  */
 async function executeDailyProspectionWorkflowsActivity(options = {}) {
     console.log('🎯 Starting Daily Prospection workflow execution...');
-    const { businessHoursAnalysis, hoursThreshold = 48, maxLeads = 100 } = options;
+    const { businessHoursAnalysis, hoursThreshold = 48, maxLeads = 30 } = options;
     if (businessHoursAnalysis) {
         console.log('📋 BUSINESS HOURS FILTERING ENABLED:');
         console.log(`   - Sites with business_hours: ${businessHoursAnalysis.sitesWithBusinessHours}`);
@@ -1879,7 +1888,8 @@ async function executeDailyProspectionWorkflowsActivity(options = {}) {
                     scheduledBy: 'activityPrioritizationEngine',
                     hoursThreshold,
                     maxLeads,
-                    dryRun: options.dryRun
+                    dryRun: options.dryRun,
+                    parentScheduleId: options.parentScheduleId
                 });
                 results.push(prospectionResult);
                 if (prospectionResult.success) {
@@ -1964,8 +1974,8 @@ async function executeDailyProspectionWorkflow(site, executionOptions) {
                     site_id: site.id,
                     userId: site.user_id,
                     hoursThreshold: executionOptions.hoursThreshold || 48,
-                    maxLeads: executionOptions.maxLeads || 100,
-                    createTasks: true,
+                    maxLeads: executionOptions.maxLeads || 30,
+                    minLeadsRequired: 30,
                     updateStatus: false,
                     additionalData: {
                         scheduledBy: executionOptions.scheduledBy,
@@ -1977,7 +1987,9 @@ async function executeDailyProspectionWorkflow(site, executionOptions) {
                         executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
                         businessHoursAnalysis: executionOptions.businessHoursAnalysis,
                         triggeredBy: 'activityPrioritizationEngine',
-                        followsAfter: 'dailyStandUpWorkflow'
+                        followsAfter: 'dailyStandUpWorkflow',
+                        parentScheduleId: executionOptions.parentScheduleId,
+                        dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
                     }
                 }],
             taskQueue: config_1.temporalConfig.taskQueue,
@@ -2002,7 +2014,7 @@ async function executeDailyProspectionWorkflow(site, executionOptions) {
  * EXECUTES 2 HOURS AFTER DAILY STANDUP to process leads after standup and lead generation
  */
 async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis, options = {}) {
-    const { timezone = 'America/Mexico_City', hoursThreshold = 48, maxLeads = 100 } = options;
+    const { timezone = 'America/Mexico_City', hoursThreshold = 48, maxLeads = 30 } = options;
     console.log(`🎯 Scheduling individual Daily Prospection workflows using TIMERS`);
     console.log(`   - Default timezone: ${timezone}`);
     console.log(`   - Sites with business_hours: ${businessHoursAnalysis.openSites?.length || 0}`);
@@ -2032,7 +2044,7 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
         }
         // Determine if fallback should be used based on day of week
         const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
-        const isWeekend = currentDay === 5 || currentDay === 6; // Friday = 5, Saturday = 6
+        const isWeekend = currentDay === 0 || currentDay === 6; // Sunday = 0, Saturday = 6
         const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
         console.log(`   - Current day: ${dayName} (${currentDay})`);
         console.log(`   - Is weekend: ${isWeekend}`);
@@ -2123,7 +2135,7 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
                         userId: site.user_id,
                         hoursThreshold,
                         maxLeads,
-                        createTasks: true,
+                        minLeadsRequired: 30,
                         updateStatus: false,
                         additionalData: {
                             scheduledBy: 'activityPrioritizationEngine-dailyProspection',
@@ -2150,7 +2162,9 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
                             executesAfterDailyStandup: true,
                             executesAfterLeadGeneration: true,
                             hoursThreshold,
-                            maxLeads
+                            maxLeads,
+                            parentScheduleId: options.parentScheduleId,
+                            dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
                         }
                     }];
                 // Start the DELAYED workflow for daily prospection

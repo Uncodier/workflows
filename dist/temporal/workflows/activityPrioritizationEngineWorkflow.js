@@ -6,6 +6,29 @@ const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity, sc
     startToCloseTimeout: '10 minutes',
 });
 /**
+ * Extract the real schedule ID from workflow info
+ * This is the schedule that triggers the entire daily operations pipeline
+ */
+function extractScheduleId(info) {
+    // Check if workflow was triggered by a schedule
+    // Temporal schedules typically set search attributes or memo data
+    const searchAttributes = info.searchAttributes || {};
+    const memo = info.memo || {};
+    // Look for common schedule-related attributes
+    const scheduleId = searchAttributes['TemporalScheduledById'] ||
+        searchAttributes['ScheduleId'] ||
+        memo['TemporalScheduledById'] ||
+        memo['scheduleId'] ||
+        memo['scheduleName'];
+    if (scheduleId) {
+        console.log(`✅ Activity Prioritization Engine - Real schedule ID found: ${scheduleId}`);
+        return scheduleId;
+    }
+    // If no schedule ID found, it might be a manual execution or child workflow
+    console.log(`⚠️ Activity Prioritization Engine - No schedule ID found - likely manual execution`);
+    return 'manual-execution';
+}
+/**
  * Activity Prioritization Engine Workflow
  * Decides WHETHER to execute daily operations based on business logic
  * Now considers business_hours from database for smarter scheduling
@@ -18,6 +41,14 @@ const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity, sc
 async function activityPrioritizationEngineWorkflow() {
     console.log('🎯 Starting activity prioritization engine workflow...');
     const startTime = new Date();
+    // Get REAL workflow information and schedule ID from Temporal
+    const workflowInfo_real = (0, workflow_1.workflowInfo)();
+    const realWorkflowId = workflowInfo_real.workflowId;
+    const realScheduleId = extractScheduleId(workflowInfo_real);
+    console.log(`📋 Activity Prioritization Engine Info:`);
+    console.log(`   - REAL Workflow ID: ${realWorkflowId}`);
+    console.log(`   - REAL Schedule ID: ${realScheduleId} (${realScheduleId === 'manual-execution' ? 'manual execution' : 'from schedule'})`);
+    console.log(`   - This schedule ID will be propagated to all child workflows`);
     try {
         // Step 0: Validate and clean any stuck cron status records
         console.log('🔍 Step 0: Validating cron status for activity prioritization engine...');
@@ -120,7 +151,8 @@ async function activityPrioritizationEngineWorkflow() {
                         testMode: false, // PRODUCTION: Full production mode
                         businessHoursAnalysis, // PASS business hours analysis for filtering
                         hoursThreshold: 48, // Look for leads older than 48 hours
-                        maxLeads: 100 // Limit to 100 leads per site (doubled from 50)
+                        maxLeads: 30, // Limit to 30 leads per site
+                        parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
                     });
                     console.log(`🎯 Daily prospection workflows execution completed:`);
                     console.log(`   ✅ Prospection executed: ${dailyProspectionResult.scheduled} sites`);
@@ -151,7 +183,8 @@ async function activityPrioritizationEngineWorkflow() {
                 console.log('   This ensures sites get their initial analysis regardless of timing');
                 try {
                     const siteAnalysisResult = await scheduleIndividualSiteAnalysisActivity(businessHoursAnalysis, {
-                        timezone: 'America/Mexico_City'
+                        timezone: 'America/Mexico_City',
+                        parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
                     });
                     console.log(`🔍 Site analysis scheduling completed:`);
                     console.log(`   ✅ Scheduled: ${siteAnalysisResult.scheduled} sites`);
@@ -181,7 +214,8 @@ async function activityPrioritizationEngineWorkflow() {
                 console.log('   Lead generation will execute 1 hour after daily standups complete');
                 try {
                     const leadGenerationResult = await scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, {
-                        timezone: 'America/Mexico_City'
+                        timezone: 'America/Mexico_City',
+                        parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
                     });
                     console.log(`🔥 Lead generation scheduling completed:`);
                     console.log(`   ✅ Scheduled: ${leadGenerationResult.scheduled} sites`);
@@ -220,7 +254,8 @@ async function activityPrioritizationEngineWorkflow() {
                 console.log(`📅 Creating individual schedules for each site at their specific business hours`);
                 // Use the new individual scheduling approach instead of global scheduling
                 const scheduleResult = await scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, {
-                    timezone: 'America/Mexico_City'
+                    timezone: 'America/Mexico_City',
+                    parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
                 });
                 if (scheduleResult.scheduled > 0) {
                     console.log(`✅ Successfully created ${scheduleResult.scheduled} individual schedules`);
@@ -258,7 +293,8 @@ async function activityPrioritizationEngineWorkflow() {
                     const dailyProspectionSchedulingResult = await scheduleIndividualDailyProspectionActivity(businessHoursAnalysis, {
                         timezone: 'America/Mexico_City',
                         hoursThreshold: 48, // Look for leads older than 48 hours
-                        maxLeads: 100 // Limit to 100 leads per site (doubled from 50)
+                        maxLeads: 30, // Limit to 30 leads per site
+                        parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
                     });
                     console.log(`🎯 Daily prospection scheduling completed:`);
                     console.log(`   ✅ Scheduled: ${dailyProspectionSchedulingResult.scheduled} sites`);
@@ -288,7 +324,8 @@ async function activityPrioritizationEngineWorkflow() {
                 console.log('   Both daily standups and site analysis will be scheduled for their appropriate times');
                 try {
                     const siteAnalysisResult = await scheduleIndividualSiteAnalysisActivity(businessHoursAnalysis, {
-                        timezone: 'America/Mexico_City'
+                        timezone: 'America/Mexico_City',
+                        parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
                     });
                     console.log(`🔍 Site analysis scheduling completed:`);
                     console.log(`   ✅ Scheduled: ${siteAnalysisResult.scheduled} sites`);
@@ -318,7 +355,8 @@ async function activityPrioritizationEngineWorkflow() {
                 console.log('   Both daily standups and lead generation will be scheduled for their appropriate times');
                 try {
                     const leadGenerationResult = await scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, {
-                        timezone: 'America/Mexico_City'
+                        timezone: 'America/Mexico_City',
+                        parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
                     });
                     console.log(`🔥 Lead generation scheduling completed:`);
                     console.log(`   ✅ Scheduled: ${leadGenerationResult.scheduled} sites`);

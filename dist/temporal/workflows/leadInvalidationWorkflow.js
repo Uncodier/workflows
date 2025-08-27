@@ -2,8 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.leadInvalidationWorkflow = leadInvalidationWorkflow;
 const workflow_1 = require("@temporalio/workflow");
+const leadFollowUpWorkflow_1 = require("./leadFollowUpWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getLeadActivity, invalidateLeadActivity, findLeadsBySharedContactActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getLeadActivity, invalidateLeadActivity, invalidateReferredLeads, findLeadsBySharedContactActivity, updateTaskStatusToCompletedActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '3 minutes', // Reasonable timeout for lead invalidation
     retry: {
         maximumAttempts: 3,
@@ -99,7 +100,8 @@ async function leadInvalidationWorkflow(options) {
                 telephone: options.telephone,
                 email: options.email
             },
-            userId: options.userId
+            userId: options.userId,
+            response_message: options.response_message
         });
         if (invalidationResult.success) {
             leadInvalidated = true;
@@ -136,7 +138,8 @@ async function leadInvalidationWorkflow(options) {
                                 email: options.email
                             },
                             userId: options.userId,
-                            shared_with_lead_id: lead_id
+                            shared_with_lead_id: lead_id,
+                            response_message: options.response_message ? `${options.response_message} (shared contact invalidation)` : undefined
                         });
                         if (sharedInvalidationResult.success) {
                             invalidatedSharedLeads++;
@@ -163,6 +166,45 @@ async function leadInvalidationWorkflow(options) {
         else {
             console.log(`⚠️ No contact information provided for shared lead search`);
         }
+        // Step 3b: Check and invalidate referred leads if lead has referral_lead_id
+        console.log(`🔍 Step 3b: Checking for referral relationships...`);
+        if (lead.referral_lead_id) {
+            console.log(`🔗 Lead has referral_lead_id: ${lead.referral_lead_id}, invalidating related leads...`);
+            try {
+                const referralInvalidationResult = await invalidateReferredLeads({
+                    lead_id: lead_id,
+                    referral_lead_id: lead.referral_lead_id,
+                    original_site_id: originalSiteId,
+                    reason: reason,
+                    original_email: lead.email,
+                    original_phone: lead.phone,
+                    userId: options.userId,
+                    response_message: options.response_message
+                });
+                if (referralInvalidationResult.success) {
+                    console.log(`✅ Referral invalidation completed successfully`);
+                    console.log(`📊 Invalidated ${referralInvalidationResult.invalidated_leads.length} referred leads`);
+                    if (referralInvalidationResult.errors.length > 0) {
+                        console.log(`⚠️ Some errors occurred during referral invalidation:`);
+                        referralInvalidationResult.errors.forEach(error => console.log(`   - ${error}`));
+                        errors.push(...referralInvalidationResult.errors);
+                    }
+                }
+                else {
+                    const errorMsg = `Referral invalidation failed: ${referralInvalidationResult.errors.join(', ')}`;
+                    console.error(`❌ ${errorMsg}`);
+                    errors.push(errorMsg);
+                }
+            }
+            catch (referralError) {
+                const errorMessage = referralError instanceof Error ? referralError.message : String(referralError);
+                console.error(`❌ Exception during referral invalidation: ${errorMessage}`);
+                errors.push(`Referral invalidation exception: ${errorMessage}`);
+            }
+        }
+        else {
+            console.log(`ℹ️ Lead has no referral_lead_id, skipping referral invalidation`);
+        }
         console.log(`✅ Lead invalidation process completed - skipping company null list functionality`);
         console.log(`📝 Note: Company tracking has been simplified to focus on lead-level invalidation`);
         const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
@@ -178,6 +220,85 @@ async function leadInvalidationWorkflow(options) {
             executionTime,
             completedAt: new Date().toISOString()
         };
+        // Step 4: Delete initial task regardless of outcome
+        console.log(`📝 Step 4: Deleting initial task for lead ${lead_id}...`);
+        try {
+            const taskDeleteResult = await updateTaskStatusToCompletedActivity({
+                lead_id: lead_id,
+                site_id: originalSiteId,
+                stage: 'awareness', // Initial tasks are typically in awareness stage
+                status: 'completed',
+                notes: `Task completed after lead invalidation workflow (${reason})`
+            });
+            if (taskDeleteResult.success) {
+                if (taskDeleteResult.updated_task_id) {
+                    console.log(`✅ Initial task ${taskDeleteResult.updated_task_id} marked as completed after invalidation`);
+                }
+                else {
+                    console.log(`✅ Task completion update completed (${taskDeleteResult.task_found ? 'no task to update' : 'no task found'})`);
+                }
+            }
+            else {
+                const errorMsg = `Failed to mark initial task as completed: ${taskDeleteResult.error}`;
+                console.error(`⚠️ ${errorMsg}`);
+                errors.push(errorMsg);
+                // Note: We don't throw here as the invalidation was successful
+            }
+        }
+        catch (taskError) {
+            const taskErrorMessage = taskError instanceof Error ? taskError.message : String(taskError);
+            console.error(`⚠️ Exception deleting initial task: ${taskErrorMessage}`);
+            errors.push(`Task deletion exception: ${taskErrorMessage}`);
+            // Note: We don't throw here as the invalidation was successful
+        }
+        // Step 5: If lead has valid phone number after invalidation, schedule follow-up
+        console.log(`📞 Step 5: Checking if lead has valid phone number for follow-up...`);
+        try {
+            // Re-fetch lead to get current state after invalidation
+            const updatedLeadResult = await getLeadActivity(lead_id);
+            if (updatedLeadResult.success && updatedLeadResult.lead) {
+                const updatedLead = updatedLeadResult.lead;
+                const hasValidPhone = updatedLead.phone &&
+                    updatedLead.phone.trim() !== '' &&
+                    updatedLead.phone !== options.telephone; // Different from failed phone
+                console.log(`📋 Post-invalidation lead contact check:`);
+                console.log(`   - Phone: ${updatedLead.phone || 'N/A'}`);
+                console.log(`   - Failed phone: ${options.telephone || 'N/A'}`);
+                console.log(`   - Has valid phone: ${hasValidPhone}`);
+                if (hasValidPhone) {
+                    console.log(`🚀 Lead has valid phone number, scheduling follow-up workflow...`);
+                    const followUpOptions = {
+                        lead_id: lead_id,
+                        site_id: originalSiteId,
+                        userId: options.userId,
+                        additionalData: {
+                            source: 'lead_invalidation_recovery',
+                            previous_failed_contact: options.telephone || options.email,
+                            invalidation_reason: reason
+                        }
+                    };
+                    await (0, workflow_1.startChild)(leadFollowUpWorkflow_1.leadFollowUpWorkflow, {
+                        args: [followUpOptions],
+                        workflowId: `lead-follow-up-recovery-${lead_id}-${Date.now()}`
+                    });
+                    console.log(`✅ Lead follow-up workflow started for lead ${lead_id} with valid phone number`);
+                    console.log(`📞 Will attempt follow-up via WhatsApp to: ${updatedLead.phone}`);
+                    // Don't wait for the result, just start it and continue
+                }
+                else {
+                    console.log(`ℹ️ Lead ${lead_id} has no valid phone number for follow-up after invalidation`);
+                }
+            }
+            else {
+                console.log(`⚠️ Could not re-fetch lead information for follow-up check: ${updatedLeadResult.error}`);
+            }
+        }
+        catch (followUpError) {
+            const followUpErrorMessage = followUpError instanceof Error ? followUpError.message : String(followUpError);
+            console.error(`⚠️ Exception checking for follow-up opportunity: ${followUpErrorMessage}`);
+            errors.push(`Follow-up check exception: ${followUpErrorMessage}`);
+            // Note: We don't throw here as the invalidation was successful
+        }
         console.log(`🎉 Lead invalidation workflow completed successfully!`);
         console.log(`📊 Summary: Lead ${lead_id} - Invalidated: ${leadInvalidated}, Shared leads: ${invalidatedSharedLeads}`);
         console.log(`⏱️ Execution time: ${executionTime}`);
@@ -203,7 +324,34 @@ async function leadInvalidationWorkflow(options) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Lead invalidation workflow failed: ${errorMessage}`);
-        const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+        // Step 4: Even if workflow failed, try to delete initial task
+        console.log(`📝 Step 4: Attempting to delete initial task for lead ${lead_id} despite workflow failure...`);
+        try {
+            const taskDeleteResult = await updateTaskStatusToCompletedActivity({
+                lead_id: lead_id,
+                site_id: site_id,
+                stage: 'awareness', // Initial tasks are typically in awareness stage
+                status: 'completed',
+                notes: `Task completed after failed lead invalidation workflow (${errorMessage})`
+            });
+            if (taskDeleteResult.success) {
+                if (taskDeleteResult.updated_task_id) {
+                    console.log(`✅ Initial task ${taskDeleteResult.updated_task_id} marked as completed despite workflow failure`);
+                }
+                else {
+                    console.log(`✅ Task completion update completed (${taskDeleteResult.task_found ? 'no task to update' : 'no task found'})`);
+                }
+            }
+            else {
+                console.error(`⚠️ Failed to mark initial task as completed: ${taskDeleteResult.error}`);
+                errors.push(`Task deletion after failure: ${taskDeleteResult.error}`);
+            }
+        }
+        catch (taskError) {
+            const taskErrorMessage = taskError instanceof Error ? taskError.message : String(taskError);
+            console.error(`⚠️ Exception deleting initial task after workflow failure: ${taskErrorMessage}`);
+            errors.push(`Task deletion exception after failure: ${taskErrorMessage}`);
+        }
         // Update cron status to indicate failure
         await saveCronStatusActivity({
             siteId: site_id,
@@ -223,20 +371,8 @@ async function leadInvalidationWorkflow(options) {
             input: options,
             error: errorMessage,
         });
-        // Return failed result instead of throwing to provide more information
-        const result = {
-            success: false,
-            leadId: lead_id,
-            originalSiteId,
-            invalidatedLead: leadInvalidated,
-            sharedContactLeads,
-            invalidatedSharedLeads,
-            reason,
-            errors: [...errors, errorMessage],
-            executionTime,
-            completedAt: new Date().toISOString()
-        };
-        return result;
+        // Throw error to properly fail the workflow
+        throw new Error(`Lead invalidation workflow failed: ${errorMessage}`);
     }
 }
 /**

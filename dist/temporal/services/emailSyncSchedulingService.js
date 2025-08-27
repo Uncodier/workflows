@@ -67,11 +67,26 @@ class EmailSyncSchedulingService {
                         reason = `Last sync was ${hoursSinceLastRun.toFixed(1)} hours ago (min: ${minHours}h) - needs new sync`;
                     }
                     else {
-                        reason = `Last sync was ${hoursSinceLastRun.toFixed(1)} hours ago (min: ${minHours}h) - still fresh`;
+                        // Allow scheduling even if recent - scheduler will handle timing
+                        shouldSchedule = true;
+                        reason = `Last sync was ${hoursSinceLastRun.toFixed(1)} hours ago (min: ${minHours}h) - scheduler will handle timing`;
                     }
                     break;
                 case 'RUNNING':
-                    reason = 'Email sync currently running - skipping';
+                    // Check if the running status is stale (workflow scheduler handles timing)
+                    // If it's been running for more than 2 hours, it's likely stuck
+                    const runningTime = lastEmailSync.last_run ? new Date(lastEmailSync.last_run).getTime() :
+                        lastEmailSync.created_at ? new Date(lastEmailSync.created_at).getTime() : now;
+                    const hoursRunning = (now - runningTime) / (1000 * 60 * 60);
+                    if (hoursRunning >= 2) {
+                        shouldSchedule = true;
+                        reason = `Email sync marked as running for ${hoursRunning.toFixed(1)}h - likely stuck, rescheduling`;
+                    }
+                    else {
+                        // Let the scheduler handle timing - don't block based on RUNNING status alone
+                        shouldSchedule = true;
+                        reason = 'Email sync marked as running but scheduler will handle timing - allowing schedule';
+                    }
                     break;
                 case 'SCHEDULED':
                     // Check if scheduled workflow should have run by now or is stuck

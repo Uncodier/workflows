@@ -4,14 +4,14 @@ exports.leadGenerationWorkflow = leadGenerationWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const deepResearchWorkflow_1 = require("./deepResearchWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, validateAndCleanStuckCronStatusActivity, getSiteActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes',
     retry: {
         maximumAttempts: 3,
     },
 });
 // Import specific lead generation activities
-const { callRegionSearchApiActivity, callRegionVenuesWithMultipleSearchTermsActivity, callLeadGenerationApiActivity, createCompaniesFromVenuesActivity, saveLeadsFromDeepResearchActivity, searchLeadsByCompanyCityActivity, updateMemoryActivity, upsertVenueFailedActivity, determineMaxVenuesActivity, notifyNewLeadsActivity, } = (0, workflow_1.proxyActivities)({
+const { callRegionSearchApiActivity, callRegionVenuesWithMultipleSearchTermsActivity, callLeadGenerationApiActivity, createCompaniesFromVenuesActivity, saveLeadsFromDeepResearchActivity, searchLeadsByCompanyCityActivity, updateMemoryActivity, upsertVenueFailedActivity, determineMaxVenuesActivity, notifyNewLeadsActivity, validateAndGenerateEmployeeContactsActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes', // Longer timeout for lead generation processes
     retry: {
         maximumAttempts: 3,
@@ -187,115 +187,35 @@ function extractCompaniesFromDeliverables(deliverables: any): CompanyData[] {
 }
 */
 /**
- * Normalize name for duplicate detection
+ * Extract raw employees from deep research deliverables (no validation)
  */
-function normalizeName(name) {
-    return name.toLowerCase().trim().replace(/\s+/g, ' ');
-}
-/**
- * Validate if telephone is obfuscated with asterisks
- */
-function isPhoneObfuscated(phone) {
-    if (!phone)
-        return false;
-    // Check if phone contains asterisks or is mostly asterisks
-    return phone.includes('*') || phone.includes('***') || /^\*+$/.test(phone.trim());
-}
-/**
- * Validate if email is obfuscated with asterisks
- */
-function isEmailObfuscated(email) {
-    if (!email)
-        return false;
-    // Check if email contains asterisks in the local part (before @)
-    // Examples: c******@domain.com, john***@example.com, ***@domain.com
-    return email.includes('*') && email.includes('@');
-}
-/**
- * Extract employees from deep research deliverables with validation
- */
-function extractEmployeesFromDeliverables(deliverables) {
+function extractEmployeesFromDeliverablesRaw(deliverables) {
     const employees = [];
-    const seenNames = new Set(); // Track processed names to avoid duplicates
-    let duplicatesSkipped = 0;
-    let obfuscatedPhonesSkipped = 0;
-    let obfuscatedEmailsSkipped = 0;
-    /**
-     * Validate and add employee if valid
-     */
-    function validateAndAddEmployee(leadData, businessData) {
-        if (!leadData || typeof leadData !== 'object' || !leadData.name) {
-            return;
-        }
-        const normalizedName = normalizeName(leadData.name);
-        // Validation 1: Check for duplicate names
-        if (seenNames.has(normalizedName)) {
-            console.log(`🔄 Skipping duplicate lead: ${leadData.name}`);
-            duplicatesSkipped++;
-            return;
-        }
-        const telephone = leadData.telephone || leadData.phone || null;
-        const email = leadData.email || null;
-        // Validation 2: Check for obfuscated phone numbers
-        if (telephone && isPhoneObfuscated(telephone)) {
-            console.log(`📞 Skipping lead with obfuscated phone: ${leadData.name} (${telephone})`);
-            obfuscatedPhonesSkipped++;
-            return;
-        }
-        // Validation 3: Check for obfuscated email addresses
-        if (email && isEmailObfuscated(email)) {
-            console.log(`📧 Skipping lead with obfuscated email: ${leadData.name} (${email})`);
-            obfuscatedEmailsSkipped++;
-            return;
-        }
-        // All validations passed, add the lead
-        seenNames.add(normalizedName);
-        employees.push({
-            name: leadData.name,
-            telephone: telephone,
-            email: email,
-            company_name: businessData?.name || leadData.company?.name || leadData.company_name || undefined,
-            address: leadData.address || businessData?.location || businessData?.address || null,
-            web: businessData?.website || leadData.company?.website || leadData.web || null,
-            position: leadData.position || leadData.job_title || null
-        });
-    }
     try {
         // Try direct array structure first (new ultra-simplified format)
         if (deliverables && Array.isArray(deliverables)) {
             console.log(`🔍 Found leads in direct array structure (ultra-simplified format)`);
-            for (const leadData of deliverables) {
-                validateAndAddEmployee(leadData);
-            }
+            employees.push(...deliverables);
         }
         // Try simplified leads structure (backup)
         else if (deliverables && deliverables.leads && Array.isArray(deliverables.leads)) {
             console.log(`🔍 Found leads in deliverables.leads structure (backup format)`);
-            for (const leadData of deliverables.leads) {
-                validateAndAddEmployee(leadData);
-            }
+            employees.push(...deliverables.leads);
         }
         // Try business.employees structure (legacy support)
         else if (deliverables && deliverables.business && deliverables.business.employees && Array.isArray(deliverables.business.employees)) {
             console.log(`🔍 Found employees in deliverables.business.employees structure (legacy)`);
-            const business = deliverables.business;
-            for (const employeeData of deliverables.business.employees) {
-                validateAndAddEmployee(employeeData, business);
-            }
+            employees.push(...deliverables.business.employees);
         }
         // Try lead.employees structure (legacy support)
         else if (deliverables && deliverables.lead && deliverables.lead.employees && Array.isArray(deliverables.lead.employees)) {
             console.log(`🔍 Found employees in deliverables.lead.employees structure (legacy)`);
-            for (const employeeData of deliverables.lead.employees) {
-                validateAndAddEmployee(employeeData);
-            }
+            employees.push(...deliverables.lead.employees);
         }
         // Try direct employees structure
         else if (deliverables && deliverables.employees && Array.isArray(deliverables.employees)) {
             console.log(`🔍 Found employees in deliverables.employees structure`);
-            for (const employeeData of deliverables.employees) {
-                validateAndAddEmployee(employeeData);
-            }
+            employees.push(...deliverables.employees);
         }
         // Alternative structure fallbacks
         else if (deliverables && typeof deliverables === 'object') {
@@ -308,9 +228,7 @@ function extractEmployeesFromDeliverables(deliverables) {
             ];
             for (const possibleArray of possibleEmployeeArrays) {
                 if (Array.isArray(possibleArray)) {
-                    for (const item of possibleArray) {
-                        validateAndAddEmployee(item);
-                    }
+                    employees.push(...possibleArray);
                     break; // Use first valid array found
                 }
             }
@@ -319,17 +237,40 @@ function extractEmployeesFromDeliverables(deliverables) {
     catch (error) {
         console.error('⚠️ Error extracting employees from deliverables:', error);
     }
-    console.log(`📊 Extracted ${employees.length} valid employees from deliverables`);
-    if (duplicatesSkipped > 0) {
-        console.log(`🔄 Skipped ${duplicatesSkipped} duplicate leads by name`);
-    }
-    if (obfuscatedPhonesSkipped > 0) {
-        console.log(`📞 Skipped ${obfuscatedPhonesSkipped} leads with obfuscated phone numbers`);
-    }
-    if (obfuscatedEmailsSkipped > 0) {
-        console.log(`📧 Skipped ${obfuscatedEmailsSkipped} leads with obfuscated email addresses`);
-    }
+    console.log(`📊 Extracted ${employees.length} raw employees from deliverables`);
     return employees;
+}
+/**
+ * Extract the real schedule ID from workflow info
+ * This looks for evidence of schedule execution in search attributes or memo
+ */
+function extractScheduleId(info, options) {
+    // First, check if a parent schedule ID was passed through additionalData
+    // This is the case when launched by dailyOperationsWorkflow
+    const parentScheduleId = options.additionalData?.parentScheduleId ||
+        options.additionalData?.originalScheduleId ||
+        options.additionalData?.dailyOperationsScheduleId;
+    if (parentScheduleId) {
+        console.log(`✅ Lead Generation - Using parent schedule ID: ${parentScheduleId} (from dailyOperations)`);
+        return parentScheduleId;
+    }
+    // Fallback: Check if workflow was triggered by its own schedule
+    // Temporal schedules typically set search attributes or memo data
+    const searchAttributes = info.searchAttributes || {};
+    const memo = info.memo || {};
+    // Look for common schedule-related attributes
+    const scheduleId = searchAttributes['TemporalScheduledById'] ||
+        searchAttributes['ScheduleId'] ||
+        memo['TemporalScheduledById'] ||
+        memo['scheduleId'] ||
+        memo['scheduleName'];
+    if (scheduleId) {
+        console.log(`✅ Lead Generation - Real schedule ID found: ${scheduleId}`);
+        return scheduleId;
+    }
+    // If no schedule ID found, it might be a manual execution or child workflow
+    console.log(`⚠️ Lead Generation - No schedule ID found in workflow info - likely manual execution`);
+    return 'manual-execution';
 }
 /**
  * Workflow to execute lead generation process with optimized flow
@@ -346,18 +287,50 @@ function extractEmployeesFromDeliverables(deliverables) {
  * @param options - Configuration options for lead generation
  */
 async function leadGenerationWorkflow(options) {
-    const { site_id } = options;
+    const { site_id, retryCount = 0, maxRetries = 3 } = options;
     if (!site_id) {
         throw new Error('No site ID provided');
     }
+    // Get workflow information from Temporal to extract schedule ID
+    const workflowInfo_real = (0, workflow_1.workflowInfo)();
+    const realWorkflowId = workflowInfo_real.workflowId;
+    const realScheduleId = extractScheduleId(workflowInfo_real, options);
     const workflowId = `lead-generation-${site_id}`;
     const startTime = Date.now();
     // Extract scheduleId from additionalData.scheduleType (passed by scheduling activities)
     // Fallback to generic format if not provided
     const scheduleId = options.additionalData?.scheduleType || `lead-generation-${site_id}`;
-    console.log(`🔥 Starting NEW lead generation workflow for site ${site_id}`);
+    console.log(`🔥 Starting ${retryCount > 0 ? 'RETRY' : 'NEW'} lead generation workflow for site ${site_id}`);
     console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+    console.log(`📋 REAL Workflow ID: ${realWorkflowId} (from Temporal)`);
+    console.log(`📋 REAL Schedule ID: ${realScheduleId} (from ${realScheduleId === 'manual-execution' ? 'manual execution' : 'schedule'})`);
     console.log(`📋 Schedule ID: ${scheduleId} (from ${options.additionalData?.scheduleType ? 'scheduleType' : 'fallback'})`);
+    console.log(`🔄 Retry Info: Attempt ${retryCount + 1}/${maxRetries + 1} (${retryCount === 0 ? 'First attempt' : `Retry ${retryCount}`})`);
+    // Validate and clean any stuck cron status records before execution (skip for retries)
+    if (retryCount === 0) {
+        console.log('🔍 Validating cron status before lead generation execution...');
+        const cronValidation = await validateAndCleanStuckCronStatusActivity('leadGenerationWorkflow', site_id, 18 // 18 hours threshold - lead generation should not be stuck longer than 18h
+        );
+        console.log(`📋 Cron validation result: ${cronValidation.reason}`);
+        if (cronValidation.wasStuck) {
+            console.log(`🧹 Cleaned stuck record that was ${cronValidation.hoursStuck?.toFixed(1)}h old`);
+        }
+        if (!cronValidation.canProceed) {
+            console.log('⏳ Another lead generation is likely running for this site - terminating');
+            // Log termination
+            await logWorkflowExecutionActivity({
+                workflowId,
+                workflowType: 'leadGenerationWorkflow',
+                status: 'BLOCKED',
+                input: options,
+                error: `Workflow blocked: ${cronValidation.reason}`,
+            });
+            throw new Error(`Workflow blocked: ${cronValidation.reason}`);
+        }
+    }
+    else {
+        console.log('⏩ Skipping cron validation for retry workflow');
+    }
     // Log workflow execution start
     await logWorkflowExecutionActivity({
         workflowId,
@@ -425,7 +398,21 @@ async function leadGenerationWorkflow(options) {
         // Debug: Log the complete regionSearchResult
         console.log('🔍 Region search result received:', JSON.stringify(regionSearchResult, null, 2));
         if (!regionSearchResult.success) {
-            const warningMsg = `Region search API call failed: ${regionSearchResult.error}, proceeding with generic search`;
+            const errorMsg = String(regionSearchResult.error || 'Unknown error');
+            // Check for critical 414 errors that should fail the entire workflow
+            if (errorMsg.includes('414') ||
+                errorMsg.includes('Request-URI Too Large') ||
+                errorMsg.includes('<html>') ||
+                errorMsg.includes('cloudflare') ||
+                errorMsg.includes('HTTP_414') ||
+                errorMsg.includes('Server returned HTML error page')) {
+                const criticalError = `Critical API error (414 Request-URI Too Large) in Region Search API: ${errorMsg}`;
+                console.error(`🚨 CRITICAL ERROR: ${criticalError}`);
+                console.error(`🛑 This error requires immediate attention and workflow termination`);
+                errors.push(criticalError);
+                throw new Error(criticalError);
+            }
+            const warningMsg = `Region search API call failed: ${errorMsg}, proceeding with generic search`;
             console.warn(`⚠️ ${warningMsg}`);
             errors.push(warningMsg);
             // Don't throw error, continue with generic search
@@ -547,6 +534,26 @@ async function leadGenerationWorkflow(options) {
             console.log(`🐛 Debug regionVenuesMultipleOptions:`, JSON.stringify(regionVenuesMultipleOptions, null, 2));
             console.log(`🔍 Using multiple search terms strategy with ${businessTypes.length} business types (city + region + country)`);
             venuesResult = await callRegionVenuesWithMultipleSearchTermsActivity(regionVenuesMultipleOptions);
+            if (!venuesResult.success) {
+                const errorMsg = String(venuesResult.error || 'Unknown error');
+                // Check for critical 414 errors that should fail the entire workflow
+                if (errorMsg.includes('414') ||
+                    errorMsg.includes('Request-URI Too Large') ||
+                    errorMsg.includes('<html>') ||
+                    errorMsg.includes('cloudflare') ||
+                    errorMsg.includes('HTTP_414') ||
+                    errorMsg.includes('Server returned HTML error page')) {
+                    const criticalError = `Critical API error (414 Request-URI Too Large) in Region Venues API: ${errorMsg}`;
+                    console.error(`🚨 CRITICAL ERROR: ${criticalError}`);
+                    console.error(`🛑 This error requires immediate attention and workflow termination`);
+                    errors.push(criticalError);
+                    throw new Error(criticalError);
+                }
+                const normalErrorMsg = `Region venues API call failed: ${errorMsg}`;
+                console.error(`❌ ${normalErrorMsg}`);
+                errors.push(normalErrorMsg);
+                // Continue to handle this as a normal error
+            }
             if (venuesResult.success && venuesResult.data && venuesResult.data.venues) {
                 venuesFound = venuesResult.data.venues;
                 // Step 3a: Create companies from venues
@@ -602,6 +609,26 @@ async function leadGenerationWorkflow(options) {
                                         hasError: !!companyLeadGenResult.error,
                                         error: companyLeadGenResult.error
                                     });
+                                    // Check for critical errors that should fail the entire workflow
+                                    if (!companyLeadGenResult.success && companyLeadGenResult.error) {
+                                        const errorMsg = String(companyLeadGenResult.error);
+                                        // Check for 414 Request-URI Too Large or similar critical errors
+                                        if (errorMsg.includes('414') ||
+                                            errorMsg.includes('Request-URI Too Large') ||
+                                            errorMsg.includes('URL too long') ||
+                                            errorMsg.includes('<html>') || // HTML error pages from Cloudflare
+                                            errorMsg.includes('cloudflare') ||
+                                            errorMsg.includes('HTTP_414') ||
+                                            errorMsg.includes('Server returned HTML error page')) {
+                                            const criticalError = `Critical API error (414 Request-URI Too Large) in Lead Generation API: ${errorMsg}`;
+                                            console.error(`🚨 CRITICAL ERROR: ${criticalError}`);
+                                            console.error(`🛑 This error requires immediate attention and workflow termination`);
+                                            console.error(`🔧 The API request payload is too large. Check recent optimizations.`);
+                                            // Add to main errors array and throw to fail entire workflow
+                                            errors.push(criticalError);
+                                            throw new Error(criticalError);
+                                        }
+                                    }
                                     if (companyLeadGenResult.success && companyLeadGenResult.searchTopic) {
                                         console.log(`✅ Lead generation for ${company.name} successful`);
                                         console.log(`🔍 Search topic received: "${companyLeadGenResult.searchTopic}"`);
@@ -677,6 +704,8 @@ async function leadGenerationWorkflow(options) {
                                             research_topic: employeeSearchTopic,
                                             userId: options.userId || site.user_id,
                                             deliverables: employeeDeliverables,
+                                            scheduleId: realScheduleId, // Pass the schedule ID from parent workflow
+                                            parentWorkflowType: 'leadGenerationWorkflow', // Identify the parent workflow type
                                             additionalData: {
                                                 ...options.additionalData,
                                                 company: cleanCompanyForDeepResearch(company),
@@ -690,6 +719,7 @@ async function leadGenerationWorkflow(options) {
                                         const employeeResearchHandle = await (0, workflow_1.startChild)(deepResearchWorkflow_1.deepResearchWorkflow, {
                                             args: [employeeResearchOptions],
                                             workflowId: `employee-research-${company.name.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
+                                            parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON, // ✅ Child continues independently
                                         });
                                         const employeeResearchResult = await employeeResearchHandle.result();
                                         companyResult.employeeResearchResult = employeeResearchResult;
@@ -701,9 +731,30 @@ async function leadGenerationWorkflow(options) {
                                                 empDeliverables = employeeResearchResult.data.deliverables;
                                             }
                                             if (empDeliverables) {
-                                                const employeeLeads = extractEmployeesFromDeliverables(empDeliverables);
-                                                companyResult.leadsGenerated = employeeLeads;
-                                                console.log(`👥 Extracted ${employeeLeads.length} potential leads for ${company.name}`);
+                                                // Extract raw employees from deliverables
+                                                const rawEmployees = extractEmployeesFromDeliverablesRaw(empDeliverables);
+                                                console.log(`📧 Step 4b.3a: Validating and generating contacts for ${rawEmployees.length} employees from ${company.name}...`);
+                                                // Use new activity to validate and generate emails
+                                                const contactValidationResult = await validateAndGenerateEmployeeContactsActivity({
+                                                    employees: rawEmployees,
+                                                    companyInfo: company,
+                                                    site_id: site_id,
+                                                    userId: options.userId || site.user_id
+                                                });
+                                                if (contactValidationResult.success) {
+                                                    console.log(`✅ Contact validation completed for ${company.name}:`);
+                                                    console.log(`   - Employees processed: ${rawEmployees.length}`);
+                                                    console.log(`   - Valid leads generated: ${contactValidationResult.validatedEmployees.length}`);
+                                                    console.log(`   - Emails generated: ${contactValidationResult.emailsGenerated}`);
+                                                    console.log(`   - Emails validated: ${contactValidationResult.emailsValidated}`);
+                                                    console.log(`   - Employees skipped: ${contactValidationResult.employeesSkipped}`);
+                                                    companyResult.leadsGenerated = contactValidationResult.validatedEmployees;
+                                                }
+                                                else {
+                                                    console.error(`❌ Contact validation failed for ${company.name}: ${contactValidationResult.error}`);
+                                                    companyResult.leadsGenerated = [];
+                                                }
+                                                const employeeLeads = contactValidationResult.validatedEmployees;
                                                 // Step 4b.4: If no leads generated, save venue as failed in system_memories
                                                 if (employeeLeads.length === 0) {
                                                     console.log(`📝 Step 4b.4: No leads generated for ${company.name}, saving venue as failed...`);
@@ -977,13 +1028,20 @@ async function leadGenerationWorkflow(options) {
             leadCreationResults,
             retryWorkflowStarted,
             retryWorkflowId: retryWorkflowStarted ? retryWorkflowId : undefined,
+            retryInfo: {
+                currentAttempt: retryCount + 1,
+                maxRetries: maxRetries,
+                isRetry: retryCount > 0,
+                canRetry: retryCount < maxRetries
+            },
             errors,
             executionTime,
             completedAt: new Date().toISOString()
         };
-        console.log(`🎉 NEW Lead generation workflow completed successfully!`);
+        console.log(`🎉 ${retryCount > 0 ? 'RETRY' : 'NEW'} Lead generation workflow completed successfully!`);
         console.log(`📊 Summary: Lead generation for site ${siteName} completed in ${executionTime}`);
         console.log(`   - Site: ${siteName} (${siteUrl})`);
+        console.log(`   - Retry Info: Attempt ${retryCount + 1}/${maxRetries + 1} (${retryCount === 0 ? 'First attempt' : `Retry ${retryCount}`})`);
         console.log(`   - Business types received: ${businessTypes.length}`);
         console.log(`   - Enhanced search topic: ${enhancedSearchTopic}`);
         console.log(`   - Target location: ${targetCity && targetRegion ? `${targetCity}, ${targetRegion}` : targetCity || targetRegion || 'Not specified'}`);
@@ -992,7 +1050,10 @@ async function leadGenerationWorkflow(options) {
         console.log(`   - Total leads generated: ${totalLeadsGenerated}`);
         console.log(`   - Lead creation results: ${leadCreationResults.length}`);
         if (retryWorkflowStarted) {
-            console.log(`   - Retry workflow started: ${retryWorkflowId} (reason: no leads found)`);
+            console.log(`   - Next retry workflow started: ${retryWorkflowId} (attempt ${retryCount + 2}/${maxRetries + 1})`);
+        }
+        else if (totalLeadsGenerated === 0 && retryCount >= maxRetries) {
+            console.log(`   - No more retries: Maximum attempts (${maxRetries + 1}) reached`);
         }
         // Step Final: Send notification for all leads generated in this workflow
         if (totalLeadsGenerated > 0) {
@@ -1046,34 +1107,57 @@ async function leadGenerationWorkflow(options) {
             }
         }
         else {
-            console.log(`ℹ️ No leads generated, starting retry workflow...`);
-            // Step Retry: If no valid leads found, automatically start a new workflow execution
-            try {
-                console.log(`🔄 Step Retry: Starting new lead generation workflow for site ${site_id} (no leads found)...`);
-                const retryOptions = {
-                    ...options,
-                    additionalData: {
-                        ...options.additionalData,
-                        retryReason: 'no_leads_found',
-                        originalWorkflowId: workflowId,
-                        originalExecutionTime: executionTime,
-                        retriedAt: new Date().toISOString()
-                    }
-                };
-                const retryWorkflowHandle = await (0, workflow_1.startChild)(leadGenerationWorkflow, {
-                    args: [retryOptions],
-                    workflowId: `lead-generation-retry-${site_id}-${Date.now()}`,
-                });
-                retryWorkflowStarted = true;
-                retryWorkflowId = retryWorkflowHandle.workflowId;
-                console.log(`✅ Successfully started retry workflow: ${retryWorkflowHandle.workflowId}`);
-                // Don't await the result to avoid blocking this workflow completion
-                // The retry workflow will run independently
+            console.log(`ℹ️ No leads generated, checking retry eligibility...`);
+            // Check if we can retry (haven't exceeded max retries)
+            if (retryCount < maxRetries) {
+                console.log(`🔄 Step Retry: Starting retry ${retryCount + 1}/${maxRetries} for site ${site_id} (no leads found)...`);
+                // Step Retry: If no valid leads found and retries available, start a new workflow execution
+                try {
+                    const retryOptions = {
+                        ...options,
+                        retryCount: retryCount + 1,
+                        maxRetries: maxRetries,
+                        additionalData: {
+                            ...options.additionalData,
+                            retryReason: 'no_leads_found',
+                            originalWorkflowId: workflowId,
+                            originalExecutionTime: executionTime,
+                            retriedAt: new Date().toISOString(),
+                            previousRetryCount: retryCount
+                        }
+                    };
+                    const retryWorkflowHandle = await (0, workflow_1.startChild)(leadGenerationWorkflow, {
+                        args: [retryOptions],
+                        workflowId: `lead-generation-retry-${site_id}-${retryCount + 1}-${Date.now()}`,
+                        parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON, // ✅ Child continues independently
+                    });
+                    retryWorkflowStarted = true;
+                    retryWorkflowId = retryWorkflowHandle.workflowId;
+                    console.log(`✅ Successfully started retry workflow ${retryCount + 1}/${maxRetries}: ${retryWorkflowHandle.workflowId}`);
+                    // Don't await the result to avoid blocking this workflow completion
+                    // The retry workflow will run independently
+                }
+                catch (retryError) {
+                    const errorMessage = retryError instanceof Error ? retryError.message : String(retryError);
+                    console.error(`❌ Failed to start retry workflow: ${errorMessage}`);
+                    errors.push(`Retry workflow failed: ${errorMessage}`);
+                }
             }
-            catch (retryError) {
-                const errorMessage = retryError instanceof Error ? retryError.message : String(retryError);
-                console.error(`❌ Failed to start retry workflow: ${errorMessage}`);
-                errors.push(`Retry workflow failed: ${errorMessage}`);
+            else {
+                console.log(`🛑 Maximum retries (${maxRetries}) reached for site ${site_id}. No more retry attempts will be made.`);
+                console.log(`📊 Final result: No leads generated after ${retryCount + 1} attempts (1 initial + ${retryCount} retries)`);
+                errors.push(`Maximum retries reached: ${retryCount + 1} attempts completed without generating leads`);
+                // Update cron status to indicate retry limit reached
+                await saveCronStatusActivity({
+                    siteId: site_id,
+                    workflowId,
+                    scheduleId: scheduleId,
+                    activityName: 'leadGenerationWorkflow',
+                    status: 'FAILED',
+                    lastRun: new Date().toISOString(),
+                    errorMessage: `Maximum retries (${maxRetries}) reached - no leads generated after ${retryCount + 1} attempts`,
+                    retryCount: retryCount + 1
+                });
             }
         }
         // Update cron status to indicate successful completion
@@ -1098,7 +1182,6 @@ async function leadGenerationWorkflow(options) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ NEW Lead generation workflow failed: ${errorMessage}`);
-        const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         // Update cron status to indicate failure
         await saveCronStatusActivity({
             siteId: site_id,
@@ -1108,7 +1191,7 @@ async function leadGenerationWorkflow(options) {
             status: 'FAILED',
             lastRun: new Date().toISOString(),
             errorMessage: errorMessage,
-            retryCount: 1
+            retryCount: retryCount + 1
         });
         // Log workflow execution failure
         await logWorkflowExecutionActivity({
@@ -1118,29 +1201,7 @@ async function leadGenerationWorkflow(options) {
             input: options,
             error: errorMessage,
         });
-        // Return failed result instead of throwing to provide more information
-        const result = {
-            success: false,
-            siteId: site_id,
-            siteName,
-            siteUrl,
-            regionSearchResult,
-            businessTypes,
-            enhancedSearchTopic,
-            targetCity,
-            targetRegion,
-            venuesResult,
-            venuesFound,
-            companiesCreated,
-            companyResults,
-            totalLeadsGenerated,
-            leadCreationResults,
-            retryWorkflowStarted,
-            retryWorkflowId: retryWorkflowStarted ? retryWorkflowId : undefined,
-            errors: [...errors, errorMessage],
-            executionTime,
-            completedAt: new Date().toISOString()
-        };
-        return result;
+        // Throw error to properly fail the workflow
+        throw new Error(`Lead generation workflow failed: ${errorMessage}`);
     }
 }

@@ -11,6 +11,38 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, } = (0, workflow_1
     },
 });
 /**
+ * Extract schedule ID from workflow info or parent schedule
+ * Prioritizes parent schedule ID over workflow's own schedule attributes
+ */
+function extractScheduleId(info, options) {
+    // First, check if a parent schedule ID was passed through additionalData
+    // This is the case when launched by dailyOperationsWorkflow
+    const parentScheduleId = options.additionalData?.parentScheduleId ||
+        options.additionalData?.originalScheduleId ||
+        options.additionalData?.dailyOperationsScheduleId;
+    if (parentScheduleId) {
+        console.log(`✅ Using parent schedule ID: ${parentScheduleId} (from dailyOperations)`);
+        return parentScheduleId;
+    }
+    // Fallback: Check if workflow was triggered by its own schedule
+    // Temporal schedules typically set search attributes or memo data
+    const searchAttributes = info.searchAttributes || {};
+    const memo = info.memo || {};
+    // Look for common schedule-related attributes
+    const scheduleId = searchAttributes['TemporalScheduledById'] ||
+        searchAttributes['ScheduleId'] ||
+        memo['TemporalScheduledById'] ||
+        memo['scheduleId'] ||
+        memo['scheduleName'];
+    if (scheduleId) {
+        console.log(`✅ Real schedule ID found: ${scheduleId}`);
+        return scheduleId;
+    }
+    // If no schedule ID found, it might be a manual execution or child workflow
+    console.log(`⚠️ No schedule ID found in workflow info - likely manual execution or child workflow`);
+    return 'manual-execution';
+}
+/**
  * Daily Strategic Accounts Workflow
  *
  * Este workflow ejecuta la prospección de cuentas estratégicas:
@@ -23,21 +55,22 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, } = (0, workflow_1
  * @param options - Configuration options for daily strategic accounts
  */
 async function dailyStrategicAccountsWorkflow(options) {
-    const { site_id, createTasks = true } = options;
+    const { site_id } = options;
     if (!site_id) {
         throw new Error('No site ID provided');
     }
-    const workflowId = `daily-strategic-accounts-${site_id}`;
+    // Get REAL workflow information from Temporal
+    const workflowInfo_real = (0, workflow_1.workflowInfo)();
+    const realWorkflowId = workflowInfo_real.workflowId;
+    const realScheduleId = extractScheduleId(workflowInfo_real, options);
     const startTime = Date.now();
-    // Extract scheduleId from additionalData.scheduleType (passed by scheduling activities)
-    // Fallback to generic format if not provided
-    const scheduleId = options.additionalData?.scheduleType || `daily-strategic-accounts-${site_id}`;
     console.log(`🎯 Starting daily strategic accounts workflow for site ${site_id}`);
     console.log(`📋 Options:`, JSON.stringify(options, null, 2));
-    console.log(`📋 Schedule ID: ${scheduleId} (from ${options.additionalData?.scheduleType ? 'scheduleType' : 'fallback'})`);
+    console.log(`📋 REAL Workflow ID: ${realWorkflowId} (from Temporal)`);
+    console.log(`📋 REAL Schedule ID: ${realScheduleId} (from ${realScheduleId === 'manual-execution' ? 'manual execution' : 'schedule'})`);
     // Log workflow execution start
     await logWorkflowExecutionActivity({
-        workflowId,
+        workflowId: realWorkflowId,
         workflowType: 'dailyStrategicAccountsWorkflow',
         status: 'STARTED',
         input: options,
@@ -45,8 +78,8 @@ async function dailyStrategicAccountsWorkflow(options) {
     // Update cron status to indicate the workflow is running
     await saveCronStatusActivity({
         siteId: site_id,
-        workflowId,
-        scheduleId: scheduleId,
+        workflowId: realWorkflowId,
+        scheduleId: realScheduleId,
         activityName: 'dailyStrategicAccountsWorkflow',
         status: 'RUNNING',
         lastRun: new Date().toISOString()
@@ -64,19 +97,20 @@ async function dailyStrategicAccountsWorkflow(options) {
         const leadGenOptions = {
             site_id: site_id,
             userId: options.userId,
-            create: createTasks,
+            create: false,
             region: 'world',
             keywords: ['key accounts'], // ✅ Fixed: Pass as array instead of string
             additionalData: {
                 ...options.additionalData,
                 leadType: 'strategic_accounts',
-                workflowId: workflowId
+                workflowId: realWorkflowId
             }
         };
         console.log(`🚀 Calling leadGenerationWorkflow with strategic parameters...`);
         const leadGenHandle = await (0, workflow_1.startChild)(leadGenerationWorkflow_1.leadGenerationWorkflow, {
             args: [leadGenOptions],
             workflowId: `strategic-lead-generation-${site_id}-${Date.now()}`,
+            parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON, // ✅ Child continues independently
         });
         const leadGenResult = await leadGenHandle.result();
         if (!leadGenResult.success) {
@@ -167,15 +201,15 @@ async function dailyStrategicAccountsWorkflow(options) {
         // Update cron status to indicate successful completion
         await saveCronStatusActivity({
             siteId: site_id,
-            workflowId,
-            scheduleId: scheduleId,
+            workflowId: realWorkflowId,
+            scheduleId: realScheduleId,
             activityName: 'dailyStrategicAccountsWorkflow',
             status: 'COMPLETED',
             lastRun: new Date().toISOString()
         });
         // Log successful completion
         await logWorkflowExecutionActivity({
-            workflowId,
+            workflowId: realWorkflowId,
             workflowType: 'dailyStrategicAccountsWorkflow',
             status: 'COMPLETED',
             input: options,
@@ -186,12 +220,11 @@ async function dailyStrategicAccountsWorkflow(options) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Daily strategic accounts workflow failed: ${errorMessage}`);
-        const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         // Update cron status to indicate failure
         await saveCronStatusActivity({
             siteId: site_id,
-            workflowId,
-            scheduleId: scheduleId,
+            workflowId: realWorkflowId,
+            scheduleId: realScheduleId,
             activityName: 'dailyStrategicAccountsWorkflow',
             status: 'FAILED',
             lastRun: new Date().toISOString(),
@@ -200,50 +233,13 @@ async function dailyStrategicAccountsWorkflow(options) {
         });
         // Log workflow execution failure
         await logWorkflowExecutionActivity({
-            workflowId,
+            workflowId: realWorkflowId,
             workflowType: 'dailyStrategicAccountsWorkflow',
             status: 'FAILED',
             input: options,
             error: errorMessage,
         });
-        // Return failed result instead of throwing to provide more information
-        const result = {
-            success: false,
-            siteId: site_id,
-            siteName,
-            siteUrl,
-            strategicCriteria: {
-                region: 'world',
-                keywords: 'key accounts',
-                searchType: 'strategic_accounts'
-            },
-            leadsGenerated,
-            leadsProcessed,
-            tasksCreated: 0,
-            statusUpdated: 0,
-            strategicAccountResults: [],
-            salesAgentResponse: null,
-            selectedLeads: [],
-            leadsPriority: null,
-            assignedLeads: [],
-            notificationResults: [],
-            // Add channel filtering fields
-            leadsFiltered: 0,
-            filteredLeads: [],
-            channelFilteringInfo: {
-                hasEmailChannel: false,
-                hasWhatsappChannel: false,
-                leadsWithEmail: 0,
-                leadsWithPhone: 0,
-                leadsWithBoth: 0,
-                leadsWithNeither: 0,
-                leadsFilteredOut: 0
-            },
-            regionSearchResult,
-            errors: [...errors, errorMessage],
-            executionTime,
-            completedAt: new Date().toISOString()
-        };
-        return result;
+        // Throw error to properly fail the workflow
+        throw new Error(`Daily strategic accounts workflow failed: ${errorMessage}`);
     }
 }

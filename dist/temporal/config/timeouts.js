@@ -56,6 +56,13 @@ exports.RETRY_POLICIES = {
         initialIntervalMs: 2000, // 2 segundos
         maximumIntervalMs: 30000, // 30 segundos
     },
+    // No retry for non-critical operations
+    NO_RETRY: {
+        maximumAttempts: 1,
+        backoffCoefficient: 1.0,
+        initialIntervalMs: 0,
+        maximumIntervalMs: 0,
+    },
     // Default
     DEFAULT: {
         maximumAttempts: 3,

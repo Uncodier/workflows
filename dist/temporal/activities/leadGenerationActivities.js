@@ -48,6 +48,7 @@ exports.callRegionVenuesWithMultipleSearchTermsActivity = callRegionVenuesWithMu
 exports.callLeadGenerationApiActivity = callLeadGenerationApiActivity;
 exports.saveLeadsFromDeepResearchActivity = saveLeadsFromDeepResearchActivity;
 exports.createLeadsFromResearchActivity = createLeadsFromResearchActivity;
+exports.validateAndGenerateEmployeeContactsActivity = validateAndGenerateEmployeeContactsActivity;
 exports.createSingleLead = createSingleLead;
 exports.convertVenuesToCompanies = convertVenuesToCompanies;
 exports.updateMemoryActivity = updateMemoryActivity;
@@ -69,12 +70,23 @@ async function callRegionSearchApiActivity(options) {
             site_id: options.site_id,
             userId: options.userId
         });
+        // Optimize request body by only sending essential data to avoid 414 errors
         const requestBody = {
-            site_id: options.site_id,
+            siteId: options.site_id, // Convert to camelCase for API consistency
             userId: options.userId,
-            ...options.additionalData
+            // Only include essential additionalData to avoid large request bodies
+            siteName: options.additionalData?.siteName,
+            siteUrl: options.additionalData?.siteUrl,
+            region: options.additionalData?.region,
+            keywords: options.additionalData?.keywords
+            // Exclude large objects that could cause 414 errors
         };
-        console.log('📤 Sending region search request:', JSON.stringify(requestBody, null, 2));
+        const requestBodySize = JSON.stringify(requestBody).length;
+        console.log(`📤 Sending region search request (${requestBodySize} bytes):`, JSON.stringify(requestBody, null, 2));
+        // Warn if request body is getting large
+        if (requestBodySize > 50000) { // 50KB warning threshold
+            console.warn(`⚠️ Large request body detected (${requestBodySize} bytes). This might cause 414 errors.`);
+        }
         const response = await apiService_1.apiService.post('/api/agents/sales/regionSearch', requestBody);
         if (!response.success) {
             logger_1.logger.error('❌ Region search API call failed', {
@@ -292,9 +304,17 @@ async function callRegionVenuesApiActivity(options) {
                 bestTimeToContact: 'business_hours',
                 contactPerson: 'business_owner'
             },
-            ...options.additionalData
+            // Only include essential additionalData to avoid 414 errors
+            siteName: options.additionalData?.siteName,
+            siteUrl: options.additionalData?.siteUrl
+            // Exclude large objects like regionSearchResult, businessTypes arrays, etc.
         };
-        console.log('📤 Sending region venues request:', JSON.stringify(requestBody, null, 2));
+        const requestBodySize = JSON.stringify(requestBody).length;
+        console.log(`📤 Sending region venues request (${requestBodySize} bytes):`, JSON.stringify(requestBody, null, 2));
+        // Warn if request body is getting large
+        if (requestBodySize > 50000) { // 50KB warning threshold
+            console.warn(`⚠️ Large request body detected (${requestBodySize} bytes). This might cause 414 errors.`);
+        }
         const response = await apiService_1.apiService.post('/api/agents/sales/regionVenues', requestBody);
         if (!response.success) {
             logger_1.logger.error('❌ Region venues API call failed', {
@@ -384,10 +404,13 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
                 priority: options.priority || 'high',
                 excludeNames: combinedExcludeNames,
                 additionalData: {
-                    ...options.additionalData,
+                    // Only include essential data to avoid 414 errors
+                    siteName: options.additionalData?.siteName,
+                    siteUrl: options.additionalData?.siteUrl,
                     searchIteration: 1,
                     businessType: firstBusinessTypeName,
                     isMultipleSearchStrategy: true
+                    // Exclude large objects like regionSearchResult, businessTypes arrays, etc.
                 }
             };
             console.log(`🚨 URGENT DEBUG About to call callRegionVenuesApiActivity with:`);
@@ -443,10 +466,13 @@ async function callRegionVenuesWithMultipleSearchTermsActivity(options) {
                     priority: options.priority || 'high',
                     excludeNames: combinedExcludeNames,
                     additionalData: {
-                        ...options.additionalData,
+                        // Only include essential data to avoid 414 errors
+                        siteName: options.additionalData?.siteName,
+                        siteUrl: options.additionalData?.siteUrl,
                         searchIteration: i + 1,
                         businessType: businessTypeName,
                         isMultipleSearchStrategy: true
+                        // Exclude large objects like regionSearchResult, businessTypes arrays, etc.
                     }
                 };
                 console.log(`🚨 URGENT DEBUG About to call callRegionVenuesApiActivity (additional search ${i + 1}) with:`);
@@ -569,12 +595,35 @@ async function callLeadGenerationApiActivity(options) {
             site_id: options.site_id,
             userId: options.userId
         });
+        // Optimize request body by only sending essential data to avoid 414 errors
         const requestBody = {
-            site_id: options.site_id,
+            siteId: options.site_id, // Convert to camelCase for API consistency
             userId: options.userId,
-            ...options.additionalData
+            // Only include essential data, filter out large objects that might cause 414 errors
+            company: options.additionalData?.company ? {
+                name: options.additionalData.company.name,
+                industry: options.additionalData.company.industry,
+                location: options.additionalData.company.location,
+                website: options.additionalData.company.website
+            } : undefined,
+            targetCompany: options.additionalData?.targetCompany,
+            targetIndustry: options.additionalData?.targetIndustry,
+            targetLocation: options.additionalData?.targetLocation,
+            siteName: options.additionalData?.siteName,
+            siteUrl: options.additionalData?.siteUrl,
+            // Include only business type names, not full objects
+            businessTypes: options.additionalData?.businessTypes?.map((bt) => typeof bt === 'string' ? bt : bt?.name || bt) || undefined
+            // Explicitly exclude large objects that could cause 414 errors:
+            // - regionSearchResult (can be very large)
+            // - venuesResult (can be very large) 
+            // - businessTypes full objects (only include names)
         };
-        console.log('📤 Sending lead generation request:', JSON.stringify(requestBody, null, 2));
+        const requestBodySize = JSON.stringify(requestBody).length;
+        console.log(`📤 Sending lead generation request (${requestBodySize} bytes):`, JSON.stringify(requestBody, null, 2));
+        // Warn if request body is getting large (approaching URL limits for some servers)
+        if (requestBodySize > 50000) { // 50KB warning threshold
+            console.warn(`⚠️ Large request body detected (${requestBodySize} bytes). This might cause 414 errors if data ends up in URL.`);
+        }
         const response = await apiService_1.apiService.post('/api/agents/sales/leadGeneration', requestBody);
         if (!response.success) {
             logger_1.logger.error('❌ Lead generation API call failed', {
@@ -678,9 +727,13 @@ async function saveLeadsFromDeepResearchActivity(options) {
             userId: options.userId,
             segment_id: options.segment_id,
             additionalData: {
-                ...options.additionalData,
+                // Only include essential data to avoid 414 errors
+                siteName: options.additionalData?.siteName,
+                siteUrl: options.additionalData?.siteUrl,
+                workflowId: options.additionalData?.workflowId,
                 company: options.company,
                 workflowStep: 'save_leads_from_deep_research'
+                // Exclude large objects like regionSearchResult, businessTypes arrays, etc.
             }
         };
         const result = await createLeadsFromResearchActivity(createLeadsOptions);
@@ -891,8 +944,8 @@ function validateLeadData(lead) {
     if (lead.company_name && typeof lead.company_name !== 'string') {
         warnings.push('Company name should be a string');
     }
-    if (lead.address && typeof lead.address !== 'string') {
-        warnings.push('Address should be a string');
+    if (lead.address && typeof lead.address !== 'object') {
+        warnings.push('Address should be an object');
     }
     if (lead.web && typeof lead.web !== 'string') {
         warnings.push('Web should be a string');
@@ -914,6 +967,354 @@ function validateLeadData(lead) {
         errors,
         warnings
     };
+}
+/**
+ * Activity to validate and generate emails for employees found in deep research
+ */
+async function validateAndGenerateEmployeeContactsActivity(options) {
+    console.log(`📧 Starting email validation and generation for ${options.employees.length} employees...`);
+    const validatedEmployees = [];
+    const seenNames = new Set();
+    let emailsGenerated = 0;
+    let emailsValidated = 0;
+    let employeesSkipped = 0;
+    let duplicatesSkipped = 0;
+    let obfuscatedPhonesSkipped = 0;
+    let obfuscatedEmailsSkipped = 0;
+    let deepResearchEmailsCount = 0;
+    let aiGeneratedEmailsCount = 0;
+    try {
+        for (const employeeData of options.employees) {
+            if (!employeeData || typeof employeeData !== 'object' || !employeeData.name) {
+                employeesSkipped++;
+                continue;
+            }
+            const normalizedName = normalizeName(employeeData.name);
+            // Check for duplicate names
+            if (seenNames.has(normalizedName)) {
+                console.log(`🔄 Skipping duplicate employee: ${employeeData.name}`);
+                duplicatesSkipped++;
+                employeesSkipped++;
+                continue;
+            }
+            const telephone = employeeData.telephone || employeeData.phone || null;
+            const email = employeeData.email || null;
+            // Check for obfuscated phone numbers
+            if (telephone && isPhoneObfuscated(telephone)) {
+                console.log(`📞 Skipping employee with obfuscated phone: ${employeeData.name} (${telephone})`);
+                obfuscatedPhonesSkipped++;
+                employeesSkipped++;
+                continue;
+            }
+            // Check for obfuscated email addresses
+            if (email && isEmailObfuscated(email)) {
+                console.log(`📧 Skipping employee with obfuscated email: ${employeeData.name} (${email})`);
+                obfuscatedEmailsSkipped++;
+                employeesSkipped++;
+                continue;
+            }
+            // Email validation and generation
+            let emailVerified = false;
+            let validatedEmail = email;
+            let emailSource = 'deepResearch'; // Default to deepResearch if email exists
+            // If no email, generate one
+            if (!email || email.trim() === '') {
+                console.log(`📧 No email found for ${employeeData.name}, attempting to generate...`);
+                try {
+                    // Extract domain from company website
+                    let domain = '';
+                    if (options.companyInfo?.website) {
+                        try {
+                            const url = new URL(options.companyInfo.website.startsWith('http') ?
+                                options.companyInfo.website : `https://${options.companyInfo.website}`);
+                            domain = url.hostname.replace('www.', '');
+                        }
+                        catch {
+                            domain = options.companyInfo.name.toLowerCase().replace(/\s+/g, '') + '.com';
+                        }
+                    }
+                    else if (options.companyInfo?.name) {
+                        domain = options.companyInfo.name.toLowerCase().replace(/\s+/g, '') + '.com';
+                    }
+                    else {
+                        console.log(`⚠️ No company information available for domain extraction for ${employeeData.name}`);
+                        employeesSkipped++;
+                        continue;
+                    }
+                    const context = `
+            Name: ${employeeData.name}
+            Company: ${options.companyInfo?.name || 'Unknown'}
+            Position: ${employeeData.position || employeeData.job_title || 'Unknown'}
+            Current Email: None
+            Domain: ${domain}
+            Context: Lead generation workflow email generation for employee
+          `.trim();
+                    // Call leadContactGeneration API directly
+                    const response = await apiService_1.apiService.post('/api/agents/dataAnalyst/leadContactGeneration', {
+                        name: employeeData.name,
+                        domain: domain,
+                        context: context,
+                        site_id: options.site_id
+                    });
+                    const emailGenerationResult = {
+                        success: response.success,
+                        email_generation_analysis: response.success ?
+                            (response.data?.data?.email_generation_analysis?.generated_emails ||
+                                response.data?.email_generation_analysis?.generated_emails || []) : [],
+                        error: response.success ? undefined : (response.error?.message || 'Email generation failed')
+                    };
+                    if (emailGenerationResult.success && emailGenerationResult.email_generation_analysis) {
+                        const generatedEmails = emailGenerationResult.email_generation_analysis;
+                        console.log(`🔄 Generated ${generatedEmails.length} potential emails for ${employeeData.name}`);
+                        emailsGenerated += generatedEmails.length;
+                        // Validate each generated email
+                        for (const generatedEmail of generatedEmails) {
+                            console.log(`📧 Validating generated email: ${generatedEmail}`);
+                            // Call email validation API directly
+                            const validationResponse = await apiService_1.apiService.post('/api/agents/tools/validateEmail', {
+                                email: generatedEmail
+                            });
+                            const validationResult = {
+                                success: validationResponse.success,
+                                isValid: validationResponse.success ? (validationResponse.data?.data?.isValid || false) : false,
+                                reason: validationResponse.success ?
+                                    (validationResponse.data?.data?.result || 'Validation completed') :
+                                    (validationResponse.error?.message || 'Validation failed')
+                            };
+                            if (validationResult.success && validationResult.isValid) {
+                                console.log(`✅ Valid email found for ${employeeData.name}: ${generatedEmail}`);
+                                validatedEmail = generatedEmail;
+                                emailVerified = true;
+                                emailSource = 'AI_Generated'; // Mark as AI generated
+                                emailsValidated++;
+                                break;
+                            }
+                            else {
+                                console.log(`❌ Invalid email: ${generatedEmail} (${validationResult.reason})`);
+                            }
+                        }
+                    }
+                    else {
+                        console.log(`❌ Email generation failed for ${employeeData.name}: ${emailGenerationResult.error}`);
+                    }
+                }
+                catch (emailError) {
+                    console.error(`❌ Email generation error for ${employeeData.name}:`, emailError);
+                }
+            }
+            else {
+                // Validate existing email
+                console.log(`📧 Validating existing email for ${employeeData.name}: ${email}`);
+                try {
+                    // Call email validation API directly
+                    const validationResponse = await apiService_1.apiService.post('/api/agents/tools/validateEmail', {
+                        email: email
+                    });
+                    const emailValidationResult = {
+                        success: validationResponse.success,
+                        isValid: validationResponse.success ? (validationResponse.data?.data?.isValid || false) : false,
+                        reason: validationResponse.success ?
+                            (validationResponse.data?.data?.result || 'Validation completed') :
+                            (validationResponse.error?.message || 'Validation failed')
+                    };
+                    if (emailValidationResult.success && emailValidationResult.isValid) {
+                        console.log(`✅ Existing email is valid for ${employeeData.name}: ${email}`);
+                        validatedEmail = email;
+                        emailVerified = true;
+                        emailSource = 'deepResearch'; // Keep as deepResearch since it was valid
+                        emailsValidated++;
+                    }
+                    else {
+                        console.log(`❌ Existing email is invalid for ${employeeData.name}: ${email}, attempting to generate new one...`);
+                        // Try to generate new email if existing one is invalid
+                        try {
+                            // Extract domain from company website
+                            let domain = '';
+                            if (options.companyInfo?.website) {
+                                try {
+                                    const url = new URL(options.companyInfo.website.startsWith('http') ?
+                                        options.companyInfo.website : `https://${options.companyInfo.website}`);
+                                    domain = url.hostname.replace('www.', '');
+                                }
+                                catch {
+                                    domain = options.companyInfo.name.toLowerCase().replace(/\s+/g, '') + '.com';
+                                }
+                            }
+                            else if (options.companyInfo?.name) {
+                                domain = options.companyInfo.name.toLowerCase().replace(/\s+/g, '') + '.com';
+                            }
+                            else {
+                                console.log(`⚠️ No company info for fallback generation for ${employeeData.name}`);
+                                validatedEmail = email; // Keep original invalid email
+                                emailSource = 'deepResearch'; // Keep original source
+                            }
+                            if (domain) {
+                                const context = `
+                  Name: ${employeeData.name}
+                  Company: ${options.companyInfo?.name || 'Unknown'}
+                  Position: ${employeeData.position || employeeData.job_title || 'Unknown'}
+                  Current Email: ${email} (invalid)
+                  Domain: ${domain}
+                  Context: Lead generation workflow email generation for employee (fallback)
+                `.trim();
+                                const fallbackGenerationResult = await apiService_1.apiService.post('/api/agents/dataAnalyst/leadContactGeneration', {
+                                    name: employeeData.name,
+                                    domain: domain,
+                                    context: context,
+                                    site_id: options.site_id
+                                });
+                                const fallbackEmailResult = {
+                                    success: fallbackGenerationResult.success,
+                                    email_generation_analysis: fallbackGenerationResult.success ?
+                                        (fallbackGenerationResult.data?.data?.email_generation_analysis?.generated_emails ||
+                                            fallbackGenerationResult.data?.email_generation_analysis?.generated_emails || []) : [],
+                                    error: fallbackGenerationResult.success ? undefined : (fallbackGenerationResult.error?.message || 'Email generation failed')
+                                };
+                                if (fallbackEmailResult.success && fallbackEmailResult.email_generation_analysis) {
+                                    const fallbackEmails = fallbackEmailResult.email_generation_analysis;
+                                    console.log(`🔄 Generated ${fallbackEmails.length} fallback emails for ${employeeData.name}`);
+                                    emailsGenerated += fallbackEmails.length;
+                                    // Validate each generated email
+                                    for (const fallbackEmail of fallbackEmails) {
+                                        console.log(`📧 Validating fallback email: ${fallbackEmail}`);
+                                        const fallbackValidationResponse = await apiService_1.apiService.post('/api/agents/tools/validateEmail', {
+                                            email: fallbackEmail
+                                        });
+                                        const fallbackValidationResult = {
+                                            success: fallbackValidationResponse.success,
+                                            isValid: fallbackValidationResponse.success ? (fallbackValidationResponse.data?.data?.isValid || false) : false,
+                                            reason: fallbackValidationResponse.success ?
+                                                (fallbackValidationResponse.data?.data?.result || 'Validation completed') :
+                                                (fallbackValidationResponse.error?.message || 'Validation failed')
+                                        };
+                                        if (fallbackValidationResult.success && fallbackValidationResult.isValid) {
+                                            console.log(`✅ Valid fallback email found for ${employeeData.name}: ${fallbackEmail}`);
+                                            validatedEmail = fallbackEmail;
+                                            emailVerified = true;
+                                            emailSource = 'AI_Generated'; // Mark as AI generated (fallback)
+                                            emailsValidated++;
+                                            break;
+                                        }
+                                        else {
+                                            console.log(`❌ Invalid fallback email: ${fallbackEmail} (${fallbackValidationResult.reason})`);
+                                        }
+                                    }
+                                }
+                            }
+                            // If no valid email found via generation, keep original
+                            if (!emailVerified) {
+                                validatedEmail = email; // Keep original invalid email
+                                emailSource = 'deepResearch'; // Keep original source
+                            }
+                        }
+                        catch (fallbackError) {
+                            console.error(`❌ Fallback email generation error for ${employeeData.name}:`, fallbackError);
+                            validatedEmail = email; // Keep original invalid email
+                            emailSource = 'deepResearch'; // Keep original source
+                        }
+                    }
+                }
+                catch (emailError) {
+                    console.error(`❌ Email validation error for ${employeeData.name}:`, emailError);
+                    validatedEmail = email;
+                }
+            }
+            // Add validated employee
+            seenNames.add(normalizedName);
+            const employeeDataResult = {
+                name: employeeData.name,
+                telephone: telephone,
+                email: validatedEmail,
+                company_name: options.companyInfo?.name || employeeData.company?.name || employeeData.company_name || undefined,
+                address: employeeData.address || options.companyInfo?.location || options.companyInfo?.address || null,
+                web: options.companyInfo?.website || employeeData.company?.website || employeeData.web || null,
+                position: employeeData.position || employeeData.job_title || null
+            };
+            // Add metadata if email was verified
+            if (emailVerified) {
+                employeeDataResult.metadata = {
+                    emailVerified: true,
+                    emailVerificationTimestamp: new Date().toISOString(),
+                    emailVerificationWorkflow: 'leadGenerationWorkflow',
+                    emailSource: emailSource // 'deepResearch' or 'AI_Generated'
+                };
+            }
+            else {
+                // Even if not verified, add the source information
+                employeeDataResult.metadata = {
+                    emailVerified: false,
+                    emailVerificationTimestamp: new Date().toISOString(),
+                    emailVerificationWorkflow: 'leadGenerationWorkflow',
+                    emailSource: emailSource // 'deepResearch' or 'AI_Generated'
+                };
+            }
+            // Count by email source
+            if (emailSource === 'deepResearch') {
+                deepResearchEmailsCount++;
+            }
+            else if (emailSource === 'AI_Generated') {
+                aiGeneratedEmailsCount++;
+            }
+            validatedEmployees.push(employeeDataResult);
+        }
+        console.log(`📊 Email validation and generation completed:`);
+        console.log(`   - Total employees processed: ${options.employees.length}`);
+        console.log(`   - Valid employees extracted: ${validatedEmployees.length}`);
+        console.log(`   - Emails generated: ${emailsGenerated}`);
+        console.log(`   - Emails validated: ${emailsValidated}`);
+        console.log(`   - Deep Research emails: ${deepResearchEmailsCount}`);
+        console.log(`   - AI Generated emails: ${aiGeneratedEmailsCount}`);
+        console.log(`   - Employees skipped: ${employeesSkipped}`);
+        if (duplicatesSkipped > 0)
+            console.log(`   - Duplicates skipped: ${duplicatesSkipped}`);
+        if (obfuscatedPhonesSkipped > 0)
+            console.log(`   - Obfuscated phones skipped: ${obfuscatedPhonesSkipped}`);
+        if (obfuscatedEmailsSkipped > 0)
+            console.log(`   - Obfuscated emails skipped: ${obfuscatedEmailsSkipped}`);
+        return {
+            success: true,
+            validatedEmployees,
+            emailsGenerated,
+            emailsValidated,
+            employeesSkipped
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception during employee contact validation:`, errorMessage);
+        return {
+            success: false,
+            validatedEmployees: [],
+            emailsGenerated: 0,
+            emailsValidated: 0,
+            employeesSkipped: options.employees.length,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Helper function to check if phone number is obfuscated
+ */
+function isPhoneObfuscated(phone) {
+    if (!phone)
+        return false;
+    // Check if phone contains asterisks or other obfuscation patterns
+    return phone.includes('*') || phone.includes('xxx') || phone.includes('XXX');
+}
+/**
+ * Helper function to normalize names for duplicate detection
+ */
+function normalizeName(name) {
+    return name.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+/**
+ * Helper function to check if email is obfuscated
+ */
+function isEmailObfuscated(email) {
+    if (!email)
+        return false;
+    // Check if email contains asterisks in the local part (before @)
+    return email.includes('*') && email.includes('@');
 }
 /**
  * Create a single lead in the database
@@ -1007,7 +1408,7 @@ segmentId // Add segment_id parameter
             } : (lead.web ? { website: lead.web } : {}), // Store company info in company jsonb field
             company_id: companyId || null, // Add company_id to lead data
             segment_id: segmentId || null, // Add segment_id to lead data
-            address: lead.address ? { full_address: lead.address } : {}, // Store address exactly as provided
+            address: lead.address || {}, // Store complete address structure as provided
             position: lead.position || null,
             site_id: site_id,
             user_id: userId || null,
@@ -1557,11 +1958,12 @@ function parseGoogleMapsAddress(addressString, targetCity) {
         // Split the address by commas
         const parts = addressString.split(',').map(part => part.trim());
         if (parts.length < 2) {
-            // If we can't parse, just store the full address
+            // If we can't parse, return basic structure with new fields only
             return {
                 full_address: addressString,
-                address1: addressString,
-                city: targetCity || null, // Always use target_city if available
+                street: addressString,
+                external_number: null,
+                internal_number: null
             };
         }
         // Initialize result object
@@ -1612,8 +2014,8 @@ function parseGoogleMapsAddress(addressString, targetCity) {
                 }
             }
         }
-        // ✅ FIXED: Everything BEFORE the zip/city parts goes to address1
-        const address1Parts = [];
+        // ✅ NEW: Extract street address and numbers from the first parts
+        const streetParts = [];
         const maxIndex = Math.max(zipPartIndex, cityPartIndex);
         for (let i = 0; i < Math.min(maxIndex === -1 ? parts.length - 2 : maxIndex, parts.length - 2); i++) {
             // Skip if this is the zip part and we extracted city from elsewhere
@@ -1624,13 +2026,13 @@ function parseGoogleMapsAddress(addressString, targetCity) {
                 if (zipMatch) {
                     const beforeZip = part.substring(0, part.indexOf(zipMatch[0])).trim();
                     if (beforeZip) {
-                        address1Parts.push(beforeZip);
+                        streetParts.push(beforeZip);
                     }
                 }
             }
             else if (i !== cityPartIndex) {
-                // This part goes entirely to address1
-                address1Parts.push(parts[i]);
+                // This part goes entirely to street
+                streetParts.push(parts[i]);
             }
         }
         // Handle city assignment
@@ -1652,20 +2054,38 @@ function parseGoogleMapsAddress(addressString, targetCity) {
                 parsed.city = parts[cityPartIndex];
             }
         }
-        // Build address1 from collected parts
-        if (address1Parts.length > 0) {
-            parsed.address1 = address1Parts.join(', ');
+        // Build street address and extract numbers
+        if (streetParts.length > 0) {
+            const fullStreet = streetParts.join(', ');
+            parsed.street = fullStreet;
+            // Try to extract external and internal numbers from street
+            // Pattern for external number (e.g., "Núm. 171", "No. 123", "123")
+            const externalMatch = fullStreet.match(/(?:núm\.?|no\.?|#)\s*(\d+)/i) ||
+                fullStreet.match(/\b(\d+)\b/);
+            if (externalMatch) {
+                parsed.external_number = externalMatch[1];
+            }
+            // Pattern for internal number (e.g., "int 18", "interior 5", "depto A")
+            const internalMatch = fullStreet.match(/(?:int\.?|interior|depto\.?|dept\.?|apt\.?)\s*([a-zA-Z0-9]+)/i);
+            if (internalMatch) {
+                parsed.internal_number = internalMatch[1];
+            }
         }
+        // Set default null values for missing fields
+        parsed.street = parsed.street || null;
+        parsed.external_number = parsed.external_number || null;
+        parsed.internal_number = parsed.internal_number || null;
         console.log(`🗺️ Parsed address: "${addressString}" → ${JSON.stringify(parsed)}`);
         return parsed;
     }
     catch (error) {
         console.error(`❌ Error parsing address: ${addressString}`, error);
-        // Fallback: return basic structure with target_city
+        // Fallback: return basic structure with new fields only
         return {
             full_address: addressString,
-            address1: addressString,
-            city: targetCity || null,
+            street: addressString,
+            external_number: null,
+            internal_number: null
         };
     }
 }
@@ -1926,14 +2346,30 @@ async function notifyNewLeadsActivity(options) {
                 success: true
             };
         }
+        // Optimize request body by only sending essential data to avoid 414 errors
         const requestBody = {
             site_id: options.site_id,
             names: options.leadNames,
             userId: options.userId,
             timestamp: new Date().toISOString(),
-            ...options.additionalData
+            // Only include essential additionalData to avoid large request bodies
+            source: options.additionalData?.source,
+            workflowStep: options.additionalData?.workflowStep,
+            siteName: options.additionalData?.siteName,
+            siteUrl: options.additionalData?.siteUrl,
+            targetCity: options.additionalData?.targetCity,
+            targetRegion: options.additionalData?.targetRegion,
+            companiesProcessed: options.additionalData?.companiesProcessed,
+            executionTime: options.additionalData?.executionTime,
+            workflowId: options.additionalData?.workflowId
+            // Exclude large objects like businessTypes arrays, regionSearchResult, etc.
         };
-        console.log('📤 Sending new leads notification:', JSON.stringify(requestBody, null, 2));
+        const requestBodySize = JSON.stringify(requestBody).length;
+        console.log(`📤 Sending new leads notification (${requestBodySize} bytes):`, JSON.stringify(requestBody, null, 2));
+        // Warn if request body is getting large
+        if (requestBodySize > 50000) { // 50KB warning threshold
+            console.warn(`⚠️ Large request body detected (${requestBodySize} bytes). This might cause 414 errors.`);
+        }
         const response = await apiService_1.apiService.post('/api/notifications/newLeadsAlert', requestBody);
         if (!response.success) {
             logger_1.logger.error('❌ New leads notification API call failed', {
@@ -1973,6 +2409,8 @@ async function notifyNewLeadsActivity(options) {
  * - 2 venues if free plan but has at least one channel configured
  * - 10 venues for startup plan
  * - 30 venues for enterprise plan
+ *
+ * Note: Limits reduced by 50% due to email validation providing higher quality leads
  */
 async function determineMaxVenuesActivity(options) {
     try {
@@ -2027,23 +2465,23 @@ async function determineMaxVenuesActivity(options) {
         // Check if channels are configured (non-empty object with at least one enabled channel)
         const hasChannels = channels && typeof channels === 'object' && Object.keys(channels).length > 0 &&
             Object.values(channels).some((channel) => channel && typeof channel === 'object' && channel.enabled === true);
-        let maxVenues = 2; // Default for free plan without channels (doubled)
-        // Apply business logic for venue limits (doubled from original values)
+        let maxVenues = 1; // Default for free plan without channels (reduced by half due to email validation quality improvement)
+        // Apply business logic for venue limits (reduced by half due to higher quality validated leads)
         switch (plan.toLowerCase()) {
             case 'free':
             case 'commission': // ✅ Commission plan treated as free plan
-                maxVenues = hasChannels ? 4 : 2;
+                maxVenues = hasChannels ? 2 : 1;
                 break;
             case 'startup':
-                maxVenues = 20;
+                maxVenues = 10;
                 break;
             case 'enterprise':
-                maxVenues = 60;
+                maxVenues = 30;
                 break;
             default:
                 // For any unknown plan, treat as free without channels
-                maxVenues = 2;
-                logger_1.logger.warn('⚠️ Unknown billing plan, defaulting to 2 venues', {
+                maxVenues = 1;
+                logger_1.logger.warn('⚠️ Unknown billing plan, defaulting to 1 venue', {
                     site_id: options.site_id,
                     plan: plan
                 });

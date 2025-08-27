@@ -67,10 +67,7 @@ async function emailCustomerSupportMessageWorkflow(emailData, baseParams) {
         // ✅ Verificar que la llamada a customer support fue exitosa antes de continuar
         if (!response || !response.success) {
             console.error('❌ Customer support message failed:', response?.error || 'Unknown error');
-            return {
-                success: false,
-                error: response?.error || 'Customer support call was not successful'
-            };
+            throw new Error(response?.error || 'Customer support call was not successful');
         }
         console.log('✅ Customer support message sent successfully');
         console.log(`📋 Customer support response:`, JSON.stringify(response.data, null, 2));
@@ -219,10 +216,7 @@ async function emailCustomerSupportMessageWorkflow(emailData, baseParams) {
     }
     catch (error) {
         console.error('❌ Email customer support message workflow failed:', error);
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : String(error)
-        };
+        throw new Error(`Email customer support message workflow failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 /**
@@ -261,10 +255,7 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
             const response = await sendCustomerSupportMessageActivity(messageData, effectiveBaseParams);
             if (!response || !response.success) {
                 console.error('❌ Website chat customer support message failed:', response?.error || 'Unknown error');
-                return {
-                    success: false,
-                    error: response?.error || 'Customer support call was not successful'
-                };
+                throw new Error(response?.error || 'Customer support call was not successful');
             }
             console.log('✅ Website chat customer support message sent successfully');
             console.log(`📋 Customer support response:`, JSON.stringify(response.data, null, 2));
@@ -356,10 +347,7 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
             const response = await sendCustomerSupportMessageActivity(emailDataForCS, effectiveBaseParams);
             if (!response || !response.success) {
                 console.error('❌ WhatsApp customer support message failed:', response?.error || 'Unknown error');
-                return {
-                    success: false,
-                    error: response?.error || 'Customer support call was not successful'
-                };
+                throw new Error(response?.error || 'Customer support call was not successful');
             }
             console.log('✅ WhatsApp customer support message sent successfully');
             console.log(`📋 Customer support response:`, JSON.stringify(response.data, null, 2));
@@ -504,9 +492,6 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
     }
     catch (error) {
         console.error('❌ Customer support workflow failed:', error);
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : String(error)
-        };
+        throw new Error(`Customer support workflow failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }

@@ -47,6 +47,26 @@ function extractScheduleId(info) {
     console.log(`⚠️ No schedule ID found in workflow info - likely manual execution or child workflow`);
     return 'manual-execution';
 }
+/**
+ * Determine the effective schedule ID for tracking purposes
+ * Uses passed scheduleId parameter if available, otherwise tries to extract from workflow info
+ */
+function getEffectiveScheduleId(options, workflowInfo) {
+    // Priority 1: Use passed scheduleId from parent workflow
+    if (options.scheduleId) {
+        console.log(`✅ Using scheduleId from parent workflow: ${options.scheduleId}`);
+        return options.scheduleId;
+    }
+    // Priority 2: Try to extract from workflow info (for direct schedule executions)
+    const extractedScheduleId = extractScheduleId(workflowInfo);
+    // Priority 3: If this is a child workflow, create a descriptive identifier
+    if (extractedScheduleId === 'manual-execution' && options.parentWorkflowType) {
+        const childScheduleId = `child-of-${options.parentWorkflowType}`;
+        console.log(`📋 Child workflow detected - using identifier: ${childScheduleId}`);
+        return childScheduleId;
+    }
+    return extractedScheduleId;
+}
 function generateCompanyStructure(existingCompany) {
     return {
         // Basic required fields
@@ -126,23 +146,15 @@ function generateCompanyStructure(existingCompany) {
 async function deepResearchWorkflow(options) {
     const { site_id, research_topic } = options;
     if (!site_id) {
-        return {
-            success: false,
-            data: null,
-            error: 'No site ID provided'
-        };
+        throw new Error('No site ID provided');
     }
     if (!research_topic) {
-        return {
-            success: false,
-            data: null,
-            error: 'No research topic provided'
-        };
+        throw new Error('No research topic provided');
     }
     // Get REAL workflow information from Temporal
     const workflowInfo_real = (0, workflow_1.workflowInfo)();
     const realWorkflowId = workflowInfo_real.workflowId;
-    const realScheduleId = extractScheduleId(workflowInfo_real);
+    const realScheduleId = getEffectiveScheduleId(options, workflowInfo_real);
     const startTime = Date.now();
     console.log(`🔬 Starting deep research workflow for topic "${research_topic}" on site ${site_id}`);
     console.log(`📋 Options:`, JSON.stringify(options, null, 2));
@@ -713,37 +725,6 @@ async function deepResearchWorkflow(options) {
             input: options,
             error: errorMessage,
         });
-        // Prepare flattened error result data
-        const errorResearchAnalysis = research_analysis || {
-            success: false,
-            error: errorMessage,
-            site_id: site_id,
-            research_topic: research_topic,
-            deliverables: enhancedDeliverables || options.deliverables,
-            timestamp: new Date().toISOString(),
-            fallback: false
-        };
-        // Check if any operations completed in fallback mode before the error
-        const hadFallbackOperations = operationResults.some(result => result.fallback || false);
-        const errorData = {
-            // Spread error research analysis content directly at root level
-            ...errorResearchAnalysis,
-            // Keep deliverables at top level for consistency
-            // Use the deliverables from errorResearchAnalysis (which already contains appropriate deliverables)
-            deliverables: errorResearchAnalysis?.deliverables || enhancedDeliverables || options.deliverables,
-            // Add execution metadata
-            execution_time: `${((Date.now() - startTime) / 1000).toFixed(2)}s`,
-            completed_at: new Date().toISOString(),
-            // Add fallback information
-            workflow_fallback_mode: hadFallbackOperations,
-            fallback_operations: operationResults.filter(result => result.fallback).length,
-            api_status: 'error',
-            error_stage: research_analysis ? 'post_analysis' : 'pre_analysis'
-        };
-        return {
-            success: false,
-            data: errorData,
-            error: errorMessage
-        };
+        throw new Error(`Deep research workflow failed: ${errorMessage}`);
     }
 }

@@ -2,12 +2,21 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildCampaignsWorkflow = buildCampaignsWorkflow;
 const workflow_1 = require("@temporalio/workflow");
-// Configure activity options - Each activity has 5 minutes to complete
-const { createCampaignsActivity, createCampaignRequirementsActivity, getSiteActivity, getSegmentsActivity } = (0, workflow_1.proxyActivities)({
-    startToCloseTimeout: '5 minutes', // Each activity has 5 minutes maximum execution time
-    retry: {
-        maximumAttempts: 3,
-    },
+const timeouts_1 = require("../config/timeouts");
+// Configure critical activities with standard retry policy
+const { getSiteActivity, getSegmentsActivity } = (0, workflow_1.proxyActivities)({
+    startToCloseTimeout: timeouts_1.ACTIVITY_TIMEOUTS.DEFAULT,
+    retry: timeouts_1.RETRY_POLICIES.DEFAULT,
+});
+// Configure campaign activities with retry policy for critical campaign creation
+const { createCampaignsActivity } = (0, workflow_1.proxyActivities)({
+    startToCloseTimeout: timeouts_1.ACTIVITY_TIMEOUTS.DEFAULT,
+    retry: timeouts_1.RETRY_POLICIES.DEFAULT, // Enable retries for campaign creation
+});
+// Configure non-critical campaign requirements with no retry policy
+const { createCampaignRequirementsActivity } = (0, workflow_1.proxyActivities)({
+    startToCloseTimeout: timeouts_1.ACTIVITY_TIMEOUTS.DEFAULT,
+    retry: timeouts_1.RETRY_POLICIES.NO_RETRY, // No retries for campaign requirements creation
 });
 /**
  * Build Campaigns Workflow
@@ -24,12 +33,7 @@ async function buildCampaignsWorkflow(params) {
     if (!siteId) {
         const errorMessage = 'Site ID is required but not provided';
         console.error(`❌ ${errorMessage}`);
-        return {
-            success: false,
-            processed: false,
-            reason: 'Invalid parameters',
-            error: errorMessage
-        };
+        throw new Error(errorMessage);
     }
     try {
         // 1. Validate site exists and get site information
@@ -42,12 +46,7 @@ async function buildCampaignsWorkflow(params) {
             if (siteResult.error === 'Site not found') {
                 throw new Error(`Site ${siteId} not found`);
             }
-            return {
-                success: false,
-                processed: false,
-                reason: 'Site validation failed',
-                error: siteResult.error || 'Site validation failed'
-            };
+            throw new Error(siteResult.error || 'Site validation failed');
         }
         if (!siteResult.site) {
             const errorMessage = `Site ${siteId} data is invalid or empty`;
@@ -93,45 +92,50 @@ async function buildCampaignsWorkflow(params) {
             }
         };
         console.log('📋 Final campaign request:', JSON.stringify(campaignRequest, null, 2));
+        // Create campaigns - this is now a critical operation with retries
+        console.log('🚀 Creating campaigns (critical operation with retries)...');
         const campaignResult = await createCampaignsActivity(campaignRequest);
         if (!campaignResult.success) {
-            console.error('❌ Campaign creation failed:', campaignResult.error);
-            return {
-                success: false,
-                processed: true,
-                reason: 'Campaign creation failed',
-                error: campaignResult.error,
-                siteInfo: siteResult.site,
-                segmentsUsed
-            };
+            const errorMessage = `Campaign creation failed: ${campaignResult.error}`;
+            console.error(`❌ ${errorMessage}`);
+            throw new Error(errorMessage);
         }
         console.log('✅ Campaigns created successfully');
         console.log(`📈 Campaign result:`, JSON.stringify(campaignResult.campaign, null, 2));
-        // 4. Create campaign requirements using the same parameters
-        console.log('📋 Creating campaign requirements...');
-        const requirementsResult = await createCampaignRequirementsActivity(campaignRequest);
-        if (!requirementsResult.success) {
-            console.error('❌ Campaign requirements creation failed:', requirementsResult.error);
-            return {
-                success: false,
-                processed: true,
-                reason: 'Campaign requirements creation failed',
-                error: requirementsResult.error,
-                campaign: campaignResult.campaign,
-                siteInfo: siteResult.site,
-                segmentsUsed
-            };
+        // Try to create campaign requirements - non-critical operation
+        let requirementsResult;
+        let requirementsCreated = false;
+        try {
+            console.log('📋 Creating campaign requirements...');
+            requirementsResult = await createCampaignRequirementsActivity(campaignRequest);
+            if (requirementsResult.success) {
+                console.log('✅ Campaign requirements created successfully');
+                console.log(`📋 Requirements result:`, JSON.stringify(requirementsResult.requirements, null, 2));
+                requirementsCreated = true;
+            }
+            else {
+                console.warn('⚠️ Campaign requirements creation failed (non-critical):', requirementsResult.error);
+            }
         }
-        console.log('✅ Campaign requirements created successfully');
-        console.log(`📋 Requirements result:`, JSON.stringify(requirementsResult.requirements, null, 2));
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.warn('⚠️ Campaign requirements creation threw error (non-critical):', errorMessage);
+        }
+        // Build final result - campaigns creation is now critical, requirements are optional
+        const warnings = [];
+        if (!requirementsCreated) {
+            warnings.push('Campaign requirements creation failed');
+        }
+        const warningMessage = warnings.length > 0 ? ` (warnings: ${warnings.join(', ')})` : '';
         return {
-            success: true,
+            success: true, // Success because campaigns were created successfully
             processed: true,
-            reason: 'Campaigns and requirements created successfully',
+            reason: `Workflow completed successfully${warningMessage}`,
             campaign: campaignResult.campaign,
-            requirements: requirementsResult.requirements,
+            requirements: requirementsCreated ? requirementsResult?.requirements : undefined,
             siteInfo: siteResult.site,
-            segmentsUsed
+            segmentsUsed,
+            warnings: warnings.length > 0 ? warnings : undefined
         };
     }
     catch (error) {
