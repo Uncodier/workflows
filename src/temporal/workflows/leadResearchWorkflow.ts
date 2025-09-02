@@ -119,6 +119,7 @@ async function validateAndGenerateEmails(
     } else {
       console.log(`❌ Existing email is invalid: ${leadEmail}`);
       console.log(`🔍 Reason: ${emailValidationResult.reason}`);
+      console.log(`📊 Full validation result:`, JSON.stringify(emailValidationResult, null, 2));
     }
   }
 
@@ -208,6 +209,7 @@ async function validateAndGenerateEmails(
       return { success: true, validEmail: email };
     } else {
       console.log(`❌ Invalid email: ${email} (${validationResult.reason})`);
+      console.log(`📊 Full validation result:`, JSON.stringify(validationResult, null, 2));
     }
   }
 

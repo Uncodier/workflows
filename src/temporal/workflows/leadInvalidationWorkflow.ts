@@ -11,6 +11,7 @@ const {
   invalidateReferredLeads,
   findLeadsBySharedContactActivity,
   updateTaskStatusToCompletedActivity,
+  deleteLeadConversationsActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '3 minutes', // Reasonable timeout for lead invalidation
   retry: {
@@ -40,6 +41,9 @@ export interface LeadInvalidationResult {
   errors: string[];
   executionTime: string;
   completedAt: string;
+  conversationsDeleted?: number;      // Number of conversations deleted during hard invalidation
+  messagesDeleted?: number;           // Number of messages deleted during hard invalidation
+  hardInvalidation?: boolean;         // Whether this was a hard invalidation (no alternative contact)
 }
 
 /**
@@ -49,8 +53,9 @@ export interface LeadInvalidationResult {
  * 1. Gets the lead information from database
  * 2. Checks if lead has alternative contact methods
  * 3. If no alternative contact, removes site_id and adds invalidation metadata
- * 4. Finds other leads sharing the same failed contact information
- * 5. Invalidates shared leads and adds metadata for revalidation
+ * 4. For hard invalidation (no alternative contact), deletes all conversations and messages
+ * 5. Finds other leads sharing the same failed contact information
+ * 6. Invalidates shared leads and adds metadata for revalidation
  * 
  * @param options - Configuration options for lead invalidation
  */
@@ -109,6 +114,8 @@ export async function leadInvalidationWorkflow(
   let sharedContactLeads: string[] = [];
   let invalidatedSharedLeads = 0;
   let originalSiteId = site_id;
+  let conversationsDeleted = 0;
+  let messagesDeleted = 0;
 
   try {
     console.log(`👤 Step 1: Getting lead information for ${lead_id}...`);
@@ -158,6 +165,41 @@ export async function leadInvalidationWorkflow(
       leadInvalidated = true;
       console.log(`✅ Lead ${lead_id} invalidated successfully`);
       console.log(`📝 site_id removed and invalidation metadata added`);
+      
+      // Step 2a: Delete conversations if this is a hard invalidation (no alternative contact methods)
+      if (!hasAlternative) {
+        console.log(`🗑️ Step 2a: Hard invalidation detected - deleting conversations for lead with no contact methods...`);
+        console.log(`📋 Lead has no alternative contact methods, cleaning up conversation data`);
+        
+        try {
+          const conversationCleanupResult = await deleteLeadConversationsActivity({
+            lead_id: lead_id,
+            site_id: originalSiteId,
+            reason: `hard_invalidation_${reason}`
+          });
+          
+          if (conversationCleanupResult.success) {
+            conversationsDeleted = conversationCleanupResult.conversations_deleted;
+            messagesDeleted = conversationCleanupResult.messages_deleted;
+            console.log(`✅ Conversation cleanup completed successfully:`);
+            console.log(`   - Conversations deleted: ${conversationsDeleted}`);
+            console.log(`   - Messages deleted: ${messagesDeleted}`);
+            console.log(`   - Reason: No valid contact methods available`);
+          } else {
+            const errorMsg = `Failed to cleanup conversations: ${conversationCleanupResult.error}`;
+            console.error(`⚠️ ${errorMsg}`);
+            errors.push(errorMsg);
+            // Note: We don't throw here as the invalidation was successful
+          }
+        } catch (cleanupError) {
+          const cleanupErrorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+          console.error(`⚠️ Exception during conversation cleanup: ${cleanupErrorMessage}`);
+          errors.push(`Conversation cleanup exception: ${cleanupErrorMessage}`);
+          // Note: We don't throw here as the invalidation was successful
+        }
+      } else {
+        console.log(`ℹ️ Lead has alternative contact methods - preserving conversation data for potential future use`);
+      }
     } else {
       const errorMsg = `Failed to invalidate lead: ${invalidationResult.error}`;
       console.error(`❌ ${errorMsg}`);
@@ -275,7 +317,10 @@ export async function leadInvalidationWorkflow(
       reason,
       errors,
       executionTime,
-      completedAt: new Date().toISOString()
+      completedAt: new Date().toISOString(),
+      conversationsDeleted,
+      messagesDeleted,
+      hardInvalidation: !hasAlternative
     };
 
     // Step 4: Delete initial task regardless of outcome
@@ -365,6 +410,9 @@ export async function leadInvalidationWorkflow(
 
     console.log(`🎉 Lead invalidation workflow completed successfully!`);
     console.log(`📊 Summary: Lead ${lead_id} - Invalidated: ${leadInvalidated}, Shared leads: ${invalidatedSharedLeads}`);
+    if (conversationsDeleted > 0 || messagesDeleted > 0) {
+      console.log(`🗑️ Conversation cleanup: ${conversationsDeleted} conversations, ${messagesDeleted} messages deleted (hard invalidation)`);
+    }
     console.log(`⏱️ Execution time: ${executionTime}`);
 
     // Update cron status to indicate successful completion

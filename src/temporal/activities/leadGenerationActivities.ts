@@ -1330,13 +1330,20 @@ export async function validateAndGenerateEmployeeContactsActivity(
                 email: generatedEmail 
               });
 
+              // The API response structure is: { success: true, data: { isValid: false, result: "invalid", ... } }
+              // So we access data.isValid directly
+              const isValid = validationResponse.data?.isValid || false;
+              const result = validationResponse.data?.result || 'unknown';
+              
+              console.log(`🔍 Parsed validation data for ${generatedEmail}: isValid=${isValid}, result=${result}`);
+              
               const validationResult = {
                 success: validationResponse.success,
-                isValid: validationResponse.success ? (validationResponse.data?.data?.isValid || false) : false,
-                reason: validationResponse.success ? 
-                  (validationResponse.data?.data?.result || 'Validation completed') :
-                  (validationResponse.error?.message || 'Validation failed')
+                isValid,
+                reason: validationResponse.success ? result : (validationResponse.error?.message || 'Validation failed')
               };
+              
+              console.log(`📊 Validation result for ${generatedEmail}:`, JSON.stringify(validationResult, null, 2));
 
               if (validationResult.success && validationResult.isValid) {
                 console.log(`✅ Valid email found for ${employeeData.name}: ${generatedEmail}`);
@@ -1365,13 +1372,20 @@ export async function validateAndGenerateEmployeeContactsActivity(
             email: email 
           });
 
+          // The API response structure is: { success: true, data: { isValid: false, result: "invalid", ... } }
+          // So we access data.isValid directly
+          const isValid = validationResponse.data?.isValid || false;
+          const result = validationResponse.data?.result || 'unknown';
+          
+          console.log(`🔍 Parsed email validation data for ${employeeData.name}: isValid=${isValid}, result=${result}`);
+          
           const emailValidationResult = {
             success: validationResponse.success,
-            isValid: validationResponse.success ? (validationResponse.data?.data?.isValid || false) : false,
-            reason: validationResponse.success ? 
-              (validationResponse.data?.data?.result || 'Validation completed') :
-              (validationResponse.error?.message || 'Validation failed')
+            isValid,
+            reason: validationResponse.success ? result : (validationResponse.error?.message || 'Validation failed')
           };
+          
+          console.log(`📊 Email validation result for ${employeeData.name}:`, JSON.stringify(emailValidationResult, null, 2));
 
           if (emailValidationResult.success && emailValidationResult.isValid) {
             console.log(`✅ Existing email is valid for ${employeeData.name}: ${email}`);
@@ -1440,13 +1454,20 @@ export async function validateAndGenerateEmployeeContactsActivity(
                       email: fallbackEmail 
                     });
 
+                    // The API response structure is: { success: true, data: { isValid: false, result: "invalid", ... } }
+                    // So we access data.isValid directly
+                    const isValid = fallbackValidationResponse.data?.isValid || false;
+                    const result = fallbackValidationResponse.data?.result || 'unknown';
+                    
+                    console.log(`🔍 Parsed fallback validation data for ${fallbackEmail}: isValid=${isValid}, result=${result}`);
+                    
                     const fallbackValidationResult = {
                       success: fallbackValidationResponse.success,
-                      isValid: fallbackValidationResponse.success ? (fallbackValidationResponse.data?.data?.isValid || false) : false,
-                      reason: fallbackValidationResponse.success ? 
-                        (fallbackValidationResponse.data?.data?.result || 'Validation completed') :
-                        (fallbackValidationResponse.error?.message || 'Validation failed')
+                      isValid,
+                      reason: fallbackValidationResponse.success ? result : (fallbackValidationResponse.error?.message || 'Validation failed')
                     };
+                    
+                    console.log(`📊 Fallback validation result for ${fallbackEmail}:`, JSON.stringify(fallbackValidationResult, null, 2));
 
                     if (fallbackValidationResult.success && fallbackValidationResult.isValid) {
                       console.log(`✅ Valid fallback email found for ${employeeData.name}: ${fallbackEmail}`);

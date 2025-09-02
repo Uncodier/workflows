@@ -147,28 +147,55 @@ export async function validateContactInformation(request: {
       };
     }
     
-    // Handle the new API response structure
+    // Handle the API response structure
     const data = response.data;
     console.log(`✅ Email validation response:`, data);
     console.log(`🔍 Full API response structure:`, JSON.stringify(response, null, 2));
     
-    const isValid = data.isValid || false;
+    // The API response structure is: { success: true, data: { isValid: false, result: "invalid", ... } }
+    // So we access data.isValid directly
+    const isValid = data?.isValid || false;
+    const result = data?.result || 'unknown';
+    const flags = data?.flags || [];
+    const suggested_correction = data?.suggested_correction;
+    const execution_time = data?.execution_time;
+    const message = data?.message;
+    
+    console.log(`🔍 Parsed validation data: isValid=${isValid}, result=${result}, flags=${JSON.stringify(flags)}`);
+    
     const hasWhatsApp = phone && phone.trim() !== '';
     
     console.log(`📊 Validation result: isValid=${isValid}, hasWhatsApp=${hasWhatsApp}`);
+    console.log(`📊 Validation details: result=${result}, flags=${JSON.stringify(flags)}`);
     
-    return {
+    const returnResult: {
+      success: boolean;
+      isValid: boolean;
+      result?: string;
+      flags?: string[];
+      suggested_correction?: string;
+      execution_time?: number;
+      message?: string;
+      error?: string;
+      shouldProceed: boolean;
+      validationType: 'email' | 'whatsapp' | 'none';
+      reason?: string;
+    } = {
       success: true,
       isValid,
-      result: data.result,
-      flags: data.flags,
-      suggested_correction: data.suggested_correction,
-      execution_time: data.execution_time,
-      message: data.message,
+      result,
+      flags,
+      suggested_correction,
+      execution_time,
+      message,
       shouldProceed: isValid, // Only proceed if valid
-      validationType: 'email',
-      reason: isValid ? 'Email is valid' : `Email is invalid (${data.result || 'unknown'})`
+      validationType: 'email' as const,
+      reason: isValid ? 'Email is valid' : `Email is invalid (${result})`
     };
+    
+    console.log(`📤 Returning validation result:`, JSON.stringify(returnResult, null, 2));
+    
+    return returnResult;
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
