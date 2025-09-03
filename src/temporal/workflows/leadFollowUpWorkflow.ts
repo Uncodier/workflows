@@ -210,6 +210,7 @@ export async function leadFollowUpWorkflow(
   const startTime = Date.now();
   
   console.log(`📞 Starting lead follow-up workflow for lead ${lead_id} on site ${site_id}`);
+  console.log(`📋 Workflow version: v2.1 - Email validation with site WhatsApp check`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
 
   // Log workflow execution start

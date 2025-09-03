@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "build:all": "npm run build && npx tsc --project worker.tsconfig.json",
+    "build": "echo '🚀 Building version:' && git log --oneline -1 && next build",
+    "build:all": "echo '🚀 Building version:' && git log --oneline -1 && npm run build && npx tsc --project worker.tsconfig.json",
     "start": "next start",
     "lint": "next lint",
     "start-worker": "npx tsx src/scripts/start-worker.ts",

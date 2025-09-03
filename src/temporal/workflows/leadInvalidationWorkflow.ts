@@ -2,6 +2,8 @@ import { proxyActivities, startChild } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { leadFollowUpWorkflow, type LeadFollowUpOptions } from './leadFollowUpWorkflow';
 
+// Force worker restart - v2.0
+
 // Define the activity interface and options
 const { 
   logWorkflowExecutionActivity,

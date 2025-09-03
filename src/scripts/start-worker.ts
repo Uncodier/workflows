@@ -5,6 +5,18 @@ const { logger } = require('../lib/logger');
 
 // Log environment info
 console.log('=== Start Worker Script Initiated ===');
+
+// Log version information
+try {
+  const { execSync } = require('child_process');
+  const gitCommit = execSync('git log --oneline -1', { encoding: 'utf8' }).trim();
+  console.log(`🚀 Worker starting with version: ${gitCommit}`);
+  logger.info(`Worker version: ${gitCommit}`);
+} catch (error) {
+  console.log('⚠️ Could not determine git version');
+  logger.warn('Could not determine git version', { error: error.message });
+}
+
 logger.info('Starting Temporal worker...');
 logger.debug('Environment configuration', {
   temporalServer: process.env.TEMPORAL_SERVER_URL,
