@@ -210,7 +210,7 @@ export async function leadFollowUpWorkflow(
   const startTime = Date.now();
   
   console.log(`📞 Starting lead follow-up workflow for lead ${lead_id} on site ${site_id}`);
-  console.log(`📋 Workflow version: v2.1 - Email validation with site WhatsApp check`);
+  console.log(`📋 Workflow version: v0.2.0 - Email deliverable validation`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
 
   // Log workflow execution start
@@ -359,7 +359,7 @@ export async function leadFollowUpWorkflow(
     
     // Handle specific early validation results that require immediate action
     if (earlyValidationResult.validationType === 'email' && !earlyValidationResult.isValid && earlyValidationResult.success) {
-      console.log(`🚫 Email validation failed in early validation`);
+      console.log(`🚫 Email validation failed in early validation (invalid or not deliverable)`);
       console.log(`📧 Email value: ${leadEmail || 'null/undefined'}`);
       console.log(`📋 Reason: ${earlyValidationResult.reason}`);
       
@@ -389,7 +389,7 @@ export async function leadFollowUpWorkflow(
         const invalidationOptions: LeadInvalidationOptions = {
           lead_id: lead_id,
           site_id: site_id,
-          reason: 'invalid_email',
+          reason: 'invalid_email', // This covers both invalid and non-deliverable emails
           email: leadEmail,
           userId: options.userId || site.user_id
         };
@@ -429,7 +429,7 @@ export async function leadFollowUpWorkflow(
           nextSteps: [],
           data: null,
           messageSent: undefined,
-          errors: [...errors, 'Lead invalidated due to invalid email and no WhatsApp available (early validation)'],
+          errors: [...errors, 'Lead invalidated due to invalid/non-deliverable email and no WhatsApp available (early validation)'],
           executionTime,
           completedAt: new Date().toISOString()
         };
@@ -459,8 +459,8 @@ export async function leadFollowUpWorkflow(
         console.log(`📱✅ Both lead and site have WhatsApp available - invalidating only email but continuing with WhatsApp workflow`);
         
         if (leadEmail) {
-          // Email exists but is invalid, invalidate it
-          console.log(`📧🚫 Email invalid but WhatsApp available - invalidating only email field...`);
+          // Email exists but is invalid or not deliverable, invalidate it
+          console.log(`📧🚫 Email invalid or not deliverable but WhatsApp available - invalidating only email field...`);
           
           const emailInvalidationResult = await invalidateEmailOnlyActivity({
             lead_id: lead_id,
@@ -488,7 +488,7 @@ export async function leadFollowUpWorkflow(
     
     // If API worked but we shouldn't proceed, complete successfully after invalidation
     if (!earlyValidationResult.shouldProceed) {
-      console.log(`✅ Contact validation API worked but email is invalid - completing workflow after successful invalidation`);
+      console.log(`✅ Contact validation API worked but email is invalid or not deliverable - completing workflow after successful invalidation`);
       console.log(`📋 Validation details:`);
       console.log(`   - Type: ${earlyValidationResult.validationType}`);
       console.log(`   - Valid: ${earlyValidationResult.isValid}`);
@@ -502,7 +502,7 @@ export async function leadFollowUpWorkflow(
       // Complete workflow successfully since validation API worked correctly
       const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
       
-      console.log(`🎉 Lead follow-up workflow completed successfully after contact validation (invalid email, no alternative contact)`);
+      console.log(`🎉 Lead follow-up workflow completed successfully after contact validation (invalid/non-deliverable email, no alternative contact)`);
       console.log(`📊 Summary: Lead ${lead_id} validation completed for ${siteName} in ${executionTime}`);
 
       // Update cron status to indicate successful completion

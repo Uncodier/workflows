@@ -1372,17 +1372,24 @@ export async function validateAndGenerateEmployeeContactsActivity(
             email: email 
           });
 
-          // The API response structure is: { success: true, data: { isValid: false, result: "invalid", ... } }
-          // So we access data.isValid directly
+          // The API response structure is: { success: true, data: { isValid: false, deliverable: false, result: "invalid", ... } }
+          // So we access data.isValid and data.deliverable directly
           const isValid = validationResponse.data?.isValid || false;
+          const deliverable = validationResponse.data?.deliverable !== undefined ? validationResponse.data?.deliverable : true;
           const result = validationResponse.data?.result || 'unknown';
           
-          console.log(`🔍 Parsed email validation data for ${employeeData.name}: isValid=${isValid}, result=${result}`);
+          console.log(`🔍 Parsed email validation data for ${employeeData.name}: isValid=${isValid}, deliverable=${deliverable}, result=${result}`);
+          
+          // Email is considered invalid if either isValid is false OR deliverable is false
+          const shouldTreatAsInvalid = !isValid || !deliverable;
+          console.log(`🔍 Email treatment for ${employeeData.name}: shouldTreatAsInvalid=${shouldTreatAsInvalid} (isValid=${isValid}, deliverable=${deliverable})`);
           
           const emailValidationResult = {
             success: validationResponse.success,
-            isValid,
-            reason: validationResponse.success ? result : (validationResponse.error?.message || 'Validation failed')
+            isValid: !shouldTreatAsInvalid,
+            reason: validationResponse.success ? 
+              (!shouldTreatAsInvalid ? 'Email is valid and deliverable' : `Email ${!isValid ? 'invalid' : 'valid but not deliverable'} (${result})`) : 
+              (validationResponse.error?.message || 'Validation failed')
           };
           
           console.log(`📊 Email validation result for ${employeeData.name}:`, JSON.stringify(emailValidationResult, null, 2));

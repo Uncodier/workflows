@@ -105,7 +105,7 @@ async function validateAndGenerateEmails(
     });
 
     if (emailValidationResult.success && emailValidationResult.isValid) {
-      console.log(`✅ Existing email is valid: ${leadEmail}`);
+      console.log(`✅ Existing email is valid and deliverable: ${leadEmail}`);
       
       // Mark email as verified
       await updateLeadEmailVerificationActivity({
@@ -117,7 +117,7 @@ async function validateAndGenerateEmails(
 
       return { success: true, validEmail: leadEmail };
     } else {
-      console.log(`❌ Existing email is invalid: ${leadEmail}`);
+      console.log(`❌ Existing email is invalid or not deliverable: ${leadEmail}`);
       console.log(`🔍 Reason: ${emailValidationResult.reason}`);
       console.log(`📊 Full validation result:`, JSON.stringify(emailValidationResult, null, 2));
     }
