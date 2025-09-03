@@ -152,27 +152,27 @@ export async function validateContactInformation(request: {
     console.log(`✅ Email validation response:`, data);
     console.log(`🔍 Full API response structure:`, JSON.stringify(response, null, 2));
     
-    const isValid = data.isValid || false;
-    const deliverable = data.deliverable !== undefined ? data.deliverable : true; // Default to true if not provided
+    const isValid = Boolean(data.isValid); // Ensure proper boolean conversion
+    const deliverable = data.deliverable !== undefined ? Boolean(data.deliverable) : true; // Default to true if not provided
     const hasWhatsApp = Boolean(phone && phone.trim() !== ''); // Ensure boolean type
     
     console.log(`📊 Validation result: isValid=${isValid}, deliverable=${deliverable}, hasWhatsApp=${hasWhatsApp}`);
     
-    // Email is considered invalid if either isValid is false OR deliverable is false
-    const shouldTreatAsInvalid = !isValid || !deliverable;
-    console.log(`🔍 Email treatment: shouldTreatAsInvalid=${shouldTreatAsInvalid} (isValid=${isValid}, deliverable=${deliverable})`);
+    // SIMPLE RULE: If both isValid AND deliverable are true, always pass
+    const emailIsGood = isValid && deliverable;
+    console.log(`🔍 Email decision: emailIsGood=${emailIsGood} (isValid=${isValid} AND deliverable=${deliverable})`);
     
     return {
       success: true,
-      isValid: !shouldTreatAsInvalid, // Return false if email should be treated as invalid
+      isValid: emailIsGood, // Simple: true only if both isValid AND deliverable are true
       result: data.result,
       flags: data.flags,
       suggested_correction: data.suggested_correction,
       execution_time: data.execution_time,
       message: data.message,
-      shouldProceed: !shouldTreatAsInvalid || hasWhatsApp, // Proceed if email is valid AND deliverable OR we have WhatsApp as backup
+      shouldProceed: emailIsGood || hasWhatsApp, // Proceed if email is good OR we have WhatsApp as backup
       validationType: 'email',
-      reason: !shouldTreatAsInvalid ? 
+      reason: emailIsGood ? 
         'Email is valid and deliverable' : 
         (hasWhatsApp ? `Email ${!isValid ? 'invalid' : 'valid but not deliverable'} but WhatsApp available as backup` : `Email ${!isValid ? 'invalid' : 'valid but not deliverable'} and no WhatsApp backup`)
     };
