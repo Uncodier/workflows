@@ -130,7 +130,10 @@ export async function validateContactInformation(request: {
   }
   
   // Proceed with email validation
-  console.log(`📧 Validating email: ${email}`);
+  const timestamp = new Date().toISOString();
+  const callId = Math.random().toString(36).substring(7);
+  console.log(`📧 [${callId}] Validating email: ${email} at ${timestamp}`);
+  console.log(`📧 [${callId}] Called from leadId: ${leadId}`);
   
   try {
     const response = await apiService.post('/api/agents/tools/validateEmail', { email });
@@ -149,25 +152,42 @@ export async function validateContactInformation(request: {
     
     // Handle the new API response structure
     const data = response.data;
-    console.log(`✅ Email validation response:`, data);
-    console.log(`🔍 Full API response structure:`, JSON.stringify(response, null, 2));
+    console.log(`✅ [${callId}] Email validation response:`, data);
+    console.log(`🔍 [${callId}] Full API response structure:`, JSON.stringify(response, null, 2));
     
+    // Check both isValid AND deliverable for proper email validation
     const isValid = data.isValid || false;
+    const isDeliverable = data.deliverable !== false; // Default to true if not specified, false if explicitly false
+    const isEmailUsable = isValid && isDeliverable;
     const hasWhatsApp = phone && phone.trim() !== '';
     
-    console.log(`📊 Validation result: isValid=${isValid}, hasWhatsApp=${hasWhatsApp}`);
+    console.log(`📊 [${callId}] Validation result: isValid=${isValid}, deliverable=${isDeliverable}, usable=${isEmailUsable}, hasWhatsApp=${hasWhatsApp}`);
+    
+    // Determine reason based on validation results
+    let reason: string;
+    if (isEmailUsable) {
+      reason = 'Email is valid and deliverable';
+    } else if (!isValid && !isDeliverable) {
+      reason = `Email is invalid and not deliverable (${data.result || 'unknown'})`;
+    } else if (!isValid) {
+      reason = `Email is invalid (${data.result || 'unknown'})`;
+    } else if (!isDeliverable) {
+      reason = `Email is not deliverable (${data.result || 'unknown'})`;
+    } else {
+      reason = `Email validation failed (${data.result || 'unknown'})`;
+    }
     
     return {
       success: true,
-      isValid,
+      isValid: isEmailUsable, // Return true only if both valid AND deliverable
       result: data.result,
       flags: data.flags,
       suggested_correction: data.suggested_correction,
       execution_time: data.execution_time,
       message: data.message,
-      shouldProceed: isValid, // Only proceed if valid
+      shouldProceed: isEmailUsable, // Only proceed if email is both valid AND deliverable
       validationType: 'email',
-      reason: isValid ? 'Email is valid' : `Email is invalid (${data.result || 'unknown'})`
+      reason: reason
     };
     
   } catch (error) {
