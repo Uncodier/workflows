@@ -152,29 +152,22 @@ export async function validateContactInformation(request: {
     console.log(`✅ Email validation response:`, data);
     console.log(`🔍 Full API response structure:`, JSON.stringify(response, null, 2));
     
-    const isValid = Boolean(data.isValid); // Ensure proper boolean conversion
-    const deliverable = data.deliverable !== undefined ? Boolean(data.deliverable) : true; // Default to true if not provided
-    const hasWhatsApp = Boolean(phone && phone.trim() !== ''); // Ensure boolean type
+    const isValid = data.isValid || false;
+    const hasWhatsApp = phone && phone.trim() !== '';
     
-    console.log(`📊 Validation result: isValid=${isValid}, deliverable=${deliverable}, hasWhatsApp=${hasWhatsApp}`);
-    
-    // SIMPLE RULE: If both isValid AND deliverable are true, always pass
-    const emailIsGood = isValid && deliverable;
-    console.log(`🔍 Email decision: emailIsGood=${emailIsGood} (isValid=${isValid} AND deliverable=${deliverable})`);
+    console.log(`📊 Validation result: isValid=${isValid}, hasWhatsApp=${hasWhatsApp}`);
     
     return {
       success: true,
-      isValid: emailIsGood, // Simple: true only if both isValid AND deliverable are true
+      isValid,
       result: data.result,
       flags: data.flags,
       suggested_correction: data.suggested_correction,
       execution_time: data.execution_time,
       message: data.message,
-      shouldProceed: emailIsGood || hasWhatsApp, // Proceed if email is good OR we have WhatsApp as backup
+      shouldProceed: isValid, // Only proceed if valid
       validationType: 'email',
-      reason: emailIsGood ? 
-        'Email is valid and deliverable' : 
-        (hasWhatsApp ? `Email ${!isValid ? 'invalid' : 'valid but not deliverable'} but WhatsApp available as backup` : `Email ${!isValid ? 'invalid' : 'valid but not deliverable'} and no WhatsApp backup`)
+      reason: isValid ? 'Email is valid' : `Email is invalid (${data.result || 'unknown'})`
     };
     
   } catch (error) {

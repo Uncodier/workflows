@@ -1372,23 +1372,18 @@ export async function validateAndGenerateEmployeeContactsActivity(
             email: email 
           });
 
-          // The API response structure is: { success: true, data: { isValid: false, deliverable: false, result: "invalid", ... } }
-          // So we access data.isValid and data.deliverable directly
+          // The API response structure is: { success: true, data: { isValid: false, result: "invalid", ... } }
+          // So we access data.isValid directly (ignoring deliverable per user request)
           const isValid = validationResponse.data?.isValid || false;
-          const deliverable = validationResponse.data?.deliverable !== undefined ? validationResponse.data?.deliverable : true;
           const result = validationResponse.data?.result || 'unknown';
           
-          console.log(`🔍 Parsed email validation data for ${employeeData.name}: isValid=${isValid}, deliverable=${deliverable}, result=${result}`);
-          
-          // Email is considered invalid if either isValid is false OR deliverable is false
-          const shouldTreatAsInvalid = !isValid || !deliverable;
-          console.log(`🔍 Email treatment for ${employeeData.name}: shouldTreatAsInvalid=${shouldTreatAsInvalid} (isValid=${isValid}, deliverable=${deliverable})`);
+          console.log(`🔍 Parsed email validation data for ${employeeData.name}: isValid=${isValid}, result=${result}`);
           
           const emailValidationResult = {
             success: validationResponse.success,
-            isValid: !shouldTreatAsInvalid,
+            isValid,
             reason: validationResponse.success ? 
-              (!shouldTreatAsInvalid ? 'Email is valid and deliverable' : `Email ${!isValid ? 'invalid' : 'valid but not deliverable'} (${result})`) : 
+              (isValid ? 'Email is valid' : `Email is invalid (${result})`) : 
               (validationResponse.error?.message || 'Validation failed')
           };
           
