@@ -61,6 +61,7 @@ exports.checkCompanyValidLeadsActivity = checkCompanyValidLeadsActivity;
 exports.addCompanyToNullListActivity = addCompanyToNullListActivity;
 exports.getCompanyInfoFromLeadActivity = getCompanyInfoFromLeadActivity;
 exports.cleanupFailedFollowUpActivity = cleanupFailedFollowUpActivity;
+exports.deleteLeadConversationsActivity = deleteLeadConversationsActivity;
 exports.updateLeadEmailVerificationActivity = updateLeadEmailVerificationActivity;
 exports.invalidateReferredLeads = invalidateReferredLeads;
 const apiService_1 = require("../services/apiService");
@@ -2279,6 +2280,118 @@ async function cleanupFailedFollowUpActivity(request) {
         return {
             success: false,
             error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to delete all conversations for a lead during hard invalidation
+ * This is used when a lead has no valid contact methods (no email and no WhatsApp)
+ * and there's no point in keeping conversation data
+ */
+async function deleteLeadConversationsActivity(request) {
+    console.log(`🗑️ Starting conversation cleanup for hard invalidated lead ${request.lead_id}...`);
+    console.log(`📋 Reason: ${request.reason}`);
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot delete conversations');
+            return {
+                success: false,
+                error: 'Database not available',
+                conversations_deleted: 0,
+                messages_deleted: 0
+            };
+        }
+        console.log('✅ Database connection confirmed, proceeding with conversation cleanup...');
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // Step 1: Find all conversations for this lead
+        console.log(`🔍 Finding all conversations for lead ${request.lead_id}...`);
+        const { data: conversations, error: findError } = await supabaseServiceRole
+            .from('conversations')
+            .select('id, created_at, status')
+            .eq('lead_id', request.lead_id)
+            .eq('site_id', request.site_id)
+            .order('created_at', { ascending: false });
+        if (findError) {
+            console.error(`❌ Error finding conversations:`, findError);
+            return {
+                success: false,
+                error: `Failed to find conversations: ${findError.message}`,
+                conversations_deleted: 0,
+                messages_deleted: 0
+            };
+        }
+        const conversationsFound = conversations?.length || 0;
+        console.log(`📊 Found ${conversationsFound} conversations for lead ${request.lead_id}`);
+        if (conversationsFound === 0) {
+            console.log(`ℹ️ No conversations found for lead ${request.lead_id} - cleanup complete`);
+            return {
+                success: true,
+                conversations_deleted: 0,
+                messages_deleted: 0,
+                cleanup_summary: {
+                    conversations_found: 0,
+                    total_messages_deleted: 0
+                }
+            };
+        }
+        let totalMessagesDeleted = 0;
+        let conversationsDeleted = 0;
+        // Step 2: Delete messages and conversations for each conversation
+        for (const conversation of conversations) {
+            console.log(`🗑️ Processing conversation ${conversation.id}...`);
+            // Step 2a: Delete all messages in this conversation
+            const { error: deleteMessagesError, count: messagesDeletedCount } = await supabaseServiceRole
+                .from('messages')
+                .delete({ count: 'exact' })
+                .eq('conversation_id', conversation.id);
+            if (deleteMessagesError) {
+                console.error(`⚠️ Error deleting messages from conversation ${conversation.id}:`, deleteMessagesError);
+            }
+            else {
+                const messagesDeleted = messagesDeletedCount || 0;
+                totalMessagesDeleted += messagesDeleted;
+                console.log(`✅ Deleted ${messagesDeleted} messages from conversation ${conversation.id}`);
+            }
+            // Step 2b: Delete the conversation itself
+            const { error: deleteConversationError } = await supabaseServiceRole
+                .from('conversations')
+                .delete()
+                .eq('id', conversation.id)
+                .eq('site_id', request.site_id);
+            if (deleteConversationError) {
+                console.error(`❌ Error deleting conversation ${conversation.id}:`, deleteConversationError);
+            }
+            else {
+                conversationsDeleted++;
+                console.log(`✅ Successfully deleted conversation ${conversation.id}`);
+            }
+        }
+        console.log(`🎉 Conversation cleanup completed for lead ${request.lead_id}:`);
+        console.log(`   - Conversations deleted: ${conversationsDeleted}/${conversationsFound}`);
+        console.log(`   - Total messages deleted: ${totalMessagesDeleted}`);
+        console.log(`   - Reason: ${request.reason}`);
+        return {
+            success: true,
+            conversations_deleted: conversationsDeleted,
+            messages_deleted: totalMessagesDeleted,
+            cleanup_summary: {
+                conversations_found: conversationsFound,
+                total_messages_deleted: totalMessagesDeleted
+            }
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception during conversation cleanup:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage,
+            conversations_deleted: 0,
+            messages_deleted: 0
         };
     }
 }

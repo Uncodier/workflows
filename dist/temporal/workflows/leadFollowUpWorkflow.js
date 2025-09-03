@@ -5,7 +5,7 @@ const workflow_1 = require("@temporalio/workflow");
 const leadResearchWorkflow_1 = require("./leadResearchWorkflow");
 const leadInvalidationWorkflow_1 = require("./leadInvalidationWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, sendEmailFromAgentActivity, sendWhatsAppFromAgentActivity, updateConversationStatusAfterFollowUpActivity, validateMessageAndConversationActivity, updateMessageStatusToSentActivity, updateTaskStatusToCompletedActivity, cleanupFailedFollowUpActivity, updateMessageTimestampActivity, validateContactInformation, invalidateEmailOnlyActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, sendEmailFromAgentActivity, sendWhatsAppFromAgentActivity, updateConversationStatusAfterFollowUpActivity, validateMessageAndConversationActivity, updateMessageStatusToSentActivity, updateTaskStatusToCompletedActivity, cleanupFailedFollowUpActivity, updateMessageTimestampActivity, validateContactInformation, invalidateEmailOnlyActivity, validateCommunicationChannelsActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
     retry: {
         maximumAttempts: 3,
@@ -255,13 +255,30 @@ async function leadFollowUpWorkflow(options) {
             });
             console.log(`📊 Early validation completed: type=${earlyValidationResult.validationType}, shouldProceed=${earlyValidationResult.shouldProceed}`);
             console.log(`📋 Reason: ${earlyValidationResult.reason}`);
+            console.log(`📊 Full validation result:`, JSON.stringify(earlyValidationResult, null, 2));
             // Handle specific early validation results that require immediate action
-            if (earlyValidationResult.validationType === 'email' && !earlyValidationResult.isValid && earlyValidationResult.success && leadEmail) {
-                console.log(`🚫 Email is invalid in early validation: ${leadEmail}`);
-                const hasWhatsApp = leadPhone && leadPhone.trim() !== '';
-                if (!hasWhatsApp) {
-                    // Lead has no WhatsApp, use full invalidation workflow and stop (no research needed)
-                    console.log(`🚫 Lead has no WhatsApp - using full lead invalidation workflow and stopping before research...`);
+            if (earlyValidationResult.validationType === 'email' && !earlyValidationResult.isValid && earlyValidationResult.success) {
+                console.log(`🚫 Email validation failed in early validation`);
+                console.log(`📧 Email value: ${leadEmail || 'null/undefined'}`);
+                console.log(`📋 Reason: ${earlyValidationResult.reason}`);
+                const hasLeadWhatsApp = leadPhone && leadPhone.trim() !== '';
+                // Check if site has WhatsApp configured
+                console.log(`🔍 Checking if site has WhatsApp channel configured...`);
+                const channelsValidation = await validateCommunicationChannelsActivity({
+                    site_id: site_id
+                });
+                const hasSiteWhatsApp = channelsValidation.success && channelsValidation.hasWhatsappChannel;
+                console.log(`📊 Channel validation results:`);
+                console.log(`   - Lead has WhatsApp: ${hasLeadWhatsApp ? '✅' : '❌'}`);
+                console.log(`   - Site has WhatsApp configured: ${hasSiteWhatsApp ? '✅' : '❌'}`);
+                // Use full invalidation workflow if:
+                // a) Site doesn't have WhatsApp configured (even if lead has phone)
+                // b) Lead doesn't have WhatsApp phone number
+                const shouldUseFullInvalidation = !hasSiteWhatsApp || !hasLeadWhatsApp;
+                if (shouldUseFullInvalidation) {
+                    // Use full invalidation workflow - either site has no WhatsApp or lead has no phone
+                    const reason = !hasSiteWhatsApp ? 'Site has no WhatsApp configured' : 'Lead has no WhatsApp phone number';
+                    console.log(`🚫 ${reason} - using full lead invalidation workflow and stopping before research...`);
                     const invalidationOptions = {
                         lead_id: lead_id,
                         site_id: site_id,
@@ -271,7 +288,8 @@ async function leadFollowUpWorkflow(options) {
                     };
                     const invalidationHandle = await (0, workflow_1.startChild)(leadInvalidationWorkflow_1.leadInvalidationWorkflow, {
                         args: [invalidationOptions],
-                        workflowId: `lead-invalidation-${lead_id}-email-early-${Date.now()}`
+                        workflowId: `lead-invalidation-${lead_id}-email-early-${Date.now()}`,
+                        parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON // ✅ Child continues independently
                     });
                     console.log(`🚀 Lead invalidation workflow started (early validation), waiting for completion...`);
                     try {
@@ -325,56 +343,36 @@ async function leadFollowUpWorkflow(options) {
                     return result;
                 }
                 else {
-                    // Lead has WhatsApp, only invalidate email but continue with research and WhatsApp workflow
-                    console.log(`📧🚫 Email invalid but WhatsApp available - invalidating only email field but continuing with research and WhatsApp...`);
-                    const emailInvalidationResult = await invalidateEmailOnlyActivity({
-                        lead_id: lead_id,
-                        failed_email: leadEmail,
-                        userId: options.userId || site.user_id
-                    });
-                    if (emailInvalidationResult.success) {
-                        console.log(`✅ Email invalidated successfully (early validation), site_id preserved for WhatsApp communication`);
-                        emailInvalidatedInEarlyValidation = true; // Mark email as invalidated to prevent sending later
+                    // Both lead and site have WhatsApp available, handle email invalidation appropriately
+                    console.log(`📱✅ Both lead and site have WhatsApp available - invalidating only email but continuing with WhatsApp workflow`);
+                    if (leadEmail) {
+                        // Email exists but is invalid, invalidate it
+                        console.log(`📧🚫 Email invalid but WhatsApp available - invalidating only email field...`);
+                        const emailInvalidationResult = await invalidateEmailOnlyActivity({
+                            lead_id: lead_id,
+                            failed_email: leadEmail,
+                            userId: options.userId || site.user_id
+                        });
+                        if (emailInvalidationResult.success) {
+                            console.log(`✅ Email invalidated successfully (early validation), site_id preserved for WhatsApp communication`);
+                            emailInvalidatedInEarlyValidation = true; // Mark email as invalidated to prevent sending later
+                        }
+                        else {
+                            console.error(`❌ Failed to invalidate email (early validation): ${emailInvalidationResult.error}`);
+                            errors.push(`Email invalidation failed: ${emailInvalidationResult.error}`);
+                        }
                     }
                     else {
-                        console.error(`❌ Failed to invalidate email (early validation): ${emailInvalidationResult.error}`);
-                        errors.push(`Email invalidation failed: ${emailInvalidationResult.error}`);
+                        // No email exists, but we have WhatsApp, so just mark as no email
+                        console.log(`📧🚫 No email exists but WhatsApp available - marking as no email for later processing`);
+                        emailInvalidatedInEarlyValidation = true; // Mark as no email to prevent email sending later
                     }
-                    console.log(`✅ Continuing workflow for WhatsApp communication despite invalid email (early validation)`);
+                    // Note: We don't return here - let the shouldProceed logic below handle the flow
+                    console.log(`📋 Email invalidation completed, proceeding to shouldProceed check...`);
                 }
             }
-            // Check if the validation API itself failed (not just invalid email)
-            if (!earlyValidationResult.success) {
-                console.log(`❌ Contact validation API failed - failing workflow`);
-                console.log(`🔍 API failure details:`);
-                console.log(`   - Error: ${earlyValidationResult.error}`);
-                console.log(`   - Reason: ${earlyValidationResult.reason}`);
-                // Create appropriate error message for API failure
-                const apiFailureError = `Contact validation API failed: ${earlyValidationResult.error || earlyValidationResult.reason}`;
-                errors.push(apiFailureError);
-                // Update cron status to indicate API failure
-                await saveCronStatusActivity({
-                    siteId: site_id,
-                    workflowId,
-                    scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
-                    activityName: 'leadFollowUpWorkflow',
-                    status: 'FAILED',
-                    lastRun: new Date().toISOString(),
-                    errorMessage: apiFailureError
-                });
-                // Log workflow failure due to API failure
-                await logWorkflowExecutionActivity({
-                    workflowId,
-                    workflowType: 'leadFollowUpWorkflow',
-                    status: 'FAILED',
-                    input: options,
-                    error: apiFailureError,
-                });
-                // Throw error to properly fail the workflow when API fails
-                throw new Error(apiFailureError);
-            }
-            // If API worked but we shouldn't proceed (e.g., invalid email + no WhatsApp), complete successfully
-            if (!earlyValidationResult.shouldProceed && !(earlyValidationResult.validationType === 'email' && !earlyValidationResult.isValid && leadPhone)) {
+            // If API worked but we shouldn't proceed, complete successfully after invalidation
+            if (!earlyValidationResult.shouldProceed) {
                 console.log(`✅ Contact validation API worked but email is invalid - completing workflow after successful invalidation`);
                 console.log(`📋 Validation details:`);
                 console.log(`   - Type: ${earlyValidationResult.validationType}`);
@@ -433,6 +431,36 @@ async function leadFollowUpWorkflow(options) {
                     executionTime,
                     completedAt: new Date().toISOString()
                 };
+            }
+            // Check if the validation API itself failed (not just invalid email)
+            if (!earlyValidationResult.success) {
+                console.log(`❌ Contact validation API failed - failing workflow`);
+                console.log(`🔍 API failure details:`);
+                console.log(`   - Error: ${earlyValidationResult.error}`);
+                console.log(`   - Reason: ${earlyValidationResult.reason}`);
+                // Create appropriate error message for API failure
+                const apiFailureError = `Contact validation API failed: ${earlyValidationResult.error || earlyValidationResult.reason}`;
+                errors.push(apiFailureError);
+                // Update cron status to indicate API failure
+                await saveCronStatusActivity({
+                    siteId: site_id,
+                    workflowId,
+                    scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+                    activityName: 'leadFollowUpWorkflow',
+                    status: 'FAILED',
+                    lastRun: new Date().toISOString(),
+                    errorMessage: apiFailureError
+                });
+                // Log workflow failure due to API failure
+                await logWorkflowExecutionActivity({
+                    workflowId,
+                    workflowType: 'leadFollowUpWorkflow',
+                    status: 'FAILED',
+                    input: options,
+                    error: apiFailureError,
+                });
+                // Throw error to properly fail the workflow when API fails
+                throw new Error(apiFailureError);
             }
             console.log(`✅ Early contact validation passed - proceeding with research and follow-up`);
             // Check if lead needs research before follow-up (now that we know contact is valid)

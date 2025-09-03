@@ -70,6 +70,7 @@ async function validateAndGenerateEmails(leadInfo, siteInfo, options) {
         else {
             console.log(`❌ Existing email is invalid: ${leadEmail}`);
             console.log(`🔍 Reason: ${emailValidationResult.reason}`);
+            console.log(`📊 Full validation result:`, JSON.stringify(emailValidationResult, null, 2));
         }
     }
     // Step 2: Generate new emails using leadContactGeneration
@@ -151,6 +152,7 @@ async function validateAndGenerateEmails(leadInfo, siteInfo, options) {
         }
         else {
             console.log(`❌ Invalid email: ${email} (${validationResult.reason})`);
+            console.log(`📊 Full validation result:`, JSON.stringify(validationResult, null, 2));
         }
     }
     console.log(`❌ No valid emails found after validation`);
