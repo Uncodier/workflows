@@ -9,9 +9,11 @@ import * as workflows from '../workflows/worker-workflows';
  */
 export async function startWorker() {
   try {
+    console.log('🚀 Starting Temporal worker...');
     logger.info('🚀 Starting Temporal worker on Render...');
 
     // Validate required environment variables
+    console.log('📋 Checking environment variables...');
     if (!temporalConfig.serverUrl) {
       throw new Error('TEMPORAL_SERVER_URL is required');
     }
@@ -19,6 +21,7 @@ export async function startWorker() {
     if (!temporalConfig.namespace) {
       throw new Error('TEMPORAL_NAMESPACE is required');
     }
+    console.log('✅ Environment variables validated');
 
     // Log configuration for debugging
     logger.info('Temporal configuration:', {
@@ -31,8 +34,10 @@ export async function startWorker() {
     });
 
     // Log available activities and workflows for debugging
+    console.log('📦 Loading activities and workflows...');
     logger.info('Available activities:', { activities: Object.keys(activities) });
     logger.info('Available workflows:', { workflows: Object.keys(workflows) });
+    console.log(`✅ Loaded ${Object.keys(activities).length} activities and ${Object.keys(workflows).length} workflows`);
 
     // Connect to Temporal server with optimized settings for persistent workers
     const connectionOptions: any = {
@@ -57,13 +62,18 @@ export async function startWorker() {
       connectionOptions.apiKey = temporalConfig.apiKey;
     }
 
+    console.log('🔗 Connecting to Temporal server...');
+    console.log('Connection options:', JSON.stringify(connectionOptions, null, 2));
     logger.info('🔗 Connecting to Temporal server...');
     const connection = await NativeConnection.connect(connectionOptions);
+    console.log('✅ Successfully connected to Temporal server');
     logger.info('✅ Successfully connected to Temporal server');
 
     // Create worker with all activities and workflows
+    console.log('🔧 Creating Temporal worker...');
     logger.info('🔧 Creating Temporal worker...');
-    const worker = await TemporalWorker.create({
+    
+    const workerOptions = {
       connection,
       namespace: temporalConfig.namespace,
       taskQueue: temporalConfig.taskQueue,
@@ -72,10 +82,17 @@ export async function startWorker() {
       // Optimize for persistent workers
       maxConcurrentActivityTaskExecutions: 10,
       maxConcurrentWorkflowTaskExecutions: 10,
-      // Enable graceful shutdown
-      shutdownGraceTime: '30s',
-    });
+    };
+    
+    console.log('Worker options:', JSON.stringify({
+      ...workerOptions,
+      connection: '[CONNECTION_OBJECT]',
+      activities: `[${Object.keys(activities).length} activities]`
+    }, null, 2));
+    
+    const worker = await TemporalWorker.create(workerOptions);
 
+    console.log('✅ Worker created successfully');
     logger.info('✅ Worker created successfully');
 
     // Set up graceful shutdown handlers
@@ -91,14 +108,25 @@ export async function startWorker() {
     process.on('SIGTERM', () => shutdown('SIGTERM'));
 
     // Start the worker
+    console.log('🎯 Starting worker execution...');
+    console.log(`📋 Task Queue: ${temporalConfig.taskQueue}`);
+    console.log(`🏢 Namespace: ${temporalConfig.namespace}`);
     logger.info('🎯 Starting worker execution...');
     logger.info(`📋 Task Queue: ${temporalConfig.taskQueue}`);
     logger.info(`🏢 Namespace: ${temporalConfig.namespace}`);
     
     // In Render, we want the worker to run continuously
-    await worker.run();
+    console.log('🔄 Calling worker.run()...');
     
-    logger.info('⚠️ Worker execution ended unexpectedly');
+    // Return worker instance instead of blocking on run
+    return {
+      worker,
+      runPromise: worker.run(),
+      shutdown: async () => {
+        await worker.shutdown();
+        await connection.close();
+      }
+    };
     
   } catch (error: any) {
     logger.error('❌ Failed to start worker', { 
@@ -125,5 +153,7 @@ if (require.main === module) {
   });
 }
 
-export { startWorker as default };
-module.exports = { startWorker }; 
+// Export for CommonJS and ES modules compatibility
+module.exports = { startWorker };
+module.exports.startWorker = startWorker;
+module.exports.default = startWorker; 

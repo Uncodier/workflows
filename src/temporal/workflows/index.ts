@@ -39,6 +39,7 @@ import { leadInvalidationWorkflow } from './leadInvalidationWorkflow';
 import { startRobotWorkflow } from './startRobotWorkflow';
 import { robotWorkflow } from './robotWorkflow';
 import { promptRobotWorkflow } from './promptRobotWorkflow';
+import { validateEmailWorkflow } from './validateEmailWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -74,6 +75,7 @@ export * from './leadAttentionWorkflow';
 export * from './dailyProspectionWorkflow';
 export * from './dailyStrategicAccountsWorkflow';
 export * from './leadInvalidationWorkflow';
+export * from './validateEmailWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -114,6 +116,7 @@ export const workflows = {
   startRobotWorkflow,
   robotWorkflow,
   promptRobotWorkflow,
+  validateEmailWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
   // ✅ Aliases for agent workflows with different naming conventions
@@ -160,6 +163,7 @@ export const workflowNames = {
   startRobotWorkflow: 'startRobotWorkflow',
   robotWorkflow: 'robotWorkflow',
   promptRobotWorkflow: 'promptRobotWorkflow',
+  validateEmailWorkflow: 'validateEmailWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',
   // ✅ Aliases for agent workflows with different naming conventions

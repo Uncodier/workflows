@@ -38,6 +38,7 @@ export * from './sendNewsletterWorkflow';
 export * from './dailyProspectionWorkflow';
 export * from './dailyStrategicAccountsWorkflow';
 export * from './leadInvalidationWorkflow';
+export * from './validateEmailWorkflow';
 export * from './startRobotWorkflow';
 export * from './robotWorkflow';
 export * from './promptRobotWorkflow'; 

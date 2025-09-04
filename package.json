@@ -1,11 +1,11 @@
 {
   "name": "temporal-workflows",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "echo '🚀 Building version: v0.2.0-email-deliverable-validation' && next build",
-    "build:all": "echo '🚀 Building version: v0.2.0-email-deliverable-validation' && npm run build && npx tsc --project worker.tsconfig.json",
+    "build": "echo '🚀 Building version: v0.2.1-email-deliverable-validation' && next build",
+    "build:all": "echo '🚀 Building version: v0.2.1-email-deliverable-validation' && npm run build && npx tsc --project worker.tsconfig.json",
     "start": "next start",
     "lint": "next lint",
     "start-worker": "npx tsx src/scripts/start-worker.ts",
@@ -41,6 +41,7 @@
     "test-phone-formatting": "npx tsx src/scripts/test-phone-formatting.ts",
     "test-lead-invalidation": "npx tsx src/scripts/test-lead-invalidation-workflow.ts",
     "test-lead-invalidation-debug": "npx tsx src/scripts/test-lead-invalidation-debug.ts",
+    "test-validate-email": "node examples/validateEmailWorkflow-example.js",
     "monitor-workflows": "npx tsx src/scripts/monitor-workflow-versions.ts",
     "render:start": "node api/worker.js",
     "render:init": "npx tsx src/scripts/initialize-render.ts",

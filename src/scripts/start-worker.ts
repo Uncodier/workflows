@@ -76,7 +76,11 @@ async function run() {
       }
     } else {
       logger.info('Running in development mode. Worker will keep running.');
-      // In development, the worker.run() call will keep the process alive
+      // In development, await the runPromise to keep the process alive
+      if (worker && worker.runPromise) {
+        logger.info('Awaiting worker to keep process alive...');
+        await worker.runPromise;
+      }
     }
     
     // Handle graceful shutdown only in non-serverless environments
@@ -139,6 +143,7 @@ if (require.main === module) {
   });
 } else {
   console.log('=== Running as imported module ===');
-  // Export the run function for use in serverless environments
-  module.exports = { run, startWorker };
-} 
+}
+
+// Export the run function for use in serverless environments
+module.exports = { run, startWorker }; 
