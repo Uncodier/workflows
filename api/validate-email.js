@@ -150,7 +150,7 @@ export default async function handler(req, res) {
         email,
         aggressiveMode
       },
-      taskQueue: 'email-validation-queue'
+      taskQueue: 'validation'
     });
     
     console.log(`[VALIDATE_EMAIL_API] ✅ Workflow completed:`, {

@@ -170,16 +170,16 @@ When SMTP validation fails due to IP blocks or other issues:
 Configure all required environment variables in Render dashboard
 
 ### 3. Worker Configuration
-Ensure Temporal worker is configured to handle the `email-validation-queue`:
+Ensure Temporal worker is configured to handle the `validation` queue:
 
 ```typescript
 // In your worker configuration
-import { taskQueues } from './src/temporal/config/taskQueues';
+import { TASK_QUEUES } from './src/temporal/config/taskQueues';
 
 const worker = await Worker.create({
   connection,
   namespace: 'your-namespace',
-  taskQueue: taskQueues.EMAIL_VALIDATION, // 'email-validation-queue'
+  taskQueue: TASK_QUEUES.EMAIL_VALIDATION, // 'validation'
   workflowsPath: require.resolve('./src/temporal/workflows'),
   activitiesPath: require.resolve('./src/temporal/activities'),
 });
@@ -214,7 +214,7 @@ const result = await executeWorkflow({
     email: 'test@example.com',
     aggressiveMode: false
   },
-  taskQueue: 'email-validation-queue'
+  taskQueue: 'validation'
 });
 ```
 

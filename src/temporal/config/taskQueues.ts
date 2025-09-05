@@ -22,7 +22,7 @@ export const TASK_QUEUES = {
   BACKGROUND: 'background-priority',
   
   // Email validation queue (dedicated for Render deployment)
-  EMAIL_VALIDATION: 'email-validation-queue'
+  EMAIL_VALIDATION: 'validation'
 } as const;
 
 export type TaskQueue = typeof TASK_QUEUES[keyof typeof TASK_QUEUES];

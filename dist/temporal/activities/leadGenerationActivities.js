@@ -1074,15 +1074,22 @@ async function validateAndGenerateEmployeeContactsActivity(options) {
                             const validationResponse = await apiService_1.apiService.post('/api/agents/tools/validateEmail', {
                                 email: generatedEmail
                             });
-                            // The API response structure is: { success: true, data: { isValid: false, result: "invalid", ... } }
-                            // So we access data.isValid directly
+                            // The API response structure is: { success: true, data: { isValid: false, deliverable: false, result: "invalid", ... } }
+                            // Check both isValid AND deliverable for proper email validation
                             const isValid = validationResponse.data?.isValid || false;
+                            const isDeliverable = validationResponse.data?.deliverable !== false; // Default to true if not specified, false if explicitly false
+                            const isEmailUsable = isValid && isDeliverable;
                             const result = validationResponse.data?.result || 'unknown';
-                            console.log(`🔍 Parsed validation data for ${generatedEmail}: isValid=${isValid}, result=${result}`);
+                            console.log(`🔍 Parsed validation data for ${generatedEmail}: isValid=${isValid}, deliverable=${isDeliverable}, usable=${isEmailUsable}, result=${result}`);
                             const validationResult = {
                                 success: validationResponse.success,
-                                isValid,
-                                reason: validationResponse.success ? result : (validationResponse.error?.message || 'Validation failed')
+                                isValid: isEmailUsable, // Return true only if both valid AND deliverable
+                                reason: validationResponse.success ?
+                                    (isEmailUsable ? 'Email is valid and deliverable' :
+                                        !isValid && !isDeliverable ? `Email is invalid and not deliverable (${result})` :
+                                            !isValid ? `Email is invalid (${result})` :
+                                                `Email is not deliverable (${result})`) :
+                                    (validationResponse.error?.message || 'Validation failed')
                             };
                             console.log(`📊 Validation result for ${generatedEmail}:`, JSON.stringify(validationResult, null, 2));
                             if (validationResult.success && validationResult.isValid) {
@@ -1114,15 +1121,22 @@ async function validateAndGenerateEmployeeContactsActivity(options) {
                     const validationResponse = await apiService_1.apiService.post('/api/agents/tools/validateEmail', {
                         email: email
                     });
-                    // The API response structure is: { success: true, data: { isValid: false, result: "invalid", ... } }
-                    // So we access data.isValid directly
+                    // The API response structure is: { success: true, data: { isValid: false, deliverable: false, result: "invalid", ... } }
+                    // Check both isValid AND deliverable for proper email validation
                     const isValid = validationResponse.data?.isValid || false;
+                    const isDeliverable = validationResponse.data?.deliverable !== false; // Default to true if not specified, false if explicitly false
+                    const isEmailUsable = isValid && isDeliverable;
                     const result = validationResponse.data?.result || 'unknown';
-                    console.log(`🔍 Parsed email validation data for ${employeeData.name}: isValid=${isValid}, result=${result}`);
+                    console.log(`🔍 Parsed email validation data for ${employeeData.name}: isValid=${isValid}, deliverable=${isDeliverable}, usable=${isEmailUsable}, result=${result}`);
                     const emailValidationResult = {
                         success: validationResponse.success,
-                        isValid,
-                        reason: validationResponse.success ? result : (validationResponse.error?.message || 'Validation failed')
+                        isValid: isEmailUsable, // Return true only if both valid AND deliverable
+                        reason: validationResponse.success ?
+                            (isEmailUsable ? 'Email is valid and deliverable' :
+                                !isValid && !isDeliverable ? `Email is invalid and not deliverable (${result})` :
+                                    !isValid ? `Email is invalid (${result})` :
+                                        `Email is not deliverable (${result})`) :
+                            (validationResponse.error?.message || 'Validation failed')
                     };
                     console.log(`📊 Email validation result for ${employeeData.name}:`, JSON.stringify(emailValidationResult, null, 2));
                     if (emailValidationResult.success && emailValidationResult.isValid) {
@@ -1188,15 +1202,22 @@ async function validateAndGenerateEmployeeContactsActivity(options) {
                                         const fallbackValidationResponse = await apiService_1.apiService.post('/api/agents/tools/validateEmail', {
                                             email: fallbackEmail
                                         });
-                                        // The API response structure is: { success: true, data: { isValid: false, result: "invalid", ... } }
-                                        // So we access data.isValid directly
+                                        // The API response structure is: { success: true, data: { isValid: false, deliverable: false, result: "invalid", ... } }
+                                        // Check both isValid AND deliverable for proper email validation
                                         const isValid = fallbackValidationResponse.data?.isValid || false;
+                                        const isDeliverable = fallbackValidationResponse.data?.deliverable !== false; // Default to true if not specified, false if explicitly false
+                                        const isEmailUsable = isValid && isDeliverable;
                                         const result = fallbackValidationResponse.data?.result || 'unknown';
-                                        console.log(`🔍 Parsed fallback validation data for ${fallbackEmail}: isValid=${isValid}, result=${result}`);
+                                        console.log(`🔍 Parsed fallback validation data for ${fallbackEmail}: isValid=${isValid}, deliverable=${isDeliverable}, usable=${isEmailUsable}, result=${result}`);
                                         const fallbackValidationResult = {
                                             success: fallbackValidationResponse.success,
-                                            isValid,
-                                            reason: fallbackValidationResponse.success ? result : (fallbackValidationResponse.error?.message || 'Validation failed')
+                                            isValid: isEmailUsable, // Return true only if both valid AND deliverable
+                                            reason: fallbackValidationResponse.success ?
+                                                (isEmailUsable ? 'Email is valid and deliverable' :
+                                                    !isValid && !isDeliverable ? `Email is invalid and not deliverable (${result})` :
+                                                        !isValid ? `Email is invalid (${result})` :
+                                                            `Email is not deliverable (${result})`) :
+                                                (fallbackValidationResponse.error?.message || 'Validation failed')
                                         };
                                         console.log(`📊 Fallback validation result for ${fallbackEmail}:`, JSON.stringify(fallbackValidationResult, null, 2));
                                         if (fallbackValidationResult.success && fallbackValidationResult.isValid) {

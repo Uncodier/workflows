@@ -34,7 +34,6 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.startWorker = startWorker;
-exports.default = startWorker;
 const worker_1 = require("@temporalio/worker");
 const activities_1 = require("../activities");
 const logger_1 = require("../../lib/logger");
@@ -45,14 +44,17 @@ const workflows = __importStar(require("../workflows/worker-workflows"));
  */
 async function startWorker() {
     try {
+        console.log('🚀 Starting Temporal worker...');
         logger_1.logger.info('🚀 Starting Temporal worker on Render...');
         // Validate required environment variables
+        console.log('📋 Checking environment variables...');
         if (!config_1.temporalConfig.serverUrl) {
             throw new Error('TEMPORAL_SERVER_URL is required');
         }
         if (!config_1.temporalConfig.namespace) {
             throw new Error('TEMPORAL_NAMESPACE is required');
         }
+        console.log('✅ Environment variables validated');
         // Log configuration for debugging
         logger_1.logger.info('Temporal configuration:', {
             serverUrl: config_1.temporalConfig.serverUrl,
@@ -63,8 +65,10 @@ async function startWorker() {
             environment: process.env.NODE_ENV
         });
         // Log available activities and workflows for debugging
+        console.log('📦 Loading activities and workflows...');
         logger_1.logger.info('Available activities:', { activities: Object.keys(activities_1.activities) });
         logger_1.logger.info('Available workflows:', { workflows: Object.keys(workflows) });
+        console.log(`✅ Loaded ${Object.keys(activities_1.activities).length} activities and ${Object.keys(workflows).length} workflows`);
         // Connect to Temporal server with optimized settings for persistent workers
         const connectionOptions = {
             address: config_1.temporalConfig.serverUrl,
@@ -85,12 +89,16 @@ async function startWorker() {
             };
             connectionOptions.apiKey = config_1.temporalConfig.apiKey;
         }
+        console.log('🔗 Connecting to Temporal server...');
+        console.log('Connection options:', JSON.stringify(connectionOptions, null, 2));
         logger_1.logger.info('🔗 Connecting to Temporal server...');
         const connection = await worker_1.NativeConnection.connect(connectionOptions);
+        console.log('✅ Successfully connected to Temporal server');
         logger_1.logger.info('✅ Successfully connected to Temporal server');
         // Create worker with all activities and workflows
+        console.log('🔧 Creating Temporal worker...');
         logger_1.logger.info('🔧 Creating Temporal worker...');
-        const worker = await worker_1.Worker.create({
+        const workerOptions = {
             connection,
             namespace: config_1.temporalConfig.namespace,
             taskQueue: config_1.temporalConfig.taskQueue,
@@ -99,9 +107,14 @@ async function startWorker() {
             // Optimize for persistent workers
             maxConcurrentActivityTaskExecutions: 10,
             maxConcurrentWorkflowTaskExecutions: 10,
-            // Enable graceful shutdown
-            shutdownGraceTime: '30s',
-        });
+        };
+        console.log('Worker options:', JSON.stringify({
+            ...workerOptions,
+            connection: '[CONNECTION_OBJECT]',
+            activities: `[${Object.keys(activities_1.activities).length} activities]`
+        }, null, 2));
+        const worker = await worker_1.Worker.create(workerOptions);
+        console.log('✅ Worker created successfully');
         logger_1.logger.info('✅ Worker created successfully');
         // Set up graceful shutdown handlers
         const shutdown = async (signal) => {
@@ -114,12 +127,23 @@ async function startWorker() {
         process.on('SIGINT', () => shutdown('SIGINT'));
         process.on('SIGTERM', () => shutdown('SIGTERM'));
         // Start the worker
+        console.log('🎯 Starting worker execution...');
+        console.log(`📋 Task Queue: ${config_1.temporalConfig.taskQueue}`);
+        console.log(`🏢 Namespace: ${config_1.temporalConfig.namespace}`);
         logger_1.logger.info('🎯 Starting worker execution...');
         logger_1.logger.info(`📋 Task Queue: ${config_1.temporalConfig.taskQueue}`);
         logger_1.logger.info(`🏢 Namespace: ${config_1.temporalConfig.namespace}`);
         // In Render, we want the worker to run continuously
-        await worker.run();
-        logger_1.logger.info('⚠️ Worker execution ended unexpectedly');
+        console.log('🔄 Calling worker.run()...');
+        // Return worker instance instead of blocking on run
+        return {
+            worker,
+            runPromise: worker.run(),
+            shutdown: async () => {
+                await worker.shutdown();
+                await connection.close();
+            }
+        };
     }
     catch (error) {
         logger_1.logger.error('❌ Failed to start worker', {
@@ -143,4 +167,7 @@ if (require.main === module) {
         process.exit(1);
     });
 }
+// Export for CommonJS and ES modules compatibility
 module.exports = { startWorker };
+module.exports.startWorker = startWorker;
+module.exports.default = startWorker;

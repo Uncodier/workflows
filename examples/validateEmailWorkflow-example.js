@@ -20,7 +20,7 @@ async function exampleValidateEmail() {
         email: 'user@gmail.com',
         aggressiveMode: false
       },
-      taskQueue: 'email-validation-queue'
+      taskQueue: 'validation'
     });
     
     console.log('Basic validation result:', {
@@ -40,7 +40,7 @@ async function exampleValidateEmail() {
         email: 'test@hotmail.com', // High bounce risk domain
         aggressiveMode: true
       },
-      taskQueue: 'email-validation-queue'
+      taskQueue: 'validation'
     });
     
     console.log('Aggressive validation result:', {
@@ -62,7 +62,7 @@ async function exampleValidateEmail() {
         email: 'nonexistent@thisdoesnotexist12345.com',
         aggressiveMode: false
       },
-      taskQueue: 'email-validation-queue'
+      taskQueue: 'validation'
     });
     
     console.log('Invalid validation result:', {
@@ -81,7 +81,7 @@ async function exampleValidateEmail() {
         email: 'test@10minutemail.com',
         aggressiveMode: false
       },
-      taskQueue: 'email-validation-queue'
+      taskQueue: 'validation'
     });
     
     console.log('Disposable validation result:', {
@@ -152,7 +152,7 @@ async function exampleBatchValidation() {
             email,
             aggressiveMode: false
           },
-          taskQueue: 'email-validation-queue'
+          taskQueue: 'validation'
         })
       )
     );
@@ -184,7 +184,7 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   console.log('\n🎉 All examples completed!');
   console.log('\nNext steps:');
   console.log('1. Deploy to Render with proper environment variables');
-  console.log('2. Configure Temporal worker for email-validation-queue');
+  console.log('2. Configure Temporal worker for validation');
   console.log('3. Test with real email addresses');
   console.log('4. Monitor validation performance and accuracy');
 }

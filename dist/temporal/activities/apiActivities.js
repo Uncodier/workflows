@@ -102,7 +102,10 @@ async function validateContactInformation(request) {
         };
     }
     // Proceed with email validation
-    console.log(`📧 Validating email: ${email}`);
+    const timestamp = new Date().toISOString();
+    const callId = Math.random().toString(36).substring(7);
+    console.log(`📧 [${callId}] Validating email: ${email} at ${timestamp}`);
+    console.log(`📧 [${callId}] Called from leadId: ${leadId}`);
     try {
         const response = await apiService_1.apiService.post('/api/agents/tools/validateEmail', { email });
         if (!response.success) {
@@ -116,36 +119,45 @@ async function validateContactInformation(request) {
                 reason: 'Validation service failed, proceeding with send'
             };
         }
-        // Handle the API response structure
+        // Handle the new API response structure
         const data = response.data;
-        console.log(`✅ Email validation response:`, data);
-        console.log(`🔍 Full API response structure:`, JSON.stringify(response, null, 2));
-        // The API response structure is: { success: true, data: { isValid: false, result: "invalid", ... } }
-        // So we access data.isValid directly
-        const isValid = data?.isValid || false;
-        const result = data?.result || 'unknown';
-        const flags = data?.flags || [];
-        const suggested_correction = data?.suggested_correction;
-        const execution_time = data?.execution_time;
-        const message = data?.message;
-        console.log(`🔍 Parsed validation data: isValid=${isValid}, result=${result}, flags=${JSON.stringify(flags)}`);
+        console.log(`✅ [${callId}] Email validation response:`, data);
+        console.log(`🔍 [${callId}] Full API response structure:`, JSON.stringify(response, null, 2));
+        // Check both isValid AND deliverable for proper email validation
+        const isValid = data.isValid || false;
+        const isDeliverable = data.deliverable !== false; // Default to true if not specified, false if explicitly false
+        const isEmailUsable = isValid && isDeliverable;
         const hasWhatsApp = phone && phone.trim() !== '';
-        console.log(`📊 Validation result: isValid=${isValid}, hasWhatsApp=${hasWhatsApp}`);
-        console.log(`📊 Validation details: result=${result}, flags=${JSON.stringify(flags)}`);
-        const returnResult = {
+        console.log(`📊 [${callId}] Validation result: isValid=${isValid}, deliverable=${isDeliverable}, usable=${isEmailUsable}, hasWhatsApp=${hasWhatsApp}`);
+        // Determine reason based on validation results
+        let reason;
+        if (isEmailUsable) {
+            reason = 'Email is valid and deliverable';
+        }
+        else if (!isValid && !isDeliverable) {
+            reason = `Email is invalid and not deliverable (${data.result || 'unknown'})`;
+        }
+        else if (!isValid) {
+            reason = `Email is invalid (${data.result || 'unknown'})`;
+        }
+        else if (!isDeliverable) {
+            reason = `Email is not deliverable (${data.result || 'unknown'})`;
+        }
+        else {
+            reason = `Email validation failed (${data.result || 'unknown'})`;
+        }
+        return {
             success: true,
-            isValid,
-            result,
-            flags,
-            suggested_correction,
-            execution_time,
-            message,
-            shouldProceed: isValid, // Only proceed if valid
+            isValid: isEmailUsable, // Return true only if both valid AND deliverable
+            result: data.result,
+            flags: data.flags,
+            suggested_correction: data.suggested_correction,
+            execution_time: data.execution_time,
+            message: data.message,
+            shouldProceed: isEmailUsable, // Only proceed if email is both valid AND deliverable
             validationType: 'email',
-            reason: isValid ? 'Email is valid' : `Email is invalid (${result})`
+            reason: reason
         };
-        console.log(`📤 Returning validation result:`, JSON.stringify(returnResult, null, 2));
-        return returnResult;
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);

@@ -54,6 +54,7 @@ const leadInvalidationWorkflow_1 = require("./leadInvalidationWorkflow");
 const startRobotWorkflow_1 = require("./startRobotWorkflow");
 const robotWorkflow_1 = require("./robotWorkflow");
 const promptRobotWorkflow_1 = require("./promptRobotWorkflow");
+const validateEmailWorkflow_1 = require("./validateEmailWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -88,6 +89,7 @@ __exportStar(require("./leadAttentionWorkflow"), exports);
 __exportStar(require("./dailyProspectionWorkflow"), exports);
 __exportStar(require("./dailyStrategicAccountsWorkflow"), exports);
 __exportStar(require("./leadInvalidationWorkflow"), exports);
+__exportStar(require("./validateEmailWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -127,6 +129,7 @@ exports.workflows = {
     startRobotWorkflow: startRobotWorkflow_1.startRobotWorkflow,
     robotWorkflow: robotWorkflow_1.robotWorkflow,
     promptRobotWorkflow: promptRobotWorkflow_1.promptRobotWorkflow,
+    validateEmailWorkflow: validateEmailWorkflow_1.validateEmailWorkflow,
     // Alias for backward compatibility
     whatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
     // ✅ Aliases for agent workflows with different naming conventions
@@ -172,6 +175,7 @@ exports.workflowNames = {
     startRobotWorkflow: 'startRobotWorkflow',
     robotWorkflow: 'robotWorkflow',
     promptRobotWorkflow: 'promptRobotWorkflow',
+    validateEmailWorkflow: 'validateEmailWorkflow',
     // Alias for backward compatibility
     whatsappMessageWorkflow: 'whatsappMessageWorkflow',
     // ✅ Aliases for agent workflows with different naming conventions

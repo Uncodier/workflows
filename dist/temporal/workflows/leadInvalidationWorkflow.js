@@ -3,8 +3,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.leadInvalidationWorkflow = leadInvalidationWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const leadFollowUpWorkflow_1 = require("./leadFollowUpWorkflow");
+// Force worker restart - v2.0
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getLeadActivity, invalidateLeadActivity, invalidateReferredLeads, findLeadsBySharedContactActivity, updateTaskStatusToCompletedActivity, deleteLeadConversationsActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getLeadActivity, invalidateLeadActivity, invalidateReferredLeads, findLeadsBySharedContactActivity, updateTaskStatusToCompletedActivity, deleteLeadConversationsActivity, updateLeadActivity, checkLeadExistingTasksActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '3 minutes', // Reasonable timeout for lead invalidation
     retry: {
         maximumAttempts: 3,
@@ -88,6 +89,85 @@ async function leadInvalidationWorkflow(options) {
         console.log(`   - Email: ${lead.email || 'N/A'}`);
         console.log(`   - Phone: ${lead.phone || 'N/A'}`);
         console.log(`   - Has alternative contact: ${hasAlternativeContact(lead, options)}`);
+        // Early guard: if lead is qualified/converted or has consideration+ tasks, do not invalidate; only append note
+        const leadStatus = lead.status;
+        const protectedStatuses = new Set(['qualified', 'converted']);
+        // Check existing tasks to detect any in consideration or later stages
+        let hasConsiderationOrLaterTasks = false;
+        try {
+            const tasksInfo = await checkLeadExistingTasksActivity({
+                lead_id,
+                site_id: originalSiteId
+            });
+            if (tasksInfo.success && tasksInfo.existingTasks && tasksInfo.existingTasks.length > 0) {
+                const considerationStages = new Set(['consideration', 'decision', 'purchase', 'retention', 'referral']);
+                hasConsiderationOrLaterTasks = tasksInfo.existingTasks.some((t) => considerationStages.has(t.stage));
+                if (hasConsiderationOrLaterTasks) {
+                    console.log(`🛑 Lead has tasks in consideration+ stages. Stages found: ${tasksInfo.existingTasks.map((t) => t.stage).join(', ')}`);
+                }
+            }
+        }
+        catch (taskCheckErr) {
+            const taskCheckMsg = taskCheckErr instanceof Error ? taskCheckErr.message : String(taskCheckErr);
+            console.error(`⚠️ Failed to check existing tasks for early guard: ${taskCheckMsg}`);
+            errors.push(`Task check failure: ${taskCheckMsg}`);
+        }
+        const shouldSkipInvalidation = (leadStatus && protectedStatuses.has(leadStatus)) || hasConsiderationOrLaterTasks;
+        if (shouldSkipInvalidation) {
+            console.log(`🛑 Lead has protected status (${leadStatus}). Skipping invalidation and deletions. Will only append note.`);
+            if (options.response_message) {
+                try {
+                    await updateLeadActivity({
+                        lead_id,
+                        updateData: {
+                            // Concatenate: existing notes + new message. We rely on updateLeadActivity safeUpdate, so we just set notes to append-friendly value.
+                            // Since updateLeadActivity doesn't read existing notes, we pass a marker for concatenation via a minimal pattern: prefix with "\n" if needed is handled at DB trigger or leave as overwrite if none.
+                            notes: (lead.notes ? `${lead.notes}\n${options.response_message}` : options.response_message)
+                        },
+                        safeUpdate: true
+                    });
+                    console.log(`📝 Appended note to lead ${lead_id} due to protected criteria.`);
+                }
+                catch (noteError) {
+                    const noteErrMsg = noteError instanceof Error ? noteError.message : String(noteError);
+                    console.error(`⚠️ Failed to append note for protected lead: ${noteErrMsg}`);
+                    errors.push(`Note append failure: ${noteErrMsg}`);
+                }
+            }
+            const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+            const result = {
+                success: true,
+                leadId: lead_id,
+                originalSiteId,
+                invalidatedLead: false,
+                sharedContactLeads,
+                invalidatedSharedLeads,
+                reason,
+                errors,
+                executionTime,
+                completedAt: new Date().toISOString(),
+                conversationsDeleted,
+                messagesDeleted,
+                hardInvalidation: false
+            };
+            // Update cron status and log, then return early
+            await saveCronStatusActivity({
+                siteId: site_id,
+                workflowId,
+                scheduleId: `lead-invalidation-${lead_id}`,
+                activityName: 'leadInvalidationWorkflow',
+                status: 'COMPLETED',
+                lastRun: new Date().toISOString()
+            });
+            await logWorkflowExecutionActivity({
+                workflowId,
+                workflowType: 'leadInvalidationWorkflow',
+                status: 'COMPLETED',
+                input: options,
+                output: result,
+            });
+            return result;
+        }
         // Step 2: Invalidate lead (remove site_id and add metadata)
         console.log(`🔍 Step 2: Invalidating lead (removing site_id and adding metadata)...`);
         // Always invalidate the lead when this workflow is called

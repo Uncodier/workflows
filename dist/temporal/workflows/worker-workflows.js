@@ -56,6 +56,7 @@ __exportStar(require("./sendNewsletterWorkflow"), exports);
 __exportStar(require("./dailyProspectionWorkflow"), exports);
 __exportStar(require("./dailyStrategicAccountsWorkflow"), exports);
 __exportStar(require("./leadInvalidationWorkflow"), exports);
+__exportStar(require("./validateEmailWorkflow"), exports);
 __exportStar(require("./startRobotWorkflow"), exports);
 __exportStar(require("./robotWorkflow"), exports);
 __exportStar(require("./promptRobotWorkflow"), exports);

@@ -5,6 +5,10 @@ const { startWorker } = require('../temporal/workers/worker');
 const { logger } = require('../lib/logger');
 // Log environment info
 console.log('=== Start Worker Script Initiated ===');
+// Log version information
+const WORKER_VERSION = 'v2.1-email-validation-with-whatsapp-check';
+console.log(`🚀 Worker starting with version: ${WORKER_VERSION}`);
+logger.info(`Worker version: ${WORKER_VERSION}`);
 logger.info('Starting Temporal worker...');
 logger.debug('Environment configuration', {
     temporalServer: process.env.TEMPORAL_SERVER_URL,
@@ -65,7 +69,11 @@ async function run() {
         }
         else {
             logger.info('Running in development mode. Worker will keep running.');
-            // In development, the worker.run() call will keep the process alive
+            // In development, await the runPromise to keep the process alive
+            if (worker && worker.runPromise) {
+                logger.info('Awaiting worker to keep process alive...');
+                await worker.runPromise;
+            }
         }
         // Handle graceful shutdown only in non-serverless environments
         if (!process.env.VERCEL) {
@@ -126,6 +134,6 @@ if (require.main === module) {
 }
 else {
     console.log('=== Running as imported module ===');
-    // Export the run function for use in serverless environments
-    module.exports = { run, startWorker };
 }
+// Export the run function for use in serverless environments
+module.exports = { run, startWorker };
