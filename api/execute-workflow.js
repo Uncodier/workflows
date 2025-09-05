@@ -74,17 +74,21 @@ module.exports = async (req, res) => {
     // Generate unique workflow ID
     const workflowId = `${workflowType}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    // Compute task queue using shared mapper
+    const { getTaskQueueForWorkflow } = require('../dist/temporal/config/taskQueues');
+    const selectedTaskQueue = getTaskQueueForWorkflow(workflowType);
+
     console.log('Starting workflow:', {
       workflowId,
       workflowType,
-      taskQueue: process.env.WORKFLOW_TASK_QUEUE || 'default'
+      taskQueue: selectedTaskQueue
     });
 
     // Start workflow execution
     const handle = await client.workflow.start(workflowType, {
       args,
       workflowId,
-      taskQueue: process.env.WORKFLOW_TASK_QUEUE || 'default',
+      taskQueue: selectedTaskQueue,
       workflowRunTimeout: options.timeout || '10m',
     });
 

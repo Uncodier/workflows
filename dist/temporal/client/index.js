@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getTemporalClient = getTemporalClient;
 exports.executeWorkflow = executeWorkflow;
 const config_1 = require("../../config/config");
+const taskQueues_1 = require("../config/taskQueues");
 /**
  * Creates and returns a Temporal client connection
  * @returns Temporal client instance
@@ -43,6 +44,6 @@ async function executeWorkflow(workflowType, args, workflowId, taskQueue) {
     return client.workflow.start(workflowType, {
         args,
         workflowId: workflowId || `${workflowType}-${Date.now()}`,
-        taskQueue: taskQueue || config_1.temporalConfig.taskQueue,
+        taskQueue: taskQueue || (0, taskQueues_1.getTaskQueueForWorkflow)(workflowType),
     });
 }

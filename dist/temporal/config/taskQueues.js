@@ -20,12 +20,16 @@ exports.TASK_QUEUES = {
     // Background tasks (cleanup, maintenance)
     BACKGROUND: 'background-priority',
     // Email validation queue (dedicated for Render deployment)
-    EMAIL_VALIDATION: 'email-validation-queue'
+    EMAIL_VALIDATION: 'validation'
 };
 /**
  * Get the appropriate task queue based on workflow type and urgency
  */
 function getTaskQueueForWorkflow(workflowType, priority) {
+    // Always route validateEmailWorkflow to its dedicated queue regardless of overrides
+    if (workflowType === 'validateEmailWorkflow') {
+        return exports.TASK_QUEUES.EMAIL_VALIDATION;
+    }
     // Global override via environment variable (e.g., FORCE_TASK_QUEUE=default)
     const forcedQueue = process.env.FORCE_TASK_QUEUE;
     if (forcedQueue) {

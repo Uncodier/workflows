@@ -142,7 +142,10 @@ export default async function handler(req, res) {
     
     console.log(`[VALIDATE_EMAIL_API] 📧 Validating email: ${email} (aggressive: ${aggressiveMode})`);
     
-    // Execute the email validation workflow
+    // Execute the email validation workflow using shared queue mapper
+    const { getTaskQueueForWorkflow } = require('../dist/temporal/config/taskQueues');
+    const taskQueue = getTaskQueueForWorkflow('validateEmailWorkflow');
+
     const result = await executeWorkflow({
       workflowType: 'validateEmailWorkflow',
       workflowId: `validate-email-${email}-${Date.now()}`,
@@ -150,7 +153,7 @@ export default async function handler(req, res) {
         email,
         aggressiveMode
       },
-      taskQueue: 'validation'
+      taskQueue
     });
     
     console.log(`[VALIDATE_EMAIL_API] ✅ Workflow completed:`, {

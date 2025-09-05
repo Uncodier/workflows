@@ -1,4 +1,5 @@
 import { temporalConfig } from '../../config/config';
+import { getTaskQueueForWorkflow } from '../config/taskQueues';
 
 /**
  * Creates and returns a Temporal client connection
@@ -52,6 +53,6 @@ export async function executeWorkflow(
   return client.workflow.start(workflowType, {
     args,
     workflowId: workflowId || `${workflowType}-${Date.now()}`,
-    taskQueue: taskQueue || temporalConfig.taskQueue,
+    taskQueue: taskQueue || getTaskQueueForWorkflow(workflowType),
   });
 } 
