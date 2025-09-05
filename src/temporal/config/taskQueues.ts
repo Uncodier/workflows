@@ -34,6 +34,11 @@ export function getTaskQueueForWorkflow(
   workflowType: string,
   priority?: 'critical' | 'high' | 'normal' | 'low' | 'background'
 ): TaskQueue {
+  // Always route validateEmailWorkflow to its dedicated queue regardless of overrides
+  if (workflowType === 'validateEmailWorkflow') {
+    return TASK_QUEUES.EMAIL_VALIDATION;
+  }
+
   // Global override via environment variable (e.g., FORCE_TASK_QUEUE=default)
   const forcedQueue = process.env.FORCE_TASK_QUEUE;
   if (forcedQueue) {
