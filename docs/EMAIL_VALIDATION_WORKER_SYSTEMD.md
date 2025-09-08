@@ -15,7 +15,7 @@ cd /path/to/Workflows
 git fetch origin
 git switch main && git pull --rebase --autostash origin main
 npm ci
-npm run build
+npm run build:all
 ```
 
 ### Configure environment (timeouts, EHLO, MAIL FROM)

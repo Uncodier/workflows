@@ -646,22 +646,52 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
     });
     
     // Optional policy: treat anti-spam policy blocks as risky valid (reduce false negatives)
-    // Enabled when EMAIL_VALIDATOR_TREAT_POLICY_AS_RISKY === '1'
+    // Default ON unless explicitly disabled: EMAIL_VALIDATOR_TREAT_POLICY_AS_RISKY === '0'
+    const treatPolicyAsRisky = (process.env.EMAIL_VALIDATOR_TREAT_POLICY_AS_RISKY ?? '1') === '1';
     if (
-      process.env.EMAIL_VALIDATOR_TREAT_POLICY_AS_RISKY === '1' &&
+      treatPolicyAsRisky &&
       smtpResult.result === 'unknown' &&
       Array.isArray(smtpResult.flags) && smtpResult.flags.includes('anti_spam_policy') &&
       domainCheck?.exists && Array.isArray(mxRecords) && mxRecords.length > 0
     ) {
+      const updatedFlags = [...smtpResult.flags, 'policy_as_risky'] as string[];
       smtpResult = {
         ...smtpResult,
         isValid: true,
         deliverable: false,
         result: 'risky',
-        flags: [...smtpResult.flags, 'policy_as_risky'] as string[],
-        message: 'Rejected by anti-spam policy; treating as risky valid due to DNS+MX presence'
+        flags: updatedFlags,
+        // Provide clearer message and avoid zero confidence
+        message: 'Rejected by anti-spam policy; treating as risky valid due to DNS+MX presence',
+        confidence: Math.max(smtpResult.confidence ?? 0, 20),
+        confidenceLevel: (Math.max(smtpResult.confidence ?? 0, 20) >= 70 ? 'high' : Math.max(smtpResult.confidence ?? 0, 20) >= 50 ? 'medium' : 'low') as 'low' | 'medium' | 'high' | 'very_high'
       } as typeof smtpResult;
       console.log(`[VALIDATE_EMAIL] ⚖️ Policy-as-risky applied (isValid=true, deliverable=false)`);
+    }
+
+    // Optional heuristic: treat as deliverable when SMTP is connectable and DNS+MX exist,
+    // and the only blocker is anti-spam policy (no user_unknown/permanent_error)
+    // Enable with EMAIL_VALIDATOR_DELIVERABLE_ON_CONNECT=1 (default off)
+    const deliverableOnConnect = process.env.EMAIL_VALIDATOR_DELIVERABLE_ON_CONNECT === '1';
+    const flagsSet = new Set((smtpResult.flags || []).map((f: string) => f.toLowerCase()));
+    const hasPolicyOnlyBlock = flagsSet.has('anti_spam_policy') && !flagsSet.has('user_unknown') && !flagsSet.has('permanent_error');
+    const hasConnectivity = flagsSet.has('smtp_connectable');
+    if (
+      deliverableOnConnect &&
+      hasPolicyOnlyBlock &&
+      hasConnectivity &&
+      domainCheck?.exists && Array.isArray(mxRecords) && mxRecords.length > 0
+    ) {
+      smtpResult = {
+        ...smtpResult,
+        deliverable: true,
+        result: smtpResult.result === 'unknown' ? 'risky' : smtpResult.result,
+        flags: [...smtpResult.flags, 'deliverable_on_connect'] as string[],
+        message: `${smtpResult.message} | Inferring deliverable due to SMTP connectivity and DNS+MX presence`,
+        confidence: Math.max(smtpResult.confidence ?? 0, 40),
+        confidenceLevel: (Math.max(smtpResult.confidence ?? 0, 40) >= 85 ? 'very_high' : Math.max(smtpResult.confidence ?? 0, 40) >= 70 ? 'high' : Math.max(smtpResult.confidence ?? 0, 40) >= 50 ? 'medium' : 'low') as 'low' | 'medium' | 'high' | 'very_high'
+      } as typeof smtpResult;
+      console.log(`[VALIDATE_EMAIL] 📬 Deliverable-on-connect heuristic applied (deliverable=true)`);
     }
     
     // Extract reputation info from the result (already included in performSMTPValidation)
@@ -679,6 +709,8 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
     let finalIsValid = smtpResult.isValid;
     let finalResult = smtpResult.result as 'valid' | 'invalid' | 'unknown' | 'disposable' | 'catchall' | 'risky';
     let finalFlags = [...smtpResult.flags, ...inferred.extraFlags, ...reputationCheck.reputationFlags];
+    // Dedupe flags to avoid duplicates like 'anti_spam_policy'
+    finalFlags = Array.from(new Set(finalFlags));
     if (inferred.deliverable && !finalIsValid) {
       finalIsValid = true;
       // If status was unknown, upgrade to risky to reflect uncertainty

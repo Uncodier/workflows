@@ -555,20 +555,47 @@ async function validateEmail(input) {
             executionTime
         });
         // Optional policy: treat anti-spam policy blocks as risky valid (reduce false negatives)
-        // Enabled when EMAIL_VALIDATOR_TREAT_POLICY_AS_RISKY === '1'
-        if (process.env.EMAIL_VALIDATOR_TREAT_POLICY_AS_RISKY === '1' &&
+        // Default ON unless explicitly disabled: EMAIL_VALIDATOR_TREAT_POLICY_AS_RISKY === '0'
+        const treatPolicyAsRisky = (process.env.EMAIL_VALIDATOR_TREAT_POLICY_AS_RISKY ?? '1') === '1';
+        if (treatPolicyAsRisky &&
             smtpResult.result === 'unknown' &&
             Array.isArray(smtpResult.flags) && smtpResult.flags.includes('anti_spam_policy') &&
             domainCheck?.exists && Array.isArray(mxRecords) && mxRecords.length > 0) {
+            const updatedFlags = [...smtpResult.flags, 'policy_as_risky'];
             smtpResult = {
                 ...smtpResult,
                 isValid: true,
                 deliverable: false,
                 result: 'risky',
-                flags: [...smtpResult.flags, 'policy_as_risky'],
-                message: 'Rejected by anti-spam policy; treating as risky valid due to DNS+MX presence'
+                flags: updatedFlags,
+                // Provide clearer message and avoid zero confidence
+                message: 'Rejected by anti-spam policy; treating as risky valid due to DNS+MX presence',
+                confidence: Math.max(smtpResult.confidence ?? 0, 20),
+                confidenceLevel: (Math.max(smtpResult.confidence ?? 0, 20) >= 70 ? 'high' : Math.max(smtpResult.confidence ?? 0, 20) >= 50 ? 'medium' : 'low')
             };
             console.log(`[VALIDATE_EMAIL] ⚖️ Policy-as-risky applied (isValid=true, deliverable=false)`);
+        }
+        // Optional heuristic: treat as deliverable when SMTP is connectable and DNS+MX exist,
+        // and the only blocker is anti-spam policy (no user_unknown/permanent_error)
+        // Enable with EMAIL_VALIDATOR_DELIVERABLE_ON_CONNECT=1 (default off)
+        const deliverableOnConnect = process.env.EMAIL_VALIDATOR_DELIVERABLE_ON_CONNECT === '1';
+        const flagsSet = new Set((smtpResult.flags || []).map((f) => f.toLowerCase()));
+        const hasPolicyOnlyBlock = flagsSet.has('anti_spam_policy') && !flagsSet.has('user_unknown') && !flagsSet.has('permanent_error');
+        const hasConnectivity = flagsSet.has('smtp_connectable');
+        if (deliverableOnConnect &&
+            hasPolicyOnlyBlock &&
+            hasConnectivity &&
+            domainCheck?.exists && Array.isArray(mxRecords) && mxRecords.length > 0) {
+            smtpResult = {
+                ...smtpResult,
+                deliverable: true,
+                result: smtpResult.result === 'unknown' ? 'risky' : smtpResult.result,
+                flags: [...smtpResult.flags, 'deliverable_on_connect'],
+                message: `${smtpResult.message} | Inferring deliverable due to SMTP connectivity and DNS+MX presence`,
+                confidence: Math.max(smtpResult.confidence ?? 0, 40),
+                confidenceLevel: (Math.max(smtpResult.confidence ?? 0, 40) >= 85 ? 'very_high' : Math.max(smtpResult.confidence ?? 0, 40) >= 70 ? 'high' : Math.max(smtpResult.confidence ?? 0, 40) >= 50 ? 'medium' : 'low')
+            };
+            console.log(`[VALIDATE_EMAIL] 📬 Deliverable-on-connect heuristic applied (deliverable=true)`);
         }
         // Extract reputation info from the result (already included in performSMTPValidation)
         const reputationCheck = await (0, email_validation_1.checkDomainReputation)(domain);
@@ -583,6 +610,8 @@ async function validateEmail(input) {
         let finalIsValid = smtpResult.isValid;
         let finalResult = smtpResult.result;
         let finalFlags = [...smtpResult.flags, ...inferred.extraFlags, ...reputationCheck.reputationFlags];
+        // Dedupe flags to avoid duplicates like 'anti_spam_policy'
+        finalFlags = Array.from(new Set(finalFlags));
         if (inferred.deliverable && !finalIsValid) {
             finalIsValid = true;
             // If status was unknown, upgrade to risky to reflect uncertainty

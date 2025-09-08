@@ -48,8 +48,50 @@ const dns_1 = require("dns");
  * Validates email format using regex
  */
 function isValidEmailFormat(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+    // Quick sanity checks
+    if (!email || typeof email !== 'string')
+        return false;
+    if (email.includes(' '))
+        return false;
+    const atCount = (email.match(/@/g) || []).length;
+    if (atCount !== 1)
+        return false;
+    const [localPart, domain] = email.split('@');
+    if (!localPart || !domain)
+        return false;
+    // Local part rules (RFC-inspired, pragmatic):
+    // - length 1..64
+    // - allowed chars: A-Z a-z 0-9 and .!#$%&'*+/=?^_`{|}~-
+    // - no leading/trailing dot
+    // - no consecutive dots
+    if (localPart.length === 0 || localPart.length > 64)
+        return false;
+    if (!/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(localPart))
+        return false;
+    if (localPart.startsWith('.') || localPart.endsWith('.'))
+        return false;
+    if (localPart.includes('..'))
+        return false;
+    // Domain rules (hostname-like):
+    // - total length <= 255
+    // - at least one dot
+    // - labels 1..63, alphanumeric with hyphens, no leading/trailing hyphen
+    // - TLD 2+ letters
+    const domainLower = domain.toLowerCase();
+    if (domainLower.length === 0 || domainLower.length > 255)
+        return false;
+    if (!domainLower.includes('.'))
+        return false;
+    const labels = domainLower.split('.');
+    if (labels.some(l => l.length === 0 || l.length > 63))
+        return false;
+    const labelRegex = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+    if (!labels.every(l => labelRegex.test(l)))
+        return false;
+    const tld = labels[labels.length - 1];
+    if (!/^[a-z]{2,}$/.test(tld))
+        return false;
+    return true;
 }
 /**
  * Extracts domain from email address
@@ -283,15 +325,29 @@ async function sendSMTPCommand(socket, command) {
  * or when our current deliverable is undefined/false but flags indicate acceptance.
  */
 function inferDeliverableFromSignals(input) {
-    const { isValid, result, flags, currentDeliverable } = input;
+    const { result, flags, currentDeliverable } = input;
     // Preserve explicit true
     if (currentDeliverable === true)
         return { deliverable: true, extraFlags: [] };
     const normalizedFlags = (flags || []).map(f => f.toLowerCase());
     const has = (name) => normalizedFlags.includes(name);
+    // Hard-negative guards: never infer deliverability when permanent errors are present
+    const hardNegatives = [
+        'permanent_error',
+        'user_unknown',
+        'mailbox_unavailable',
+        'invalid_recipient',
+        'rcpt_rejected',
+        'syntax_error',
+        '550',
+        '5.1.1',
+    ];
+    if (hardNegatives.some(n => has(n))) {
+        return { deliverable: Boolean(currentDeliverable) && !false, extraFlags: [] };
+    }
     let deliverable = Boolean(currentDeliverable);
     let changed = false;
-    // Strong positive signals for deliverability
+    // Only infer deliverability from strong signals we fully trust
     if (!deliverable) {
         if (result === 'valid') {
             deliverable = true;
@@ -301,14 +357,9 @@ function inferDeliverableFromSignals(input) {
             deliverable = true;
             changed = true;
         }
-        else if (has('smtp_connectable')) {
-            deliverable = true;
-            changed = true;
-        }
-        else if (isValid && has('basic_validation') && has('has_dns') && has('has_dns_mx')) {
-            deliverable = true;
-            changed = true;
-        }
+        // Do NOT infer from mere SMTP connectivity or DNS-only checks
+        // else if (has('smtp_connectable')) { ... }
+        // else if (isValid && has('basic_validation') && has('has_dns') && has('has_dns_mx')) { ... }
     }
     return { deliverable, extraFlags: changed ? ['deliverable_inferred'] : [] };
 }
