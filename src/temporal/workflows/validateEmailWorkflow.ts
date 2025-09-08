@@ -2,6 +2,7 @@ import { proxyActivities } from '@temporalio/workflow';
 import type * as activities from '../activities/validateEmailActivities';
 
 const {
+  testSMTPConnectivityActivity,
   validateEmail
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: '10 minutes',
@@ -65,6 +66,22 @@ export async function validateEmailWorkflow(
   console.log(`[VALIDATE_EMAIL_WORKFLOW] Starting email validation for: ${input.email} (aggressive: ${input.aggressiveMode || false})`);
   
   try {
+    // First, ensure SMTP connectivity over port 25 is available and visible in history
+    const connectivity = await testSMTPConnectivityActivity({
+      email: input.email
+    });
+    if (!connectivity.success) {
+      console.error(`[VALIDATE_EMAIL_WORKFLOW] SMTP connectivity failed for ${input.email}:`, connectivity);
+      return {
+        success: false,
+        error: {
+          code: connectivity.errorCode || 'SMTP_CONNECT_FAILED',
+          message: 'SMTP connectivity failed',
+          details: connectivity.error || connectivity.message
+        }
+      };
+    }
+
     // Execute the email validation activity
     const result = await validateEmail({
       email: input.email,

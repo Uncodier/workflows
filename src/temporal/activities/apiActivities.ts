@@ -294,14 +294,16 @@ export async function sendDailyStandUpNotificationActivity(params: {
   subject: string;
   message: string;
   systemAnalysis?: any; // Optional system analysis data
+  health?: any; // Optional health status structure from wrap up
 }): Promise<any> {
-  const { site_id, subject, message, systemAnalysis } = params;
+  const { site_id, subject, message, systemAnalysis, health } = params;
   
   const response = await apiService.post('/api/notifications/dailyStandUp', {
     site_id,
     subject,
     message,
-    systemAnalysis
+    systemAnalysis,
+    health
   });
   
   if (!response.success) {

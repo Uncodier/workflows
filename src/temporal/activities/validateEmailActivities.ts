@@ -9,8 +9,78 @@ import {
   performSMTPValidation,
   checkDomainReputation,
   performBasicEmailValidation,
+  createSocketWithTimeout,
   type MXRecord
 } from '../../lib/email-validation';
+
+/**
+ * Activity: Test initial SMTP connectivity over port 25
+ * Returns a simple success/failure so it's visible in Temporal history
+ */
+export async function testSMTPConnectivityActivity(input: {
+  email: string;
+  timeoutMs?: number;
+}): Promise<{
+  success: boolean;
+  host?: string;
+  message: string;
+  error?: string;
+  errorCode?: string;
+}> {
+  const { email, timeoutMs } = input;
+  console.log(`[SMTP_CONNECTIVITY] Starting SMTP connectivity test for: ${email}`);
+  try {
+    if (!email || !isValidEmailFormat(email)) {
+      return {
+        success: false,
+        message: 'Invalid or missing email',
+        errorCode: 'INVALID_EMAIL_FORMAT'
+      };
+    }
+    const domain = extractDomain(email);
+    console.log(`[SMTP_CONNECTIVITY] Extracted domain: ${domain}`);
+    const mxRecords = await getMXRecords(domain);
+    if (!mxRecords || mxRecords.length === 0) {
+      console.log(`[SMTP_CONNECTIVITY] No MX records for domain: ${domain}`);
+      return {
+        success: false,
+        message: 'No MX records for domain',
+        errorCode: 'NO_MX_RECORDS'
+      };
+    }
+    const primaryMX = mxRecords[0];
+    const connectTimeout = typeof timeoutMs === 'number'
+      ? timeoutMs
+      : (process.env.EMAIL_VALIDATOR_CONNECT_TIMEOUT_MS ? Number(process.env.EMAIL_VALIDATOR_CONNECT_TIMEOUT_MS) : 8000);
+    console.log(`[SMTP_CONNECTIVITY] Testing TCP connect to ${primaryMX.exchange}:25 with timeout ${connectTimeout}ms`);
+    const connectionTest = await createSocketWithTimeout(primaryMX.exchange, 25, connectTimeout);
+    if (!connectionTest.success) {
+      console.log(`[SMTP_CONNECTIVITY] Connection failed: ${connectionTest.error || 'Unknown error'}`);
+      return {
+        success: false,
+        message: 'Unable to establish SMTP connection on port 25',
+        error: connectionTest.error || 'Connection failed',
+        errorCode: connectionTest.errorCode || 'CONNECTION_ERROR'
+      };
+    }
+    // Cleanup socket
+    connectionTest.socket?.destroy();
+    console.log(`[SMTP_CONNECTIVITY] Connectivity OK via ${primaryMX.exchange}:25`);
+    return {
+      success: true,
+      host: primaryMX.exchange,
+      message: 'SMTP connectivity OK'
+    };
+  } catch (error: any) {
+    console.error(`[SMTP_CONNECTIVITY] Error during connectivity test:`, error?.message || error);
+    return {
+      success: false,
+      message: 'SMTP connectivity check threw an error',
+      error: error?.message || 'Unknown error',
+      errorCode: error?.code || 'SMTP_CONNECTIVITY_ERROR'
+    };
+  }
+}
 
 export interface ValidateEmailInput {
   email: string;
@@ -381,6 +451,8 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
       };
     }
     
+    // SMTP connectivity is now handled as a dedicated activity in the workflow for visibility
+
     // Try SMTP validation with MX records (try multiple if first fails with timeout)
     console.log(`[VALIDATE_EMAIL] 🔌 Attempting SMTP validation with ${mxRecords.length} MX record(s)`);
     
