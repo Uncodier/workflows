@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateEmailWorkflow = validateEmailWorkflow;
 const workflow_1 = require("@temporalio/workflow");
-const { validateEmail } = (0, workflow_1.proxyActivities)({
+const { testSMTPConnectivityActivity, validateEmail } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes',
     retry: {
         initialInterval: '1 second',
@@ -27,6 +27,14 @@ const { validateEmail } = (0, workflow_1.proxyActivities)({
 async function validateEmailWorkflow(input) {
     console.log(`[VALIDATE_EMAIL_WORKFLOW] Starting email validation for: ${input.email} (aggressive: ${input.aggressiveMode || false})`);
     try {
+        // First, ensure SMTP connectivity over port 25 is available and visible in history
+        const connectivity = await testSMTPConnectivityActivity({
+            email: input.email
+        });
+        if (!connectivity.success) {
+            console.warn(`[VALIDATE_EMAIL_WORKFLOW] SMTP connectivity precheck failed for ${input.email}, continuing with validation:`, connectivity);
+            // Do not abort; proceed to full validation which tries multiple MX and IPv4 first
+        }
         // Execute the email validation activity
         const result = await validateEmail({
             email: input.email,

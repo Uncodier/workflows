@@ -1431,6 +1431,24 @@ segmentId // Add segment_id parameter
         }
         console.log(`✅ No duplicates found, proceeding with lead creation`);
         // ✅ STEP 2: Prepare lead data for database
+        // Prepare metadata to persist, preserving any metadata coming from upstream validation/generation
+        const metadataToPersist = (() => {
+            const incomingMetadata = lead?.metadata;
+            if (incomingMetadata && typeof incomingMetadata === 'object') {
+                return {
+                    ...incomingMetadata,
+                    // Ensure workflow origin marker exists
+                    emailVerificationWorkflow: incomingMetadata.emailVerificationWorkflow || 'leadGenerationWorkflow'
+                };
+            }
+            // Default metadata for AI generated contacts when none provided upstream
+            return {
+                emailVerified: false,
+                emailVerificationTimestamp: new Date().toISOString(),
+                emailVerificationWorkflow: 'leadGenerationWorkflow',
+                emailSource: 'AI_Generated'
+            };
+        })();
         const leadData = {
             name: lead.name,
             email: lead.email,
@@ -1447,7 +1465,7 @@ segmentId // Add segment_id parameter
             user_id: userId || null,
             status: 'new',
             origin: 'lead_generation_workflow',
-            metadata: {}, // Keep metadata empty for now
+            metadata: metadataToPersist,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };

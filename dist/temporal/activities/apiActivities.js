@@ -231,12 +231,13 @@ async function leadContactGenerationActivity(request) {
  * Activity to send daily stand up notification
  */
 async function sendDailyStandUpNotificationActivity(params) {
-    const { site_id, subject, message, systemAnalysis } = params;
+    const { site_id, subject, message, systemAnalysis, health } = params;
     const response = await apiService_1.apiService.post('/api/notifications/dailyStandUp', {
         site_id,
         subject,
         message,
-        systemAnalysis
+        systemAnalysis,
+        health
     });
     if (!response.success) {
         throw new Error(`Failed to send daily stand up notification: ${response.error?.message}`);

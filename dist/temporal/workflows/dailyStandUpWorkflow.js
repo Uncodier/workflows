@@ -254,7 +254,8 @@ async function dailyStandUpWorkflow(options) {
                     site_id: site_id,
                     subject: wrapUpResult.subject,
                     message: wrapUpResult.message,
-                    systemAnalysis: systemAnalysisResult
+                    systemAnalysis: systemAnalysisResult,
+                    health: wrapUpResult.health || systemAnalysisResult?.health
                 });
                 console.log(`✅ Daily stand up notification sent successfully`);
             }

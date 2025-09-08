@@ -48,28 +48,36 @@ export async function testSMTPConnectivityActivity(input: {
         errorCode: 'NO_MX_RECORDS'
       };
     }
-    const primaryMX = mxRecords[0];
     const connectTimeout = typeof timeoutMs === 'number'
       ? timeoutMs
       : (process.env.EMAIL_VALIDATOR_CONNECT_TIMEOUT_MS ? Number(process.env.EMAIL_VALIDATOR_CONNECT_TIMEOUT_MS) : 8000);
-    console.log(`[SMTP_CONNECTIVITY] Testing TCP connect to ${primaryMX.exchange}:25 with timeout ${connectTimeout}ms`);
-    const connectionTest = await createSocketWithTimeout(primaryMX.exchange, 25, connectTimeout);
-    if (!connectionTest.success) {
-      console.log(`[SMTP_CONNECTIVITY] Connection failed: ${connectionTest.error || 'Unknown error'}`);
-      return {
-        success: false,
-        message: 'Unable to establish SMTP connection on port 25',
-        error: connectionTest.error || 'Connection failed',
-        errorCode: connectionTest.errorCode || 'CONNECTION_ERROR'
-      };
+    
+    // Try up to first 3 MX records, prefer IPv4 in socket util (already implemented there)
+    let lastError: { error?: string; errorCode?: string } | null = null;
+    for (let i = 0; i < Math.min(mxRecords.length, 3); i++) {
+      const mx = mxRecords[i];
+      console.log(`[SMTP_CONNECTIVITY] Testing TCP connect to ${mx.exchange}:25 with timeout ${connectTimeout}ms`);
+      const connectionTest = await createSocketWithTimeout(mx.exchange, 25, connectTimeout);
+      if (connectionTest.success) {
+        // Cleanup socket
+        connectionTest.socket?.destroy();
+        console.log(`[SMTP_CONNECTIVITY] Connectivity OK via ${mx.exchange}:25`);
+        return {
+          success: true,
+          host: mx.exchange,
+          message: 'SMTP connectivity OK'
+        };
+      }
+      console.log(`[SMTP_CONNECTIVITY] Connection failed on ${mx.exchange}: ${connectionTest.error || 'Unknown error'}`);
+      lastError = { error: connectionTest.error, errorCode: connectionTest.errorCode };
     }
-    // Cleanup socket
-    connectionTest.socket?.destroy();
-    console.log(`[SMTP_CONNECTIVITY] Connectivity OK via ${primaryMX.exchange}:25`);
+    
+    // If none succeeded
     return {
-      success: true,
-      host: primaryMX.exchange,
-      message: 'SMTP connectivity OK'
+      success: false,
+      message: 'Unable to establish SMTP connection on port 25',
+      error: lastError?.error || 'Connection failed',
+      errorCode: lastError?.errorCode || 'CONNECTION_ERROR'
     };
   } catch (error: any) {
     console.error(`[SMTP_CONNECTIVITY] Error during connectivity test:`, error?.message || error);

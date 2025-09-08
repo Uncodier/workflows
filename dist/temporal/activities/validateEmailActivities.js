@@ -1,7 +1,74 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.testSMTPConnectivityActivity = testSMTPConnectivityActivity;
 exports.validateEmail = validateEmail;
 const email_validation_1 = require("../../lib/email-validation");
+/**
+ * Activity: Test initial SMTP connectivity over port 25
+ * Returns a simple success/failure so it's visible in Temporal history
+ */
+async function testSMTPConnectivityActivity(input) {
+    const { email, timeoutMs } = input;
+    console.log(`[SMTP_CONNECTIVITY] Starting SMTP connectivity test for: ${email}`);
+    try {
+        if (!email || !(0, email_validation_1.isValidEmailFormat)(email)) {
+            return {
+                success: false,
+                message: 'Invalid or missing email',
+                errorCode: 'INVALID_EMAIL_FORMAT'
+            };
+        }
+        const domain = (0, email_validation_1.extractDomain)(email);
+        console.log(`[SMTP_CONNECTIVITY] Extracted domain: ${domain}`);
+        const mxRecords = await (0, email_validation_1.getMXRecords)(domain);
+        if (!mxRecords || mxRecords.length === 0) {
+            console.log(`[SMTP_CONNECTIVITY] No MX records for domain: ${domain}`);
+            return {
+                success: false,
+                message: 'No MX records for domain',
+                errorCode: 'NO_MX_RECORDS'
+            };
+        }
+        const connectTimeout = typeof timeoutMs === 'number'
+            ? timeoutMs
+            : (process.env.EMAIL_VALIDATOR_CONNECT_TIMEOUT_MS ? Number(process.env.EMAIL_VALIDATOR_CONNECT_TIMEOUT_MS) : 8000);
+        // Try up to first 3 MX records, prefer IPv4 in socket util (already implemented there)
+        let lastError = null;
+        for (let i = 0; i < Math.min(mxRecords.length, 3); i++) {
+            const mx = mxRecords[i];
+            console.log(`[SMTP_CONNECTIVITY] Testing TCP connect to ${mx.exchange}:25 with timeout ${connectTimeout}ms`);
+            const connectionTest = await (0, email_validation_1.createSocketWithTimeout)(mx.exchange, 25, connectTimeout);
+            if (connectionTest.success) {
+                // Cleanup socket
+                connectionTest.socket?.destroy();
+                console.log(`[SMTP_CONNECTIVITY] Connectivity OK via ${mx.exchange}:25`);
+                return {
+                    success: true,
+                    host: mx.exchange,
+                    message: 'SMTP connectivity OK'
+                };
+            }
+            console.log(`[SMTP_CONNECTIVITY] Connection failed on ${mx.exchange}: ${connectionTest.error || 'Unknown error'}`);
+            lastError = { error: connectionTest.error, errorCode: connectionTest.errorCode };
+        }
+        // If none succeeded
+        return {
+            success: false,
+            message: 'Unable to establish SMTP connection on port 25',
+            error: lastError?.error || 'Connection failed',
+            errorCode: lastError?.errorCode || 'CONNECTION_ERROR'
+        };
+    }
+    catch (error) {
+        console.error(`[SMTP_CONNECTIVITY] Error during connectivity test:`, error?.message || error);
+        return {
+            success: false,
+            message: 'SMTP connectivity check threw an error',
+            error: error?.message || 'Unknown error',
+            errorCode: error?.code || 'SMTP_CONNECTIVITY_ERROR'
+        };
+    }
+}
 /**
  * Validates an email address using SMTP validation with catchall detection
  */
@@ -320,6 +387,7 @@ async function validateEmail(input) {
                 }
             };
         }
+        // SMTP connectivity is now handled as a dedicated activity in the workflow for visibility
         // Try SMTP validation with MX records (try multiple if first fails with timeout)
         console.log(`[VALIDATE_EMAIL] 🔌 Attempting SMTP validation with ${mxRecords.length} MX record(s)`);
         // Check if we're running in Vercel (serverless environment)

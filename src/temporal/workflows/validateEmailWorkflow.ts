@@ -71,15 +71,8 @@ export async function validateEmailWorkflow(
       email: input.email
     });
     if (!connectivity.success) {
-      console.error(`[VALIDATE_EMAIL_WORKFLOW] SMTP connectivity failed for ${input.email}:`, connectivity);
-      return {
-        success: false,
-        error: {
-          code: connectivity.errorCode || 'SMTP_CONNECT_FAILED',
-          message: 'SMTP connectivity failed',
-          details: connectivity.error || connectivity.message
-        }
-      };
+      console.warn(`[VALIDATE_EMAIL_WORKFLOW] SMTP connectivity precheck failed for ${input.email}, continuing with validation:`, connectivity);
+      // Do not abort; proceed to full validation which tries multiple MX and IPv4 first
     }
 
     // Execute the email validation activity

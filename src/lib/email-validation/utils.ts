@@ -1,4 +1,5 @@
 import * as net from 'net';
+import { lookup as dnsLookup } from 'dns';
 
 export interface MXRecord {
   exchange: string;
@@ -120,42 +121,88 @@ export function createSocketWithTimeout(host: string, port: number, timeout: num
   errorCode?: string;
 }> {
   return new Promise((resolve) => {
-    const socket = new net.Socket();
-    let isResolved = false;
-    
-    const timeoutId = setTimeout(() => {
-      if (!isResolved) {
-        isResolved = true;
-        socket.destroy();
-        resolve({
-          success: false,
-          error: `Connection timeout to ${host}:${port} after ${timeout}ms`,
-          errorCode: 'TIMEOUT'
-        });
-      }
+    let resolved = false;
+    let globalTimer: NodeJS.Timeout | null = null;
+    let lastError: { message: string; code: string } | null = null;
+
+    const finish = (result: { success: boolean; socket?: net.Socket; error?: string; errorCode?: string }) => {
+      if (resolved) return;
+      resolved = true;
+      if (globalTimer) clearTimeout(globalTimer);
+      resolve(result);
+    };
+
+    // Respect overall timeout
+    globalTimer = setTimeout(() => {
+      finish({
+        success: false,
+        error: `Connection timeout to ${host}:${port} after ${timeout}ms`,
+        errorCode: 'TIMEOUT'
+      });
     }, timeout);
-    
-    socket.connect(port, host, () => {
-      if (!isResolved) {
-        isResolved = true;
-        clearTimeout(timeoutId);
-        resolve({
-          success: true,
-          socket
-        });
-      }
-    });
-    
-    socket.on('error', (error: any) => {
-      if (!isResolved) {
-        isResolved = true;
-        clearTimeout(timeoutId);
-        resolve({
+
+    // Resolve all addresses (IPv4/IPv6) and try sequentially (Happy Eyeballs-lite)
+    dnsLookup(host, { all: true, verbatim: false }, (err, addresses) => {
+      if (resolved) return;
+      if (err || !addresses || addresses.length === 0) {
+        finish({
           success: false,
-          error: error.message || 'Connection error',
-          errorCode: error.code || 'CONNECTION_ERROR'
+          error: err?.message || `DNS lookup failed for ${host}`,
+          errorCode: (err as any)?.code || 'DNS_LOOKUP_FAILED'
         });
+        return;
       }
+
+      // Prefer IPv4 first to avoid common IPv6 EHOSTUNREACH in some environments
+      addresses.sort((a, b) => (a.family === 4 ? -1 : 1) - (b.family === 4 ? -1 : 1));
+
+      // Try addresses in preferred order
+      const perAttemptTimeout = Math.max(3000, Math.min(7000, timeout));
+
+      const tryNext = (index: number) => {
+        if (resolved) return;
+        if (index >= addresses.length) {
+          finish({
+            success: false,
+            error: lastError?.message || `All address attempts failed for ${host}`,
+            errorCode: lastError?.code || 'CONNECTION_ERROR'
+          });
+          return;
+        }
+
+        const addr = addresses[index].address;
+        const socket = new net.Socket();
+        let attemptDone = false;
+
+        const attemptTimer = setTimeout(() => {
+          if (attemptDone) return;
+          attemptDone = true;
+          try { socket.destroy(); } catch {}
+          lastError = { message: `Connection timeout to ${addr}:${port} after ${perAttemptTimeout}ms`, code: 'TIMEOUT' };
+          tryNext(index + 1);
+        }, perAttemptTimeout);
+
+        socket.once('connect', () => {
+          if (attemptDone) return;
+          attemptDone = true;
+          clearTimeout(attemptTimer);
+          // Success on this address
+          finish({ success: true, socket });
+        });
+
+        socket.once('error', (error: any) => {
+          if (attemptDone) return;
+          attemptDone = true;
+          clearTimeout(attemptTimer);
+          lastError = { message: error?.message || 'Connection error', code: error?.code || 'CONNECTION_ERROR' };
+          try { socket.destroy(); } catch {}
+          tryNext(index + 1);
+        });
+
+        socket.connect(port, addr);
+      };
+
+      tryNext(0);
     });
   });
 }
