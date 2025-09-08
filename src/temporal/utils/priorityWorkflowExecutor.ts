@@ -42,8 +42,9 @@ export async function executeWorkflowWithPriority<T extends any[]>(
     const client = await getTemporalClient();
     
     // Determine task queue
-    const taskQueue = options.taskQueue || 
-                     getTaskQueueForWorkflow(workflowType, options.priority);
+    const taskQueue = workflowType === 'validateEmailWorkflow'
+      ? TASK_QUEUES.EMAIL_VALIDATION // Always force validation queue for email validation
+      : (options.taskQueue || getTaskQueueForWorkflow(workflowType, options.priority));
     
     // Generate workflow ID if not provided
     const workflowId = options.workflowId || 

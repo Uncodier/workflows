@@ -78,6 +78,11 @@ module.exports = async (req, res) => {
      * Get task queue based on workflow type and priority
      */
     function getTaskQueueForWorkflow(workflowType, priority, expedite) {
+      // Always route email validation to dedicated queue regardless of overrides
+      if (workflowType === 'validateEmailWorkflow') {
+        return 'validation';
+      }
+
       // Global override via environment variable (e.g., FORCE_TASK_QUEUE=default)
       if (process.env.FORCE_TASK_QUEUE) {
         return process.env.FORCE_TASK_QUEUE;

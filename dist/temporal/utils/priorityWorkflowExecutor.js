@@ -20,8 +20,9 @@ async function executeWorkflowWithPriority(workflowType, args, options = {}) {
     try {
         const client = await (0, client_1.getTemporalClient)();
         // Determine task queue
-        const taskQueue = options.taskQueue ||
-            (0, taskQueues_1.getTaskQueueForWorkflow)(workflowType, options.priority);
+        const taskQueue = workflowType === 'validateEmailWorkflow'
+            ? taskQueues_1.TASK_QUEUES.EMAIL_VALIDATION // Always force validation queue for email validation
+            : (options.taskQueue || (0, taskQueues_1.getTaskQueueForWorkflow)(workflowType, options.priority));
         // Generate workflow ID if not provided
         const workflowId = options.workflowId ||
             `${workflowType}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
