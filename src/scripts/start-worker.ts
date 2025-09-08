@@ -7,7 +7,7 @@ const { logger } = require('../lib/logger');
 console.log('=== Start Worker Script Initiated ===');
 
 // Log version information
-const WORKER_VERSION = 'v2.1-email-validation-with-whatsapp-check';
+const WORKER_VERSION = 'v2.2-email-validation-version-bump';
 console.log(`🚀 Worker starting with version: ${WORKER_VERSION}`);
 logger.info(`Worker version: ${WORKER_VERSION}`);
 
