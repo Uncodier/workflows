@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendSMTPCommand = exports.readSMTPResponse = exports.createSocketWithTimeout = exports.withDNSTimeout = exports.isLikelyNonEmailDomain = exports.isDisposableEmail = exports.extractDomain = exports.isValidEmailFormat = exports.checkDomainReputation = exports.performBasicEmailValidation = exports.attemptFallbackValidation = exports.getMXRecords = exports.checkDomainExists = exports.detectCatchallDomain = exports.performSMTPValidation = void 0;
+exports.inferDeliverableFromSignals = exports.sendSMTPCommand = exports.readSMTPResponse = exports.createSocketWithTimeout = exports.withDNSTimeout = exports.isLikelyNonEmailDomain = exports.isDisposableEmail = exports.extractDomain = exports.isValidEmailFormat = exports.checkDomainReputation = exports.performBasicEmailValidation = exports.attemptFallbackValidation = exports.getMXRecords = exports.checkDomainExists = exports.detectCatchallDomain = exports.performSMTPValidation = void 0;
 // Main validation functions
 var smtp_js_1 = require("./smtp.js");
 Object.defineProperty(exports, "performSMTPValidation", { enumerable: true, get: function () { return smtp_js_1.performSMTPValidation; } });
@@ -22,3 +22,4 @@ Object.defineProperty(exports, "withDNSTimeout", { enumerable: true, get: functi
 Object.defineProperty(exports, "createSocketWithTimeout", { enumerable: true, get: function () { return utils_js_1.createSocketWithTimeout; } });
 Object.defineProperty(exports, "readSMTPResponse", { enumerable: true, get: function () { return utils_js_1.readSMTPResponse; } });
 Object.defineProperty(exports, "sendSMTPCommand", { enumerable: true, get: function () { return utils_js_1.sendSMTPCommand; } });
+Object.defineProperty(exports, "inferDeliverableFromSignals", { enumerable: true, get: function () { return utils_js_1.inferDeliverableFromSignals; } });

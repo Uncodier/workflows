@@ -554,16 +554,50 @@ async function validateEmail(input) {
             flags: smtpResult.flags,
             executionTime
         });
+        // Optional policy: treat anti-spam policy blocks as risky valid (reduce false negatives)
+        // Enabled when EMAIL_VALIDATOR_TREAT_POLICY_AS_RISKY === '1'
+        if (process.env.EMAIL_VALIDATOR_TREAT_POLICY_AS_RISKY === '1' &&
+            smtpResult.result === 'unknown' &&
+            Array.isArray(smtpResult.flags) && smtpResult.flags.includes('anti_spam_policy') &&
+            domainCheck?.exists && Array.isArray(mxRecords) && mxRecords.length > 0) {
+            smtpResult = {
+                ...smtpResult,
+                isValid: true,
+                deliverable: false,
+                result: 'risky',
+                flags: [...smtpResult.flags, 'policy_as_risky'],
+                message: 'Rejected by anti-spam policy; treating as risky valid due to DNS+MX presence'
+            };
+            console.log(`[VALIDATE_EMAIL] ⚖️ Policy-as-risky applied (isValid=true, deliverable=false)`);
+        }
         // Extract reputation info from the result (already included in performSMTPValidation)
         const reputationCheck = await (0, email_validation_1.checkDomainReputation)(domain);
+        // Infer deliverable from available signals to avoid false negatives
+        const inferred = (0, email_validation_1.inferDeliverableFromSignals)({
+            isValid: smtpResult.isValid,
+            result: smtpResult.result,
+            flags: smtpResult.flags,
+            currentDeliverable: smtpResult.deliverable
+        });
+        // Consistency rule: if deliverable is true, isValid must be true.
+        let finalIsValid = smtpResult.isValid;
+        let finalResult = smtpResult.result;
+        let finalFlags = [...smtpResult.flags, ...inferred.extraFlags, ...reputationCheck.reputationFlags];
+        if (inferred.deliverable && !finalIsValid) {
+            finalIsValid = true;
+            // If status was unknown, upgrade to risky to reflect uncertainty
+            if (finalResult === 'unknown')
+                finalResult = 'risky';
+            finalFlags = [...finalFlags, 'is_valid_inferred'];
+        }
         const response = {
             success: true,
             data: {
                 email,
-                isValid: smtpResult.isValid,
-                deliverable: smtpResult.deliverable,
-                result: smtpResult.result,
-                flags: [...smtpResult.flags, ...reputationCheck.reputationFlags],
+                isValid: finalIsValid,
+                deliverable: inferred.deliverable,
+                result: finalResult,
+                flags: finalFlags,
                 suggested_correction: null,
                 execution_time: executionTime,
                 message: smtpResult.message,

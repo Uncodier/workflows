@@ -41,6 +41,7 @@ exports.withDNSTimeout = withDNSTimeout;
 exports.createSocketWithTimeout = createSocketWithTimeout;
 exports.readSMTPResponse = readSMTPResponse;
 exports.sendSMTPCommand = sendSMTPCommand;
+exports.inferDeliverableFromSignals = inferDeliverableFromSignals;
 const net = __importStar(require("net"));
 const dns_1 = require("dns");
 /**
@@ -276,4 +277,38 @@ async function sendSMTPCommand(socket, command) {
             errorCode: 'SEND_ERROR'
         };
     }
+}
+/**
+ * Infers deliverability from available signals when a provider only supplies isValid
+ * or when our current deliverable is undefined/false but flags indicate acceptance.
+ */
+function inferDeliverableFromSignals(input) {
+    const { isValid, result, flags, currentDeliverable } = input;
+    // Preserve explicit true
+    if (currentDeliverable === true)
+        return { deliverable: true, extraFlags: [] };
+    const normalizedFlags = (flags || []).map(f => f.toLowerCase());
+    const has = (name) => normalizedFlags.includes(name);
+    let deliverable = Boolean(currentDeliverable);
+    let changed = false;
+    // Strong positive signals for deliverability
+    if (!deliverable) {
+        if (result === 'valid') {
+            deliverable = true;
+            changed = true;
+        }
+        else if (has('catchall_domain') || has('accepts_all') || has('accept_all')) {
+            deliverable = true;
+            changed = true;
+        }
+        else if (has('smtp_connectable')) {
+            deliverable = true;
+            changed = true;
+        }
+        else if (isValid && has('basic_validation') && has('has_dns') && has('has_dns_mx')) {
+            deliverable = true;
+            changed = true;
+        }
+    }
+    return { deliverable, extraFlags: changed ? ['deliverable_inferred'] : [] };
 }

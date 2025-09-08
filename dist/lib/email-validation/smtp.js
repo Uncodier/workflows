@@ -49,6 +49,8 @@ const TLS_HANDSHAKE_TIMEOUT_MS = process.env.EMAIL_VALIDATOR_TLS_TIMEOUT_MS ? Nu
  */
 async function performSMTPValidationCore(email, mxRecord) {
     let socket = null;
+    // Accumulate protocol capability/observations as flags
+    const accumulatedFlags = [];
     try {
         console.log(`[VALIDATE_EMAIL] Connecting to SMTP server: ${mxRecord.exchange}:25`);
         // Create socket connection with configurable timeout
@@ -178,6 +180,8 @@ async function performSMTPValidationCore(email, mxRecord) {
                 message: `MAIL FROM rejected: ${mailFromResponse.code} ${mailFromResponse.message}`
             };
         }
+        // We reached and passed MAIL FROM, mark SMTP connectability
+        accumulatedFlags.push('smtp_connectable');
         // Send RCPT TO command - this is the key validation step
         const rcptToResult = await (0, utils_js_1.sendSMTPCommand)(activeSocket, `RCPT TO:<${email}>`);
         if (!rcptToResult.success) {
@@ -196,7 +200,7 @@ async function performSMTPValidationCore(email, mxRecord) {
             console.log(`[VALIDATE_EMAIL] QUIT command failed (non-critical):`, quitResult.error);
         }
         // Analyze RCPT TO response
-        const flags = [];
+        const flags = [...accumulatedFlags];
         let result = 'unknown';
         let isValid = false;
         let message = '';

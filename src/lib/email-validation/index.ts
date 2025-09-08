@@ -12,7 +12,8 @@ export {
   withDNSTimeout,
   createSocketWithTimeout,
   readSMTPResponse,
-  sendSMTPCommand
+  sendSMTPCommand,
+  inferDeliverableFromSignals
 } from './utils.js';
 
 // Types

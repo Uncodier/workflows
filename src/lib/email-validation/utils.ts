@@ -289,3 +289,35 @@ export async function sendSMTPCommand(socket: net.Socket, command: string): Prom
     };
   }
 }
+
+/**
+ * Infers deliverability from available signals when a provider only supplies isValid
+ * or when our current deliverable is undefined/false but flags indicate acceptance.
+ */
+export function inferDeliverableFromSignals(input: {
+  isValid: boolean;
+  result: 'valid' | 'invalid' | 'unknown' | 'disposable' | 'catchall' | 'risky';
+  flags: string[];
+  currentDeliverable?: boolean;
+}): { deliverable: boolean; extraFlags: string[] } {
+  const { isValid, result, flags, currentDeliverable } = input;
+
+  // Preserve explicit true
+  if (currentDeliverable === true) return { deliverable: true, extraFlags: [] };
+
+  const normalizedFlags = (flags || []).map(f => f.toLowerCase());
+  const has = (name: string) => normalizedFlags.includes(name);
+
+  let deliverable = Boolean(currentDeliverable);
+  let changed = false;
+
+  // Strong positive signals for deliverability
+  if (!deliverable) {
+    if (result === 'valid') { deliverable = true; changed = true; }
+    else if (has('catchall_domain') || has('accepts_all') || has('accept_all')) { deliverable = true; changed = true; }
+    else if (has('smtp_connectable')) { deliverable = true; changed = true; }
+    else if (isValid && has('basic_validation') && has('has_dns') && has('has_dns_mx')) { deliverable = true; changed = true; }
+  }
+
+  return { deliverable, extraFlags: changed ? ['deliverable_inferred'] : [] };
+}

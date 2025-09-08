@@ -18,6 +18,8 @@ export async function performSMTPValidationCore(email: string, mxRecord: MXRecor
   message: string;
 }> {
   let socket: any = null;
+  // Accumulate protocol capability/observations as flags
+  const accumulatedFlags: string[] = [];
   
   try {
     console.log(`[VALIDATE_EMAIL] Connecting to SMTP server: ${mxRecord.exchange}:25`);
@@ -168,6 +170,8 @@ export async function performSMTPValidationCore(email: string, mxRecord: MXRecor
         message: `MAIL FROM rejected: ${mailFromResponse.code} ${mailFromResponse.message}`
       };
     }
+    // We reached and passed MAIL FROM, mark SMTP connectability
+    accumulatedFlags.push('smtp_connectable');
     
     // Send RCPT TO command - this is the key validation step
     const rcptToResult = await sendSMTPCommand(activeSocket, `RCPT TO:<${email}>`);
@@ -191,7 +195,7 @@ export async function performSMTPValidationCore(email: string, mxRecord: MXRecor
     }
     
     // Analyze RCPT TO response
-    const flags: string[] = [];
+    const flags: string[] = [...accumulatedFlags];
     let result: 'valid' | 'invalid' | 'unknown' | 'disposable' | 'catchall' | 'risky' = 'unknown';
     let isValid = false;
     let message = '';
