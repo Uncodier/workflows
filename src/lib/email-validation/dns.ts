@@ -85,21 +85,29 @@ export async function performBasicEmailValidation(domain: string): Promise<{
       const mxRecords = await getMXRecords(domain);
       result.has_dns_mx = mxRecords.length > 0;
       
-      // Test SMTP connectivity to primary MX if available
+      // Test SMTP connectivity to multiple MX hosts (not just primary) to avoid false negatives
       if (mxRecords.length > 0) {
         try {
           const { createSocketWithTimeout } = await import('./utils');
-          const primaryMX = mxRecords[0];
-          const connectionTest = await createSocketWithTimeout(primaryMX.exchange, 25, 8000);
-          result.smtp_connectable = connectionTest.success;
-          
-          if (!connectionTest.success) {
-            result.details.smtp_error = connectionTest.error;
+          // Try up to first 3 MX records, stop on first success
+          const maxToTry = Math.min(mxRecords.length, 3);
+          let lastError: string | undefined;
+          for (let i = 0; i < maxToTry; i++) {
+            const mx = mxRecords[i];
+            const connectionTest = await createSocketWithTimeout(mx.exchange, 25, 8000);
+            if (connectionTest.success) {
+              result.smtp_connectable = true;
+              // Clean up socket if successful
+              if (connectionTest.socket) {
+                connectionTest.socket.destroy();
+              }
+              break;
+            } else {
+              lastError = connectionTest.error;
+            }
           }
-          
-          // Clean up socket if successful
-          if (connectionTest.socket) {
-            connectionTest.socket.destroy();
+          if (!result.smtp_connectable && lastError) {
+            result.details.smtp_error = lastError;
           }
         } catch (error: any) {
           result.details.smtp_error = error.message;
