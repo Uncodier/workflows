@@ -463,6 +463,34 @@ async function performSMTPValidation(email, mxRecord, aggressiveMode = false) {
             console.log(`[VALIDATE_EMAIL] Catchall check after unknown failed:`, error);
         }
     }
+    // Degrade catchall when MX belongs to known accept-all gateways (configurable)
+    try {
+        const acceptAllGateways = (process.env.EMAIL_VALIDATOR_ACCEPT_ALL_GATEWAYS || '')
+            .split(',')
+            .map((d) => d.trim().toLowerCase())
+            .filter(Boolean);
+        const gatewayPolicy = (process.env.EMAIL_VALIDATOR_GATEWAY_POLICY || 'risky').toLowerCase(); // 'invalid' | 'risky'
+        const mxHostLower = (mxRecord.exchange || '').toLowerCase();
+        const isGateway = acceptAllGateways.some((g) => mxHostLower.includes(g));
+        if (isGateway && finalResult === 'catchall') {
+            finalFlags = [...finalFlags, 'gateway_accept_all', 'antispam_gateway'];
+            deliverable = false;
+            if (gatewayPolicy === 'invalid') {
+                finalIsValid = false;
+                finalResult = 'invalid';
+                finalMessage = 'Accept-all gateway detected; treating as invalid to avoid post-RCPT bounces';
+            }
+            else {
+                // risky non-deliverable
+                finalIsValid = false;
+                finalResult = 'risky';
+                finalMessage = 'Accept-all gateway detected; treating as risky non-deliverable';
+            }
+        }
+    }
+    catch {
+        // Non-fatal
+    }
     // Calculate confidence and decide on aggressive validation
     const confidenceAnalysis = calculateValidationConfidence(emailResult.isValid, reputationCheck.bounceRisk, finalFlags, reputationCheck.riskFactors);
     // Apply aggressive mode if enabled

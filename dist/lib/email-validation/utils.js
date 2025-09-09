@@ -331,6 +331,11 @@ function inferDeliverableFromSignals(input) {
         return { deliverable: true, extraFlags: [] };
     const normalizedFlags = (flags || []).map(f => f.toLowerCase());
     const has = (name) => normalizedFlags.includes(name);
+    // Never infer deliverable when the overall result is already 'invalid',
+    // or when we detected an accept-all gateway
+    if (result === 'invalid' || has('gateway_accept_all') || has('antispam_gateway')) {
+        return { deliverable: Boolean(currentDeliverable) && false, extraFlags: [] };
+    }
     // Hard-negative guards: never infer deliverability when permanent errors are present
     const hardNegatives = [
         'permanent_error',
