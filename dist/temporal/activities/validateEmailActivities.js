@@ -577,6 +577,36 @@ async function validateEmail(input) {
             flags: smtpResult.flags,
             executionTime
         });
+        // Heuristic: treat temporary failures as risky valid (not deliverable) when DNS+MX+SMTP connectivity
+        // and bounce risk is not high. Enable with EMAIL_VALIDATOR_TEMPORARY_AS_RISKY=1
+        try {
+            const temporaryAsRisky = process.env.EMAIL_VALIDATOR_TEMPORARY_AS_RISKY === '1';
+            if (temporaryAsRisky && smtpResult.result === 'unknown') {
+                const tempFlags = new Set((smtpResult.flags || []).map((f) => f.toLowerCase()));
+                const tempOnlyBlockers = tempFlags.has('temporary_failure') && !tempFlags.has('user_unknown') && !tempFlags.has('permanent_error');
+                const hasConnectivity = tempFlags.has('smtp_connectable');
+                if (tempOnlyBlockers && hasConnectivity && domainCheck?.exists && Array.isArray(mxRecords) && mxRecords.length > 0) {
+                    const reputationForHeuristics = await (0, email_validation_1.checkDomainReputation)(domain);
+                    const acceptableRisk = reputationForHeuristics.bounceRisk === 'low' || reputationForHeuristics.bounceRisk === 'medium';
+                    if (acceptableRisk) {
+                        smtpResult = {
+                            ...smtpResult,
+                            isValid: true,
+                            deliverable: false,
+                            result: 'risky',
+                            flags: Array.from(new Set([...(smtpResult.flags || []), 'temporary_as_risky'])),
+                            message: `${smtpResult.message} | Interpreting temporary failure as risky (DNS+MX+SMTP present)`,
+                            confidence: Math.max(smtpResult.confidence ?? 0, 35),
+                            confidenceLevel: ((Math.max(smtpResult.confidence ?? 0, 35) >= 85) ? 'very_high' : (Math.max(smtpResult.confidence ?? 0, 35) >= 70) ? 'high' : (Math.max(smtpResult.confidence ?? 0, 35) >= 50) ? 'medium' : 'low')
+                        };
+                        console.log(`[VALIDATE_EMAIL] ⚖️ Temporary-as-risky applied (isValid=true, deliverable=false)`);
+                    }
+                }
+            }
+        }
+        catch (heurErr) {
+            console.log(`[VALIDATE_EMAIL] Heuristic (temporary_as_risky) skipped due to error:`, heurErr?.message || heurErr);
+        }
         // Optional policy: treat anti-spam policy blocks as risky valid (reduce false negatives)
         // Default ON unless explicitly disabled: EMAIL_VALIDATOR_TREAT_POLICY_AS_RISKY === '0'
         const treatPolicyAsRisky = (process.env.EMAIL_VALIDATOR_TREAT_POLICY_AS_RISKY ?? '1') === '1';
@@ -598,27 +628,38 @@ async function validateEmail(input) {
             };
             console.log(`[VALIDATE_EMAIL] ⚖️ Policy-as-risky applied (isValid=true, deliverable=false)`);
         }
-        // Optional heuristic: treat as deliverable when SMTP is connectable and DNS+MX exist,
-        // and the only blocker is anti-spam policy (no user_unknown/permanent_error)
+        // Optional heuristic: infer deliverable=true cautiously on connectivity + DNS/MX with only policy/temporary blocks
         // Enable with EMAIL_VALIDATOR_DELIVERABLE_ON_CONNECT=1 (default off)
-        const deliverableOnConnect = process.env.EMAIL_VALIDATOR_DELIVERABLE_ON_CONNECT === '1';
-        const flagsSet = new Set((smtpResult.flags || []).map((f) => f.toLowerCase()));
-        const hasPolicyOnlyBlock = flagsSet.has('anti_spam_policy') && !flagsSet.has('user_unknown') && !flagsSet.has('permanent_error');
-        const hasConnectivity = flagsSet.has('smtp_connectable');
-        if (deliverableOnConnect &&
-            hasPolicyOnlyBlock &&
-            hasConnectivity &&
-            domainCheck?.exists && Array.isArray(mxRecords) && mxRecords.length > 0) {
-            smtpResult = {
-                ...smtpResult,
-                deliverable: true,
-                result: smtpResult.result === 'unknown' ? 'risky' : smtpResult.result,
-                flags: [...smtpResult.flags, 'deliverable_on_connect'],
-                message: `${smtpResult.message} | Inferring deliverable due to SMTP connectivity and DNS+MX presence`,
-                confidence: Math.max(smtpResult.confidence ?? 0, 40),
-                confidenceLevel: (Math.max(smtpResult.confidence ?? 0, 40) >= 85 ? 'very_high' : Math.max(smtpResult.confidence ?? 0, 40) >= 70 ? 'high' : Math.max(smtpResult.confidence ?? 0, 40) >= 50 ? 'medium' : 'low')
-            };
-            console.log(`[VALIDATE_EMAIL] 📬 Deliverable-on-connect heuristic applied (deliverable=true)`);
+        try {
+            const deliverableOnConnect = process.env.EMAIL_VALIDATOR_DELIVERABLE_ON_CONNECT === '1';
+            const flagsSet = new Set((smtpResult.flags || []).map((f) => f.toLowerCase()));
+            const hasConnectivity2 = flagsSet.has('smtp_connectable');
+            const hasPolicyBlock = flagsSet.has('anti_spam_policy');
+            const hasTemporaryBlock = flagsSet.has('temporary_failure');
+            const noHardNegatives = !flagsSet.has('user_unknown') && !flagsSet.has('permanent_error');
+            if (deliverableOnConnect &&
+                hasConnectivity2 &&
+                (hasPolicyBlock || hasTemporaryBlock) &&
+                noHardNegatives &&
+                domainCheck?.exists && Array.isArray(mxRecords) && mxRecords.length > 0) {
+                // Require acceptable bounce risk (low/medium)
+                const reputationForDeliverable = await (0, email_validation_1.checkDomainReputation)(domain);
+                if (reputationForDeliverable.bounceRisk !== 'high') {
+                    smtpResult = {
+                        ...smtpResult,
+                        deliverable: true,
+                        result: smtpResult.result === 'unknown' ? 'risky' : smtpResult.result,
+                        flags: [...smtpResult.flags, 'deliverable_on_connect'],
+                        message: `${smtpResult.message} | Inferring deliverable (DNS+MX+SMTP, only ${hasPolicyBlock ? 'policy' : 'temporary'} block)`,
+                        confidence: Math.max(smtpResult.confidence ?? 0, 45),
+                        confidenceLevel: (Math.max(smtpResult.confidence ?? 0, 45) >= 85 ? 'very_high' : Math.max(smtpResult.confidence ?? 0, 45) >= 70 ? 'high' : Math.max(smtpResult.confidence ?? 0, 45) >= 50 ? 'medium' : 'low')
+                    };
+                    console.log(`[VALIDATE_EMAIL] 📬 Deliverable-on-connect heuristic applied cautiously (deliverable=true)`);
+                }
+            }
+        }
+        catch (heurErr) {
+            console.log(`[VALIDATE_EMAIL] Heuristic (deliverable_on_connect) skipped due to error:`, heurErr?.message || heurErr);
         }
         // Extract reputation info from the result (already included in performSMTPValidation)
         const reputationCheck = await (0, email_validation_1.checkDomainReputation)(domain);
