@@ -1,12 +1,12 @@
 {
   "name": "temporal-workflows",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "scripts": {
     "test": "jest",
     "dev": "next dev",
-    "build": "echo '🚀 Building version: v0.2.5-email-validation-heuristics' && next build",
-    "build:all": "echo '🚀 Building version: v0.2.5-email-validation-heuristics' && npm run build && npx tsc --project worker.tsconfig.json",
+    "build": "echo '🚀 Building version: v0.2.6-email-validation-gateway-policy' && next build",
+    "build:all": "echo '🚀 Building version: v0.2.6-email-validation-gateway-policy' && npm run build && npx tsc --project worker.tsconfig.json",
     "start": "next start",
     "lint": "next lint",
     "start-worker": "npx tsx src/scripts/start-worker.ts",
