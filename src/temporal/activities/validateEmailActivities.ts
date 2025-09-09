@@ -734,6 +734,11 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
     // Enable with EMAIL_VALIDATOR_DELIVERABLE_ON_CONNECT=1 (default off)
     try {
       const deliverableOnConnect = process.env.EMAIL_VALIDATOR_DELIVERABLE_ON_CONNECT === '1';
+      const connectWhitelist = (process.env.EMAIL_VALIDATOR_DELIVERABLE_ON_CONNECT_DOMAINS || '')
+        .split(',')
+        .map((d) => d.trim().toLowerCase())
+        .filter(Boolean);
+      const isWhitelistedForConnect = connectWhitelist.some((d) => domain.toLowerCase().endsWith(d));
       const flagsSet = new Set((smtpResult.flags || []).map((f: string) => f.toLowerCase()));
       const hasConnectivity2 = flagsSet.has('smtp_connectable');
       const hasPolicyBlock = flagsSet.has('anti_spam_policy');
@@ -748,13 +753,13 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
       ) {
         // Require acceptable bounce risk (low/medium)
         const reputationForDeliverable = await checkDomainReputation(domain);
-        if (reputationForDeliverable.bounceRisk !== 'high') {
+        if (reputationForDeliverable.bounceRisk !== 'high' || isWhitelistedForConnect) {
           smtpResult = {
             ...smtpResult,
             deliverable: true,
             result: smtpResult.result === 'unknown' ? 'risky' : smtpResult.result,
-            flags: [...smtpResult.flags, 'deliverable_on_connect'] as string[],
-            message: `${smtpResult.message} | Inferring deliverable (DNS+MX+SMTP, only ${hasPolicyBlock ? 'policy' : 'temporary'} block)`,
+            flags: [...smtpResult.flags, isWhitelistedForConnect ? 'deliverable_on_connect_whitelist' : 'deliverable_on_connect'] as string[],
+            message: `${smtpResult.message} | Inferring deliverable (DNS+MX+SMTP, only ${hasPolicyBlock ? 'policy' : 'temporary'} block${isWhitelistedForConnect ? ', domain whitelisted' : ''})`,
             confidence: Math.max(smtpResult.confidence ?? 0, 45),
             confidenceLevel: (Math.max(smtpResult.confidence ?? 0, 45) >= 85 ? 'very_high' : Math.max(smtpResult.confidence ?? 0, 45) >= 70 ? 'high' : Math.max(smtpResult.confidence ?? 0, 45) >= 50 ? 'medium' : 'low') as 'low' | 'medium' | 'high' | 'very_high'
           } as typeof smtpResult;

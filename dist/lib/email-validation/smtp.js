@@ -119,6 +119,8 @@ async function performSMTPValidationCore(email, mxRecord) {
         }
         const ehloResponse = ehloResult.response;
         console.log(`[VALIDATE_EMAIL] EHLO response: ${ehloResponse.code} ${ehloResponse.message}`);
+        // Mark SMTP connectability upon successful EHLO
+        accumulatedFlags.push('smtp_connectable');
         // Check if STARTTLS is supported and required
         let tlsSocket = null;
         if (ehloResponse.message.includes('STARTTLS')) {
@@ -149,6 +151,8 @@ async function performSMTPValidationCore(email, mxRecord) {
                     const tlsEhloResult = await (0, utils_js_1.readSMTPResponse)(tlsSocket);
                     if (tlsEhloResult.success) {
                         console.log(`[VALIDATE_EMAIL] TLS EHLO response: ${tlsEhloResult.response.code} ${tlsEhloResult.response.message}`);
+                        // Re-affirm connectability after TLS
+                        accumulatedFlags.push('smtp_connectable');
                     }
                     else {
                         console.log(`[VALIDATE_EMAIL] TLS EHLO failed: ${tlsEhloResult.error}`);
@@ -173,10 +177,33 @@ async function performSMTPValidationCore(email, mxRecord) {
         const mailFromResponse = mailFromResult.response;
         console.log(`[VALIDATE_EMAIL] MAIL FROM response: ${mailFromResponse.code} ${mailFromResponse.message}`);
         if (mailFromResponse.code !== 250) {
+            // Classify policy/IP reputation related rejections so higher layers can treat as risky
+            const lowerMsg = mailFromResponse.message.toLowerCase();
+            const policyIndicators = [
+                '5.7.',
+                'policy',
+                'spam',
+                'blocked',
+                'client host blocked',
+                'spamhaus',
+                'block list',
+                'pbl',
+                'rbl',
+                'reputation'
+            ];
+            const isPolicyBlock = policyIndicators.some(ind => lowerMsg.includes(ind));
+            const flags = [...accumulatedFlags, 'mail_from_rejected'];
+            if (isPolicyBlock) {
+                flags.push('anti_spam_policy', 'validation_blocked');
+                // Heuristic: treat well-known policy sources as IP-based block
+                if (lowerMsg.includes('spamhaus') || lowerMsg.includes('client host blocked') || lowerMsg.includes('pbl') || lowerMsg.includes('block list')) {
+                    flags.push('ip_blocked');
+                }
+            }
             return {
                 isValid: false,
                 result: 'unknown',
-                flags: ['mail_from_rejected'],
+                flags,
                 message: `MAIL FROM rejected: ${mailFromResponse.code} ${mailFromResponse.message}`
             };
         }
@@ -415,6 +442,21 @@ async function performSMTPValidation(email, mxRecord, aggressiveMode = false) {
                 finalFlags = [...finalFlags, 'catchall_domain', 'catchall_detected', `confidence_${Math.round(catchallTest.confidence * 100)}%`];
                 finalMessage = `Catchall detected after policy/temporary failure (${Math.round(catchallTest.confidence * 100)}% confidence) - deliverable but uncertain recipient`;
                 finalIsValid = true;
+            }
+            else {
+                // Optional: assume catchall for whitelisted domains
+                const assumeCatchallDomains = (process.env.EMAIL_VALIDATOR_ASSUME_CATCHALL_DOMAINS || '')
+                    .split(',')
+                    .map((d) => d.trim().toLowerCase())
+                    .filter(Boolean);
+                const assumeCatchall = assumeCatchallDomains.some((d) => domain.toLowerCase().endsWith(d));
+                if (assumeCatchall) {
+                    deliverable = true;
+                    finalIsValid = true;
+                    finalResult = 'catchall';
+                    finalFlags = [...finalFlags, 'assume_catchall_domain'];
+                    finalMessage = `Assuming catchall based on domain whitelist`;
+                }
             }
         }
         catch (error) {

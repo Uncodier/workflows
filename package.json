@@ -3,6 +3,7 @@
   "version": "0.2.5",
   "private": true,
   "scripts": {
+    "test": "jest",
     "dev": "next dev",
     "build": "echo '🚀 Building version: v0.2.5-email-validation-heuristics' && next build",
     "build:all": "echo '🚀 Building version: v0.2.5-email-validation-heuristics' && npm run build && npx tsc --project worker.tsconfig.json",
@@ -43,6 +44,7 @@
     "test-lead-invalidation-debug": "npx tsx src/scripts/test-lead-invalidation-debug.ts",
     "test-validate-email": "node examples/validateEmailWorkflow-example.js",
     "monitor-workflows": "npx tsx src/scripts/monitor-workflow-versions.ts",
+    "compare:provider": "npx tsx src/scripts/compare-provider-results.ts",
     "render:start": "node api/worker.js",
     "render:init": "npx tsx src/scripts/initialize-render.ts",
     "render:startup:compiled": "node dist/scripts/render-startup.js"

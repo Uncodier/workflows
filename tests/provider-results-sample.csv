@@ -1,0 +1,6 @@
+Timestamp,Email,Result,Flags,Suggested Correction
+Mon Sep 08 2025 23:59:58 GMT+0000 (Coordinated Universal Time),segurosyfianzascabo@hotmail.com,valid,"free_email_host, has_dns, has_dns_mx, smtp_connectable",
+Mon Sep 08 2025 23:08:44 GMT+0000 (Coordinated Universal Time),d@intervita.com.mx,valid,"has_dns, smtp_connectable, has_dns_mx",
+Mon Sep 08 2025 23:45:57 GMT+0000 (Coordinated Universal Time),info@revroc.com,valid,"role_account, has_dns, smtp_connectable, has_dns_mx",
+Mon Sep 08 2025 23:04:22 GMT+0000 (Coordinated Universal Time),gladis@integrasesores.com,unknown,,
+

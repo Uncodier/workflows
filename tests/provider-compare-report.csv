@@ -1,0 +1,13 @@
+email,field,expected,got
+gladis@integrasesores.com,has_dns,false,true
+gladis@integrasesores.com,smtp_connectable,false,true
+m.b@spconsultores.co,result,"invalid","unknown"
+m.b.@spconsultores.co,has_dns,false,true
+emoya@masseguros.mx,has_dns_mx,false,true
+erick.valdes@yepseguros.com,has_dns_mx,false,true
+erick.valdes@yepseguros.com,result,"catchall","risky"
+mariajose@pylc.com.mx,result,"valid","unknown"
+oyunes@cotizaseguros.mx,has_dns_mx,false,true
+xxx@500.co,has_dns_mx,false,true
+ana.martinez@publicidadcreativa.com.mx,has_dns_mx,false,true
+ana.martinez@publicidadcreativa.com.mx,result,"invalid","unknown"
