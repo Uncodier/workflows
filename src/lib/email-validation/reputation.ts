@@ -22,6 +22,11 @@ export async function checkDomainReputation(domain: string): Promise<{
     'gmail.com', 'googlemail.com' // Google has good delivery but strict policies
   ];
   
+  // Annotate free-email hosts (informational flag)
+  const freeEmailHosts = [
+    'gmail.com', 'googlemail.com', 'hotmail.com', 'outlook.com', 'live.com', 'yahoo.com', 'aol.com', 'icloud.com', 'proton.me', 'protonmail.com'
+  ];
+  
   if (highBounceDomains.includes(domain.toLowerCase())) {
     bounceRisk = 'high';
     riskFactors.push('high_bounce_provider');
@@ -30,6 +35,10 @@ export async function checkDomainReputation(domain: string): Promise<{
     bounceRisk = 'medium';
     riskFactors.push('medium_bounce_provider');
     reputationFlags.push('moderate_spam_policy');
+  }
+  
+  if (freeEmailHosts.includes(domain.toLowerCase())) {
+    reputationFlags.push('free_email_host');
   }
   
   // Check for corporate domains (usually lower bounce risk)

@@ -1330,12 +1330,23 @@ export async function validateAndGenerateEmployeeContactsActivity(
                 email: generatedEmail 
               });
 
-              // The API response structure is: { success: true, data: { isValid: false, deliverable: false, result: "invalid", ... } }
+              // Normalize possible nested response payloads
+              // Variants:
+              // A) { success: true, data: { email, isValid, deliverable, ... } }
+              // B) { success: true, data: { success: true, data: { email, isValid, deliverable, ... } } }
+              let emailData: any = validationResponse.data;
+              if (emailData && typeof emailData === 'object' && 'data' in emailData) {
+                emailData = (emailData as any).data;
+              }
+              if (emailData && typeof emailData === 'object' && 'data' in emailData) {
+                emailData = (emailData as any).data;
+              }
+
               // Check both isValid AND deliverable for proper email validation
-              const isValid = validationResponse.data?.isValid || false;
-              const isDeliverable = validationResponse.data?.deliverable !== false; // Default to true if not specified, false if explicitly false
+              const isValid = emailData?.isValid || false;
+              const isDeliverable = emailData?.deliverable !== false; // Default to true if not specified, false if explicitly false
               const isEmailUsable = isValid && isDeliverable;
-              const result = validationResponse.data?.result || 'unknown';
+              const result = emailData?.result || 'unknown';
               
               console.log(`🔍 Parsed validation data for ${generatedEmail}: isValid=${isValid}, deliverable=${isDeliverable}, usable=${isEmailUsable}, result=${result}`);
               
@@ -1379,12 +1390,20 @@ export async function validateAndGenerateEmployeeContactsActivity(
             email: email 
           });
 
-          // The API response structure is: { success: true, data: { isValid: false, deliverable: false, result: "invalid", ... } }
+          // Normalize possible nested response payloads
+          let emailData: any = validationResponse.data;
+          if (emailData && typeof emailData === 'object' && 'data' in emailData) {
+            emailData = (emailData as any).data;
+          }
+          if (emailData && typeof emailData === 'object' && 'data' in emailData) {
+            emailData = (emailData as any).data;
+          }
+
           // Check both isValid AND deliverable for proper email validation
-          const isValid = validationResponse.data?.isValid || false;
-          const isDeliverable = validationResponse.data?.deliverable !== false; // Default to true if not specified, false if explicitly false
+          const isValid = emailData?.isValid || false;
+          const isDeliverable = emailData?.deliverable !== false; // Default to true if not specified, false if explicitly false
           const isEmailUsable = isValid && isDeliverable;
-          const result = validationResponse.data?.result || 'unknown';
+          const result = emailData?.result || 'unknown';
           
           console.log(`🔍 Parsed email validation data for ${employeeData.name}: isValid=${isValid}, deliverable=${isDeliverable}, usable=${isEmailUsable}, result=${result}`);
           
@@ -1468,12 +1487,20 @@ export async function validateAndGenerateEmployeeContactsActivity(
                       email: fallbackEmail 
                     });
 
-                    // The API response structure is: { success: true, data: { isValid: false, deliverable: false, result: "invalid", ... } }
+                    // Normalize possible nested response payloads
+                    let emailData: any = fallbackValidationResponse.data;
+                    if (emailData && typeof emailData === 'object' && 'data' in emailData) {
+                      emailData = (emailData as any).data;
+                    }
+                    if (emailData && typeof emailData === 'object' && 'data' in emailData) {
+                      emailData = (emailData as any).data;
+                    }
+
                     // Check both isValid AND deliverable for proper email validation
-                    const isValid = fallbackValidationResponse.data?.isValid || false;
-                    const isDeliverable = fallbackValidationResponse.data?.deliverable !== false; // Default to true if not specified, false if explicitly false
+                    const isValid = emailData?.isValid || false;
+                    const isDeliverable = emailData?.deliverable !== false; // Default to true if not specified, false if explicitly false
                     const isEmailUsable = isValid && isDeliverable;
-                    const result = fallbackValidationResponse.data?.result || 'unknown';
+                    const result = emailData?.result || 'unknown';
                     
                     console.log(`🔍 Parsed fallback validation data for ${fallbackEmail}: isValid=${isValid}, deliverable=${isDeliverable}, usable=${isEmailUsable}, result=${result}`);
                     

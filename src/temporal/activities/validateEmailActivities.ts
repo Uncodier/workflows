@@ -469,7 +469,16 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
     const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
     const maxMXAttempts = isVercel ? 2 : 3; // Reduce attempts in Vercel for faster response
     
-    let smtpResult = null;
+    let smtpResult: {
+      isValid: boolean;
+      deliverable: boolean;
+      result: 'valid' | 'invalid' | 'unknown' | 'disposable' | 'catchall' | 'risky';
+      flags: string[];
+      message: string;
+      confidence: number;
+      confidenceLevel: 'low' | 'medium' | 'high' | 'very_high';
+      reasoning: string[];
+    } | null = null;
     let lastError = null;
     
     for (let i = 0; i < Math.min(mxRecords.length, maxMXAttempts); i++) { // Try fewer MX records in Vercel
@@ -551,11 +560,11 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
                        Array.isArray((lastError as any).flags) &&
                        ((lastError as any).flags.includes('ip_blocked') || (lastError as any).flags.includes('validation_blocked')));
     
-    const hasConnectionIssues = smtpResult.flags.includes('connection_failed') || 
+    const hasConnectionIssues = !!smtpResult && (smtpResult.flags.includes('connection_failed') || 
                                smtpResult.flags.includes('smtp_timeout') ||
-                               smtpResult.flags.includes('all_mx_failed');
+                               smtpResult.flags.includes('all_mx_failed'));
     
-    const shouldTryFallback = allBlocked || (isVercel && hasConnectionIssues && smtpResult.result === 'unknown');
+    const shouldTryFallback = allBlocked || (isVercel && hasConnectionIssues && smtpResult && smtpResult.result === 'unknown');
     
     if (shouldTryFallback) {
       const fallbackReason = allBlocked ? 'IP blocked by servers' : 'Connection issues in serverless environment';
@@ -575,29 +584,51 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
         
         // If basic validation shows email capability, use it
         if (basicValidation.has_dns && basicValidation.has_dns_mx) {
-          const confidence = basicValidation.smtp_connectable ? 70 : 50;
+          const policyBlocked = ['ip_blocked', 'validation_blocked', 'anti_spam_policy'].some(
+            (f) => ((smtpResult && smtpResult.flags) ? smtpResult.flags : []).includes(f)
+          );
           const flags = ['basic_validation'];
-          
           if (basicValidation.has_dns) flags.push('has_dns');
           if (basicValidation.has_dns_mx) flags.push('has_dns_mx');
           if (basicValidation.smtp_connectable) flags.push('smtp_connectable');
-          
-          smtpResult = {
-            isValid: true,
-            deliverable: basicValidation.smtp_connectable, // Deliverable if SMTP is connectable
-            result: basicValidation.smtp_connectable ? 'valid' : 'risky' as const,
-            flags: [...smtpResult.flags, ...flags],
-            message: `Basic validation: DNS=${basicValidation.has_dns}, MX=${basicValidation.has_dns_mx}, SMTP=${basicValidation.smtp_connectable}`,
-            confidence,
-            confidenceLevel: confidence >= 70 ? 'high' : confidence >= 50 ? 'medium' : 'low' as const,
-            reasoning: [
-              `DNS records found (+${basicValidation.has_dns ? 20 : 0})`,
-              `MX records found (+${basicValidation.has_dns_mx ? 30 : 0})`,
-              `SMTP connectable (+${basicValidation.smtp_connectable ? 20 : 0})`
-            ]
-          };
-          
-          console.log(`[VALIDATE_EMAIL] ✅ Basic validation successful with confidence ${confidence}%`);
+
+          if (policyBlocked) {
+            // Conservative: policy-blocked sessions remain risky and non-deliverable
+            const confidence = basicValidation.smtp_connectable ? 55 : 45;
+            smtpResult = {
+              isValid: true,
+              deliverable: false,
+              result: 'risky' as const,
+              flags: [...((smtpResult && smtpResult.flags) ? smtpResult.flags : []), ...flags, 'policy_blocked_fallback'] as string[],
+              message: `Policy-blocked SMTP. Basic validation indicates DNS=${basicValidation.has_dns}, MX=${basicValidation.has_dns_mx}, SMTP=${basicValidation.smtp_connectable}`,
+              confidence,
+              confidenceLevel: (confidence >= 70 ? 'high' : confidence >= 50 ? 'medium' : 'low'),
+              reasoning: [
+                'SMTP validation blocked by policy/IP reputation (-40)',
+                `DNS records found (+${basicValidation.has_dns ? 20 : 0})`,
+                `MX records found (+${basicValidation.has_dns_mx ? 30 : 0})`,
+                `SMTP connectable (+${basicValidation.smtp_connectable ? 10 : 0})`
+              ]
+            };
+            console.log(`[VALIDATE_EMAIL] ⚖️ Policy-blocked case treated as risky (non-deliverable)`);
+          } else {
+            const confidence = basicValidation.smtp_connectable ? 70 : 50;
+            smtpResult = {
+              isValid: true,
+              deliverable: basicValidation.smtp_connectable, // Deliverable if SMTP is connectable
+              result: (basicValidation.smtp_connectable ? 'valid' : 'risky'),
+              flags: [...((smtpResult && smtpResult.flags) ? smtpResult.flags : []), ...flags],
+              message: `Basic validation: DNS=${basicValidation.has_dns}, MX=${basicValidation.has_dns_mx}, SMTP=${basicValidation.smtp_connectable}`,
+              confidence,
+              confidenceLevel: (confidence >= 70 ? 'high' : confidence >= 50 ? 'medium' : 'low'),
+              reasoning: [
+                `DNS records found (+${basicValidation.has_dns ? 20 : 0})`,
+                `MX records found (+${basicValidation.has_dns_mx ? 30 : 0})`,
+                `SMTP connectable (+${basicValidation.smtp_connectable ? 20 : 0})`
+              ]
+            };
+            console.log(`[VALIDATE_EMAIL] ✅ Basic validation successful with confidence ${confidence}%`);
+          }
         } else {
           // Try advanced fallback validation
           const fallbackResult = await attemptFallbackValidation(domain);
@@ -609,11 +640,11 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
             smtpResult = {
               isValid: true,
               deliverable: false, // Still risky due to validation limitations
-              result: 'risky' as const,
+              result: 'risky',
               flags: [...smtpResult.flags, 'fallback_validation', ...fallbackResult.flags],
               message: `SMTP validation blocked but ${fallbackResult.message}`,
               confidence: Math.max(fallbackResult.confidence - 20, 30), // Reduce confidence due to IP block
-              confidenceLevel: fallbackResult.confidence >= 70 ? 'medium' : 'low' as const,
+              confidenceLevel: (fallbackResult.confidence >= 70 ? 'medium' : 'low'),
               reasoning: [
                 'SMTP validation blocked by IP reputation (-40)',
                 `Fallback validation: ${fallbackResult.fallbackMethod} (+${fallbackResult.confidence})`
