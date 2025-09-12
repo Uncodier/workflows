@@ -120,6 +120,16 @@ export async function validateContactInformation(request: {
   
   if (!email || email.trim() === '') {
     console.log(`❌ Email message exists but no email address found`);
+    // If we have a WhatsApp path, proceed via WhatsApp instead of stopping the workflow
+    if (hasWhatsAppMessage && phone && phone.trim() !== '') {
+      return {
+        success: true,
+        isValid: false,
+        shouldProceed: true,
+        validationType: 'whatsapp',
+        reason: 'Email missing; proceed with WhatsApp channel'
+      };
+    }
     return {
       success: true,
       isValid: false,
