@@ -42,3 +42,4 @@ export * from './validateEmailWorkflow';
 export * from './startRobotWorkflow';
 export * from './robotWorkflow';
 export * from './promptRobotWorkflow'; 
+export * from './webhookDispatchWorkflow';

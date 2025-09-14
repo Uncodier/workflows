@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.dailyStandUpWorkflow = dailyStandUpWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, validateAndCleanStuckCronStatusActivity, getSiteActivity, cmoSystemAnalysisActivity, cmoSalesAnalysisActivity, cmoSupportAnalysisActivity, cmoGrowthAnalysisActivity, cmoWrapUpActivity, sendDailyStandUpNotificationActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, validateAndCleanStuckCronStatusActivity, cmoWrapUpActivity, sendDailyStandUpNotificationActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes', // Extended timeout for CMO analysis operations
     retry: {
         maximumAttempts: 3,
@@ -84,232 +84,66 @@ async function dailyStandUpWorkflow(options) {
         lastRun: new Date().toISOString()
     });
     const errors = [];
-    let siteName = '';
-    let siteUrl = '';
-    let systemAnalysisResult = null;
-    let salesAnalysisResult = null;
-    let supportAnalysisResult = null;
-    let growthAnalysisResult = null;
     let wrapUpResult = null;
     let finalCommandId = '';
     let executionTime = '';
     try {
-        console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
-        // Get site information to obtain site details
-        const siteResult = await getSiteActivity(site_id);
-        if (!siteResult.success) {
-            const errorMsg = `Failed to get site information: ${siteResult.error}`;
-            console.error(`❌ ${errorMsg}`);
-            errors.push(errorMsg);
-            throw new Error(errorMsg);
-        }
-        const site = siteResult.site;
-        siteName = site.name;
-        siteUrl = site.url;
-        console.log(`✅ Retrieved site information: ${siteName} (${siteUrl})`);
-        // Prepare request object for all CMO activities
         const baseRequest = {
             site_id: site_id,
-            userId: options.userId || site.user_id,
+            userId: options.userId,
             additionalData: {
                 ...options.additionalData,
-                siteName: siteName,
-                siteUrl: siteUrl,
                 workflowId: workflowId
             }
         };
-        // Step 2: CRITICAL - Execute system analysis first to get command_id
-        console.log(`🔄 Step 2: Running system analysis (CRITICAL for command_id)...`);
-        systemAnalysisResult = await cmoSystemAnalysisActivity(baseRequest);
-        if (!systemAnalysisResult.success) {
-            const errorMsg = `System analysis failed: ${systemAnalysisResult.error}`;
-            console.error(`❌ ${errorMsg}`);
-            errors.push(errorMsg);
-            throw new Error(errorMsg);
-        }
-        if (!systemAnalysisResult.command_id) {
-            const errorMsg = 'System analysis succeeded but did not return command_id - cannot continue workflow';
-            console.error(`❌ ${errorMsg}`);
-            errors.push(errorMsg);
-            throw new Error(errorMsg);
-        }
-        finalCommandId = systemAnalysisResult.command_id;
-        console.log(`✅ System analysis completed with command_id: ${finalCommandId}`);
-        if (options.runParallel) {
-            console.log(`🚀 Step 3: Running remaining analyses in parallel with command_id: ${finalCommandId}...`);
-            // Execute remaining analyses in parallel with shared command_id
-            const [salesResult, supportResult, growthResult] = await Promise.allSettled([
-                cmoSalesAnalysisActivity({ ...baseRequest, command_id: finalCommandId }),
-                cmoSupportAnalysisActivity({ ...baseRequest, command_id: finalCommandId }),
-                cmoGrowthAnalysisActivity({ ...baseRequest, command_id: finalCommandId })
-            ]);
-            // Process sales analysis result
-            if (salesResult.status === 'fulfilled') {
-                salesAnalysisResult = salesResult.value;
-                if (salesAnalysisResult.success) {
-                    console.log(`✅ Sales analysis completed: ${salesAnalysisResult.command_id || 'no command_id'}`);
-                }
-                else {
-                    console.error(`❌ Sales analysis failed: ${salesAnalysisResult.error}`);
-                    errors.push(`Sales analysis: ${salesAnalysisResult.error}`);
-                }
-            }
-            else {
-                console.error(`❌ Sales analysis rejected: ${salesResult.reason}`);
-                errors.push(`Sales analysis rejected: ${salesResult.reason}`);
-            }
-            // Process support analysis result
-            if (supportResult.status === 'fulfilled') {
-                supportAnalysisResult = supportResult.value;
-                if (supportAnalysisResult.success) {
-                    console.log(`✅ Support analysis completed: ${supportAnalysisResult.command_id || 'no command_id'}`);
-                }
-                else {
-                    console.error(`❌ Support analysis failed: ${supportAnalysisResult.error}`);
-                    errors.push(`Support analysis: ${supportAnalysisResult.error}`);
-                }
-            }
-            else {
-                console.error(`❌ Support analysis rejected: ${supportResult.reason}`);
-                errors.push(`Support analysis rejected: ${supportResult.reason}`);
-            }
-            // Process growth analysis result
-            if (growthResult.status === 'fulfilled') {
-                growthAnalysisResult = growthResult.value;
-                if (growthAnalysisResult.success) {
-                    console.log(`✅ Growth analysis completed: ${growthAnalysisResult.command_id || 'no command_id'}`);
-                }
-                else {
-                    console.error(`❌ Growth analysis failed: ${growthAnalysisResult.error}`);
-                    errors.push(`Growth analysis: ${growthAnalysisResult.error}`);
-                }
-            }
-            else {
-                console.error(`❌ Growth analysis rejected: ${growthResult.reason}`);
-                errors.push(`Growth analysis rejected: ${growthResult.reason}`);
-            }
+        finalCommandId =
+            options.command_id ||
+                options.commandId ||
+                options.additionalData?.command_id ||
+                options.additionalData?.commandId;
+        if (!finalCommandId) {
+            console.log('ℹ️ No command_id provided. Proceeding with wrap-up using current context.');
         }
         else {
-            // Execute analyses sequentially
-            console.log(`🔄 Step 3: Running sales analysis with command_id: ${finalCommandId}...`);
-            salesAnalysisResult = await cmoSalesAnalysisActivity({
-                ...baseRequest,
-                command_id: finalCommandId
-            });
-            if (salesAnalysisResult.success) {
-                console.log(`✅ Sales analysis completed: ${salesAnalysisResult.command_id || 'no command_id'}`);
-            }
-            else {
-                console.error(`❌ Sales analysis failed: ${salesAnalysisResult.error}`);
-                errors.push(`Sales analysis: ${salesAnalysisResult.error}`);
-            }
-            console.log(`🔄 Step 4: Running support analysis with command_id: ${finalCommandId}...`);
-            supportAnalysisResult = await cmoSupportAnalysisActivity({
-                ...baseRequest,
-                command_id: finalCommandId
-            });
-            if (supportAnalysisResult.success) {
-                console.log(`✅ Support analysis completed: ${supportAnalysisResult.command_id || 'no command_id'}`);
-            }
-            else {
-                console.error(`❌ Support analysis failed: ${supportAnalysisResult.error}`);
-                errors.push(`Support analysis: ${supportAnalysisResult.error}`);
-            }
-            console.log(`🔄 Step 5: Running growth analysis with command_id: ${finalCommandId}...`);
-            growthAnalysisResult = await cmoGrowthAnalysisActivity({
-                ...baseRequest,
-                command_id: finalCommandId
-            });
-            if (growthAnalysisResult.success) {
-                console.log(`✅ Growth analysis completed: ${growthAnalysisResult.command_id || 'no command_id'}`);
-            }
-            else {
-                console.error(`❌ Growth analysis failed: ${growthAnalysisResult.error}`);
-                errors.push(`Growth analysis: ${growthAnalysisResult.error}`);
-            }
+            console.log(`🔄 Running wrap up with provided command_id: ${finalCommandId}...`);
         }
-        // Step Final: Execute wrap up with the command_id
-        console.log(`🔄 Step Final: Running wrap up with command_id: ${finalCommandId}...`);
         wrapUpResult = await cmoWrapUpActivity({
             ...baseRequest,
             command_id: finalCommandId
         });
-        if (wrapUpResult.success) {
-            console.log(`✅ Wrap up completed successfully`);
-            console.log(`📋 Final summary available: ${wrapUpResult.summary ? 'Yes' : 'No'}`);
-            // Update final command_id if wrap up returned a new one
-            if (wrapUpResult.command_id) {
-                finalCommandId = wrapUpResult.command_id;
-            }
-            // Send daily stand up notification - REQUIRED step, fail if no subject/message
-            if (!wrapUpResult.subject || !wrapUpResult.message) {
-                const errorMsg = 'Wrap up result must include subject and message for notification - workflow failed';
-                console.error(`❌ ${errorMsg}`);
-                errors.push(`Notification: ${errorMsg}`);
-                throw new Error(errorMsg);
-            }
-            console.log(`📧 Sending daily stand up notification...`);
-            try {
-                await sendDailyStandUpNotificationActivity({
-                    site_id: site_id,
-                    subject: wrapUpResult.subject,
-                    message: wrapUpResult.message,
-                    systemAnalysis: systemAnalysisResult,
-                    health: wrapUpResult.health || systemAnalysisResult?.health
-                });
-                console.log(`✅ Daily stand up notification sent successfully`);
-            }
-            catch (notificationError) {
-                const errorMsg = `CRITICAL: Failed to send daily stand up notification - workflow must fail: ${notificationError instanceof Error ? notificationError.message : String(notificationError)}`;
-                console.error(`❌ ${errorMsg}`);
-                errors.push(`Notification: ${errorMsg}`);
-                throw new Error(errorMsg); // FAIL the workflow if notification cannot be sent
-            }
-        }
-        else {
-            // CRITICAL: If wrap up fails, we cannot send notification - fail the workflow
-            const errorMsg = `CRITICAL: Wrap up failed, cannot generate notification content - workflow must fail: ${wrapUpResult.error}`;
+        if (!wrapUpResult?.success) {
+            const errorMsg = `Wrap up failed: ${wrapUpResult?.error || 'Unknown error'}`;
             console.error(`❌ ${errorMsg}`);
-            errors.push(`Wrap up: ${errorMsg}`);
+            errors.push(errorMsg);
             throw new Error(errorMsg);
         }
-        // If we reach here, notification was sent successfully (or workflow would have failed)
-        const notificationSent = true;
+        // Send daily stand up notification - REQUIRED if wrapUpResult includes subject/message
+        if (!wrapUpResult.subject || !wrapUpResult.message) {
+            const errorMsg = 'Wrap up result must include subject and message for notification - workflow failed';
+            console.error(`❌ ${errorMsg}`);
+            errors.push(`Notification: ${errorMsg}`);
+            throw new Error(errorMsg);
+        }
+        console.log(`📧 Sending daily stand up notification...`);
+        await sendDailyStandUpNotificationActivity({
+            site_id: site_id,
+            subject: wrapUpResult.subject,
+            message: wrapUpResult.message,
+            health: wrapUpResult.health
+        });
+        console.log(`✅ Daily stand up notification sent successfully`);
         executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         const result = {
-            success: true, // If we reach here, system analysis succeeded and we have command_id
+            success: true,
             siteId: site_id,
-            siteName,
-            siteUrl,
             command_id: finalCommandId,
-            systemAnalysis: systemAnalysisResult,
-            salesAnalysis: salesAnalysisResult,
-            supportAnalysis: supportAnalysisResult,
-            growthAnalysis: growthAnalysisResult,
             finalSummary: wrapUpResult?.summary,
-            notificationSent,
-            data: {
-                system: systemAnalysisResult,
-                sales: salesAnalysisResult,
-                support: supportAnalysisResult,
-                growth: growthAnalysisResult,
-                wrapUp: wrapUpResult
-            },
+            notificationSent: true,
+            data: { wrapUp: wrapUpResult },
             errors,
             executionTime,
             completedAt: new Date().toISOString()
         };
-        console.log(`🎉 CMO daily stand up workflow completed successfully!`);
-        console.log(`📊 Summary: Daily stand up for ${siteName} completed in ${executionTime}`);
-        console.log(`   - Site: ${siteName} (${siteUrl})`);
-        console.log(`   - Command ID: ${finalCommandId}`);
-        console.log(`   - System analysis: ${systemAnalysisResult?.success ? 'Success' : 'Failed'}`);
-        console.log(`   - Sales analysis: ${salesAnalysisResult?.success ? 'Success' : 'Failed'}`);
-        console.log(`   - Support analysis: ${supportAnalysisResult?.success ? 'Success' : 'Failed'}`);
-        console.log(`   - Growth analysis: ${growthAnalysisResult?.success ? 'Success' : 'Failed'}`);
-        console.log(`   - Wrap up: ${wrapUpResult?.success ? 'Success' : 'Failed'}`);
-        console.log(`   - Notification sent: ${notificationSent ? 'Yes' : 'No'}`);
-        console.log(`   - Errors: ${errors.length}`);
         // Update cron status to indicate successful completion
         await saveCronStatusActivity({
             siteId: site_id,
@@ -327,6 +161,11 @@ async function dailyStandUpWorkflow(options) {
             input: options,
             output: result,
         });
+        console.log(`🎉 CMO daily stand up wrap up-only workflow completed successfully!`);
+        console.log(`📊 Summary: Wrap up for site ${site_id} completed in ${executionTime}`);
+        console.log(`   - Command ID: ${finalCommandId}`);
+        console.log(`   - Wrap up: ${wrapUpResult?.success ? 'Success' : 'Failed'}`);
+        console.log(`   - Errors: ${errors.length}`);
         return result;
     }
     catch (error) {

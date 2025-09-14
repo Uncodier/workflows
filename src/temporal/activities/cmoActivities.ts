@@ -178,7 +178,7 @@ export async function cmoGrowthAnalysisActivity(request: DailyStandUpRequest & {
 /**
  * Activity to wrap up all memories and create final summary via external CMO agent
  */
-export async function cmoWrapUpActivity(request: DailyStandUpRequest & { command_id: string }): Promise<DailyStandUpResponse> {
+export async function cmoWrapUpActivity(request: DailyStandUpRequest & { command_id?: string }): Promise<DailyStandUpResponse> {
   console.log(`📋 Running CMO wrap up for site: ${request.site_id}`);
   console.log(`📊 Command ID: ${request.command_id}`);
   console.log(`📋 Request:`, JSON.stringify(request, null, 2));
