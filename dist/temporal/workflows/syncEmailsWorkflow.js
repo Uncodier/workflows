@@ -4,7 +4,7 @@ exports.syncEmailsWorkflow = syncEmailsWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, validateAndCleanStuckCronStatusActivity, analyzeEmailsActivity, syncSentEmailsActivity, deliveryStatusActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, validateAndCleanStuckCronStatusActivity, validateCommunicationChannelsActivity, analyzeEmailsLeadsReplyActivity, analyzeEmailsAliasReplyActivity, analyzeEmailsReplyActivity, syncSentEmailsActivity, deliveryStatusActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '15 minutes', // ✅ FIXED: Increased timeout to 15 minutes to handle slow email API
     retry: {
         maximumAttempts: 3,
@@ -70,18 +70,27 @@ async function syncEmailsWorkflow(options) {
         else {
             sinceDate = new Date(Date.now() - 24 * 60 * 60 * 1000); // Last 24 hours
         }
-        // Simulate email sync validation
+        // Simulate email sync validation + fetch channels config to branch alias/reply
+        const channelsValidation = await validateCommunicationChannelsActivity({ site_id: siteId });
+        const hasEmailChannel = !!channelsValidation?.hasEmailChannel;
+        // Prefer explicit computed field; fallback to checking aliases key (string or array)
+        const emailAliasConfigured = !!(channelsValidation?.emailAliasConfigured ||
+            (channelsValidation?.emailConfig && ((typeof channelsValidation.emailConfig.aliases === 'string' && channelsValidation.emailConfig.aliases.trim().length > 0) ||
+                (Array.isArray(channelsValidation.emailConfig.aliases) && channelsValidation.emailConfig.aliases.length > 0))));
         const validation = {
             isValid: true,
             provider: options.provider,
             batchSize: options.batchSize || 50,
             since: sinceDate,
-            analysisLimit: options.analysisLimit || 15
+            analysisLimit: options.analysisLimit || 15,
+            emailAliasConfigured
         };
         if (!validation.isValid) {
             throw new Error(`Invalid email sync configuration for provider ${options.provider}`);
         }
         console.log(`✅ Configuration validated for ${options.provider} provider`);
+        console.log(`   - Email channel: ${hasEmailChannel ? 'enabled' : 'disabled'}`);
+        console.log(`   - Email alias configured: ${emailAliasConfigured ? 'yes' : 'no'}`);
         console.log(`📬 Step 2: Connecting to ${options.provider} email server...`);
         console.log(`✅ Connected to ${options.provider} email server`);
         console.log(`📥 Step 3: Email sync preparation completed`);
@@ -111,61 +120,80 @@ async function syncEmailsWorkflow(options) {
                 analysis_type: 'commercial_opportunity',
                 since_date: validation.since.toISOString()
             };
-            const analysisResponse = await analyzeEmailsActivity(analysisRequest);
+            // Always run leads reply analysis
+            const leadsReplyResponse = await analyzeEmailsLeadsReplyActivity(analysisRequest);
+            // If alias configured: call only alias. Otherwise: call only reply.
+            let aliasReplyResponse = null;
+            let generalReplyResponse = null;
+            let hasAliasResults = false;
+            if (emailAliasConfigured) {
+                aliasReplyResponse = await analyzeEmailsAliasReplyActivity(analysisRequest);
+                hasAliasResults = !!(aliasReplyResponse?.success && ((aliasReplyResponse.data?.emails?.length || 0) > 0 || (aliasReplyResponse.data?.analysisCount || 0) > 0));
+            }
+            else {
+                generalReplyResponse = await analyzeEmailsReplyActivity(analysisRequest);
+            }
             // ✅ FIXED: Properly handle analysis failure and propagate critical errors
-            if (analysisResponse.success) {
-                console.log(`✅ Email analysis initiated successfully`);
-                console.log(`📧 ${analysisResponse.data?.emailCount || 0} emails submitted for analysis`);
-                console.log(`🤖 ${analysisResponse.data?.analysisCount || 0} emails were analyzed`);
-                console.log(`📋 Command ID: ${analysisResponse.data?.commandId}`);
+            // Build a summary using the three routes
+            if (leadsReplyResponse.success || aliasReplyResponse?.success || generalReplyResponse?.success) {
+                console.log(`✅ Email analysis (split routes) initiated successfully`);
+                const summary = {
+                    emailCount: (leadsReplyResponse.data?.emailCount || 0) + ((aliasReplyResponse?.data?.emailCount || 0) || (generalReplyResponse?.data?.emailCount || 0)),
+                    analysisCount: (leadsReplyResponse.data?.analysisCount || 0) + ((aliasReplyResponse?.data?.analysisCount || 0) || (generalReplyResponse?.data?.analysisCount || 0)),
+                    commandId: leadsReplyResponse.data?.commandId || aliasReplyResponse?.data?.commandId || generalReplyResponse?.data?.commandId,
+                    status: leadsReplyResponse.data?.status || aliasReplyResponse?.data?.status || generalReplyResponse?.data?.status,
+                    message: leadsReplyResponse.data?.message || aliasReplyResponse?.data?.message || generalReplyResponse?.data?.message,
+                };
+                console.log(`📧 ${summary.emailCount} emails submitted for analysis`);
+                console.log(`🤖 ${summary.analysisCount} emails were analyzed`);
+                console.log(`📋 Command ID: ${summary.commandId}`);
                 result.analysisResult = {
                     success: true,
-                    commandId: analysisResponse.data?.commandId,
-                    emailCount: analysisResponse.data?.emailCount,
-                    analysisCount: analysisResponse.data?.analysisCount,
-                    status: analysisResponse.data?.status,
-                    message: analysisResponse.data?.message
+                    commandId: summary.commandId,
+                    emailCount: summary.emailCount,
+                    analysisCount: summary.analysisCount,
+                    status: summary.status,
+                    message: summary.message
                 };
-                // 🚀 Activación automática: cuando hay emails analizados, ejecutar customer support
-                if (analysisResponse.data?.emails && analysisResponse.data.emails.length > 0) {
-                    console.log(`🚀 Found ${analysisResponse.data.emails.length} analyzed emails - starting customer support workflow`);
-                    console.log(`📊 Starting customer support workflow for ${analysisResponse.data.analysisCount} analyzed emails`);
-                    const customerSupportWorkflowId = `schedule-customer-support-${siteId}-${Date.now()}`;
-                    // Preparar parámetros para scheduleCustomerSupportMessagesWorkflow
-                    const scheduleParams = {
-                        emails: analysisResponse.data.emails,
-                        site_id: siteId,
-                        user_id: userId,
-                        total_emails: analysisResponse.data.analysisCount,
-                        timestamp: new Date().toISOString(),
-                        agentId: undefined, // Se puede configurar si es necesario
-                        origin: "email" // Indicar que el origen es email (syncMails)
-                    };
-                    try {
-                        // ✅ FIXED: Better error handling for child workflow
-                        const childWorkflowHandle = await (0, workflow_1.startChild)(scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow, {
-                            workflowId: customerSupportWorkflowId,
-                            args: [scheduleParams],
-                            parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
-                        });
-                        console.log(`✅ Started scheduleCustomerSupportMessagesWorkflow: ${childWorkflowHandle.workflowId}`);
-                        console.log(`🔄 This will process customer support messages with 1-minute intervals`);
-                        console.log(`🚀 Parent close policy: ABANDON - child workflow will continue running independently`);
-                        // ✅ FIXED: Wait a moment to ensure child workflow started properly
-                        console.log(`⏳ Waiting for child workflow to initialize...`);
-                        await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay
+                // 🚀 Trigger customer support per category when emails exist
+                const batches = [
+                    { label: 'leadsReply', r: leadsReplyResponse },
+                    hasAliasResults ? { label: 'aliasReply', r: aliasReplyResponse } : { label: 'reply', r: generalReplyResponse },
+                ];
+                for (const batch of batches) {
+                    const r = batch.r;
+                    if (r?.success && r?.data?.emails && r.data.emails.length > 0) {
+                        console.log(`🚀 [${batch.label}] ${r.data.emails.length} emails - starting customer support workflow`);
+                        const customerSupportWorkflowId = `schedule-customer-support-${batch.label}-${siteId}-${Date.now()}`;
+                        const scheduleParams = {
+                            emails: r.data.emails,
+                            site_id: siteId,
+                            user_id: userId,
+                            total_emails: r.data.analysisCount,
+                            timestamp: new Date().toISOString(),
+                            agentId: undefined,
+                            origin: "email"
+                        };
+                        try {
+                            const childWorkflowHandle = await (0, workflow_1.startChild)(scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow, {
+                                workflowId: customerSupportWorkflowId,
+                                args: [scheduleParams],
+                                parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+                            });
+                            console.log(`✅ Started scheduleCustomerSupportMessagesWorkflow: ${childWorkflowHandle.workflowId}`);
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                        }
+                        catch (workflowError) {
+                            const workflowErrorMessage = workflowError instanceof Error ? workflowError.message : String(workflowError);
+                            console.error(`❌ [${batch.label}] Failed to start customer support workflow: ${workflowErrorMessage}`);
+                            result.errors.push(`Customer support workflow (${batch.label}) failed: ${workflowErrorMessage}`);
+                        }
                     }
-                    catch (workflowError) {
-                        const workflowErrorMessage = workflowError instanceof Error ? workflowError.message : String(workflowError);
-                        console.error(`❌ Failed to start customer support workflow: ${workflowErrorMessage}`);
-                        // ✅ FIXED: Add error to result but don't fail the entire workflow
-                        result.errors.push(`Customer support workflow failed: ${workflowErrorMessage}`);
+                    else {
+                        console.log(`📋 [${batch.label}] No analyzed emails - skip`);
                     }
                 }
-                else {
-                    console.log(`📋 No analyzed emails returned - customer support workflow not triggered`);
-                }
-                console.log(`📋 Email analysis completed. Command ID: ${analysisResponse.data?.commandId}`);
+                console.log(`📋 Email analysis completed. Command ID: ${result.analysisResult.commandId}`);
                 console.log(`🔄 Customer support workflow will be triggered automatically when emails are analyzed`);
             }
             else {

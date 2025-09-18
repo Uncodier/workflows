@@ -46,6 +46,8 @@ export interface ValidateCommunicationChannelsResult {
   hasAnyChannel: boolean;
   emailConfig?: any;
   whatsappConfig?: any;
+  // True when channels.email has aliases configured (string or array), even if disabled
+  emailAliasConfigured?: boolean;
   error?: string;
 }
 
@@ -120,6 +122,7 @@ export async function validateCommunicationChannelsActivity(
     let hasWhatsappChannel = false;
     let emailConfig = null;
     let whatsappConfig = null;
+    let emailAliasConfigured = false;
     
     // Handle different channel structure formats
     if (Array.isArray(channels)) {
@@ -143,11 +146,19 @@ export async function validateCommunicationChannelsActivity(
       
       // Check email configuration
       if (channels.email && typeof channels.email === 'object') {
+        // Set config regardless of enabled status so callers can inspect aliases
+        emailConfig = channels.email;
         hasEmailChannel = channels.email.enabled === true;
-        if (hasEmailChannel) {
-          emailConfig = channels.email;
-        }
         console.log(`   - Email enabled: ${hasEmailChannel}`, channels.email);
+        // Detect aliases: accept string, array or truthy value
+        const aliasesValue = channels.email.aliases;
+        if (typeof aliasesValue === 'string') {
+          emailAliasConfigured = aliasesValue.trim().length > 0;
+        } else if (Array.isArray(aliasesValue)) {
+          emailAliasConfigured = aliasesValue.length > 0;
+        } else if (aliasesValue) {
+          emailAliasConfigured = true;
+        }
       }
       
       // Check WhatsApp configuration  
@@ -204,7 +215,9 @@ export async function validateCommunicationChannelsActivity(
       hasEmailChannel,
       hasWhatsappChannel,
       hasAnyChannel,
-      emailConfig: hasEmailChannel ? emailConfig : undefined,
+      // Always return emailConfig to allow alias check even if disabled
+      emailConfig,
+      emailAliasConfigured,
       whatsappConfig: hasWhatsappChannel ? whatsappConfig : undefined
     };
     

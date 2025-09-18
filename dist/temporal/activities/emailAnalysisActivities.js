@@ -5,6 +5,9 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.analyzeEmailsActivity = analyzeEmailsActivity;
+exports.analyzeEmailsLeadsReplyActivity = analyzeEmailsLeadsReplyActivity;
+exports.analyzeEmailsAliasReplyActivity = analyzeEmailsAliasReplyActivity;
+exports.analyzeEmailsReplyActivity = analyzeEmailsReplyActivity;
 exports.checkEmailAnalysisStatusActivity = checkEmailAnalysisStatusActivity;
 const apiService_1 = require("../services/apiService");
 /**
@@ -46,6 +49,114 @@ async function analyzeEmailsActivity(request) {
             error: {
                 code: 'ACTIVITY_ERROR',
                 message: `Email analysis activity failed: ${errorMessage}`
+            }
+        };
+    }
+}
+/**
+ * Activity to analyze AI-assigned leads replies
+ */
+async function analyzeEmailsLeadsReplyActivity(request) {
+    console.log(`🔍 Analyzing leads replies for site ${request.site_id}`);
+    console.log(`📋 Request:`, JSON.stringify(request, null, 2));
+    try {
+        const startTime = Date.now();
+        const response = await apiService_1.apiService.request('/api/agents/email/leadsReply', {
+            method: 'POST',
+            body: request,
+            timeout: 900000
+        });
+        const duration = Date.now() - startTime;
+        console.log(`⏱️ Leads reply analysis duration: ${duration}ms`);
+        if (!response.success) {
+            console.error(`❌ Leads reply analysis failed:`, response.error);
+            throw new Error(`Leads reply analysis failed: ${response.error?.message || 'Unknown API error'}`);
+        }
+        return {
+            success: true,
+            data: response.data
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Leads reply analysis failed: ${errorMessage}`);
+        return {
+            success: false,
+            error: {
+                code: 'ACTIVITY_ERROR',
+                message: `Leads reply analysis failed: ${errorMessage}`
+            }
+        };
+    }
+}
+/**
+ * Activity to analyze alias replies
+ */
+async function analyzeEmailsAliasReplyActivity(request) {
+    console.log(`🔍 Analyzing alias replies for site ${request.site_id}`);
+    console.log(`📋 Request:`, JSON.stringify(request, null, 2));
+    try {
+        const startTime = Date.now();
+        const response = await apiService_1.apiService.request('/api/agents/email/aliasReply', {
+            method: 'POST',
+            body: request,
+            timeout: 900000
+        });
+        const duration = Date.now() - startTime;
+        console.log(`⏱️ Alias reply analysis duration: ${duration}ms`);
+        if (!response.success) {
+            console.error(`❌ Alias reply analysis failed:`, response.error);
+            throw new Error(`Alias reply analysis failed: ${response.error?.message || 'Unknown API error'}`);
+        }
+        return {
+            success: true,
+            data: response.data
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Alias reply analysis failed: ${errorMessage}`);
+        return {
+            success: false,
+            error: {
+                code: 'ACTIVITY_ERROR',
+                message: `Alias reply analysis failed: ${errorMessage}`
+            }
+        };
+    }
+}
+/**
+ * Activity to analyze general replies (no alias)
+ */
+async function analyzeEmailsReplyActivity(request) {
+    console.log(`🔍 Analyzing general replies for site ${request.site_id}`);
+    console.log(`📋 Request:`, JSON.stringify(request, null, 2));
+    try {
+        const startTime = Date.now();
+        const response = await apiService_1.apiService.request('/api/agents/email/reply', {
+            method: 'POST',
+            body: request,
+            timeout: 900000
+        });
+        const duration = Date.now() - startTime;
+        console.log(`⏱️ General reply analysis duration: ${duration}ms`);
+        if (!response.success) {
+            console.error(`❌ General reply analysis failed:`, response.error);
+            throw new Error(`General reply analysis failed: ${response.error?.message || 'Unknown API error'}`);
+        }
+        return {
+            success: true,
+            data: response.data
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ General reply analysis failed: ${errorMessage}`);
+        return {
+            success: false,
+            error: {
+                code: 'ACTIVITY_ERROR',
+                message: `General reply analysis failed: ${errorMessage}`
             }
         };
     }

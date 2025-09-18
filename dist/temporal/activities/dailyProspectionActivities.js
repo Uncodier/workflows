@@ -85,6 +85,7 @@ async function validateCommunicationChannelsActivity(params) {
         let hasWhatsappChannel = false;
         let emailConfig = null;
         let whatsappConfig = null;
+        let emailAliasConfigured = false;
         // Handle different channel structure formats
         if (Array.isArray(channels)) {
             // Array format: channels is an array of channel objects
@@ -99,11 +100,21 @@ async function validateCommunicationChannelsActivity(params) {
             console.log(`📋 Processing channels as object structure`);
             // Check email configuration
             if (channels.email && typeof channels.email === 'object') {
+                // Set config regardless of enabled status so callers can inspect aliases
+                emailConfig = channels.email;
                 hasEmailChannel = channels.email.enabled === true;
-                if (hasEmailChannel) {
-                    emailConfig = channels.email;
-                }
                 console.log(`   - Email enabled: ${hasEmailChannel}`, channels.email);
+                // Detect aliases: accept string, array or truthy value
+                const aliasesValue = channels.email.aliases;
+                if (typeof aliasesValue === 'string') {
+                    emailAliasConfigured = aliasesValue.trim().length > 0;
+                }
+                else if (Array.isArray(aliasesValue)) {
+                    emailAliasConfigured = aliasesValue.length > 0;
+                }
+                else if (aliasesValue) {
+                    emailAliasConfigured = true;
+                }
             }
             // Check WhatsApp configuration  
             if (channels.whatsapp && typeof channels.whatsapp === 'object') {
@@ -155,7 +166,9 @@ async function validateCommunicationChannelsActivity(params) {
             hasEmailChannel,
             hasWhatsappChannel,
             hasAnyChannel,
-            emailConfig: hasEmailChannel ? emailConfig : undefined,
+            // Always return emailConfig to allow alias check even if disabled
+            emailConfig,
+            emailAliasConfigured,
             whatsappConfig: hasWhatsappChannel ? whatsappConfig : undefined
         };
     }
