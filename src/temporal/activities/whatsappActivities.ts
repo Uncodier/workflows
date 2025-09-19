@@ -190,6 +190,7 @@ export interface SendWhatsAppFromAgentParams {
   agent_id?: string;
   conversation_id?: string;
   lead_id?: string;
+  responseWindowEnabled?: boolean;
 }
 
 export interface SendWhatsAppFromAgentResult {
@@ -211,7 +212,8 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
     site_id: params.site_id,
     agent_id: params.agent_id,
     conversation_id: params.conversation_id,
-    lead_id: params.lead_id
+    lead_id: params.lead_id,
+    responseWindowEnabled: params.responseWindowEnabled === true
   });
 
   try {
@@ -223,6 +225,7 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
       from: params.from || 'AI Assistant',
       agent_id: params.agent_id,
       conversation_id: params.conversation_id,
+      responseWindowEnabled: params.responseWindowEnabled === true,
     };
 
     // Only include lead_id if it's present and looks like a valid UUID

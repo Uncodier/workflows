@@ -25,6 +25,7 @@ export interface SendWhatsAppFromAgentParams {
   conversation_id?: string;
   lead_id?: string;
   message_id?: string; // ID del mensaje en la base de datos para actualizar custom_data
+  responseWindowEnabled?: boolean;
 }
 
 /**
@@ -73,7 +74,8 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
       from: params.from,
       agent_id: params.agent_id,
       conversation_id: params.conversation_id,
-      lead_id: params.lead_id
+      lead_id: params.lead_id,
+      responseWindowEnabled: params.responseWindowEnabled
     });
 
     // Step 2: Check if template is required (no response window)

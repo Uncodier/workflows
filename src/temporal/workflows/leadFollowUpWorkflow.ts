@@ -1054,6 +1054,7 @@ export async function leadFollowUpWorkflow(
               agent_id: options.userId || site.user_id,
               lead_id: lead_id,
               from: siteName,
+              responseWindowEnabled: false,
             });
             
             // If we reach here, WhatsApp was sent successfully
