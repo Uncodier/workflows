@@ -1696,40 +1696,46 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                             dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
                         }
                     }];
-                // Start the DELAYED workflow for strategic accounts
-                await client.workflow.start('delayedExecutionWorkflow', {
-                    args: [{
-                            delayMs: Math.max(strategicDelayMs, 0), // Ensure non-negative delay
-                            targetWorkflow: 'dailyStrategicAccountsWorkflow',
-                            targetArgs: strategicWorkflowArgs,
-                            siteName: site.name || 'Site',
-                            scheduledTime: `${strategicScheduledTime} ${siteTimezone}`,
-                            executionType: 'timer-based-strategic-accounts'
-                        }],
-                    taskQueue: config_1.temporalConfig.taskQueue,
-                    workflowId: strategicWorkflowId,
-                    workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
-                });
-                console.log(`✅ Successfully scheduled Daily Strategic Accounts with TIMER for ${site.name || 'Site'}`);
-                console.log(`   - Will execute at: ${strategicScheduledTime} ${siteTimezone} on ${finalLocalDateStr} (2h after lead generation)`);
-                console.log(`   - Lead generation time: ${leadGenScheduledTime} ${siteTimezone}`);
-                console.log(`   - 🎯 EXECUTES 2 HOURS AFTER LEAD GENERATION`);
-                // Update cron status for strategic accounts workflow
-                const strategicCronUpdate = {
-                    siteId: site.id,
-                    workflowId: strategicWorkflowId,
-                    scheduleId: strategicWorkflowId, // Use workflowId as scheduleId for timers
-                    activityName: 'dailyStrategicAccountsWorkflow',
-                    status: 'SCHEDULED',
-                    nextRun: strategicTargetUTC.toISOString(),
-                };
-                await (0, cronActivities_1.saveCronStatusActivity)(strategicCronUpdate);
-                results.push({
-                    workflowId: strategicWorkflowId,
-                    scheduleId: strategicWorkflowId,
-                    success: true
-                });
-                scheduled++;
+                // Temporary guard: disable Strategic Accounts scheduling unless explicitly enabled
+                if (process.env.SCHEDULE_STRATEGIC_ACCOUNTS !== 'true') {
+                    console.log('⏭️ Skipping Strategic Accounts scheduling (temporarily disabled). Set SCHEDULE_STRATEGIC_ACCOUNTS=true to enable.');
+                }
+                else {
+                    // Start the DELAYED workflow for strategic accounts
+                    await client.workflow.start('delayedExecutionWorkflow', {
+                        args: [{
+                                delayMs: Math.max(strategicDelayMs, 0), // Ensure non-negative delay
+                                targetWorkflow: 'dailyStrategicAccountsWorkflow',
+                                targetArgs: strategicWorkflowArgs,
+                                siteName: site.name || 'Site',
+                                scheduledTime: `${strategicScheduledTime} ${siteTimezone}`,
+                                executionType: 'timer-based-strategic-accounts'
+                            }],
+                        taskQueue: config_1.temporalConfig.taskQueue,
+                        workflowId: strategicWorkflowId,
+                        workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+                    });
+                    console.log(`✅ Successfully scheduled Daily Strategic Accounts with TIMER for ${site.name || 'Site'}`);
+                    console.log(`   - Will execute at: ${strategicScheduledTime} ${siteTimezone} on ${finalLocalDateStr} (2h after lead generation)`);
+                    console.log(`   - Lead generation time: ${leadGenScheduledTime} ${siteTimezone}`);
+                    console.log(`   - 🎯 EXECUTES 2 HOURS AFTER LEAD GENERATION`);
+                    // Update cron status for strategic accounts workflow
+                    const strategicCronUpdate = {
+                        siteId: site.id,
+                        workflowId: strategicWorkflowId,
+                        scheduleId: strategicWorkflowId, // Use workflowId as scheduleId for timers
+                        activityName: 'dailyStrategicAccountsWorkflow',
+                        status: 'SCHEDULED',
+                        nextRun: strategicTargetUTC.toISOString(),
+                    };
+                    await (0, cronActivities_1.saveCronStatusActivity)(strategicCronUpdate);
+                    results.push({
+                        workflowId: strategicWorkflowId,
+                        scheduleId: strategicWorkflowId,
+                        success: true
+                    });
+                    scheduled++;
+                }
             }
             catch (siteError) {
                 const errorMessage = siteError instanceof Error ? siteError.message : String(siteError);
@@ -1745,13 +1751,25 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
             }
         }
         console.log(`\n📊 Individual Lead Generation + Strategic Accounts TIMER scheduling completed:`);
-        console.log(`   ✅ Scheduled: ${scheduled} workflows (${scheduled / 2} sites x 2 workflows each)`);
+        const strategicEnabled = process.env.SCHEDULE_STRATEGIC_ACCOUNTS === 'true';
+        if (strategicEnabled) {
+            console.log(`   ✅ Scheduled: ${scheduled} workflows (${scheduled / 2} sites x 2 workflows each)`);
+        }
+        else {
+            console.log(`   ✅ Scheduled: ${scheduled} lead generation workflows (Strategic Accounts disabled)`);
+        }
         console.log(`   ⏭️ Skipped: ${skipped} sites`);
         console.log(`   ❌ Failed: ${failed} sites`);
         console.log(`   🎯 Using TIMER-based approach for reliable one-time execution`);
         console.log(`   📅 Each site will execute Lead Generation at business hours PLUS 1 HOUR`);
-        console.log(`   🎯 Each site will execute Strategic Accounts at Lead Generation time PLUS 2 HOURS`);
-        console.log(`   🔥 SEQUENCE: Daily Standup → 1h → Lead Generation → 2h → Strategic Accounts`);
+        if (strategicEnabled) {
+            console.log(`   🎯 Each site will execute Strategic Accounts at Lead Generation time PLUS 2 HOURS`);
+            console.log(`   🔥 SEQUENCE: Daily Standup → 1h → Lead Generation → 2h → Strategic Accounts`);
+        }
+        else {
+            console.log(`   ⏭️ Strategic Accounts step is currently disabled`);
+            console.log(`   🔥 SEQUENCE: Daily Standup → 1h → Lead Generation`);
+        }
         return { scheduled, skipped, failed, results, errors };
     }
     catch (error) {

@@ -2,6 +2,7 @@ import { proxyActivities, sleep, startChild, patched, deprecatePatch, ParentClos
 import type { Activities } from '../activities';
 import { leadResearchWorkflow, type LeadResearchOptions, type LeadResearchResult } from './leadResearchWorkflow';
 import { leadInvalidationWorkflow, type LeadInvalidationOptions } from './leadInvalidationWorkflow';
+import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 
 // Define the activity interface and options
 const { 
@@ -12,7 +13,6 @@ const {
   leadFollowUpActivity,
   saveLeadFollowUpLogsActivity,
   sendEmailFromAgentActivity,
-  sendWhatsAppFromAgentActivity,
   updateConversationStatusAfterFollowUpActivity,
   validateMessageAndConversationActivity,
   updateMessageStatusToSentActivity,
@@ -1047,15 +1047,22 @@ export async function leadFollowUpWorkflow(
           console.log(`📞 Phone format: ${phone} -> ${formattedPhone}`);
           
           try {
-            const whatsappResult = await sendWhatsAppFromAgentActivity({
-              phone_number: formattedPhone,
-              message: whatsappMessage,
-              site_id: site_id,
-              agent_id: options.userId || site.user_id,
-              lead_id: lead_id,
-              from: siteName,
-              responseWindowEnabled: false,
+            const whatsappWorkflowId = `send-whatsapp-agent-${lead_id}-${Date.now()}`;
+            const whatsappHandle = await startChild(sendWhatsappFromAgent, {
+              workflowId: whatsappWorkflowId,
+              args: [{
+                phone_number: formattedPhone,
+                message: whatsappMessage,
+                site_id: site_id,
+                from: siteName,
+                agent_id: options.userId || site.user_id,
+                lead_id: lead_id,
+                responseWindowEnabled: false,
+              }],
+              parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_TERMINATE,
             });
+
+            const whatsappResult = await whatsappHandle.result();
             
             // If we reach here, WhatsApp was sent successfully
             console.log(`✅ Follow-up WhatsApp sent successfully to ${formattedPhone}`);
@@ -1066,7 +1073,7 @@ export async function leadFollowUpWorkflow(
                 channel: 'whatsapp',
                 recipient: formattedPhone,
                 success: true,
-                messageId: whatsappResult.messageId,
+              messageId: whatsappResult.messageId,
               };
             }
             

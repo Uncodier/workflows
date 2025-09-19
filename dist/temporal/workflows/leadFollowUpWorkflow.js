@@ -4,8 +4,9 @@ exports.leadFollowUpWorkflow = leadFollowUpWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const leadResearchWorkflow_1 = require("./leadResearchWorkflow");
 const leadInvalidationWorkflow_1 = require("./leadInvalidationWorkflow");
+const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, sendEmailFromAgentActivity, sendWhatsAppFromAgentActivity, updateConversationStatusAfterFollowUpActivity, validateMessageAndConversationActivity, updateMessageStatusToSentActivity, updateTaskStatusToCompletedActivity, cleanupFailedFollowUpActivity, updateMessageTimestampActivity, validateContactInformation, invalidateEmailOnlyActivity, validateCommunicationChannelsActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, sendEmailFromAgentActivity, updateConversationStatusAfterFollowUpActivity, validateMessageAndConversationActivity, updateMessageStatusToSentActivity, updateTaskStatusToCompletedActivity, cleanupFailedFollowUpActivity, updateMessageTimestampActivity, validateContactInformation, invalidateEmailOnlyActivity, validateCommunicationChannelsActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
     retry: {
         maximumAttempts: 3,
@@ -866,15 +867,21 @@ async function leadFollowUpWorkflow(options) {
                     const formattedPhone = formatPhoneNumber(phone);
                     console.log(`📞 Phone format: ${phone} -> ${formattedPhone}`);
                     try {
-                        const whatsappResult = await sendWhatsAppFromAgentActivity({
-                            phone_number: formattedPhone,
-                            message: whatsappMessage,
-                            site_id: site_id,
-                            agent_id: options.userId || site.user_id,
-                            lead_id: lead_id,
-                            from: siteName,
-                            responseWindowEnabled: false,
+                        const whatsappWorkflowId = `send-whatsapp-agent-${lead_id}-${Date.now()}`;
+                        const whatsappHandle = await (0, workflow_1.startChild)(sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent, {
+                            workflowId: whatsappWorkflowId,
+                            args: [{
+                                    phone_number: formattedPhone,
+                                    message: whatsappMessage,
+                                    site_id: site_id,
+                                    from: siteName,
+                                    agent_id: options.userId || site.user_id,
+                                    lead_id: lead_id,
+                                    responseWindowEnabled: false,
+                                }],
+                            parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_TERMINATE,
                         });
+                        const whatsappResult = await whatsappHandle.result();
                         // If we reach here, WhatsApp was sent successfully
                         console.log(`✅ Follow-up WhatsApp sent successfully to ${formattedPhone}`);
                         whatsappSent = true;
