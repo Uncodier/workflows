@@ -34,7 +34,6 @@ import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 // Configure activity options using centralized timeouts
 const { 
   sendCustomerSupportMessageActivity,
-  processAnalysisDataActivity,
   startLeadAttentionWorkflowActivity,
   updateTaskStatusToCompletedActivity
 } = proxyActivities<Activities>({

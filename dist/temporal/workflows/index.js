@@ -25,6 +25,7 @@ const dailyOperationsWorkflow_1 = require("./dailyOperationsWorkflow");
 const sendReportWorkflow_1 = require("./sendReportWorkflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
 const customerSupportWorkflow_1 = require("./customerSupportWorkflow");
+const emailCustomerSupportWorkflow_1 = require("./emailCustomerSupportWorkflow");
 const sendEmailFromAgentWorkflow_1 = require("./sendEmailFromAgentWorkflow");
 const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow");
 const answerWhatsappMessageWorkflow_1 = require("./answerWhatsappMessageWorkflow");
@@ -104,7 +105,7 @@ exports.workflows = {
     sendReportWorkflow: sendReportWorkflow_1.sendReportWorkflow,
     scheduleCustomerSupportMessagesWorkflow: scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow,
     customerSupportMessageWorkflow: customerSupportWorkflow_1.customerSupportMessageWorkflow,
-    emailCustomerSupportMessageWorkflow: customerSupportWorkflow_1.emailCustomerSupportMessageWorkflow,
+    emailCustomerSupportMessageWorkflow: emailCustomerSupportWorkflow_1.emailCustomerSupportMessageWorkflow,
     sendEmailFromAgent: sendEmailFromAgentWorkflow_1.sendEmailFromAgent,
     sendWhatsappFromAgent: sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent,
     answerWhatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,

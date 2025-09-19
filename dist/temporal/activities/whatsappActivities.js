@@ -141,7 +141,8 @@ async function sendWhatsAppFromAgentActivity(params) {
         site_id: params.site_id,
         agent_id: params.agent_id,
         conversation_id: params.conversation_id,
-        lead_id: params.lead_id
+        lead_id: params.lead_id,
+        responseWindowEnabled: params.responseWindowEnabled === true
     });
     try {
         // Prepare API payload - only include lead_id if it's a valid UUID
@@ -152,6 +153,7 @@ async function sendWhatsAppFromAgentActivity(params) {
             from: params.from || 'AI Assistant',
             agent_id: params.agent_id,
             conversation_id: params.conversation_id,
+            responseWindowEnabled: params.responseWindowEnabled === true,
         };
         // Only include lead_id if it's present and looks like a valid UUID
         // API can obtain lead_id from phone_number if not provided

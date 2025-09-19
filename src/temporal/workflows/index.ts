@@ -7,7 +7,8 @@ import { activityPrioritizationEngineWorkflow } from './activityPrioritizationEn
 import { dailyOperationsWorkflow } from './dailyOperationsWorkflow';
 import { sendReportWorkflow } from './sendReportWorkflow';
 import { scheduleCustomerSupportMessagesWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
-import { customerSupportMessageWorkflow, emailCustomerSupportMessageWorkflow } from './customerSupportWorkflow';
+import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
+import { emailCustomerSupportMessageWorkflow } from './emailCustomerSupportWorkflow';
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 import { answerWhatsappMessageWorkflow, processWhatsAppMessagesWorkflow } from './answerWhatsappMessageWorkflow';

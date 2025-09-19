@@ -39,7 +39,8 @@ async function sendWhatsappFromAgent(params) {
             from: params.from,
             agent_id: params.agent_id,
             conversation_id: params.conversation_id,
-            lead_id: params.lead_id
+            lead_id: params.lead_id,
+            responseWindowEnabled: params.responseWindowEnabled
         });
         // Step 2: Check if template is required (no response window)
         if (whatsappResult.template_required) {
