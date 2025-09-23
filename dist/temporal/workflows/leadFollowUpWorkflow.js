@@ -13,74 +13,21 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, g
     },
 });
 /**
- * Format phone numbers to international format
- * Prioritizes Spanish numbers but handles international formats
+ * Sanitize phone numbers without inferring/adding country codes.
+ * Let Twilio/backend resolve the region/country.
  */
 function formatPhoneNumber(phone) {
     if (!phone || typeof phone !== 'string') {
         return phone;
     }
-    // Remove all spaces, dashes, parentheses, and other non-digit characters except +
-    const cleanPhone = phone.replace(/[^\d+]/g, '');
-    // If already has + at start, assume it's international format
+    // Keep digits and plus signs only; collapse to a single leading +
+    let cleanPhone = phone.replace(/[^\d+]/g, '');
     if (cleanPhone.startsWith('+')) {
-        return cleanPhone;
+        cleanPhone = '+' + cleanPhone.slice(1).replace(/\+/g, '');
     }
-    // If starts with 34, assume it's Spanish with country code but missing +
-    if (cleanPhone.startsWith('34') && cleanPhone.length === 11) {
-        return '+' + cleanPhone;
+    else {
+        cleanPhone = cleanPhone.replace(/\+/g, '');
     }
-    // Spanish mobile numbers (9 digits starting with 6 or 7)
-    if (cleanPhone.length === 9 && (cleanPhone.startsWith('6') || cleanPhone.startsWith('7'))) {
-        return '+34' + cleanPhone;
-    }
-    // Spanish landline numbers (9 digits starting with 9)
-    if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
-        return '+34' + cleanPhone;
-    }
-    // For any other 9-digit number, assume it's Spanish
-    if (cleanPhone.length === 9) {
-        return '+34' + cleanPhone;
-    }
-    // Spanish mobile with extra digit (10 digits starting with 6 or 7)
-    if (cleanPhone.length === 10 && (cleanPhone.startsWith('6') || cleanPhone.startsWith('7'))) {
-        return '+34' + cleanPhone;
-    }
-    // Handle US/Canada numbers (10 digits, often starting with 2-9 in first position)
-    if (cleanPhone.length === 10 && /^[2-9]\d{9}$/.test(cleanPhone)) {
-        return '+1' + cleanPhone;
-    }
-    // Handle international numbers that start with 1 (US/Canada with country code)
-    if (cleanPhone.startsWith('1') && cleanPhone.length === 11) {
-        return '+' + cleanPhone;
-    }
-    // Handle other common international patterns
-    // UK numbers (11 digits starting with 44 or just 11 digits)
-    if (cleanPhone.length === 11 && cleanPhone.startsWith('44')) {
-        return '+' + cleanPhone;
-    }
-    // France numbers (10 digits or 12 with 33)
-    if (cleanPhone.startsWith('33') && cleanPhone.length === 12) {
-        return '+' + cleanPhone;
-    }
-    // Germany numbers (11-12 digits starting with 49)
-    if (cleanPhone.startsWith('49') && (cleanPhone.length === 11 || cleanPhone.length === 12)) {
-        return '+' + cleanPhone;
-    }
-    // For shorter numbers, try to add +34 if it looks like it could be Spanish
-    if (cleanPhone.length <= 9 && cleanPhone.length >= 7) {
-        return '+34' + cleanPhone;
-    }
-    // For any remaining numbers, try to guess the format
-    // If it's 10+ digits and doesn't start with known country codes, it might be international
-    if (cleanPhone.length >= 10) {
-        // Log warning for manual review
-        console.log(`⚠️ Unknown phone format, returning without prefix: ${phone} -> ${cleanPhone}`);
-        console.log(`💡 This number might need manual verification or specific country code`);
-        return cleanPhone; // Return as-is for API to potentially handle or reject
-    }
-    // Return as-is if we can't determine format
-    console.log(`⚠️ Unable to format phone number: ${phone} -> ${cleanPhone}`);
     return cleanPhone;
 }
 /**
@@ -663,16 +610,16 @@ async function leadFollowUpWorkflow(options) {
                 console.log(`📋 Logs returned required IDs for follow-up delivery:`);
                 console.log(`   - Message IDs: ${logsResult.message_ids.join(', ')}`);
                 console.log(`   - Conversation IDs: ${logsResult.conversation_ids?.join(', ') || 'None'}`);
-                console.log(`✅ Proceeding with 2-hour timer and message delivery`);
+                console.log(`✅ Proceeding with 1-minute timer and message delivery`);
             }
         }
         // Note: We trust the logs endpoint - if it returns message_ids, we proceed with delivery
-        // Step 5: Wait 2 hours before sending follow-up message
+        // Step 5: Wait 1 minute before sending follow-up message
         if (response && (response.data?.messages || response.messages) && (response.data?.lead || response.lead)) {
-            console.log(`⏰ Step 5: Waiting 2 hours before sending follow-up message...`);
-            // Wait 2 hours before sending the message
-            await (0, workflow_1.sleep)('2 hours');
-            // Step 5.1: Final validation before sending - ensure messages still exist after the 2-hour wait
+            console.log(`⏰ Step 5: Waiting 1 minute before sending follow-up message...`);
+            // Wait 1 minute before sending the message
+            await (0, workflow_1.sleep)('1m');
+            // Step 5.1: Final validation before sending - ensure messages still exist after the 1-minute wait
             console.log(`🔍 Step 5.1: Performing final validation before message sending...`);
             console.log(`📝 Validating message IDs from logs: ${logsResult?.message_ids?.join(', ') || 'None'}`);
             console.log(`💬 Validating conversation IDs from logs: ${logsResult?.conversation_ids?.join(', ') || 'None'}`);

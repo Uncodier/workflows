@@ -1880,3 +1880,55 @@ Unified RLS per table using site-scoped access:
 - message.created
 
 You can subscribe an endpoint to any of these. Deliveries are recorded in `webhooks_deliveries` and should be sent by a background worker or scheduled job.
+
+## System: Finder Queries and Persons
+
+### Tables
+
+- role_queries (system)
+  - id (uuid, pk)
+  - query (jsonb, required)
+  - query_hash (text, generated: sha256 of query::text, unique)
+  - synced_pages (int, default 0)
+  - total_persons (int, nullable)
+  - total_organizations (int, nullable)
+  - total_search_results (int, nullable)
+  - status (text: pending | running | completed | failed, default pending)
+  - last_run_at (timestamptz, nullable)
+  - created_at / updated_at
+  - Unique: (query_hash)
+  - Indexes: created_at, status, GIN(query)
+
+- role_query_segments (bridge)
+  - id (uuid, pk)
+  - role_query_id (uuid → role_queries.id on delete cascade)
+  - segment_id (uuid → segments.id on delete cascade)
+  - created_at
+  - Unique: (role_query_id, segment_id)
+  - Indexes: role_query_id, segment_id
+
+- persons (system)
+  - id (uuid, pk)
+  - role_query_id (uuid → role_queries.id on delete set null)
+  - external_person_id (bigint, nullable)
+  - external_role_id (bigint, nullable)
+  - external_organization_id (bigint, nullable)
+  - full_name (text)
+  - role_title (text)
+  - company_name (text)
+  - start_date (date)
+  - end_date (date)
+  - is_current (boolean)
+  - location (text)
+  - emails (jsonb)
+  - phones (jsonb)
+  - raw_result (jsonb, required)
+  - created_at / updated_at
+  - Unique: (external_person_id, external_role_id)
+  - Indexes: role_query_id, full_name, company_name, role_title, is_current, GIN(raw_result)
+
+### Notes
+
+- query_hash permite upserts/dedupe rápidos: `on conflict (query_hash)`.
+- role_query_segments permite asociar el mismo query a múltiples `segments` (1→N).
+- persons almacena el snapshot crudo del API en `raw_result` y campos denormalizados para listados.
