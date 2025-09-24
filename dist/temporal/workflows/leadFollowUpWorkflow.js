@@ -610,16 +610,16 @@ async function leadFollowUpWorkflow(options) {
                 console.log(`📋 Logs returned required IDs for follow-up delivery:`);
                 console.log(`   - Message IDs: ${logsResult.message_ids.join(', ')}`);
                 console.log(`   - Conversation IDs: ${logsResult.conversation_ids?.join(', ') || 'None'}`);
-                console.log(`✅ Proceeding with 1-minute timer and message delivery`);
+                console.log(`✅ Proceeding with 2-hour timer and message delivery`);
             }
         }
         // Note: We trust the logs endpoint - if it returns message_ids, we proceed with delivery
-        // Step 5: Wait 1 minute before sending follow-up message
+        // Step 5: Wait 2 hours before sending follow-up message
         if (response && (response.data?.messages || response.messages) && (response.data?.lead || response.lead)) {
-            console.log(`⏰ Step 5: Waiting 1 minute before sending follow-up message...`);
-            // Wait 1 minute before sending the message
-            await (0, workflow_1.sleep)('1m');
-            // Step 5.1: Final validation before sending - ensure messages still exist after the 1-minute wait
+            console.log(`⏰ Step 5: Waiting 2 hours before sending follow-up message...`);
+            // Wait 2 hours before sending the message
+            await (0, workflow_1.sleep)('2 hours');
+            // Step 5.1: Final validation before sending - ensure messages still exist after the 2-hour wait
             console.log(`🔍 Step 5.1: Performing final validation before message sending...`);
             console.log(`📝 Validating message IDs from logs: ${logsResult?.message_ids?.join(', ') || 'None'}`);
             console.log(`💬 Validating conversation IDs from logs: ${logsResult?.conversation_ids?.join(', ') || 'None'}`);
@@ -824,6 +824,8 @@ async function leadFollowUpWorkflow(options) {
                                     from: siteName,
                                     agent_id: options.userId || site.user_id,
                                     lead_id: lead_id,
+                                    conversation_id: logsResult?.conversation_ids?.[0],
+                                    message_id: logsResult?.message_ids?.[0],
                                     responseWindowEnabled: false,
                                 }],
                             parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_TERMINATE,

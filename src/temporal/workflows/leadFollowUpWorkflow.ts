@@ -991,6 +991,8 @@ export async function leadFollowUpWorkflow(
                 from: siteName,
                 agent_id: options.userId || site.user_id,
                 lead_id: lead_id,
+                conversation_id: logsResult?.conversation_ids?.[0],
+                message_id: logsResult?.message_ids?.[0],
                 responseWindowEnabled: false,
               }],
               parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_TERMINATE,

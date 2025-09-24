@@ -4,7 +4,7 @@ exports.sendWhatsappFromAgent = sendWhatsappFromAgent;
 const workflow_1 = require("@temporalio/workflow");
 const timeouts_1 = require("../config/timeouts");
 // Configure activity options using centralized timeouts
-const { sendWhatsAppFromAgentActivity, createTemplateActivity, sendTemplateActivity, updateMessageStatusToSentActivity } = (0, workflow_1.proxyActivities)({
+const { sendWhatsAppFromAgentActivity, createTemplateActivity, sendTemplateActivity, updateMessageStatusToSentActivity, fetchRecordByTableAndIdActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: timeouts_1.ACTIVITY_TIMEOUTS.WHATSAPP_OPERATIONS, // ✅ Using centralized config (2 minutes)
     retry: timeouts_1.RETRY_POLICIES.NETWORK, // ✅ Using appropriate retry policy for WhatsApp operations
 });
@@ -22,10 +22,37 @@ async function sendWhatsappFromAgent(params) {
         if (!params.phone_number || !params.message || !params.site_id) {
             throw new Error('Missing required WhatsApp parameters: phone_number, message and site_id are all required');
         }
+        // If we have a message_id, ensure the message still exists and fetch the latest content
+        let currentMessageContent = params.message;
+        if (params.message_id) {
+            try {
+                console.log('🔍 Checking message existence and refreshing content before sending...', { message_id: params.message_id });
+                const fetchedMessage = await fetchRecordByTableAndIdActivity({ table: 'messages', id: params.message_id });
+                if (!fetchedMessage) {
+                    console.log('🛑 Message not found - aborting WhatsApp send sequence');
+                    throw new Error('MESSAGE_DELETED');
+                }
+                const latestContent = typeof fetchedMessage?.content === 'string' ? fetchedMessage.content.trim() : null;
+                if (!latestContent) {
+                    console.log('🛑 Message content empty or missing - aborting WhatsApp send sequence');
+                    throw new Error('MESSAGE_DELETED');
+                }
+                currentMessageContent = latestContent;
+                console.log('✏️ Using refreshed message content for sending');
+            }
+            catch (earlyFetchErr) {
+                const msg = earlyFetchErr instanceof Error ? earlyFetchErr.message : String(earlyFetchErr);
+                if (msg === 'MESSAGE_DELETED') {
+                    throw earlyFetchErr; // Propagate special abort condition
+                }
+                // If fetch failed for other reasons (e.g., network), proceed with original content
+                console.log('⚠️ Could not refresh message content, proceeding with original content', msg);
+            }
+        }
         console.log('📤 Sending WhatsApp via agent API:', {
             recipient: params.phone_number,
             from: params.from || 'AI Assistant',
-            messageLength: params.message.length,
+            messageLength: currentMessageContent.length,
             site_id: params.site_id,
             agent_id: params.agent_id || 'not-provided',
             conversation_id: params.conversation_id || 'not-provided',
@@ -34,7 +61,7 @@ async function sendWhatsappFromAgent(params) {
         // Step 1: Send WhatsApp using the agent API
         whatsappResult = await sendWhatsAppFromAgentActivity({
             phone_number: params.phone_number,
-            message: params.message,
+            message: currentMessageContent,
             site_id: params.site_id,
             from: params.from,
             agent_id: params.agent_id,
@@ -46,11 +73,12 @@ async function sendWhatsappFromAgent(params) {
         if (whatsappResult.template_required) {
             console.log('📄 Template required - no response window available. Creating template...');
             try {
+                const messageForTemplate = currentMessageContent;
                 // Step 3: Create template using the message_id and required parameters
                 const templateResult = await createTemplateActivity({
                     message_id: whatsappResult.messageId, // messageId from workflow interface maps to API's message_id
                     phone_number: params.phone_number,
-                    message: params.message,
+                    message: messageForTemplate,
                     site_id: params.site_id
                 });
                 console.log('✅ Template created successfully:', {
@@ -62,7 +90,7 @@ async function sendWhatsappFromAgent(params) {
                     phone_number: params.phone_number,
                     site_id: params.site_id,
                     message_id: whatsappResult.messageId, // Para tracking - messageId from workflow interface
-                    original_message: params.message // Para logging
+                    original_message: messageForTemplate // Para logging
                 });
                 const endTime = new Date();
                 const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
@@ -93,7 +121,7 @@ async function sendWhatsappFromAgent(params) {
                                 recipient: whatsappResult.recipient,
                                 timestamp: sendTemplateResult.timestamp,
                                 templateFlow: true,
-                                messageLength: params.message.length
+                                messageLength: (messageForTemplate || '').length
                             }
                         });
                         if (updateResult.success) {

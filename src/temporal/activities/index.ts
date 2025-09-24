@@ -25,6 +25,7 @@ export * from './dailyProspectionActivities';
 export * from './robotActivities';
 export * from './validateEmailActivities';
 export * from './webhookActivities';
+export * from './finderActivities';
 
 // Bundle all activities for the worker
 import * as supabaseActivities from './supabaseActivities';
@@ -53,6 +54,7 @@ import * as dailyProspectionActivities from './dailyProspectionActivities';
 import * as robotActivities from './robotActivities'; // Used in activities spread
 import * as validateEmailActivities from './validateEmailActivities';
 import * as webhookActivities from './webhookActivities';
+import * as finderActivities from './finderActivities';
 
 export const activities = {
   ...supabaseActivities,
@@ -81,6 +83,7 @@ export const activities = {
   ...robotActivities,
   ...validateEmailActivities,
   ...webhookActivities,
+  ...finderActivities,
 };
 
 export type Activities = typeof activities; 
