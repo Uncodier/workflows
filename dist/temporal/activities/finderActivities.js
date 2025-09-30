@@ -35,23 +35,36 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.callPersonRoleSearchActivity = callPersonRoleSearchActivity;
 exports.callPersonContactsLookupActivity = callPersonContactsLookupActivity;
+exports.getRoleQueryByIdActivity = getRoleQueryByIdActivity;
 exports.getIcpMiningByIdActivity = getIcpMiningByIdActivity;
 exports.updateIcpMiningProgressActivity = updateIcpMiningProgressActivity;
 exports.markIcpMiningStartedActivity = markIcpMiningStartedActivity;
 exports.markIcpMiningCompletedActivity = markIcpMiningCompletedActivity;
+exports.getPendingIcpMiningActivity = getPendingIcpMiningActivity;
+exports.checkExistingPersonActivity = checkExistingPersonActivity;
+exports.checkExistingLeadForPersonActivity = checkExistingLeadForPersonActivity;
 exports.upsertPersonActivity = upsertPersonActivity;
 exports.updatePersonEmailsActivity = updatePersonEmailsActivity;
+exports.getSegmentIdFromRoleQueryActivity = getSegmentIdFromRoleQueryActivity;
 const apiService_1 = require("../services/apiService");
 const services_1 = require("../services");
 // Finder API: person role search
 async function callPersonRoleSearchActivity(options) {
-    const { role_query_id, page, page_size = 10 } = options;
+    const { role_query_id, query, page, page_size = 10 } = options;
     try {
-        const response = await apiService_1.apiService.post('/api/finder/person_role_search', {
+        // Use query data if provided, otherwise fall back to role_query_id
+        const requestBody = query ? {
+            ...query, // Spread the query parameters directly into the body
+            page,
+            page_size,
+        } : {
             role_query_id,
             page,
             page_size,
-        });
+        };
+        // Log the request body for debugging
+        console.log('🔍 Person Role Search API Request:', JSON.stringify(requestBody, null, 2));
+        const response = await apiService_1.apiService.post('/api/finder/person_role_search', requestBody);
         if (!response.success) {
             return { success: false, error: response.error?.message || 'Finder person_role_search failed' };
         }
@@ -83,6 +96,30 @@ async function callPersonContactsLookupActivity(options) {
         const payload = response.data?.data || response.data;
         const emails = payload?.emails || payload?.work_emails || [];
         return { success: true, data: payload, emails };
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { success: false, error: message };
+    }
+}
+// Get role query data by ID
+async function getRoleQueryByIdActivity(id) {
+    try {
+        const supabaseService = (0, services_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            return { success: false, error: 'Database not available' };
+        }
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        const { data, error } = await supabaseServiceRole
+            .from('role_queries')
+            .select('*')
+            .eq('id', id)
+            .single();
+        if (error) {
+            return { success: false, error: error.message };
+        }
+        return { success: true, roleQuery: data };
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -125,7 +162,7 @@ async function updateIcpMiningProgressActivity(options) {
         // Fetch current row
         const { data: current, error: fetchError } = await supabaseServiceRole
             .from('icp_mining')
-            .select('processed_targets, found_matches, errors')
+            .select('processed_targets, found_matches, errors, total_targets')
             .eq('id', options.id)
             .single();
         if (fetchError) {
@@ -142,6 +179,7 @@ async function updateIcpMiningProgressActivity(options) {
             found_matches: newFound,
             last_progress_at: new Date().toISOString(),
             ...(options.status && { status: options.status }),
+            // Only update total_targets if explicitly provided, otherwise preserve existing value
             ...(options.totalTargets !== undefined && { total_targets: options.totalTargets }),
             ...(options.last_error !== undefined && { last_error: options.last_error }),
             errors,
@@ -200,6 +238,131 @@ async function markIcpMiningCompletedActivity(options) {
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { success: false, error: message };
+    }
+}
+// List pending ICP Mining rows (optionally limited and filtered by site_id)
+async function getPendingIcpMiningActivity(options) {
+    try {
+        const supabaseService = (0, services_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected)
+            return { success: false, error: 'Database not available' };
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        const limit = options?.limit && options.limit > 0 ? options.limit : 50;
+        let query = supabaseServiceRole
+            .from('icp_mining')
+            .select('*')
+            .in('status', ['pending'])
+            .order('created_at', { ascending: true })
+            .limit(limit);
+        // Filter by site_id if provided
+        if (options?.site_id) {
+            query = query.eq('site_id', options.site_id);
+        }
+        console.log(`🔍 ICP Mining Query: site_id=${options?.site_id}, limit=${limit}`);
+        // First, let's check what records exist for this site_id (any status)
+        const { data: allRecords } = await supabaseServiceRole
+            .from('icp_mining')
+            .select('id, status, site_id, name, created_at')
+            .eq('site_id', options?.site_id || '')
+            .order('created_at', { ascending: false })
+            .limit(10);
+        console.log(`📊 All ICP Mining records for site_id ${options?.site_id}:`, allRecords);
+        const { data, error } = await query;
+        if (error) {
+            console.error(`❌ ICP Mining Query Error:`, error);
+            return { success: false, error: error.message };
+        }
+        console.log(`📊 ICP Mining Results: found ${data?.length || 0} items`);
+        if (data && data.length > 0) {
+            console.log(`📋 Sample ICP Mining item:`, {
+                id: data[0].id,
+                status: data[0].status,
+                icp_criteria: data[0].icp_criteria,
+                site_id_in_criteria: data[0].icp_criteria?.site_id
+            });
+        }
+        return { success: true, items: data || [] };
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { success: false, error: message };
+    }
+}
+// Check if person already exists
+async function checkExistingPersonActivity(options) {
+    try {
+        const supabaseService = (0, services_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected)
+            return { success: false, hasExistingPerson: false, error: 'Database not available' };
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        let query = supabaseServiceRole
+            .from('persons')
+            .select('id, full_name, company_name, external_person_id, external_role_id, emails, phones, created_at, updated_at');
+        // Try to find by external IDs first (most reliable)
+        if (options.external_person_id && options.external_role_id) {
+            query = query
+                .eq('external_person_id', options.external_person_id)
+                .eq('external_role_id', options.external_role_id);
+        }
+        else if (options.external_person_id) {
+            query = query.eq('external_person_id', options.external_person_id);
+        }
+        else if (options.full_name && options.company_name) {
+            // Fallback to name and company match
+            query = query
+                .eq('full_name', options.full_name)
+                .eq('company_name', options.company_name);
+        }
+        else {
+            return { success: true, hasExistingPerson: false };
+        }
+        const { data: existingPerson, error } = await query
+            .limit(1)
+            .maybeSingle();
+        if (error)
+            return { success: false, hasExistingPerson: false, error: error.message };
+        const hasExistingPerson = !!existingPerson;
+        return {
+            success: true,
+            hasExistingPerson,
+            existingPerson: hasExistingPerson ? existingPerson : undefined
+        };
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { success: false, hasExistingPerson: false, error: message };
+    }
+}
+// Check if lead already exists for a person
+async function checkExistingLeadForPersonActivity(options) {
+    try {
+        const supabaseService = (0, services_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected)
+            return { success: false, hasExistingLead: false, error: 'Database not available' };
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // Check if there's already a lead for this person
+        const { data: existingLead, error } = await supabaseServiceRole
+            .from('leads')
+            .select('id, name, email, phone, status, created_at')
+            .eq('site_id', options.site_id)
+            .eq('person_id', options.person_id)
+            .limit(1)
+            .maybeSingle();
+        if (error)
+            return { success: false, hasExistingLead: false, error: error.message };
+        const hasExistingLead = !!existingLead;
+        return {
+            success: true,
+            hasExistingLead,
+            existingLead: hasExistingLead ? existingLead : undefined
+        };
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { success: false, hasExistingLead: false, error: message };
     }
 }
 // Upsert person into persons table
@@ -283,6 +446,38 @@ async function updatePersonEmailsActivity(options) {
         if (error)
             return { success: false, error: error.message };
         return { success: true };
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { success: false, error: message };
+    }
+}
+/**
+ * Get segment_id from role_query_segments relationship
+ */
+async function getSegmentIdFromRoleQueryActivity(roleQueryId) {
+    try {
+        const supabaseService = (0, services_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected)
+            return { success: false, error: 'Database not available' };
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        const { data: roleQuerySegment, error } = await supabaseServiceRole
+            .from('role_query_segments')
+            .select('segment_id')
+            .eq('role_query_id', roleQueryId)
+            .limit(1)
+            .maybeSingle();
+        if (error) {
+            console.error('❌ Error fetching segment from role_query_segments:', error);
+            return { success: false, error: error.message };
+        }
+        if (!roleQuerySegment) {
+            console.log(`⚠️ No segment found for role_query_id: ${roleQueryId}`);
+            return { success: true, segmentId: undefined };
+        }
+        console.log(`✅ Found segment_id: ${roleQuerySegment.segment_id} for role_query_id: ${roleQueryId}`);
+        return { success: true, segmentId: roleQuerySegment.segment_id };
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);

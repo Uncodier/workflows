@@ -26,9 +26,13 @@ export interface LeadData {
   telephone?: string;
   email?: string; // Made optional since not always available from research
   company_name?: string;
-  address?: string;
+  address?: any; // Can be object or string for backward compatibility
   web?: string;
   position?: string;
+  person_id?: string; // Add person_id for ICP mining workflow
+  social_networks?: any; // Social networks data (LinkedIn, Twitter, etc.)
+  company?: any; // Company data object
+  metadata?: any; // Additional metadata
 }
 
 export interface CreateLeadsResult {
@@ -1767,24 +1771,26 @@ export async function createSingleLead(
       name: lead.name,
       email: lead.email,
       phone: lead.telephone || null,
-      company: lead.company_name ? { 
+      company: lead.company || (lead.company_name ? { 
         name: lead.company_name,
         website: lead.web || null 
-      } : (lead.web ? { website: lead.web } : {}), // Store company info in company jsonb field
+      } : (lead.web ? { website: lead.web } : {})), // Use provided company data or fallback
       company_id: companyId || null, // Add company_id to lead data
       segment_id: segmentId || null, // Add segment_id to lead data
+      person_id: lead.person_id || null, // Add person_id to lead data for ICP mining workflow
       address: lead.address || {}, // Store complete address structure as provided
+      social_networks: lead.social_networks || {}, // Store social networks data
       position: lead.position || null,
       site_id: site_id,
       user_id: userId || null,
       status: 'new',
       origin: 'lead_generation_workflow',
-      metadata: metadataToPersist,
+      metadata: lead.metadata || metadataToPersist, // Use provided metadata or fallback
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
 
-    // Log company_id and segment_id assignment for debugging
+    // Log company_id, segment_id, and person_id assignment for debugging
     if (companyId) {
       console.log(`🔗 Assigning company_id ${companyId} to lead ${lead.name || lead.email}`);
     } else {
@@ -1795,6 +1801,12 @@ export async function createSingleLead(
       console.log(`🎯 Assigning segment_id ${segmentId} to lead ${lead.name || lead.email}`);
     } else {
       console.log(`⚠️ No segment_id provided for lead ${lead.name || lead.email}`);
+    }
+
+    if (lead.person_id) {
+      console.log(`👤 Assigning person_id ${lead.person_id} to lead ${lead.name || lead.email}`);
+    } else {
+      console.log(`⚠️ No person_id provided for lead ${lead.name || lead.email}`);
     }
 
     // ✅ STEP 3: Insert the lead
@@ -1949,7 +1961,6 @@ export function convertVenuesToCompanies(venues: VenueData[], targetCity?: strin
         website: venue.website || null,
         industry: industry,
         description: venue.description || null,
-        location: venue.address,
         address: venue.address,
         city: targetCity || null, // ✅ Always use target_city from research topic
         phone: venue.phone || venue.international_phone || null,

@@ -1950,8 +1950,10 @@ You can subscribe an endpoint to any of these. Deliveries are recorded in `webho
   - started_at / last_progress_at / finished_at (timestamptz)
   - last_error (text)
   - errors (jsonb, default [])
+  - site_id (uuid, required) - Added for site-specific filtering
+  - name (text) - Human-readable name for the ICP mining task
   - created_at / updated_at
-  - Indexes: role_query_id, status, created_at, last_progress_at, GIN(icp_criteria)
+  - Indexes: role_query_id, status, created_at, last_progress_at, site_id, GIN(icp_criteria)
   - Partial Unique: (role_query_id, icp_hash) where status in ('pending','running')
 
 ### SQL
@@ -2009,6 +2011,9 @@ create table if not exists public.icp_mining (
   last_error text,
   errors jsonb not null default '[]'::jsonb,
 
+  site_id uuid not null,
+  name text,
+
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -2024,6 +2029,7 @@ create index if not exists idx_icp_mining_role_query_id on public.icp_mining (ro
 create index if not exists idx_icp_mining_status on public.icp_mining (status);
 create index if not exists idx_icp_mining_created_at on public.icp_mining (created_at);
 create index if not exists idx_icp_mining_last_progress_at on public.icp_mining (last_progress_at);
+create index if not exists idx_icp_mining_site_id on public.icp_mining (site_id);
 create index if not exists idx_icp_mining_icp_criteria_gin on public.icp_mining using gin (icp_criteria);
 
 -- Enforce no duplicate active runs per role_query + ICP
