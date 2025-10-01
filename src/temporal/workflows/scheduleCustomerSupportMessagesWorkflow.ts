@@ -3,6 +3,24 @@ import type { EmailData, ScheduleCustomerSupportParams } from '../activities/cus
 import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
 import type { WhatsAppMessageData, WhatsAppAnalysisResponse } from '../activities/whatsappActivities';
 
+// Helper: parse an email address string like "Name <email@host>" or just "email@host"
+function parseEmailAddress(address?: string | null): { name: string | null; email: string | null } {
+  if (!address || typeof address !== 'string') return { name: null, email: null };
+  const match = address.match(/^\s*([^<"]+)?\s*<\s*([^>\s]+@[^>\s]+)\s*>\s*$/);
+  if (match) {
+    const rawName = match[1]?.trim() || '';
+    return {
+      name: rawName || null,
+      email: match[2] || null,
+    };
+  }
+  // Fallback: if the string itself looks like an email, treat it as email with no name
+  const simpleEmail = address.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/) ? address : null;
+  // Derive a display name from the local-part if possible
+  const derivedName = simpleEmail ? simpleEmail.split('@')[0] : null;
+  return { name: derivedName, email: simpleEmail };
+}
+
 /**
  * Schedule Customer Support Messages Workflow
  * Takes an array of email data and schedules customer support messages
@@ -75,21 +93,49 @@ export async function scheduleCustomerSupportMessagesWorkflow(
       const trackingId = emailData.analysis_id || `workflow-${i}-${Date.now()}`;
       const workflowId = `customer-support-message-${trackingId}`;
       
-      // Enriquecer emailData con campos necesarios si no están presentes
+      // Enriquecer/normalizar emailData con campos necesarios si no están presentes
       // ✅ FIXED: No sobrescribir analysis_id con un valor generado si ya existe
+      const fromParsed = parseEmailAddress((emailData as any)?.from);
+      const toParsed = parseEmailAddress((emailData as any)?.to);
+
       const enrichedEmailData: EmailData = {
-        ...emailData,
-        site_id: emailData.site_id || site_id,
-        user_id: emailData.user_id || user_id,
-        // Solo preservar analysis_id si existe y es válido
-        analysis_id: emailData.analysis_id,
-        lead_notification: emailData.lead_notification || 'email', // Default para procesamiento
+        // Content
+        summary: (emailData as any)?.summary || (emailData as any)?.original_text || (emailData as any)?.body || (emailData as any)?.subject || 'Customer support message',
+        original_text: (emailData as any)?.original_text || (emailData as any)?.body,
+        original_subject: (emailData as any)?.original_subject || (emailData as any)?.subject,
+        // Contact info (ensure object exists)
+        contact_info: (emailData as any)?.contact_info && typeof (emailData as any)?.contact_info === 'object'
+          ? {
+              name: (emailData as any).contact_info.name ?? fromParsed.name ?? null,
+              email: (emailData as any).contact_info.email ?? fromParsed.email ?? toParsed.email ?? null,
+              phone: (emailData as any).contact_info.phone ?? null,
+              company: (emailData as any).contact_info.company ?? null,
+            }
+          : {
+              name: fromParsed.name ?? null,
+              email: fromParsed.email ?? toParsed.email ?? null,
+              phone: null,
+              company: null,
+            },
+        // Identity and processing flags
+        site_id: (emailData as any)?.site_id || site_id,
+        user_id: (emailData as any)?.user_id || user_id,
+        analysis_id: (emailData as any)?.analysis_id,
+        lead_id: (emailData as any)?.lead_id,
+        lead_notification: (emailData as any)?.lead_notification || 'email',
+        // Optional metadata passthroughs when present
+        priority: (emailData as any)?.priority,
+        response_type: (emailData as any)?.response_type,
+        potential_value: (emailData as any)?.potential_value,
+        intent: (emailData as any)?.intent,
+        conversation_id: (emailData as any)?.conversation_id,
+        visitor_id: (emailData as any)?.visitor_id,
       };
       
       console.log(`📋 Processing email ${i + 1}/${totalEmails} (ID: ${workflowId})`);
-      console.log(`📧 Subject: ${emailData.original_subject || 'No subject'}`);
-      console.log(`👤 Contact: ${emailData.contact_info.name || 'Unknown'} (${emailData.contact_info.email || 'No email'})`);
-      console.log(`🆔 Analysis ID: ${emailData.analysis_id ? emailData.analysis_id + ' (real)' : 'none (will not send lead_id to API)'}`);
+      console.log(`📧 Subject: ${(emailData as any)?.original_subject || (emailData as any)?.subject || 'No subject'}`);
+      console.log(`👤 Contact: ${enrichedEmailData.contact_info?.name || 'Unknown'} (${enrichedEmailData.contact_info?.email || 'No email'})`);
+      console.log(`🆔 Analysis ID: ${(emailData as any)?.analysis_id ? (emailData as any)?.analysis_id + ' (real)' : 'none (will not send lead_id to API)'}`);
       
       try {
         // Preparar datos según el origen
