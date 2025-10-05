@@ -1,0 +1,10 @@
+
+> temporal-workflows@0.2.6 build:all
+> echo '🚀 Building version: v0.2.6-email-validation-gateway-policy' && npm run build && npx tsc --project worker.tsconfig.json
+
+🚀 Building version: v0.2.6-email-validation-gateway-policy
+
+> temporal-workflows@0.2.6 build
+> echo '🚀 Building version: v0.2.6-email-validation-gateway-policy' && next build
+
+🚀 Building version: v0.2.6-email-validation-gateway-policy

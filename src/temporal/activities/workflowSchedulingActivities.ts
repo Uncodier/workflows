@@ -1969,7 +1969,109 @@ export async function scheduleIndividualLeadGenerationActivity(
         scheduled++;
 
         // ===================================================================
-        // NUEVO: Programar dailyStrategicAccountsWorkflow 2 horas después
+        // NEW: Schedule idealClientProfileMiningWorkflow SAME DAY (30m after Lead Gen)
+        // ===================================================================
+
+        // Calculate ICP mining time (30 minutes after lead generation)
+        let icpHour = leadGenHour;
+        let icpMinute = minutes + 30;
+        if (icpMinute >= 60) {
+          icpHour = icpHour + 1;
+          icpMinute = icpMinute - 60;
+        }
+        if (icpHour >= 24) {
+          icpHour = icpHour - 24; // Wrap to next day if needed
+        }
+
+        const icpScheduledTime = `${icpHour.toString().padStart(2, '0')}:${icpMinute.toString().padStart(2, '0')}`;
+
+        // Create target time for ICP mining in site's timezone
+        const icpTargetLocal = new Date(finalTargetLocal);
+        icpTargetLocal.setUTCHours(icpHour, icpMinute, 0, 0);
+
+        // If ICP time is earlier than lead gen time after minute adjustment, it wrapped to next day
+        if (icpHour < leadGenHour || (icpHour === leadGenHour && icpMinute < minutes)) {
+          icpTargetLocal.setUTCDate(icpTargetLocal.getUTCDate() + 1);
+        }
+
+        const icpTargetUTC = new Date(icpTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
+        const icpDelayMs = icpTargetUTC.getTime() - now.getTime();
+
+        // Create unique workflow ID for ICP mining
+        const icpUniqueHash = Math.random().toString(36).substring(2, 15);
+        const icpWorkflowId = `icp-mining-timer-${site.id}-${finalLocalDateStr}-${icpScheduledTime.replace(':', '')}-${icpUniqueHash}`;
+
+        console.log(`\n🎯 Scheduling ICP Mining workflow (30m after Lead Generation):`);
+        console.log(`   - ICP mining time: ${icpScheduledTime} ${siteTimezone}`);
+        console.log(`   - Target time UTC: ${icpTargetUTC.toISOString()}`);
+        console.log(`   - Delay: ${icpDelayMs}ms (${(icpDelayMs / 1000 / 60).toFixed(1)} minutes)`);
+        console.log(`   - Workflow ID: ${icpWorkflowId}`);
+
+        // Prepare workflow arguments for idealClientProfileMiningWorkflow
+        const icpWorkflowArgs = [{
+          site_id: site.id,
+          userId: site.user_id,
+          // Allow batch mode: will pick first pending icp_mining for the site
+          additionalData: {
+            scheduledBy: 'activityPrioritizationEngine-icpMining',
+            executeReason: `post-leadgeneration-icp-mining-${businessHoursSource}-${icpScheduledTime}`,
+            scheduleType: `icp-mining-${businessHoursSource}`,
+            scheduleTime: `${icpScheduledTime} ${siteTimezone}`,
+            executionDay: finalLocalDateStr,
+            timezone: siteTimezone,
+            executionMode: 'timer-delayed-icp-mining',
+            businessHours: businessHours || {
+              open: scheduledTime,
+              close: '18:00',
+              enabled: true,
+              timezone: siteTimezone,
+              source: businessHoursSource
+            },
+            siteName: site.name || `Site ${site.id.substring(0, 8)}`,
+            fallbackUsed: !businessHours,
+            delayMs: icpDelayMs,
+            targetTimeUTC: icpTargetUTC.toISOString(),
+            leadGenTime: leadGenScheduledTime,
+            executesSameDayAsLeadGeneration: true,
+            parentScheduleId: options.parentScheduleId,
+            dailyOperationsScheduleId: options.parentScheduleId
+          }
+        }];
+
+        // Start the DELAYED workflow for ICP mining
+        await client.workflow.start('delayedExecutionWorkflow', {
+          args: [{
+            delayMs: Math.max(icpDelayMs, 0),
+            targetWorkflow: 'idealClientProfileMiningWorkflow',
+            targetArgs: icpWorkflowArgs,
+            siteName: site.name || 'Site',
+            scheduledTime: `${icpScheduledTime} ${siteTimezone}`,
+            executionType: 'timer-based-icp-mining'
+          }],
+          taskQueue: temporalConfig.taskQueue,
+          workflowId: icpWorkflowId,
+          workflowRunTimeout: '48h',
+        });
+
+        // Save cron status entry for ICP mining
+        const icpCronUpdate: CronStatusUpdate = {
+          siteId: site.id,
+          workflowId: icpWorkflowId,
+          scheduleId: icpWorkflowId,
+          activityName: 'idealClientProfileMiningWorkflow',
+          status: 'SCHEDULED',
+          nextRun: icpTargetUTC.toISOString(),
+        };
+        await saveCronStatusActivity(icpCronUpdate);
+
+        results.push({
+          workflowId: icpWorkflowId,
+          scheduleId: icpWorkflowId,
+          success: true
+        });
+
+        // ===================================================================
+        // NEW: Schedule dailyStrategicAccountsWorkflow 2 hours after Lead Gen
         // ===================================================================
         
         // Calculate strategic accounts time (2 hours after lead generation)

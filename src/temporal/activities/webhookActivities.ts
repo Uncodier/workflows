@@ -218,21 +218,71 @@ export async function deliverToWebhookEndpointActivity(request: DeliverWebhookRe
     const signature = signPayload(endpoint.secret, body);
 
     try {
-      const res = await fetch(endpoint.target_url, {
+      // First try GET
+      const commonHeaders: Record<string, string> = {
+        'X-Webhook-Event': effectiveEvent,
+        'X-Webhook-Delivery': deliveryId,
+        ...(signature ? { 'X-Webhook-Signature': signature } : {}),
+      };
+
+      let delivered = false;
+
+      try {
+        const url = new URL(endpoint.target_url);
+        // Include minimal context as query params
+        url.searchParams.set('delivery_id', deliveryId);
+        url.searchParams.set('event', effectiveEvent);
+        url.searchParams.set('site_id', site_id);
+        url.searchParams.set('table', table);
+        url.searchParams.set('object_id', object_id);
+
+        const getRes = await fetch(url.toString(), {
+          method: 'GET',
+          headers: commonHeaders,
+        });
+
+        lastStatus = getRes.status;
+        lastBody = await getRes.text();
+
+        delivered = getRes.ok && getRes.status >= 200 && getRes.status < 300;
+
+        if (delivered) {
+          const { error: updateError } = await supabaseServiceRole
+            .from('webhooks_deliveries')
+            .update({
+              attempt_count: attempts,
+              last_attempt_at: new Date().toISOString(),
+              response_status: lastStatus,
+              response_body: lastBody,
+              status: 'delivered',
+              delivered_at: new Date().toISOString(),
+            })
+            .eq('id', deliveryId);
+
+          if (updateError) {
+            console.error(`Failed to update delivery ${deliveryId}: ${updateError.message}`);
+          }
+
+          return { delivered: true, attempts, responseStatus: lastStatus, responseBody: lastBody, delivery_id: deliveryId };
+        }
+      } catch {
+        // If GET URL is invalid or GET fails at network level, we'll fallback to POST
+      }
+
+      // Fallback to POST
+      const postRes = await fetch(endpoint.target_url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(signature ? { 'X-Webhook-Signature': signature } : {}),
-          'X-Webhook-Event': effectiveEvent,
-          'X-Webhook-Delivery': deliveryId,
+          ...commonHeaders,
         },
         body,
       });
 
-      lastStatus = res.status;
-      lastBody = await res.text();
+      lastStatus = postRes.status;
+      lastBody = await postRes.text();
 
-      const delivered = res.ok && res.status >= 200 && res.status < 300;
+      const deliveredPost = postRes.ok && postRes.status >= 200 && postRes.status < 300;
 
       const { error: updateError } = await supabaseServiceRole
         .from('webhooks_deliveries')
@@ -241,8 +291,8 @@ export async function deliverToWebhookEndpointActivity(request: DeliverWebhookRe
           last_attempt_at: new Date().toISOString(),
           response_status: lastStatus,
           response_body: lastBody,
-          status: delivered ? 'delivered' : (attempts < maxAttempts ? 'retrying' : 'failed'),
-          delivered_at: delivered ? new Date().toISOString() : null,
+          status: deliveredPost ? 'delivered' : (attempts < maxAttempts ? 'retrying' : 'failed'),
+          delivered_at: deliveredPost ? new Date().toISOString() : null,
         })
         .eq('id', deliveryId);
 
@@ -251,7 +301,7 @@ export async function deliverToWebhookEndpointActivity(request: DeliverWebhookRe
         console.error(`Failed to update delivery ${deliveryId}: ${updateError.message}`);
       }
 
-      if (delivered) {
+      if (deliveredPost) {
         return { delivered: true, attempts, responseStatus: lastStatus, responseBody: lastBody, delivery_id: deliveryId };
       }
     } catch (err) {

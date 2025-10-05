@@ -10,6 +10,17 @@ const compat = new FlatCompat({
 });
 
 const eslintConfig = [
+  // Limit linting scope to avoid scanning heavy/generated folders
+  {
+    ignores: [
+      ".next/**",
+      "dist/**",
+      "node_modules/**",
+      "tests/**",
+      "examples/**",
+      "scripts/**",
+    ],
+  },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
     rules: {

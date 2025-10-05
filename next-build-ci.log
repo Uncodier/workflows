@@ -1,0 +1,8 @@
+
+> Build error occurred
+[Error: ETIMEDOUT: connection timed out, open '/Users/prado/Desktop/Proyectos/Uncodie/Code/Workflows/.next/cache/.rscinfo'] {
+  errno: -60,
+  code: 'ETIMEDOUT',
+  syscall: 'open',
+  path: '/Users/prado/Desktop/Proyectos/Uncodie/Code/Workflows/.next/cache/.rscinfo'
+}

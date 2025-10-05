@@ -18,7 +18,7 @@ const { callRobotPlanActActivity, callRobotPlanActivity, callRobotAuthActivity }
  *
  * This workflow continuously calls the robot plan act API until plan_completed is true:
  * - POST /api/robots/plan/act - Executes robot plan actions in a loop
- * - Waits 30 seconds between each API call to avoid overwhelming the external service
+ * - Waits 3 seconds between each API call (when no error or human intervention is required)
  * - Maneja nuevos tipos de respuestas según documentación v2
  * - Implementa lógica de retry para user attention required
  * - Llama human intervention workflow cuando sea necesario
@@ -402,15 +402,10 @@ async function robotWorkflow(input) {
                 if (!planCompleted) {
                     console.log(`🔄 Plan not yet completed, continuing to next cycle...`);
                     // Si el step se completó exitosamente, continuar inmediatamente al siguiente step
-                    if (parsedResponse.type === 'step_completed') {
-                        console.log(`🚀 Step completed successfully, proceeding immediately to next step...`);
-                    }
-                    else {
-                        // Solo esperar si no fue un step completado exitosamente
-                        console.log(`⏱️ Waiting 30 seconds before next API call...`);
-                        await (0, workflow_1.sleep)('30s');
-                        console.log(`✅ Wait completed, proceeding to next cycle`);
-                    }
+                    // Always apply a small delay between cycles if there is no error or human intervention
+                    console.log(`⏱️ Waiting 3 seconds before next plan/act call...`);
+                    await (0, workflow_1.sleep)('3s');
+                    console.log(`✅ Wait completed, proceeding to next cycle`);
                 }
                 // Update instance_plan_id if returned from the API (for first call)
                 if (planResult.instance_plan_id && !instance_plan_id) {

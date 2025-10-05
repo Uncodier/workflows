@@ -137,10 +137,11 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
         if (effectiveBaseParams.origin === 'whatsapp' && 'whatsappData' in messageData) {
             console.log('📱 Detected WhatsApp message - processing directly');
             const whatsappData = messageData.whatsappData;
-            // Preparar EmailData compatible para la activity existente
+            // Prepare EmailData compatible payload without UX-altering prefixes
             const emailDataForCS = {
-                summary: `WhatsApp message from ${whatsappData.senderName || whatsappData.phoneNumber}: ${whatsappData.messageContent || 'No message content'}`,
-                original_subject: `WhatsApp Message from ${whatsappData.senderName || whatsappData.phoneNumber}`,
+                summary: whatsappData.messageContent || 'No message content',
+                original_text: whatsappData.messageContent,
+                original_subject: whatsappData.senderName || whatsappData.phoneNumber,
                 contact_info: {
                     name: whatsappData.senderName || 'WhatsApp Contact',
                     email: '', // WhatsApp no tiene email
