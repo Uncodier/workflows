@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activityPrioritizationEngineWorkflow = activityPrioritizationEngineWorkflow;
 const workflow_1 = require("@temporalio/workflow");
-const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity, scheduleIndividualSiteAnalysisActivity, scheduleIndividualLeadGenerationActivity, scheduleIndividualDailyProspectionActivity, executeDailyProspectionWorkflowsActivity, validateAndCleanStuckCronStatusActivity } = (0, workflow_1.proxyActivities)({
+const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity, scheduleIndividualSiteAnalysisActivity, scheduleIndividualLeadGenerationActivity, scheduleIndividualDailyProspectionActivity, executeDailyProspectionWorkflowsActivity, validateAndCleanStuckCronStatusActivity, scheduleLeadQualificationActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes',
 });
 /**
@@ -240,6 +240,27 @@ async function activityPrioritizationEngineWorkflow() {
                         errors: [leadGenerationError instanceof Error ? leadGenerationError.message : String(leadGenerationError)]
                     };
                 }
+                // Step 2.4: Schedule lead qualification (Tue/Wed/Thu at 09:00)
+                console.log('📆 Step 2.4: Scheduling lead qualification (Tue/Wed/Thu at 09:00)...');
+                try {
+                    const leadQualificationResult = await scheduleLeadQualificationActivity(businessHoursAnalysis, {
+                        timezone: 'America/Mexico_City',
+                        daysWithoutReply: 7,
+                        maxLeads: 30,
+                        parentScheduleId: realScheduleId
+                    });
+                    operationsResult.leadQualificationScheduling = leadQualificationResult;
+                }
+                catch (leadQualificationError) {
+                    console.error('❌ Error scheduling lead qualification:', leadQualificationError);
+                    operationsResult.leadQualificationScheduling = {
+                        scheduled: 0,
+                        skipped: 0,
+                        failed: 1,
+                        results: [],
+                        errors: [leadQualificationError instanceof Error ? leadQualificationError.message : String(leadQualificationError)]
+                    };
+                }
             }
             catch (operationsError) {
                 console.error('❌ Daily operations workflow failed:', operationsError);
@@ -317,6 +338,27 @@ async function activityPrioritizationEngineWorkflow() {
                         failed: 1,
                         results: [],
                         errors: [dailyProspectionError instanceof Error ? dailyProspectionError.message : String(dailyProspectionError)]
+                    };
+                }
+                // Step 2.1.bis: Schedule lead qualification (Tue/Wed/Thu at 09:00)
+                console.log('📆 Step 2.1.bis: Scheduling lead qualification (Tue/Wed/Thu at 09:00)...');
+                try {
+                    const leadQualificationResult = await scheduleLeadQualificationActivity(businessHoursAnalysis, {
+                        timezone: 'America/Mexico_City',
+                        daysWithoutReply: 7,
+                        maxLeads: 30,
+                        parentScheduleId: realScheduleId
+                    });
+                    operationsResult.leadQualificationScheduling = leadQualificationResult;
+                }
+                catch (leadQualificationError) {
+                    console.error('❌ Error scheduling lead qualification:', leadQualificationError);
+                    operationsResult.leadQualificationScheduling = {
+                        scheduled: 0,
+                        skipped: 0,
+                        failed: 1,
+                        results: [],
+                        errors: [leadQualificationError instanceof Error ? leadQualificationError.message : String(leadQualificationError)]
                     };
                 }
                 // Step 2.2: Now schedule site analysis since daily standups are also scheduled for later

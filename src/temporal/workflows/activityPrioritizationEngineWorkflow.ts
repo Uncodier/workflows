@@ -8,7 +8,8 @@ const {
   scheduleIndividualLeadGenerationActivity,
   scheduleIndividualDailyProspectionActivity,
   executeDailyProspectionWorkflowsActivity,
-  validateAndCleanStuckCronStatusActivity
+  validateAndCleanStuckCronStatusActivity,
+  scheduleLeadQualificationActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '10 minutes',
 });
@@ -300,6 +301,30 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           };
         }
         
+        // Step 2.4: Schedule lead qualification (Tue/Wed/Thu at 09:00)
+        console.log('📆 Step 2.4: Scheduling lead qualification (Tue/Wed/Thu at 09:00)...');
+        try {
+          const leadQualificationResult = await scheduleLeadQualificationActivity(
+            businessHoursAnalysis,
+            {
+              timezone: 'America/Mexico_City',
+              daysWithoutReply: 7,
+              maxLeads: 30,
+              parentScheduleId: realScheduleId
+            }
+          );
+          (operationsResult as any).leadQualificationScheduling = leadQualificationResult;
+        } catch (leadQualificationError) {
+          console.error('❌ Error scheduling lead qualification:', leadQualificationError);
+          (operationsResult as any).leadQualificationScheduling = {
+            scheduled: 0,
+            skipped: 0,
+            failed: 1,
+            results: [],
+            errors: [leadQualificationError instanceof Error ? leadQualificationError.message : String(leadQualificationError)]
+          };
+        }
+
       } catch (operationsError) {
         console.error('❌ Daily operations workflow failed:', operationsError);
         operationsResult = {
@@ -392,6 +417,30 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           };
         }
         
+        // Step 2.1.bis: Schedule lead qualification (Tue/Wed/Thu at 09:00)
+        console.log('📆 Step 2.1.bis: Scheduling lead qualification (Tue/Wed/Thu at 09:00)...');
+        try {
+          const leadQualificationResult = await scheduleLeadQualificationActivity(
+            businessHoursAnalysis,
+            {
+              timezone: 'America/Mexico_City',
+              daysWithoutReply: 7,
+              maxLeads: 30,
+              parentScheduleId: realScheduleId
+            }
+          );
+          (operationsResult as any).leadQualificationScheduling = leadQualificationResult;
+        } catch (leadQualificationError) {
+          console.error('❌ Error scheduling lead qualification:', leadQualificationError);
+          (operationsResult as any).leadQualificationScheduling = {
+            scheduled: 0,
+            skipped: 0,
+            failed: 1,
+            results: [],
+            errors: [leadQualificationError instanceof Error ? leadQualificationError.message : String(leadQualificationError)]
+          };
+        }
+
         // Step 2.2: Now schedule site analysis since daily standups are also scheduled for later
         console.log('🔍 Step 2.2: Scheduling site analysis for sites that need initial analysis...');
         console.log('   Both daily standups and site analysis will be scheduled for their appropriate times');

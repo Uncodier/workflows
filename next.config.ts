@@ -1,8 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Ensure we do a server build (not static export). API routes require server runtime.
-  output: "standalone",
+  // Server build (not static export). Standalone disabled to avoid pages-manifest requirement.
   // Narrow ESLint scope and optionally bypass during builds to avoid hangs
   eslint: {
     ignoreDuringBuilds: true,

@@ -1109,8 +1109,8 @@ async function idealClientProfileMiningWorkflow(options) {
             errors: errors.length ? errors : undefined,
         };
     }
-    // Batch processing: get only the first pending record for this site_id
-    const pending = await getPendingIcpMiningActivity({ limit: 1, site_id: options.site_id });
+    // Batch processing: fetch multiple pending records for this site_id to prioritize by remaining targets
+    const pending = await getPendingIcpMiningActivity({ limit: 50, site_id: options.site_id });
     if (!pending.success) {
         const errorMsg = pending.error || 'failed to list pending';
         errors.push(errorMsg);
@@ -1131,7 +1131,7 @@ async function idealClientProfileMiningWorkflow(options) {
         input: options,
         output: {
             pendingItemsCount: items.length,
-            pendingItems: items.map(i => ({ id: i.id, role_query_id: i.role_query_id, status: i.status, name: i.name }))
+            pendingItems: items.map(i => ({ id: i.id, role_query_id: i.role_query_id, status: i.status, name: i.name, total_targets: i.total_targets, processed_targets: i.processed_targets }))
         },
     });
     if (items.length === 0) {
@@ -1144,8 +1144,33 @@ async function idealClientProfileMiningWorkflow(options) {
         });
         return { success: true, icp_mining_id: 'batch', processed: 0, foundMatches: 0 };
     }
-    // Process only the first (and only) pending record
-    const icp = items[0];
+    // Select the item with the highest number of pending targets: (total_targets - processed_targets)
+    const computePendingTargets = (it) => {
+        const total = typeof it?.total_targets === 'number' ? it.total_targets : 0;
+        const processed = typeof it?.processed_targets === 'number' ? it.processed_targets : 0;
+        const remaining = total - processed;
+        return remaining > 0 ? remaining : 0;
+    };
+    const sortedByPendingDesc = items
+        .slice()
+        .sort((a, b) => computePendingTargets(b) - computePendingTargets(a));
+    const icp = sortedByPendingDesc[0];
+    await logWorkflowExecutionActivity({
+        workflowId,
+        workflowType: 'idealClientProfileMiningWorkflow',
+        status: 'INFO',
+        input: options,
+        output: {
+            selectedIcp: {
+                id: icp.id,
+                name: icp.name,
+                role_query_id: icp.role_query_id,
+                total_targets: icp.total_targets,
+                processed_targets: icp.processed_targets,
+                pending_targets: computePendingTargets(icp),
+            }
+        }
+    });
     const res = await processSingle(icp);
     return {
         success: errors.length === 0,

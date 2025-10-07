@@ -807,6 +807,7 @@ CREATE TABLE public.settings (
   business_hours jsonb DEFAULT '[]'::jsonb,
   branding jsonb DEFAULT NULL,
   customer_journey jsonb DEFAULT '{"awareness": {"metrics": [], "actions": [], "tactics": []}, "consideration": {"metrics": [], "actions": [], "tactics": []}, "decision": {"metrics": [], "actions": [], "tactics": []}, "purchase": {"metrics": [], "actions": [], "tactics": []}, "retention": {"metrics": [], "actions": [], "tactics": []}, "referral": {"metrics": [], "actions": [], "tactics": []}}'::jsonb,
+  activities jsonb DEFAULT '{"daily_resume_and_stand_up": {"status": "default"}, "local_lead_generation": {"status": "default"}, "icp_lead_generation": {"status": "default"}, "leads_initial_cold_outreach": {"status": "default"}, "leads_follow_up": {"status": "default"}, "email_sync": {"status": "default"}}'::jsonb,
   CONSTRAINT settings_pkey PRIMARY KEY (id),
   CONSTRAINT fk_command_settings FOREIGN KEY (command_id) REFERENCES public.commands(id),
   CONSTRAINT settings_site_id_fkey FOREIGN KEY (site_id) REFERENCES public.sites(id)
@@ -1939,6 +1940,7 @@ You can subscribe an endpoint to any of these. Deliveries are recorded in `webho
 
 - icp_mining (system)
   - id (uuid, pk)
+  - name (text)
   - role_query_id (uuid → role_queries.id on delete cascade)
   - icp_criteria (jsonb, required)
   - icp_hash (text, generated: sha256 of icp_criteria::text)
@@ -1950,10 +1952,8 @@ You can subscribe an endpoint to any of these. Deliveries are recorded in `webho
   - started_at / last_progress_at / finished_at (timestamptz)
   - last_error (text)
   - errors (jsonb, default [])
-  - site_id (uuid, required) - Added for site-specific filtering
-  - name (text) - Human-readable name for the ICP mining task
   - created_at / updated_at
-  - Indexes: role_query_id, status, created_at, last_progress_at, site_id, GIN(icp_criteria)
+  - Indexes: role_query_id, status, created_at, last_progress_at, GIN(icp_criteria)
   - Partial Unique: (role_query_id, icp_hash) where status in ('pending','running')
 
 ### SQL
@@ -1976,6 +1976,8 @@ $$;
 -- Table: icp_mining
 create table if not exists public.icp_mining (
   id uuid primary key default gen_random_uuid(),
+
+  name text,
 
   role_query_id uuid not null
     references public.role_queries(id)
@@ -2011,9 +2013,6 @@ create table if not exists public.icp_mining (
   last_error text,
   errors jsonb not null default '[]'::jsonb,
 
-  site_id uuid not null,
-  name text,
-
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -2029,7 +2028,6 @@ create index if not exists idx_icp_mining_role_query_id on public.icp_mining (ro
 create index if not exists idx_icp_mining_status on public.icp_mining (status);
 create index if not exists idx_icp_mining_created_at on public.icp_mining (created_at);
 create index if not exists idx_icp_mining_last_progress_at on public.icp_mining (last_progress_at);
-create index if not exists idx_icp_mining_site_id on public.icp_mining (site_id);
 create index if not exists idx_icp_mining_icp_criteria_gin on public.icp_mining using gin (icp_criteria);
 
 -- Enforce no duplicate active runs per role_query + ICP

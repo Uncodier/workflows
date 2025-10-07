@@ -50,12 +50,38 @@ exports.scheduleIndividualSiteAnalysisActivity = scheduleIndividualSiteAnalysisA
 exports.scheduleIndividualLeadGenerationActivity = scheduleIndividualLeadGenerationActivity;
 exports.executeDailyProspectionWorkflowsActivity = executeDailyProspectionWorkflowsActivity;
 exports.scheduleIndividualDailyProspectionActivity = scheduleIndividualDailyProspectionActivity;
+exports.scheduleLeadQualificationActivity = scheduleLeadQualificationActivity;
 const client_1 = require("../client");
 const config_1 = require("../../config/config");
 const services_1 = require("../services");
 const cronActivities_1 = require("./cronActivities");
 const supabaseActivities_1 = require("./supabaseActivities");
 const supabaseService_1 = require("../services/supabaseService");
+/**
+ * Helper function to check if a workflow should be scheduled for a site
+ * based on the settings.activities configuration
+ *
+ * @param site - Site object with settings
+ * @param activityKey - Key from settings.activities (e.g., 'daily_resume_and_stand_up')
+ * @returns true if workflow should be scheduled, false otherwise
+ */
+function shouldScheduleWorkflow(site, activityKey) {
+    // If settings.activities doesn't exist, schedule as always (backward compatibility)
+    if (!site.settings || !site.settings.activities) {
+        return true;
+    }
+    const activityConfig = site.settings.activities[activityKey];
+    // If the activity doesn't exist in settings.activities, schedule by default
+    if (!activityConfig) {
+        return true;
+    }
+    // If the activity status is 'inactive', do NOT schedule
+    if (activityConfig.status === 'inactive') {
+        return false;
+    }
+    // Otherwise (status is 'default' or any other value), schedule normally
+    return true;
+}
 /**
  * Schedule a single email sync workflow for a specific site
  * Uses Temporal client to create actual workflow schedules
@@ -1009,6 +1035,11 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
         for (const site of allSites) {
             try {
                 console.log(`\n📋 Processing site: ${site.name || 'Unnamed'} (${site.id})`);
+                // Check if this workflow should be scheduled based on settings.activities
+                if (!shouldScheduleWorkflow(site, 'daily_resume_and_stand_up')) {
+                    console.log(`   ⏭️ SKIPPING - 'daily_resume_and_stand_up' is inactive in site settings`);
+                    continue;
+                }
                 // Check if this site has business_hours
                 const businessHours = sitesWithBusinessHours.get(site.id);
                 let scheduledTime;
@@ -1493,6 +1524,11 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
         for (const site of allSites) {
             try {
                 console.log(`\n🔥 Processing site for Lead Generation: ${site.name || 'Unnamed'} (${site.id})`);
+                // Check if this workflow should be scheduled based on settings.activities
+                if (!shouldScheduleWorkflow(site, 'icp_lead_generation')) {
+                    console.log(`   ⏭️ SKIPPING - 'icp_lead_generation' is inactive in site settings`);
+                    continue;
+                }
                 // Check if this site has business_hours
                 const businessHours = sitesWithBusinessHours.get(site.id);
                 let scheduledTime;
@@ -1931,7 +1967,7 @@ async function executeDailyProspectionWorkflowsActivity(options = {}) {
         const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
         let sitesQuery = supabaseServiceRole
             .from('sites')
-            .select('id, name, url, user_id, business_hours')
+            .select('id, name, url, user_id, business_hours, settings')
             .eq('active', true);
         // Apply site limit for testing
         if (options.maxSites && options.maxSites > 0) {
@@ -1989,6 +2025,12 @@ async function executeDailyProspectionWorkflowsActivity(options = {}) {
         for (const site of sitesToProcess) {
             try {
                 console.log(`🎯 Processing site: ${site.name} (${site.id})`);
+                // Check if this workflow should be scheduled based on settings.activities
+                if (!shouldScheduleWorkflow(site, 'leads_initial_cold_outreach')) {
+                    console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach' is inactive in site settings`);
+                    skipped++;
+                    continue;
+                }
                 const prospectionResult = await executeDailyProspectionWorkflow(site, {
                     executeReason: businessHoursAnalysis ? 'business-hours-triggered' : 'scheduled-execution',
                     scheduleType: businessHoursAnalysis ? 'business-hours' : 'standard',
@@ -2161,6 +2203,11 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
         for (const site of allSites) {
             try {
                 console.log(`\n🎯 Processing site for Daily Prospection: ${site.name || 'Unnamed'} (${site.id})`);
+                // Check if this workflow should be scheduled based on settings.activities
+                if (!shouldScheduleWorkflow(site, 'leads_initial_cold_outreach')) {
+                    console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach' is inactive in site settings`);
+                    continue;
+                }
                 // Check if this site has business_hours
                 const businessHours = sitesWithBusinessHours.get(site.id);
                 let scheduledTime;
@@ -2334,5 +2381,141 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
             results: [],
             errors: [errorMessage]
         };
+    }
+}
+/**
+ * Schedule Lead Qualification Workflows for individual sites using TIMERS
+ * Runs specifically on Tuesday, Wednesday and Thursday at 09:00 local time
+ * Uses business_hours timezone when available; otherwise falls back to provided timezone
+ */
+async function scheduleLeadQualificationActivity(businessHoursAnalysis, options = {}) {
+    const { timezone = 'America/Mexico_City', daysWithoutReply = 7, maxLeads = 30 } = options;
+    console.log(`📆 Scheduling Lead Qualification (Tue/Wed/Thu at 09:00)`);
+    console.log(`   - Default timezone: ${timezone}`);
+    console.log(`   - Days without reply: ${daysWithoutReply}`);
+    console.log(`   - Max leads per site: ${maxLeads}`);
+    const results = [];
+    const errors = [];
+    let scheduled = 0;
+    let skipped = 0;
+    let failed = 0;
+    try {
+        const client = await (0, client_1.getTemporalClient)();
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        const allSites = await supabaseService.fetchSites();
+        console.log(`   - Total sites in database: ${allSites.length}`);
+        if (!allSites || allSites.length === 0) {
+            return { scheduled: 0, skipped: 0, failed: 0, results: [], errors: [] };
+        }
+        const sitesWithBusinessHours = new Map();
+        if (businessHoursAnalysis?.openSites) {
+            businessHoursAnalysis.openSites.forEach((site) => {
+                sitesWithBusinessHours.set(site.siteId, site.businessHours);
+            });
+        }
+        // Valid days: Tue=2, Wed=3, Thu=4
+        const validDays = new Set([2, 3, 4]);
+        for (const site of allSites) {
+            try {
+                console.log(`\n📆 Processing site for Lead Qualification: ${site.name || 'Unnamed'} (${site.id})`);
+                // Check if this workflow should be scheduled based on settings.activities
+                if (!shouldScheduleWorkflow(site, 'leads_follow_up')) {
+                    console.log(`   ⏭️ SKIPPING - 'leads_follow_up' is inactive in site settings`);
+                    skipped++;
+                    continue;
+                }
+                const businessHours = sitesWithBusinessHours.get(site.id);
+                const siteTimezone = businessHours?.timezone || timezone;
+                const scheduledTime = '09:00';
+                const [targetHour, targetMinute] = scheduledTime.split(':').map(Number);
+                // Calculate current time in site's timezone (simple offset model as used elsewhere)
+                const nowUTC = new Date();
+                const timezoneOffset = siteTimezone === 'America/Mexico_City' ? 6 : 0;
+                const nowLocal = new Date(nowUTC.getTime() - (timezoneOffset * 60 * 60 * 1000));
+                // Find the next Tue/Wed/Thu at 09:00 local (including today if not passed)
+                let finalTargetLocal = null;
+                for (let i = 0; i <= 7; i++) {
+                    const candidate = new Date(nowLocal);
+                    candidate.setUTCDate(candidate.getUTCDate() + i);
+                    const day = candidate.getDay();
+                    if (!validDays.has(day))
+                        continue;
+                    // Set candidate time to 09:00 local
+                    candidate.setUTCHours(targetHour, targetMinute, 0, 0);
+                    if (i > 0 || candidate > nowLocal) {
+                        finalTargetLocal = candidate;
+                        break;
+                    }
+                }
+                if (!finalTargetLocal) {
+                    console.log(`   ⚠️ Could not determine next valid schedule time; skipping site`);
+                    skipped++;
+                    continue;
+                }
+                const finalLocalDateStr = finalTargetLocal.toISOString().split('T')[0];
+                const finalTargetUTC = new Date(finalTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
+                console.log(`   - Next run (local): ${finalTargetLocal.getUTCHours().toString().padStart(2, '0')}:${finalTargetLocal.getUTCMinutes().toString().padStart(2, '0')} ${siteTimezone} on ${finalLocalDateStr}`);
+                console.log(`   - Next run (UTC): ${finalTargetUTC.toISOString()}`);
+                const delayMs = finalTargetUTC.getTime() - Date.now();
+                const uniqueHash = Math.random().toString(36).substring(2, 15);
+                const workflowId = `lead-qualification-timer-${site.id}-${finalLocalDateStr}-${scheduledTime.replace(':', '')}-${uniqueHash}`;
+                const workflowArgs = [{
+                        site_id: site.id,
+                        userId: site.user_id,
+                        daysWithoutReply,
+                        maxLeads,
+                        additionalData: {
+                            scheduledBy: 'activityPrioritizationEngine-leadQualification',
+                            executeReason: `lead-qualification-${scheduledTime}`,
+                            scheduleType: 'lead-qualification-recurring',
+                            scheduleTime: `${scheduledTime} ${siteTimezone}`,
+                            executionDay: finalLocalDateStr,
+                            timezone: siteTimezone,
+                            executionMode: 'timer-delayed-lead-qualification',
+                            businessHours: businessHours || {
+                                open: scheduledTime,
+                                close: '18:00',
+                                enabled: true,
+                                timezone: siteTimezone,
+                                source: businessHours ? 'database-configured' : 'fallback-weekday'
+                            },
+                            siteName: site.name || `Site ${site.id.substring(0, 8)}`,
+                            fallbackUsed: !businessHours,
+                            delayMs,
+                            targetTimeUTC: finalTargetUTC.toISOString(),
+                            parentScheduleId: options.parentScheduleId,
+                        }
+                    }];
+                await client.workflow.start('delayedExecutionWorkflow', {
+                    args: [{
+                            delayMs: Math.max(delayMs, 0),
+                            targetWorkflow: 'leadQualificationWorkflow',
+                            targetArgs: workflowArgs,
+                            siteName: site.name || 'Site',
+                            scheduledTime: `${scheduledTime} ${siteTimezone}`,
+                            executionType: 'timer-based-lead-qualification'
+                        }],
+                    taskQueue: config_1.temporalConfig.taskQueue,
+                    workflowId,
+                    workflowRunTimeout: '48h',
+                });
+                console.log(`✅ Scheduled Lead Qualification via TIMER for ${site.name || site.id}`);
+                scheduled++;
+                results.push({ workflowId, scheduleId: 'lead-qualification-recurring', success: true });
+            }
+            catch (err) {
+                failed++;
+                const errorMessage = err instanceof Error ? err.message : String(err);
+                console.error(`❌ Failed to schedule Lead Qualification for ${site.name || site.id}: ${errorMessage}`);
+                errors.push(errorMessage);
+                results.push({ workflowId: `lead-qualification-${site.id}`, scheduleId: 'lead-qualification-recurring', success: false, error: errorMessage });
+            }
+        }
+        return { scheduled, skipped, failed, results, errors };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Lead Qualification scheduling failed: ${errorMessage}`);
+        return { scheduled: 0, skipped: 0, failed: 1, results: [], errors: [errorMessage] };
     }
 }

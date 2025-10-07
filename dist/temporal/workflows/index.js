@@ -40,6 +40,7 @@ const buildCampaignsWorkflow_1 = require("./buildCampaignsWorkflow");
 const buildSegmentsWorkflow_1 = require("./buildSegmentsWorkflow");
 const buildContentWorkflow_1 = require("./buildContentWorkflow");
 const leadFollowUpWorkflow_1 = require("./leadFollowUpWorkflow");
+const leadQualificationWorkflow_1 = require("./leadQualificationWorkflow");
 const leadResearchWorkflow_1 = require("./leadResearchWorkflow");
 const buildSegmentsICPWorkflow_1 = require("./buildSegmentsICPWorkflow");
 const humanInterventionWorkflow_1 = require("./humanInterventionWorkflow");
@@ -79,6 +80,7 @@ __exportStar(require("./buildCampaignsWorkflow"), exports);
 __exportStar(require("./buildSegmentsWorkflow"), exports);
 __exportStar(require("./buildContentWorkflow"), exports);
 __exportStar(require("./leadFollowUpWorkflow"), exports);
+__exportStar(require("./leadQualificationWorkflow"), exports);
 __exportStar(require("./leadResearchWorkflow"), exports);
 __exportStar(require("./buildSegmentsICPWorkflow"), exports);
 __exportStar(require("./humanInterventionWorkflow"), exports);
@@ -117,6 +119,7 @@ exports.workflows = {
     buildSegmentsWorkflow: buildSegmentsWorkflow_1.buildSegmentsWorkflow,
     buildContentWorkflow: buildContentWorkflow_1.buildContentWorkflow,
     leadFollowUpWorkflow: leadFollowUpWorkflow_1.leadFollowUpWorkflow,
+    leadQualificationWorkflow: leadQualificationWorkflow_1.leadQualificationWorkflow,
     leadResearchWorkflow: leadResearchWorkflow_1.leadResearchWorkflow,
     buildSegmentsICPWorkflow: buildSegmentsICPWorkflow_1.buildSegmentsICPWorkflow,
     buildSingleSegmentICPWorkflow: buildSegmentsICPWorkflow_1.buildSingleSegmentICPWorkflow,
@@ -165,6 +168,7 @@ exports.workflowNames = {
     buildSegmentsWorkflow: 'buildSegmentsWorkflow',
     buildContentWorkflow: 'buildContentWorkflow',
     leadFollowUpWorkflow: 'leadFollowUpWorkflow',
+    leadQualificationWorkflow: 'leadQualificationWorkflow',
     leadResearchWorkflow: 'leadResearchWorkflow',
     buildSegmentsICPWorkflow: 'buildSegmentsICPWorkflow',
     buildSingleSegmentICPWorkflow: 'buildSingleSegmentICPWorkflow',

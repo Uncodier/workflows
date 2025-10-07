@@ -60,6 +60,7 @@ __exportStar(require("./cmoActivities"), exports);
 __exportStar(require("./leadGenerationActivities"), exports);
 __exportStar(require("./uxActivities"), exports);
 __exportStar(require("./newsletterActivities"), exports);
+__exportStar(require("./qualificationActivities"), exports);
 __exportStar(require("./dailyProspectionActivities"), exports);
 __exportStar(require("./robotActivities"), exports);
 __exportStar(require("./validateEmailActivities"), exports);
@@ -88,6 +89,7 @@ const cmoActivities = __importStar(require("./cmoActivities"));
 const leadGenerationActivities = __importStar(require("./leadGenerationActivities"));
 const uxActivities = __importStar(require("./uxActivities"));
 const newsletterActivities = __importStar(require("./newsletterActivities"));
+const qualificationActivities = __importStar(require("./qualificationActivities"));
 const dailyProspectionActivities = __importStar(require("./dailyProspectionActivities"));
 const robotActivities = __importStar(require("./robotActivities")); // Used in activities spread
 const validateEmailActivities = __importStar(require("./validateEmailActivities"));
@@ -116,6 +118,7 @@ exports.activities = {
     ...leadGenerationActivities,
     ...uxActivities,
     ...newsletterActivities,
+    ...qualificationActivities,
     ...dailyProspectionActivities,
     ...robotActivities,
     ...validateEmailActivities,

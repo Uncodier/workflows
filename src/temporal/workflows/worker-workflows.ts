@@ -26,6 +26,7 @@ export * from './buildSegmentsWorkflow';
 export * from './buildSegmentsICPWorkflow';
 export * from './buildContentWorkflow';
 export * from './leadFollowUpWorkflow';
+export * from './leadQualificationWorkflow';
 export * from './leadResearchWorkflow';
 export * from './humanInterventionWorkflow';
 export * from './deepResearchWorkflow';

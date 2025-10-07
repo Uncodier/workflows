@@ -21,6 +21,7 @@ export * from './cmoActivities';
 export * from './leadGenerationActivities';
 export * from './uxActivities';
 export * from './newsletterActivities';
+export * from './qualificationActivities';
 export * from './dailyProspectionActivities';
 export * from './robotActivities';
 export * from './validateEmailActivities';
@@ -50,6 +51,7 @@ import * as cmoActivities from './cmoActivities';
 import * as leadGenerationActivities from './leadGenerationActivities';
 import * as uxActivities from './uxActivities';
 import * as newsletterActivities from './newsletterActivities';
+import * as qualificationActivities from './qualificationActivities';
 import * as dailyProspectionActivities from './dailyProspectionActivities';
 import * as robotActivities from './robotActivities'; // Used in activities spread
 import * as validateEmailActivities from './validateEmailActivities';
@@ -79,6 +81,7 @@ export const activities = {
   ...leadGenerationActivities,
   ...uxActivities,
   ...newsletterActivities,
+  ...qualificationActivities,
   ...dailyProspectionActivities,
   ...robotActivities,
   ...validateEmailActivities,
