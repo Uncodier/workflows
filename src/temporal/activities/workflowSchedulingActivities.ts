@@ -1516,6 +1516,52 @@ export async function scheduleIndividualSiteAnalysisActivity(
       return { scheduled: 0, skipped: 0, failed: 0, results: [], errors: [] };
     }
 
+    // Ensure we have settings for activity gating
+    // Some environments may store feature flags in the separate 'settings' table
+    // while others embed a JSON `settings` column in `sites`. We normalize here.
+    try {
+      const siteIds: string[] = (allSites as any[]).map((s: any) => s.id);
+      const completeSettings = await supabaseService.fetchCompleteSettings(siteIds);
+      const settingsBySiteId = new Map<string, any>(
+        (completeSettings || []).map((row: any) => [row.site_id, row])
+      );
+
+      for (const site of allSites as any[]) {
+        // Normalize embedded JSON (sometimes comes as JSON string)
+        if (site.settings && typeof site.settings === 'string') {
+          try {
+            site.settings = JSON.parse(site.settings);
+          } catch {
+            // Keep as-is if parsing fails
+          }
+        }
+
+        // If no activities present on embedded settings, try to hydrate from settings table
+        const hasActivities = !!(site.settings && site.settings.activities);
+        if (!hasActivities) {
+          const settingsRow = settingsBySiteId.get(site.id);
+          if (settingsRow) {
+            // Prefer a top-level `activities` field if it exists
+            const mergedActivities = (settingsRow as any).activities
+              ? (settingsRow as any).activities
+              : undefined;
+
+            // Create settings container if missing
+            if (!site.settings || typeof site.settings !== 'object') {
+              site.settings = {};
+            }
+
+            if (mergedActivities) {
+              site.settings.activities = mergedActivities;
+            }
+          }
+        }
+      }
+    } catch (settingsMergeError) {
+      console.warn('⚠️ Could not merge settings.activities from settings table:', settingsMergeError);
+      // Continue with best-effort data
+    }
+
     // Create a map of sites with business hours for quick lookup
     const sitesWithBusinessHours = new Map();
     if (businessHoursAnalysis.openSites) {
@@ -2657,6 +2703,8 @@ export async function scheduleIndividualDailyProspectionActivity(
         console.log(`\n🎯 Processing site for Daily Prospection: ${site.name || 'Unnamed'} (${site.id})`);
         
         // Check if this workflow should be scheduled based on settings.activities
+        const activityStatus = site?.settings?.activities?.leads_initial_cold_outreach?.status;
+        console.log(`   🔎 Activities check → leads_initial_cold_outreach.status: ${activityStatus ?? 'undefined'}`);
         if (!shouldScheduleWorkflow(site, 'leads_initial_cold_outreach')) {
           console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach' is inactive in site settings`);
           continue;
