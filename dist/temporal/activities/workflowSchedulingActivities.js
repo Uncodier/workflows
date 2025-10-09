@@ -1261,6 +1261,47 @@ async function scheduleIndividualSiteAnalysisActivity(businessHoursAnalysis, opt
             console.log('⚠️ No sites found in database');
             return { scheduled: 0, skipped: 0, failed: 0, results: [], errors: [] };
         }
+        // Ensure we have settings for activity gating
+        // Some environments may store feature flags in the separate 'settings' table
+        // while others embed a JSON `settings` column in `sites`. We normalize here.
+        try {
+            const siteIds = allSites.map((s) => s.id);
+            const completeSettings = await supabaseService.fetchCompleteSettings(siteIds);
+            const settingsBySiteId = new Map((completeSettings || []).map((row) => [row.site_id, row]));
+            for (const site of allSites) {
+                // Normalize embedded JSON (sometimes comes as JSON string)
+                if (site.settings && typeof site.settings === 'string') {
+                    try {
+                        site.settings = JSON.parse(site.settings);
+                    }
+                    catch {
+                        // Keep as-is if parsing fails
+                    }
+                }
+                // If no activities present on embedded settings, try to hydrate from settings table
+                const hasActivities = !!(site.settings && site.settings.activities);
+                if (!hasActivities) {
+                    const settingsRow = settingsBySiteId.get(site.id);
+                    if (settingsRow) {
+                        // Prefer a top-level `activities` field if it exists
+                        const mergedActivities = settingsRow.activities
+                            ? settingsRow.activities
+                            : undefined;
+                        // Create settings container if missing
+                        if (!site.settings || typeof site.settings !== 'object') {
+                            site.settings = {};
+                        }
+                        if (mergedActivities) {
+                            site.settings.activities = mergedActivities;
+                        }
+                    }
+                }
+            }
+        }
+        catch (settingsMergeError) {
+            console.warn('⚠️ Could not merge settings.activities from settings table:', settingsMergeError);
+            // Continue with best-effort data
+        }
         // Create a map of sites with business hours for quick lookup
         const sitesWithBusinessHours = new Map();
         if (businessHoursAnalysis.openSites) {
@@ -1494,7 +1535,7 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
     const results = [];
     const errors = [];
     let scheduled = 0;
-    const skipped = 0;
+    let skipped = 0;
     let failed = 0;
     try {
         const client = await (0, client_1.getTemporalClient)();
@@ -1512,6 +1553,49 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
             businessHoursAnalysis.openSites.forEach((site) => {
                 sitesWithBusinessHours.set(site.siteId, site.businessHours);
             });
+        }
+        // Ensure we have settings for activity gating (hydrate activities from settings table when missing)
+        try {
+            const siteIds = allSites.map((s) => s.id);
+            const completeSettings = await supabaseService.fetchCompleteSettings(siteIds);
+            const settingsBySiteId = new Map((completeSettings || []).map((row) => [row.site_id, row]));
+            for (const site of allSites) {
+                // Normalize embedded JSON (sometimes comes as JSON string)
+                if (site.settings && typeof site.settings === 'string') {
+                    try {
+                        site.settings = JSON.parse(site.settings);
+                    }
+                    catch {
+                        // Keep as-is if parsing fails
+                    }
+                }
+                // If no activities present on embedded settings, try to hydrate from settings table
+                const hasEmbeddedActivities = !!(site.settings && site.settings.activities);
+                if (!hasEmbeddedActivities) {
+                    const settingsRow = settingsBySiteId.get(site.id);
+                    if (settingsRow) {
+                        // Prefer a top-level `activities` field if it exists
+                        const mergedActivities = settingsRow.activities
+                            ? settingsRow.activities
+                            : undefined;
+                        // Create settings container if missing
+                        if (!site.settings || typeof site.settings !== 'object') {
+                            site.settings = {};
+                        }
+                        if (mergedActivities) {
+                            site.settings.activities = mergedActivities;
+                            console.log(`   ⚙️ Hydrated activities from settings table for site ${site.id}`);
+                        }
+                    }
+                }
+                else {
+                    console.log(`   ⚙️ Using embedded activities for site ${site.id}`);
+                }
+            }
+        }
+        catch (settingsMergeError) {
+            console.warn('⚠️ Could not merge settings.activities from settings table:', settingsMergeError);
+            // Continue with best-effort data
         }
         // Determine if fallback should be used based on day of week
         const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
@@ -2173,7 +2257,7 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
     const results = [];
     const errors = [];
     let scheduled = 0;
-    const skipped = 0;
+    let skipped = 0;
     let failed = 0;
     try {
         const client = await (0, client_1.getTemporalClient)();
@@ -2204,8 +2288,11 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
             try {
                 console.log(`\n🎯 Processing site for Daily Prospection: ${site.name || 'Unnamed'} (${site.id})`);
                 // Check if this workflow should be scheduled based on settings.activities
+                const activityStatus = site?.settings?.activities?.leads_initial_cold_outreach?.status;
+                console.log(`   🔎 Activities check → leads_initial_cold_outreach.status: ${activityStatus ?? 'undefined'}`);
                 if (!shouldScheduleWorkflow(site, 'leads_initial_cold_outreach')) {
                     console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach' is inactive in site settings`);
+                    skipped++;
                     continue;
                 }
                 // Check if this site has business_hours
@@ -2230,6 +2317,7 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
                 else {
                     // Weekend: NO fallback for sites without business_hours
                     console.log(`   ⏭️ SKIPPING - No business_hours configured and weekend (no fallback)`);
+                    skipped++;
                     continue;
                 }
                 // Parse the original daily standup time

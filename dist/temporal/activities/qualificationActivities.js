@@ -112,12 +112,11 @@ async function getQualificationLeadsActivity(params) {
                 continue;
             }
             if (!conversations || conversations.length === 0) {
-                // No conversations -> no replies
-                continue;
+                // No conversations found; attempt fallback by lead_id below
             }
             // For a small set of latest conversations, find the latest ASSISTANT message
             let latestAssistantMessageIso = null;
-            for (const conv of conversations) {
+            for (const conv of conversations || []) {
                 const { data: assistantMsg, error: msgError } = await supabaseServiceRole
                     .from('messages')
                     .select('id, created_at')
@@ -136,9 +135,28 @@ async function getQualificationLeadsActivity(params) {
                     }
                 }
             }
+            // Fallback: If no assistant message found via conversations, try by lead_id
+            if (!latestAssistantMessageIso) {
+                const { data: assistantMsgByLead, error: byLeadError } = await supabaseServiceRole
+                    .from('messages')
+                    .select('id, created_at')
+                    .eq('lead_id', lead.id)
+                    .eq('role', 'assistant')
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                if (byLeadError) {
+                    errors.push(`Failed to fetch assistant message by lead ${lead.id}: ${byLeadError.message}`);
+                }
+                if (assistantMsgByLead && assistantMsgByLead.created_at) {
+                    latestAssistantMessageIso = assistantMsgByLead.created_at;
+                }
+            }
             // Must have at least one assistant message historically
             if (!latestAssistantMessageIso)
                 continue;
+            // Log decision context for auditing
+            console.log(`Qualification check lead=${lead.id} lastAssistant=${latestAssistantMessageIso} threshold=${thresholdIso}`);
             // Include if the last assistant message is older than threshold
             if (latestAssistantMessageIso < thresholdIso) {
                 results.push(lead);

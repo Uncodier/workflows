@@ -1843,7 +1843,7 @@ export async function scheduleIndividualLeadGenerationActivity(
   const results: ScheduleWorkflowResult[] = [];
   const errors: string[] = [];
   let scheduled = 0;
-  const skipped = 0;
+  let skipped = 0;
   let failed = 0;
 
   try {
@@ -1865,6 +1865,53 @@ export async function scheduleIndividualLeadGenerationActivity(
       businessHoursAnalysis.openSites.forEach((site: any) => {
         sitesWithBusinessHours.set(site.siteId, site.businessHours);
       });
+    }
+
+    // Ensure we have settings for activity gating (hydrate activities from settings table when missing)
+    try {
+      const siteIds: string[] = (allSites as any[]).map((s: any) => s.id);
+      const completeSettings = await supabaseService.fetchCompleteSettings(siteIds);
+      const settingsBySiteId = new Map<string, any>(
+        (completeSettings || []).map((row: any) => [row.site_id, row])
+      );
+
+      for (const site of allSites as any[]) {
+        // Normalize embedded JSON (sometimes comes as JSON string)
+        if (site.settings && typeof site.settings === 'string') {
+          try {
+            site.settings = JSON.parse(site.settings);
+          } catch {
+            // Keep as-is if parsing fails
+          }
+        }
+
+        // If no activities present on embedded settings, try to hydrate from settings table
+        const hasEmbeddedActivities = !!(site.settings && site.settings.activities);
+        if (!hasEmbeddedActivities) {
+          const settingsRow = settingsBySiteId.get(site.id);
+          if (settingsRow) {
+            // Prefer a top-level `activities` field if it exists
+            const mergedActivities = (settingsRow as any).activities
+              ? (settingsRow as any).activities
+              : undefined;
+
+            // Create settings container if missing
+            if (!site.settings || typeof site.settings !== 'object') {
+              site.settings = {} as any;
+            }
+
+            if (mergedActivities) {
+              site.settings.activities = mergedActivities;
+              console.log(`   ⚙️ Hydrated activities from settings table for site ${site.id}`);
+            }
+          }
+        } else {
+          console.log(`   ⚙️ Using embedded activities for site ${site.id}`);
+        }
+      }
+    } catch (settingsMergeError) {
+      console.warn('⚠️ Could not merge settings.activities from settings table:', settingsMergeError);
+      // Continue with best-effort data
     }
     
     // Determine if fallback should be used based on day of week
@@ -2664,7 +2711,7 @@ export async function scheduleIndividualDailyProspectionActivity(
   const results: ScheduleWorkflowResult[] = [];
   const errors: string[] = [];
   let scheduled = 0;
-  const skipped = 0;
+  let skipped = 0;
   let failed = 0;
 
   try {
@@ -2707,6 +2754,7 @@ export async function scheduleIndividualDailyProspectionActivity(
         console.log(`   🔎 Activities check → leads_initial_cold_outreach.status: ${activityStatus ?? 'undefined'}`);
         if (!shouldScheduleWorkflow(site, 'leads_initial_cold_outreach')) {
           console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach' is inactive in site settings`);
+          skipped++;
           continue;
         }
         
@@ -2732,6 +2780,7 @@ export async function scheduleIndividualDailyProspectionActivity(
         } else {
           // Weekend: NO fallback for sites without business_hours
           console.log(`   ⏭️ SKIPPING - No business_hours configured and weekend (no fallback)`);
+          skipped++;
           continue;
         }
         

@@ -63,3 +63,4 @@ __exportStar(require("./robotWorkflow"), exports);
 __exportStar(require("./promptRobotWorkflow"), exports);
 __exportStar(require("./webhookDispatchWorkflow"), exports);
 __exportStar(require("./idealClientProfileMiningWorkflow"), exports);
+__exportStar(require("./idealClientProfilePageSearchWorkflow"), exports);

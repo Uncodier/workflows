@@ -46,14 +46,31 @@ export async function callPersonRoleSearchActivity(options: {
     const persons = payload?.persons || payload?.results || [];
     const meta = payload?.meta || {};
 
+    // Normalize pagination metadata (do not coerce total when absent)
+    const total = (typeof meta.total === 'number'
+      ? meta.total
+      : (typeof payload?.total === 'number' ? payload.total : undefined)) as number | undefined;
+    const currentPage = (typeof meta.page === 'number' ? meta.page : page) as number; // Finder may be 0- or 1-based
+    const normalizedPageSize = (typeof meta.page_size === 'number'
+      ? meta.page_size
+      : (typeof meta.pageSize === 'number' ? meta.pageSize : page_size)) as number;
+
+    // Prefer explicit hasMore; otherwise derive by page fullness when total is unknown
+    const explicitHasMore = (typeof (meta as any).has_more === 'boolean'
+      ? (meta as any).has_more
+      : (typeof (meta as any).hasMore === 'boolean' ? (meta as any).hasMore : undefined)) as boolean | undefined;
+    const derivedHasMore = (typeof total === 'number')
+      ? ((currentPage + 1) * normalizedPageSize < total)
+      : (Array.isArray(persons) && persons.length === normalizedPageSize);
+
     return {
       success: true,
       data: payload,
       persons,
-      total: meta.total || payload?.total || persons.length,
-      page: meta.page || page,
-      pageSize: meta.pageSize || page_size,
-      hasMore: meta.hasMore ?? (Array.isArray(persons) && persons.length === page_size),
+      total,
+      page: currentPage,
+      pageSize: normalizedPageSize,
+      hasMore: explicitHasMore !== undefined ? explicitHasMore : derivedHasMore,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -152,6 +169,7 @@ export async function updateIcpMiningProgressActivity(options: {
   totalTargets?: number;
   last_error?: string | null;
   appendError?: string; // push into errors[]
+  currentPage?: number;
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const supabaseService = getSupabaseService();
@@ -187,6 +205,7 @@ export async function updateIcpMiningProgressActivity(options: {
       ...(options.totalTargets !== undefined && { total_targets: options.totalTargets }),
       ...(options.last_error !== undefined && { last_error: options.last_error }),
       errors,
+      ...(options.currentPage !== undefined && { current_page: options.currentPage }),
     };
 
     const { error: updateError } = await supabaseServiceRole

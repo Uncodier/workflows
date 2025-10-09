@@ -44,6 +44,7 @@ import { promptRobotWorkflow } from './promptRobotWorkflow';
 import { validateEmailWorkflow } from './validateEmailWorkflow';
 import { webhookDispatchWorkflow } from './webhookDispatchWorkflow';
 import { idealClientProfileMiningWorkflow } from './idealClientProfileMiningWorkflow';
+import { idealClientProfilePageSearchWorkflow } from './idealClientProfilePageSearchWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -83,6 +84,7 @@ export * from './leadInvalidationWorkflow';
 export * from './validateEmailWorkflow';
 export * from './webhookDispatchWorkflow';
 export * from './idealClientProfileMiningWorkflow';
+export * from './idealClientProfilePageSearchWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -127,6 +129,7 @@ export const workflows = {
   validateEmailWorkflow,
   webhookDispatchWorkflow,
   idealClientProfileMiningWorkflow,
+  idealClientProfilePageSearchWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
   // ✅ Aliases for agent workflows with different naming conventions
@@ -177,6 +180,7 @@ export const workflowNames = {
   validateEmailWorkflow: 'validateEmailWorkflow',
   webhookDispatchWorkflow: 'webhookDispatchWorkflow',
   idealClientProfileMiningWorkflow: 'idealClientProfileMiningWorkflow',
+  idealClientProfilePageSearchWorkflow: 'idealClientProfilePageSearchWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',
   // ✅ Aliases for agent workflows with different naming conventions

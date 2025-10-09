@@ -45,3 +45,4 @@ export * from './robotWorkflow';
 export * from './promptRobotWorkflow'; 
 export * from './webhookDispatchWorkflow';
 export * from './idealClientProfileMiningWorkflow';
+export * from './idealClientProfilePageSearchWorkflow';

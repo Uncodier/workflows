@@ -65,6 +65,45 @@ async function runStartRobotWorkflowExample() {
   }
 }
 
+// Example using a provided instance_id (skips instance creation step)
+async function runStartRobotWorkflowWithInstanceIdExample() {
+  const { Connection, Client } = require('@temporalio/client');
+
+  const connection = await Connection.connect({
+    address: process.env.TEMPORAL_ADDRESS || 'localhost:7233',
+  });
+
+  const client = new Client({
+    connection,
+    namespace: process.env.TEMPORAL_NAMESPACE || 'default',
+  });
+
+  try {
+    console.log('🤖 Starting robot workflow with provided instance_id example...');
+
+    const workflowInput = {
+      site_id: 'site-789',
+      activity: 'lead-generation',
+      instance_id: 'example-instance-' + Date.now(),
+      // user_id is optional
+    };
+
+    console.log('📤 Input (with instance_id):', workflowInput);
+
+    const result = await client.execute('startRobotWorkflow', {
+      args: [workflowInput],
+      workflowId: `start-robot-with-instance-${workflowInput.site_id}-${Date.now()}`,
+      taskQueue: 'default',
+    });
+
+    console.log('✅ Robot workflow completed successfully!');
+    console.log('📋 Result:', result);
+
+  } catch (error) {
+    console.error('💥 Error executing robot workflow with instance_id:', error);
+  }
+}
+
 // Example with different activity types
 async function runMultipleActivitiesExample() {
   const { Connection, Client } = require('@temporalio/client');
@@ -121,6 +160,10 @@ if (require.main === module) {
   
   runStartRobotWorkflowExample()
     .then(() => {
+      console.log('\n🔄 Running with provided instance_id example...');
+      return runStartRobotWorkflowWithInstanceIdExample();
+    })
+    .then(() => {
       console.log('\n🔄 Running multiple activities example...');
       return runMultipleActivitiesExample();
     })
@@ -133,4 +176,4 @@ if (require.main === module) {
     });
 }
 
-export { runStartRobotWorkflowExample, runMultipleActivitiesExample };
+export { runStartRobotWorkflowExample, runMultipleActivitiesExample, runStartRobotWorkflowWithInstanceIdExample };

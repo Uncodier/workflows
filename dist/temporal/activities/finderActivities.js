@@ -71,14 +71,23 @@ async function callPersonRoleSearchActivity(options) {
         const payload = response.data?.data || response.data;
         const persons = payload?.persons || payload?.results || [];
         const meta = payload?.meta || {};
+        // Normalize pagination metadata
+        const total = (typeof meta.total === 'number' ? meta.total : (typeof payload?.total === 'number' ? payload.total : persons.length));
+        const currentPage = (typeof meta.page === 'number' ? meta.page : page); // Often 0-based from Finder
+        const normalizedPageSize = (typeof meta.page_size === 'number' ? meta.page_size : (typeof meta.pageSize === 'number' ? meta.pageSize : page_size));
+        // Prefer explicit hasMore flags if present; otherwise derive from total/page/pageSize
+        const explicitHasMore = (typeof meta.has_more === 'boolean' ? meta.has_more : (typeof meta.hasMore === 'boolean' ? meta.hasMore : undefined));
+        const derivedHasMore = (typeof total === 'number' && typeof currentPage === 'number' && typeof normalizedPageSize === 'number')
+            ? ((currentPage + 1) * normalizedPageSize < total)
+            : (Array.isArray(persons) && persons.length === normalizedPageSize);
         return {
             success: true,
             data: payload,
             persons,
-            total: meta.total || payload?.total || persons.length,
-            page: meta.page || page,
-            pageSize: meta.pageSize || page_size,
-            hasMore: meta.hasMore ?? (Array.isArray(persons) && persons.length === page_size),
+            total,
+            page: currentPage,
+            pageSize: normalizedPageSize,
+            hasMore: explicitHasMore !== undefined ? explicitHasMore : derivedHasMore,
         };
     }
     catch (error) {
@@ -183,6 +192,7 @@ async function updateIcpMiningProgressActivity(options) {
             ...(options.totalTargets !== undefined && { total_targets: options.totalTargets }),
             ...(options.last_error !== undefined && { last_error: options.last_error }),
             errors,
+            ...(options.currentPage !== undefined && { current_page: options.currentPage }),
         };
         const { error: updateError } = await supabaseServiceRole
             .from('icp_mining')

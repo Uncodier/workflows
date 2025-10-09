@@ -21,6 +21,7 @@ export interface StartRobotInput {
   site_id: string;
   activity: string;
   user_id?: string;
+  instance_id?: string;
 }
 
 export interface StartRobotResult {
@@ -53,38 +54,47 @@ export interface StartRobotResult {
  * Child workflow receives: site_id, activity, instance_id, instance_plan_id, and optionally user_id
  */
 export async function startRobotWorkflow(input: StartRobotInput): Promise<StartRobotResult> {
-  const { site_id, activity, user_id } = input;
+  const { site_id, activity, user_id, instance_id: providedInstanceId } = input;
   
   console.log(`🚀 Starting robot workflow for site: ${site_id}, activity: ${activity}${user_id ? `, user: ${user_id}` : ''}`);
 
   try {
-    // Prepare activity parameters
-    const activityParams: any = {
-      site_id,
-      activity
-    };
-    
-    if (user_id) {
-      activityParams.user_id = user_id;
-    }
-    
-    // Step 1: Call robot instance API
-    console.log(`🔄 Step 1: Calling robot instance API...`);
-    const instanceResult = await callRobotInstanceActivity(activityParams);
+    // Resolve instance_id: use provided one or create a new instance
+    let instance_id: string;
+    let instanceAPIData: any | undefined;
 
-    if (!instanceResult.success) {
-      console.error(`❌ Robot instance call failed for site ${site_id}:`, instanceResult.error);
-      throw new Error(`Instance call failed: ${instanceResult.error}`);
-    }
+    if (providedInstanceId) {
+      instance_id = providedInstanceId;
+      console.log(`🆔 Using provided instance_id: ${instance_id}`);
+    } else {
+      // Prepare activity parameters
+      const activityParams: any = {
+        site_id,
+        activity
+      };
+      if (user_id) {
+        activityParams.user_id = user_id;
+      }
 
-    // Validate instance_id was returned
-    if (!instanceResult.instance_id) {
-      console.error(`❌ No instance_id returned from robot instance API for site ${site_id}`);
-      throw new Error('Instance API did not return instance_id');
-    }
+      // Step 1: Call robot instance API
+      console.log(`🔄 Step 1: Calling robot instance API...`);
+      const instanceResult = await callRobotInstanceActivity(activityParams);
 
-    const instance_id = instanceResult.instance_id;
-    console.log(`✅ Robot instance call completed successfully. Instance ID: ${instance_id}`);
+      if (!instanceResult.success) {
+        console.error(`❌ Robot instance call failed for site ${site_id}:`, instanceResult.error);
+        throw new Error(`Instance call failed: ${instanceResult.error}`);
+      }
+
+      // Validate instance_id was returned
+      if (!instanceResult.instance_id) {
+        console.error(`❌ No instance_id returned from robot instance API for site ${site_id}`);
+        throw new Error('Instance API did not return instance_id');
+      }
+
+      instance_id = instanceResult.instance_id;
+      instanceAPIData = instanceResult.data;
+      console.log(`✅ Robot instance call completed successfully. Instance ID: ${instance_id}`);
+    }
 
     // Step 2: Call robot plan API with instance_id
     console.log(`🔄 Step 2: Calling robot plan API with instance_id: ${instance_id}...`);
@@ -140,7 +150,7 @@ export async function startRobotWorkflow(input: StartRobotInput): Promise<StartR
         success: true,
         instance_id,
         instance_plan_id,
-        instanceData: instanceResult.data,
+        instanceData: instanceAPIData,
         planData: planResult.data,
         robotExecutionWorkflowId: robotExecutionHandle.workflowId,
         site_id,
@@ -158,7 +168,7 @@ export async function startRobotWorkflow(input: StartRobotInput): Promise<StartR
         success: true,
         instance_id,
         instance_plan_id,
-        instanceData: instanceResult.data,
+        instanceData: instanceAPIData,
         planData: planResult.data,
         error: `Plan created successfully but failed to start execution workflow: ${robotErrorMessage}`,
         site_id,
