@@ -1035,6 +1035,13 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
         for (const site of allSites) {
             try {
                 console.log(`\n📋 Processing site: ${site.name || 'Unnamed'} (${site.id})`);
+                // If an activitiesMap is provided, hydrate site.settings.activities from it
+                if (options.activitiesMap && options.activitiesMap[site.id]) {
+                    if (!site.settings || typeof site.settings !== 'object') {
+                        site.settings = {};
+                    }
+                    site.settings.activities = options.activitiesMap[site.id];
+                }
                 // Check if this workflow should be scheduled based on settings.activities
                 if (!shouldScheduleWorkflow(site, 'daily_resume_and_stand_up')) {
                     console.log(`   ⏭️ SKIPPING - 'daily_resume_and_stand_up' is inactive in site settings`);
@@ -1608,6 +1615,13 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
         for (const site of allSites) {
             try {
                 console.log(`\n🔥 Processing site for Lead Generation: ${site.name || 'Unnamed'} (${site.id})`);
+                // Hydrate activities from map if provided
+                if (options.activitiesMap && options.activitiesMap[site.id]) {
+                    if (!site.settings || typeof site.settings !== 'object') {
+                        site.settings = {};
+                    }
+                    site.settings.activities = options.activitiesMap[site.id];
+                }
                 // Check if this workflow should be scheduled based on settings.activities
                 if (!shouldScheduleWorkflow(site, 'icp_lead_generation')) {
                     console.log(`   ⏭️ SKIPPING - 'icp_lead_generation' is inactive in site settings`);
@@ -2109,6 +2123,13 @@ async function executeDailyProspectionWorkflowsActivity(options = {}) {
         for (const site of sitesToProcess) {
             try {
                 console.log(`🎯 Processing site: ${site.name} (${site.id})`);
+                // Hydrate activities from map if provided
+                if (options.activitiesMap && options.activitiesMap[site.id]) {
+                    if (!site.settings || typeof site.settings !== 'object') {
+                        site.settings = {};
+                    }
+                    site.settings.activities = options.activitiesMap[site.id];
+                }
                 // Check if this workflow should be scheduled based on settings.activities
                 if (!shouldScheduleWorkflow(site, 'leads_initial_cold_outreach')) {
                     console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach' is inactive in site settings`);
@@ -2287,6 +2308,13 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
         for (const site of allSites) {
             try {
                 console.log(`\n🎯 Processing site for Daily Prospection: ${site.name || 'Unnamed'} (${site.id})`);
+                // Hydrate activities from map if provided
+                if (options.activitiesMap && options.activitiesMap[site.id]) {
+                    if (!site.settings || typeof site.settings !== 'object') {
+                        site.settings = {};
+                    }
+                    site.settings.activities = options.activitiesMap[site.id];
+                }
                 // Check if this workflow should be scheduled based on settings.activities
                 const activityStatus = site?.settings?.activities?.leads_initial_cold_outreach?.status;
                 console.log(`   🔎 Activities check → leads_initial_cold_outreach.status: ${activityStatus ?? 'undefined'}`);
@@ -2506,6 +2534,13 @@ async function scheduleLeadQualificationActivity(businessHoursAnalysis, options 
         for (const site of allSites) {
             try {
                 console.log(`\n📆 Processing site for Lead Qualification: ${site.name || 'Unnamed'} (${site.id})`);
+                // Hydrate activities from map if provided
+                if (options.activitiesMap && options.activitiesMap[site.id]) {
+                    if (!site.settings || typeof site.settings !== 'object') {
+                        site.settings = {};
+                    }
+                    site.settings.activities = options.activitiesMap[site.id];
+                }
                 // Check if this workflow should be scheduled based on settings.activities
                 if (!shouldScheduleWorkflow(site, 'leads_follow_up')) {
                     console.log(`   ⏭️ SKIPPING - 'leads_follow_up' is inactive in site settings`);

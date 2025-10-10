@@ -1192,7 +1192,7 @@ export async function scheduleDailyOperationsWorkflowActivity(
  */
 export async function scheduleIndividualDailyStandUpsActivity(
   businessHoursAnalysis: any,
-  options: { timezone?: string; parentScheduleId?: string } = {}
+  options: { timezone?: string; parentScheduleId?: string; activitiesMap?: Record<string, any> } = {}
 ): Promise<{
   scheduled: number;
   failed: number;
@@ -1244,6 +1244,14 @@ export async function scheduleIndividualDailyStandUpsActivity(
     for (const site of allSites as any[]) {
       try {
         console.log(`\n📋 Processing site: ${site.name || 'Unnamed'} (${site.id})`);
+
+        // If an activitiesMap is provided, hydrate site.settings.activities from it
+        if (options.activitiesMap && options.activitiesMap[site.id]) {
+          if (!site.settings || typeof site.settings !== 'object') {
+            site.settings = {} as any;
+          }
+          site.settings.activities = options.activitiesMap[site.id];
+        }
         
         // Check if this workflow should be scheduled based on settings.activities
         if (!shouldScheduleWorkflow(site, 'daily_resume_and_stand_up')) {
@@ -1483,7 +1491,7 @@ export async function scheduleIndividualDailyStandUpsActivity(
  */
 export async function scheduleIndividualSiteAnalysisActivity(
   businessHoursAnalysis: any,
-  options: { timezone?: string; parentScheduleId?: string } = {}
+  options: { timezone?: string; parentScheduleId?: string; activitiesMap?: Record<string, any> } = {}
 ): Promise<{
   scheduled: number;
   skipped: number;
@@ -1826,7 +1834,7 @@ export async function scheduleIndividualSiteAnalysisActivity(
  */
 export async function scheduleIndividualLeadGenerationActivity(
   businessHoursAnalysis: any,
-  options: { timezone?: string; parentScheduleId?: string } = {}
+  options: { timezone?: string; parentScheduleId?: string; activitiesMap?: Record<string, any> } = {}
 ): Promise<{
   scheduled: number;
   skipped: number;
@@ -1927,6 +1935,14 @@ export async function scheduleIndividualLeadGenerationActivity(
     for (const site of allSites as any[]) {
       try {
         console.log(`\n🔥 Processing site for Lead Generation: ${site.name || 'Unnamed'} (${site.id})`);
+
+        // Hydrate activities from map if provided
+        if (options.activitiesMap && options.activitiesMap[site.id]) {
+          if (!site.settings || typeof site.settings !== 'object') {
+            site.settings = {} as any;
+          }
+          site.settings.activities = options.activitiesMap[site.id];
+        }
         
         // Check if this workflow should be scheduled based on settings.activities
         if (!shouldScheduleWorkflow(site, 'icp_lead_generation')) {
@@ -2386,6 +2402,7 @@ export async function executeDailyProspectionWorkflowsActivity(
     hoursThreshold?: number;
     maxLeads?: number;
     parentScheduleId?: string;
+    activitiesMap?: Record<string, any>;
   } = {}
 ): Promise<{
   scheduled: number;
@@ -2521,6 +2538,14 @@ export async function executeDailyProspectionWorkflowsActivity(
       try {
         console.log(`🎯 Processing site: ${site.name} (${site.id})`);
         
+        // Hydrate activities from map if provided
+        if (options.activitiesMap && options.activitiesMap[site.id]) {
+          if (!site.settings || typeof site.settings !== 'object') {
+            site.settings = {} as any;
+          }
+          site.settings.activities = options.activitiesMap[site.id];
+        }
+
         // Check if this workflow should be scheduled based on settings.activities
         if (!shouldScheduleWorkflow(site, 'leads_initial_cold_outreach')) {
           console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach' is inactive in site settings`);
@@ -2692,6 +2717,7 @@ export async function scheduleIndividualDailyProspectionActivity(
     hoursThreshold?: number;
     maxLeads?: number;
     parentScheduleId?: string;
+    activitiesMap?: Record<string, any>;
   } = {}
 ): Promise<{
   scheduled: number;
@@ -2748,6 +2774,14 @@ export async function scheduleIndividualDailyProspectionActivity(
     for (const site of allSites as any[]) {
       try {
         console.log(`\n🎯 Processing site for Daily Prospection: ${site.name || 'Unnamed'} (${site.id})`);
+
+        // Hydrate activities from map if provided
+        if (options.activitiesMap && options.activitiesMap[site.id]) {
+          if (!site.settings || typeof site.settings !== 'object') {
+            site.settings = {} as any;
+          }
+          site.settings.activities = options.activitiesMap[site.id];
+        }
         
         // Check if this workflow should be scheduled based on settings.activities
         const activityStatus = site?.settings?.activities?.leads_initial_cold_outreach?.status;
@@ -2977,6 +3011,7 @@ export async function scheduleLeadQualificationActivity(
     daysWithoutReply?: number; 
     maxLeads?: number;
     parentScheduleId?: string;
+    activitiesMap?: Record<string, any>;
   } = {}
 ): Promise<{
   scheduled: number;
@@ -3021,6 +3056,14 @@ export async function scheduleLeadQualificationActivity(
     for (const site of allSites as any[]) {
       try {
         console.log(`\n📆 Processing site for Lead Qualification: ${site.name || 'Unnamed'} (${site.id})`);
+
+        // Hydrate activities from map if provided
+        if (options.activitiesMap && options.activitiesMap[site.id]) {
+          if (!site.settings || typeof site.settings !== 'object') {
+            site.settings = {} as any;
+          }
+          site.settings.activities = options.activitiesMap[site.id];
+        }
 
         // Check if this workflow should be scheduled based on settings.activities
         if (!shouldScheduleWorkflow(site, 'leads_follow_up')) {

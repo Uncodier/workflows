@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activityPrioritizationEngineWorkflow = activityPrioritizationEngineWorkflow;
 const workflow_1 = require("@temporalio/workflow");
-const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity, scheduleIndividualSiteAnalysisActivity, scheduleIndividualLeadGenerationActivity, scheduleIndividualDailyProspectionActivity, executeDailyProspectionWorkflowsActivity, validateAndCleanStuckCronStatusActivity, scheduleLeadQualificationActivity } = (0, workflow_1.proxyActivities)({
+const { evaluateBusinessHoursForDay, scheduleIndividualDailyStandUpsActivity, scheduleIndividualSiteAnalysisActivity, scheduleIndividualLeadGenerationActivity, scheduleIndividualDailyProspectionActivity, executeDailyProspectionWorkflowsActivity, validateAndCleanStuckCronStatusActivity, scheduleLeadQualificationActivity, fetchActivitiesMapActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes',
 });
 /**
@@ -146,13 +146,17 @@ async function activityPrioritizationEngineWorkflow() {
                 console.log('🎯 Step 2.1: Executing daily prospection workflow after daily standups...');
                 console.log('   Daily prospection will process leads after standups complete');
                 try {
+                    // Build a list of candidate site IDs from business hours analysis (fallback to empty map if not available)
+                    const candidateSiteIds = (businessHoursAnalysis?.openSites || []).map((s) => s.siteId);
+                    const activitiesMap = await fetchActivitiesMapActivity(candidateSiteIds);
                     const dailyProspectionResult = await executeDailyProspectionWorkflowsActivity({
                         dryRun: false, // PRODUCTION: Actually execute workflows
                         testMode: false, // PRODUCTION: Full production mode
                         businessHoursAnalysis, // PASS business hours analysis for filtering
                         hoursThreshold: 48, // Look for leads older than 48 hours
                         maxLeads: 30, // Limit to 30 leads per site
-                        parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
+                        parentScheduleId: realScheduleId, // PASS parent schedule ID for proper tracking
+                        activitiesMap
                     });
                     console.log(`🎯 Daily prospection workflows execution completed:`);
                     console.log(`   ✅ Prospection executed: ${dailyProspectionResult.scheduled} sites`);
@@ -182,9 +186,12 @@ async function activityPrioritizationEngineWorkflow() {
                 console.log('   Note: Site analysis will be scheduled even when daily standups execute immediately');
                 console.log('   This ensures sites get their initial analysis regardless of timing');
                 try {
+                    const candidateSiteIds = (businessHoursAnalysis?.openSites || []).map((s) => s.siteId);
+                    const activitiesMap = await fetchActivitiesMapActivity(candidateSiteIds);
                     const siteAnalysisResult = await scheduleIndividualSiteAnalysisActivity(businessHoursAnalysis, {
                         timezone: 'America/Mexico_City',
-                        parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
+                        parentScheduleId: realScheduleId, // PASS parent schedule ID for proper tracking
+                        activitiesMap
                     });
                     console.log(`🔍 Site analysis scheduling completed:`);
                     console.log(`   ✅ Scheduled: ${siteAnalysisResult.scheduled} sites`);
@@ -213,9 +220,12 @@ async function activityPrioritizationEngineWorkflow() {
                 console.log('🔥 Step 2.3: Scheduling lead generation for 1 hour after daily standups...');
                 console.log('   Lead generation will execute 1 hour after daily standups complete');
                 try {
+                    const candidateSiteIds = (businessHoursAnalysis?.openSites || []).map((s) => s.siteId);
+                    const activitiesMap = await fetchActivitiesMapActivity(candidateSiteIds);
                     const leadGenerationResult = await scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, {
                         timezone: 'America/Mexico_City',
-                        parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
+                        parentScheduleId: realScheduleId, // PASS parent schedule ID for proper tracking
+                        activitiesMap
                     });
                     console.log(`🔥 Lead generation scheduling completed:`);
                     console.log(`   ✅ Scheduled: ${leadGenerationResult.scheduled} sites`);
@@ -243,11 +253,14 @@ async function activityPrioritizationEngineWorkflow() {
                 // Step 2.4: Schedule lead qualification (Tue/Wed/Thu at 09:00)
                 console.log('📆 Step 2.4: Scheduling lead qualification (Tue/Wed/Thu at 09:00)...');
                 try {
+                    const candidateSiteIds = (businessHoursAnalysis?.openSites || []).map((s) => s.siteId);
+                    const activitiesMap = await fetchActivitiesMapActivity(candidateSiteIds);
                     const leadQualificationResult = await scheduleLeadQualificationActivity(businessHoursAnalysis, {
                         timezone: 'America/Mexico_City',
                         daysWithoutReply: 7,
                         maxLeads: 30,
-                        parentScheduleId: realScheduleId
+                        parentScheduleId: realScheduleId,
+                        activitiesMap
                     });
                     operationsResult.leadQualificationScheduling = leadQualificationResult;
                 }
@@ -311,11 +324,14 @@ async function activityPrioritizationEngineWorkflow() {
                 console.log('   Daily prospection will be scheduled for 2 hours after daily standups');
                 console.log('   This ensures prospection runs after standups and lead generation complete');
                 try {
+                    const candidateSiteIds = (businessHoursAnalysis?.openSites || []).map((s) => s.siteId);
+                    const activitiesMap = await fetchActivitiesMapActivity(candidateSiteIds);
                     const dailyProspectionSchedulingResult = await scheduleIndividualDailyProspectionActivity(businessHoursAnalysis, {
                         timezone: 'America/Mexico_City',
                         hoursThreshold: 48, // Look for leads older than 48 hours
                         maxLeads: 30, // Limit to 30 leads per site
-                        parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
+                        parentScheduleId: realScheduleId, // PASS parent schedule ID for proper tracking
+                        activitiesMap
                     });
                     console.log(`🎯 Daily prospection scheduling completed:`);
                     console.log(`   ✅ Scheduled: ${dailyProspectionSchedulingResult.scheduled} sites`);
@@ -365,9 +381,12 @@ async function activityPrioritizationEngineWorkflow() {
                 console.log('🔍 Step 2.2: Scheduling site analysis for sites that need initial analysis...');
                 console.log('   Both daily standups and site analysis will be scheduled for their appropriate times');
                 try {
+                    const candidateSiteIds = (businessHoursAnalysis?.openSites || []).map((s) => s.siteId);
+                    const activitiesMap = await fetchActivitiesMapActivity(candidateSiteIds);
                     const siteAnalysisResult = await scheduleIndividualSiteAnalysisActivity(businessHoursAnalysis, {
                         timezone: 'America/Mexico_City',
-                        parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
+                        parentScheduleId: realScheduleId, // PASS parent schedule ID for proper tracking
+                        activitiesMap
                     });
                     console.log(`🔍 Site analysis scheduling completed:`);
                     console.log(`   ✅ Scheduled: ${siteAnalysisResult.scheduled} sites`);
@@ -396,9 +415,12 @@ async function activityPrioritizationEngineWorkflow() {
                 console.log('🔥 Step 2.3: Scheduling lead generation for 1 hour after daily standups...');
                 console.log('   Both daily standups and lead generation will be scheduled for their appropriate times');
                 try {
+                    const candidateSiteIds = (businessHoursAnalysis?.openSites || []).map((s) => s.siteId);
+                    const activitiesMap = await fetchActivitiesMapActivity(candidateSiteIds);
                     const leadGenerationResult = await scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, {
                         timezone: 'America/Mexico_City',
-                        parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
+                        parentScheduleId: realScheduleId, // PASS parent schedule ID for proper tracking
+                        activitiesMap
                     });
                     console.log(`🔥 Lead generation scheduling completed:`);
                     console.log(`   ✅ Scheduled: ${leadGenerationResult.scheduled} sites`);
