@@ -277,7 +277,7 @@ export async function getPendingIcpMiningActivity(options?: { limit?: number; si
     let query = supabaseServiceRole
       .from('icp_mining')
       .select('*')
-      .in('status', ['pending'])
+      .in('status', ['running', 'pending'])
       .order('created_at', { ascending: true })
       .limit(limit);
 

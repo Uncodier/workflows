@@ -71,13 +71,19 @@ async function callPersonRoleSearchActivity(options) {
         const payload = response.data?.data || response.data;
         const persons = payload?.persons || payload?.results || [];
         const meta = payload?.meta || {};
-        // Normalize pagination metadata
-        const total = (typeof meta.total === 'number' ? meta.total : (typeof payload?.total === 'number' ? payload.total : persons.length));
-        const currentPage = (typeof meta.page === 'number' ? meta.page : page); // Often 0-based from Finder
-        const normalizedPageSize = (typeof meta.page_size === 'number' ? meta.page_size : (typeof meta.pageSize === 'number' ? meta.pageSize : page_size));
-        // Prefer explicit hasMore flags if present; otherwise derive from total/page/pageSize
-        const explicitHasMore = (typeof meta.has_more === 'boolean' ? meta.has_more : (typeof meta.hasMore === 'boolean' ? meta.hasMore : undefined));
-        const derivedHasMore = (typeof total === 'number' && typeof currentPage === 'number' && typeof normalizedPageSize === 'number')
+        // Normalize pagination metadata (do not coerce total when absent)
+        const total = (typeof meta.total === 'number'
+            ? meta.total
+            : (typeof payload?.total === 'number' ? payload.total : undefined));
+        const currentPage = (typeof meta.page === 'number' ? meta.page : page); // Finder may be 0- or 1-based
+        const normalizedPageSize = (typeof meta.page_size === 'number'
+            ? meta.page_size
+            : (typeof meta.pageSize === 'number' ? meta.pageSize : page_size));
+        // Prefer explicit hasMore; otherwise derive by page fullness when total is unknown
+        const explicitHasMore = (typeof meta.has_more === 'boolean'
+            ? meta.has_more
+            : (typeof meta.hasMore === 'boolean' ? meta.hasMore : undefined));
+        const derivedHasMore = (typeof total === 'number')
             ? ((currentPage + 1) * normalizedPageSize < total)
             : (Array.isArray(persons) && persons.length === normalizedPageSize);
         return {
@@ -262,7 +268,7 @@ async function getPendingIcpMiningActivity(options) {
         let query = supabaseServiceRole
             .from('icp_mining')
             .select('*')
-            .in('status', ['pending'])
+            .in('status', ['running', 'pending'])
             .order('created_at', { ascending: true })
             .limit(limit);
         // Filter by site_id if provided

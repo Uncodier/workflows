@@ -1,6 +1,8 @@
 import { proxyActivities, executeChild } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { idealClientProfilePageSearchWorkflow } from './idealClientProfilePageSearchWorkflow';
+import { selectNextIcp } from './icpMining/selectIcp';
+import { processSingleIcp } from './icpMining/processSingle';
 import type {
   IdealClientProfilePageSearchOptions,
   IdealClientProfilePageSearchResult,
@@ -116,348 +118,7 @@ export async function idealClientProfileMiningWorkflow(
     actualUserId = siteResult.site.user_id;
   }
 
-  // Helper to process a single ICP mining record
-  const processSingle = async (icp: any) => {
-    const icpId: string = icp.id;
-    const roleQueryId: string = icp.role_query_id;
-
-    await logWorkflowExecutionActivity({
-      workflowId,
-      workflowType: 'idealClientProfileMiningWorkflow',
-      status: 'INFO',
-      input: options,
-      output: {
-        processingIcp: {
-          icpId,
-          roleQueryId,
-          icpName: icp.name,
-          status: icp.status,
-        },
-      },
-    });
-
-    await markIcpMiningStartedActivity({ id: icpId });
-
-    let totalProcessed = 0;
-    let totalFoundMatches = 0;
-    // Read total targets strictly from DB; never mutate it here
-    const totalTargets: number | undefined =
-      typeof icp.total_targets === 'number'
-        ? icp.total_targets
-        : icp.total_targets
-        ? Number(icp.total_targets)
-        : undefined;
-
-    // Calculate starting page from DB or processed targets
-    const processedTargets = icp.processed_targets || 0;
-    const dbCurrentPage: number =
-      typeof icp.current_page === 'number'
-        ? icp.current_page
-        : icp.current_page
-        ? Number(icp.current_page)
-        : 0;
-
-    const startingPage = (() => {
-      if (dbCurrentPage !== undefined && dbCurrentPage !== null) {
-        const n = Number(dbCurrentPage);
-        if (!Number.isNaN(n) && n >= 0) return n;
-      }
-      if (processedTargets > 0) {
-        const derived = Math.floor(processedTargets / pageSize);
-        return derived >= 0 ? derived : 0;
-      }
-      return 0;
-    })();
-
-    await logWorkflowExecutionActivity({
-      workflowId,
-      workflowType: 'idealClientProfileMiningWorkflow',
-      status: 'INFO',
-      input: options,
-      output: {
-        paginationStart: {
-          icpId,
-          processedTargets,
-          pageSize,
-          startingPage,
-          maxPages,
-          targetLeadsWithEmail,
-          dbCurrentPage,
-          resumeOrigin:
-            dbCurrentPage !== undefined && dbCurrentPage !== null && !Number.isNaN(Number(dbCurrentPage))
-              ? 'db_current_page'
-              : processedTargets > 0
-              ? 'derived_from_processed_targets'
-              : 'default_start',
-          message: `Starting from page ${startingPage} (0-based). Target: ${targetLeadsWithEmail} leads with email. Resume origin: ${
-            dbCurrentPage !== undefined && dbCurrentPage !== null && !Number.isNaN(Number(dbCurrentPage))
-              ? 'db_current_page'
-              : processedTargets > 0
-              ? 'derived_from_processed_targets'
-              : 'default_start'
-          }`,
-        },
-      },
-    });
-
-    let currentPage = startingPage;
-    await updateIcpMiningProgressActivity({ id: icpId, currentPage });
-
-    // If total targets is unknown or invalid, do not proceed using Finder heuristics
-    if (!(typeof totalTargets === 'number' && totalTargets > 0)) {
-      await updateIcpMiningProgressActivity({
-        id: icpId,
-        status: 'pending',
-        last_error: null,
-      });
-
-      await logWorkflowExecutionActivity({
-        workflowId,
-        workflowType: 'idealClientProfileMiningWorkflow',
-        status: 'INFO',
-        input: options,
-        output: {
-          icpMiningPending: {
-            icpId,
-            reason: 'no_valid_total_targets',
-            message: 'total_targets not available; awaiting preprocessed totals before paging.',
-          },
-        },
-      });
-
-      return { processed: 0, foundMatches: 0, totalTargets };
-    }
-
-    // Iterate pages until target reached or processed all total targets
-    while (currentPage < maxPages && totalFoundMatches < targetLeadsWithEmail && totalProcessed < totalTargets) {
-      await logWorkflowExecutionActivity({
-        workflowId,
-        workflowType: 'idealClientProfileMiningWorkflow',
-        status: 'INFO',
-        input: options,
-        output: {
-          callingPageSearch: {
-            icpId,
-            roleQueryId,
-            page: currentPage,
-            pageSize,
-            totalFoundMatches,
-            targetLeadsWithEmail,
-            message: `Calling page search for page ${currentPage}. Progress: ${totalFoundMatches}/${targetLeadsWithEmail}`,
-          },
-        },
-      });
-
-      const pageSearchOptions: IdealClientProfilePageSearchOptions = {
-        role_query_id: roleQueryId,
-        page: currentPage,
-        page_size: pageSize,
-        site_id: options.site_id,
-        userId: actualUserId!,
-        icp_mining_id: icpId,
-      };
-
-      let pageResult: IdealClientProfilePageSearchResult;
-      try {
-        pageResult = await executeChild(idealClientProfilePageSearchWorkflow, {
-          workflowId: `icp-page-search-${icpId}-page${currentPage}`,
-          args: [pageSearchOptions],
-        });
-      } catch (error) {
-        const err = `Page ${currentPage} search failed: ${error}`;
-        errors.push(err);
-        await updateIcpMiningProgressActivity({ id: icpId, appendError: err });
-        break;
-      }
-
-      if (!pageResult.success) {
-        const err = `Page ${currentPage} returned errors: ${pageResult.errors.join(', ')}`;
-        errors.push(err);
-        await updateIcpMiningProgressActivity({ id: icpId, appendError: err });
-        // Continue to next page instead of breaking
-      }
-
-      // Update totals
-      totalProcessed += pageResult.processed;
-      totalFoundMatches += pageResult.foundMatches;
-
-      // Never mutate icp_mining.total_targets here; rely on DB-provided value only
-
-      // Update progress in DB
-      await updateIcpMiningProgressActivity({
-        id: icpId,
-        deltaProcessed: pageResult.processed,
-        deltaFound: pageResult.foundMatches,
-        currentPage,
-      });
-
-      await logWorkflowExecutionActivity({
-        workflowId,
-        workflowType: 'idealClientProfileMiningWorkflow',
-        status: 'INFO',
-        input: options,
-        output: {
-          pageCompleted: {
-            page: currentPage,
-            processed: pageResult.processed,
-            foundMatches: pageResult.foundMatches,
-            leadsCreated: pageResult.leadsCreated.length,
-            hasMore: pageResult.hasMore,
-            totalProcessed,
-            totalFoundMatches,
-            targetLeadsWithEmail,
-            progress: `${totalFoundMatches}/${targetLeadsWithEmail} leads with email`,
-          },
-        },
-      });
-
-      // Check if target reached
-      if (totalFoundMatches >= targetLeadsWithEmail) {
-        await logWorkflowExecutionActivity({
-          workflowId,
-          workflowType: 'idealClientProfileMiningWorkflow',
-          status: 'INFO',
-          input: options,
-          output: {
-            targetReached: {
-              totalFoundMatches,
-              targetLeadsWithEmail,
-              message: `Target reached! Found ${totalFoundMatches}/${targetLeadsWithEmail} leads with valid email`,
-            },
-          },
-        });
-        break;
-      }
-
-      // Decide continuation strictly by DB total_targets
-      if (!(totalProcessed < totalTargets)) {
-        await logWorkflowExecutionActivity({
-          workflowId,
-          workflowType: 'idealClientProfileMiningWorkflow',
-          status: 'INFO',
-          input: options,
-          output: {
-            noMorePages: {
-              totalFoundMatches,
-              targetLeadsWithEmail,
-              decidedBy: 'db_total_targets',
-              message: `Processed all targets (${totalProcessed}/${totalTargets}). Found ${totalFoundMatches}/${targetLeadsWithEmail} leads`,
-            },
-          },
-        });
-        break;
-      }
-
-      // Move to next page
-      currentPage = currentPage + 1;
-      await updateIcpMiningProgressActivity({ id: icpId, currentPage });
-    }
-
-    // Determine completion status
-    const targetReached = totalFoundMatches >= targetLeadsWithEmail;
-    const allTargetsProcessed =
-      totalTargets !== undefined && totalTargets > 0 && totalProcessed >= totalTargets;
-    const hasValidTotalTargets = totalTargets !== undefined && totalTargets > 0;
-
-    if (targetReached) {
-      const success = errors.length === 0;
-      await markIcpMiningCompletedActivity({
-        id: icpId,
-        failed: !success,
-        last_error: success ? null : errors[errors.length - 1],
-      });
-
-      await logWorkflowExecutionActivity({
-        workflowId,
-        workflowType: 'idealClientProfileMiningWorkflow',
-        status: 'INFO',
-        input: options,
-        output: {
-          icpMiningCompleted: {
-            icpId,
-            totalProcessed,
-            totalFoundMatches,
-            targetLeadsWithEmail,
-            reason: 'target_reached',
-            message: `ICP mining completed - target reached! Found ${totalFoundMatches}/${targetLeadsWithEmail} leads with valid email.`,
-          },
-        },
-      });
-    } else if (allTargetsProcessed) {
-      const success = errors.length === 0;
-      await markIcpMiningCompletedActivity({
-        id: icpId,
-        failed: !success,
-        last_error: success ? null : errors[errors.length - 1],
-      });
-
-      await logWorkflowExecutionActivity({
-        workflowId,
-        workflowType: 'idealClientProfileMiningWorkflow',
-        status: 'INFO',
-        input: options,
-        output: {
-          icpMiningCompleted: {
-            icpId,
-            totalProcessed,
-            totalTargets,
-            reason: 'all_targets_processed',
-            message: `ICP mining completed - processed ${totalProcessed}/${totalTargets} targets.`,
-          },
-        },
-      });
-    } else if (!hasValidTotalTargets) {
-      await updateIcpMiningProgressActivity({
-        id: icpId,
-        status: 'pending',
-        last_error: errors.length > 0 ? errors[errors.length - 1] : null,
-      });
-
-      await logWorkflowExecutionActivity({
-        workflowId,
-        workflowType: 'idealClientProfileMiningWorkflow',
-        status: 'INFO',
-        input: options,
-        output: {
-          icpMiningPending: {
-            icpId,
-            totalProcessed,
-            totalFoundMatches,
-            targetLeadsWithEmail,
-            totalTargets,
-            reason: 'no_valid_total_targets',
-            message: `ICP mining not completed - no valid total targets (${totalTargets}). Found ${totalFoundMatches}/${targetLeadsWithEmail} leads. Setting to pending.`,
-          },
-        },
-      });
-    } else {
-      await updateIcpMiningProgressActivity({
-        id: icpId,
-        status: 'pending',
-        last_error: errors.length > 0 ? errors[errors.length - 1] : null,
-      });
-
-      await logWorkflowExecutionActivity({
-        workflowId,
-        workflowType: 'idealClientProfileMiningWorkflow',
-        status: 'INFO',
-        input: options,
-        output: {
-          icpMiningPending: {
-            icpId,
-            totalProcessed,
-            totalFoundMatches,
-            targetLeadsWithEmail,
-            totalTargets,
-            reason: 'not_all_targets_processed',
-            message: `ICP mining not completed - processed ${totalProcessed}/${totalTargets} targets. Found ${totalFoundMatches}/${targetLeadsWithEmail} leads. Setting to pending.`,
-          },
-        },
-      });
-    }
-
-    return { processed: totalProcessed, foundMatches: totalFoundMatches, totalTargets };
-  };
+  // Helper to process a single ICP mining record (moved to separate module)
 
   // Decide processing mode: single id or batch pending
   const isBatch = !options.icp_mining_id || options.icp_mining_id === 'ALL';
@@ -481,7 +142,27 @@ export async function idealClientProfileMiningWorkflow(
         errors,
       };
     }
-    const res = await processSingle(icpRes.icp);
+    const res = await processSingleIcp({
+      icp: icpRes.icp,
+      options,
+      workflowId,
+      maxPages,
+      pageSize,
+      targetLeadsWithEmail,
+      actualUserId: actualUserId!,
+      deps: {
+        logWorkflowExecutionActivity,
+        markIcpMiningStartedActivity,
+        updateIcpMiningProgressActivity,
+        markIcpMiningCompletedActivity,
+        executePageSearch: async (pageSearchOptions: IdealClientProfilePageSearchOptions) => {
+          return await executeChild(idealClientProfilePageSearchWorkflow, {
+            workflowId: `icp-page-search-${pageSearchOptions.icp_mining_id || pageSearchOptions.role_query_id}-page${pageSearchOptions.page}`,
+            args: [pageSearchOptions],
+          });
+        },
+      },
+    });
     return {
       success: errors.length === 0,
       icp_mining_id: options.icp_mining_id as string,
@@ -544,19 +225,8 @@ export async function idealClientProfileMiningWorkflow(
     return { success: true, icp_mining_id: 'batch', processed: 0, foundMatches: 0 };
   }
 
-  // Select the item with the highest number of pending targets
-  const computePendingTargets = (it: any): number => {
-    const total = typeof it?.total_targets === 'number' ? it.total_targets : 0;
-    const processed = typeof it?.processed_targets === 'number' ? it.processed_targets : 0;
-    const remaining = total - processed;
-    return remaining > 0 ? remaining : 0;
-  };
-
-  const sortedByPendingDesc = items
-    .slice()
-    .sort((a, b) => computePendingTargets(b) - computePendingTargets(a));
-
-  const icp = sortedByPendingDesc[0];
+  // Select the next ICP prioritizing 'running' items, then highest remaining targets
+  const icp = selectNextIcp(items);
 
   await logWorkflowExecutionActivity({
     workflowId,
@@ -570,12 +240,32 @@ export async function idealClientProfileMiningWorkflow(
         role_query_id: icp.role_query_id,
         total_targets: icp.total_targets,
         processed_targets: icp.processed_targets,
-        pending_targets: computePendingTargets(icp),
+        pending_targets: (typeof icp.total_targets === 'number' ? icp.total_targets : 0) - (typeof icp.processed_targets === 'number' ? icp.processed_targets : 0),
       },
     },
   });
 
-  const res = await processSingle(icp);
+  const res = await processSingleIcp({
+    icp,
+    options,
+    workflowId,
+    maxPages,
+    pageSize,
+    targetLeadsWithEmail,
+    actualUserId: actualUserId!,
+    deps: {
+      logWorkflowExecutionActivity,
+      markIcpMiningStartedActivity,
+      updateIcpMiningProgressActivity,
+      markIcpMiningCompletedActivity,
+      executePageSearch: async (pageSearchOptions: IdealClientProfilePageSearchOptions) => {
+        return await executeChild(idealClientProfilePageSearchWorkflow, {
+          workflowId: `icp-page-search-${pageSearchOptions.icp_mining_id || pageSearchOptions.role_query_id}-page${pageSearchOptions.page}`,
+          args: [pageSearchOptions],
+        });
+      },
+    },
+  });
 
   return {
     success: errors.length === 0,
