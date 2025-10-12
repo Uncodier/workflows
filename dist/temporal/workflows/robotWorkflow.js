@@ -135,6 +135,10 @@ async function robotWorkflow(input) {
                     user_attention_info: planResult.data?.user_attention_info,
                     waiting_for_user: planResult.data?.waiting_for_user,
                     instance_status: planResult.data?.instance_status,
+                    // Nuevos campos para instancia pausada
+                    instance_paused: planResult.data?.instance_paused,
+                    waiting_for_instructions: planResult.data?.waiting_for_instructions,
+                    can_resume: planResult.data?.can_resume,
                     // Datos de parsing
                     agent_response: agentResponse,
                     response_type: parsedResponse.type,
@@ -158,6 +162,18 @@ async function robotWorkflow(input) {
                     else {
                         console.log(`⚠️ Plan failed but instance status is: ${instanceStatus || 'unknown'}, will process failure handling`);
                     }
+                }
+                // Verificar si la instancia está pausada y esperando instrucciones para terminar el flujo
+                if (planResult.data?.instance_paused === true && planResult.data?.waiting_for_instructions === true) {
+                    console.log(`⏸️ Instance is paused and waiting for instructions`);
+                    console.log(`📝 Message: ${planResult.data?.message || 'Instance is paused. Provide a new prompt to resume.'}`);
+                    console.log(`🛑 Terminating workflow as instance requires manual intervention`);
+                    // Marcar el plan como fallido por pausa de instancia
+                    planFailed = true;
+                    stepData.plan_failed = true;
+                    stepData.failure_reason = 'Instance paused and waiting for instructions - manual intervention required';
+                    stepData.response_type = 'plan_failed';
+                    break; // Salir del loop inmediatamente
                 }
                 // Si no hay plan_completed explícito, verificar si es una respuesta de step completado final
                 if (!planCompleted && parsedResponse.type === 'step_completed' && stepData.plan_progress?.percentage === 100) {

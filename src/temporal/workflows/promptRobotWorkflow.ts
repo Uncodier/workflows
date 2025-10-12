@@ -4,7 +4,8 @@ import { robotWorkflow } from './robotWorkflow';
 
 // Define the activity interface and options
 const { 
-  callRobotInstanceActActivity
+  callRobotInstanceActActivity,
+  callRobotInstanceResumeActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -68,6 +69,18 @@ export async function promptRobotWorkflow(input: PromptRobotWorkflowInput): Prom
   console.log(`📊 Step status: ${step_status}`);
 
   try {
+    // Step 0: Resume instance if instance_id is provided to ensure it's up
+    console.log(`🔄 Resuming robot instance: ${instance_id}...`);
+    
+    const resumeResult = await callRobotInstanceResumeActivity({ instance_id });
+    
+    if (!resumeResult.success) {
+      console.error(`❌ Robot instance resume call failed for instance ${instance_id}:`, resumeResult.error);
+      throw new Error(`Resume call failed: ${resumeResult.error}`);
+    }
+    
+    console.log(`✅ Robot instance resume call completed successfully for instance: ${instance_id}`);
+
     // Step 1: Call the robot instance act API
     console.log(`🚀 Calling robot instance act API...`);
     

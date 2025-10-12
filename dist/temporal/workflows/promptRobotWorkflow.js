@@ -4,7 +4,7 @@ exports.promptRobotWorkflow = promptRobotWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const robotWorkflow_1 = require("./robotWorkflow");
 // Define the activity interface and options
-const { callRobotInstanceActActivity } = (0, workflow_1.proxyActivities)({
+const { callRobotInstanceActActivity, callRobotInstanceResumeActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes',
     retry: {
         maximumAttempts: 3,
@@ -33,6 +33,14 @@ async function promptRobotWorkflow(input) {
     console.log(`📝 Message: ${message}`);
     console.log(`📊 Step status: ${step_status}`);
     try {
+        // Step 0: Resume instance if instance_id is provided to ensure it's up
+        console.log(`🔄 Resuming robot instance: ${instance_id}...`);
+        const resumeResult = await callRobotInstanceResumeActivity({ instance_id });
+        if (!resumeResult.success) {
+            console.error(`❌ Robot instance resume call failed for instance ${instance_id}:`, resumeResult.error);
+            throw new Error(`Resume call failed: ${resumeResult.error}`);
+        }
+        console.log(`✅ Robot instance resume call completed successfully for instance: ${instance_id}`);
         // Step 1: Call the robot instance act API
         console.log(`🚀 Calling robot instance act API...`);
         const actResult = await callRobotInstanceActActivity({

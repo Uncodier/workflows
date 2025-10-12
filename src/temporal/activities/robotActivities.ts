@@ -402,3 +402,41 @@ export async function callRobotInstanceActActivity(params: {
   }
 }
 
+/**
+ * Activity to call the robot instance resume API
+ */
+export async function callRobotInstanceResumeActivity(params: {
+  instance_id: string;
+}): Promise<{
+  success: boolean;
+  data?: any;
+  error?: string;
+}> {
+  const { instance_id } = params;
+
+  console.log(`🔄 Calling robot instance resume API for instance: ${instance_id}`);
+
+  try {
+    const payload = {
+      instance_id
+    };
+
+    const response = await apiService.post('/api/robots/instance/resume', payload);
+
+    if (!response.success) {
+      throw new Error(`Robot instance resume API call failed: ${response.error?.message || 'Unknown error'}`);
+    }
+
+    console.log('✅ Robot instance resume API call successful');
+    
+    return {
+      success: true,
+      data: response.data
+    };
+    
+  } catch (error) {
+    console.error('❌ Robot instance resume operation failed:', error);
+    throw new Error(`Robot instance resume activity failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+

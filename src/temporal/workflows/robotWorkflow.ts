@@ -70,6 +70,10 @@ export interface RobotWorkflowResult {
     user_attention_info?: any;
     waiting_for_user?: boolean;
     instance_status?: string;
+    // Nuevos campos para instancia pausada
+    instance_paused?: boolean;
+    waiting_for_instructions?: boolean;
+    can_resume?: boolean;
     // Respuesta cruda del agente para parsing
     agent_response?: string;
     response_type?: 'step_completed' | 'step_failed' | 'step_canceled' | 'plan_failed' | 'new_plan' | 'new_session' | 'session_needed' | 'session_saved' | 'user_attention';
@@ -240,6 +244,10 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
           user_attention_info: planResult.data?.user_attention_info,
           waiting_for_user: planResult.data?.waiting_for_user,
           instance_status: planResult.data?.instance_status,
+          // Nuevos campos para instancia pausada
+          instance_paused: planResult.data?.instance_paused,
+          waiting_for_instructions: planResult.data?.waiting_for_instructions,
+          can_resume: planResult.data?.can_resume,
           // Datos de parsing
           agent_response: agentResponse,
           response_type: parsedResponse.type,
@@ -267,6 +275,21 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
           } else {
             console.log(`⚠️ Plan failed but instance status is: ${instanceStatus || 'unknown'}, will process failure handling`);
           }
+        }
+        
+        // Verificar si la instancia está pausada y esperando instrucciones para terminar el flujo
+        if (planResult.data?.instance_paused === true && planResult.data?.waiting_for_instructions === true) {
+          console.log(`⏸️ Instance is paused and waiting for instructions`);
+          console.log(`📝 Message: ${planResult.data?.message || 'Instance is paused. Provide a new prompt to resume.'}`);
+          console.log(`🛑 Terminating workflow as instance requires manual intervention`);
+          
+          // Marcar el plan como fallido por pausa de instancia
+          planFailed = true;
+          stepData.plan_failed = true;
+          stepData.failure_reason = 'Instance paused and waiting for instructions - manual intervention required';
+          stepData.response_type = 'plan_failed';
+          
+          break; // Salir del loop inmediatamente
         }
         
         // Si no hay plan_completed explícito, verificar si es una respuesta de step completado final

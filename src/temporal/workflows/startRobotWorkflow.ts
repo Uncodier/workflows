@@ -7,7 +7,8 @@ import { robotWorkflow } from './robotWorkflow';
 // Define the activity interface and options
 const { 
   callRobotInstanceActivity,
-  callRobotPlanActivity
+  callRobotPlanActivity,
+  callRobotInstanceResumeActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -41,7 +42,14 @@ export interface StartRobotResult {
 /**
  * Workflow to start robot planning for a specific site and activity
  * 
- * This workflow makes two sequential API calls and then automatically starts robot execution:
+ * This workflow makes sequential API calls and then automatically starts robot execution:
+ * 
+ * When instance_id is provided:
+ * 1. POST /api/robots/instance/resume - Resumes existing robot instance
+ * 2. POST /api/agents/growth/robot/plan - Creates robot plan using the instance_id, returns instance_plan_id
+ * 3. Automatically starts robotWorkflow as a child workflow for plan execution (with ABANDON policy)
+ * 
+ * When instance_id is NOT provided:
  * 1. POST /api/robots/instance - Creates/prepares robot instance, returns instance_id
  * 2. POST /api/agents/growth/robot/plan - Creates robot plan using the instance_id, returns instance_plan_id
  * 3. Automatically starts robotWorkflow as a child workflow for plan execution (with ABANDON policy)
@@ -49,8 +57,7 @@ export interface StartRobotResult {
  * After successful plan creation and execution start, this workflow ends.
  * The child robotWorkflow continues running independently until plan completion.
  * 
- * First call receives: site_id, activity, and optionally user_id
- * Second call receives: site_id, activity, instance_id (from step 1), and optionally user_id
+ * Input: site_id, activity, and optionally user_id and instance_id
  * Child workflow receives: site_id, activity, instance_id, instance_plan_id, and optionally user_id
  */
 export async function startRobotWorkflow(input: StartRobotInput): Promise<StartRobotResult> {
@@ -66,6 +73,18 @@ export async function startRobotWorkflow(input: StartRobotInput): Promise<StartR
     if (providedInstanceId) {
       instance_id = providedInstanceId;
       console.log(`🆔 Using provided instance_id: ${instance_id}`);
+      
+      // Call resume API when instance_id is provided
+      console.log(`🔄 Calling robot instance resume API for instance: ${instance_id}...`);
+      const resumeResult = await callRobotInstanceResumeActivity({ instance_id });
+      
+      if (!resumeResult.success) {
+        console.error(`❌ Robot instance resume call failed for instance ${instance_id}:`, resumeResult.error);
+        throw new Error(`Resume call failed: ${resumeResult.error}`);
+      }
+      
+      console.log(`✅ Robot instance resume call completed successfully for instance: ${instance_id}`);
+      instanceAPIData = resumeResult.data;
     } else {
       // Prepare activity parameters
       const activityParams: any = {

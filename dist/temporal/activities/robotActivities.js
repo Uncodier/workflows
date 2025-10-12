@@ -7,6 +7,7 @@ exports.callRobotPlanActivity = callRobotPlanActivity;
 exports.callRobotPlanActActivity = callRobotPlanActActivity;
 exports.callRobotAuthActivity = callRobotAuthActivity;
 exports.callRobotInstanceActActivity = callRobotInstanceActActivity;
+exports.callRobotInstanceResumeActivity = callRobotInstanceResumeActivity;
 const apiService_1 = require("../services/apiService");
 /**
  * Activity to start the robot stream display
@@ -268,5 +269,30 @@ async function callRobotInstanceActActivity(params) {
     catch (error) {
         console.error('❌ Robot instance act operation failed:', error);
         throw new Error(`Robot instance act activity failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+/**
+ * Activity to call the robot instance resume API
+ */
+async function callRobotInstanceResumeActivity(params) {
+    const { instance_id } = params;
+    console.log(`🔄 Calling robot instance resume API for instance: ${instance_id}`);
+    try {
+        const payload = {
+            instance_id
+        };
+        const response = await apiService_1.apiService.post('/api/robots/instance/resume', payload);
+        if (!response.success) {
+            throw new Error(`Robot instance resume API call failed: ${response.error?.message || 'Unknown error'}`);
+        }
+        console.log('✅ Robot instance resume API call successful');
+        return {
+            success: true,
+            data: response.data
+        };
+    }
+    catch (error) {
+        console.error('❌ Robot instance resume operation failed:', error);
+        throw new Error(`Robot instance resume activity failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
