@@ -7,7 +7,8 @@ import { parseAgentResponse } from '../utils/agentResponseParser';
 const { 
   callRobotPlanActActivity,
   callRobotPlanActivity,
-  callRobotAuthActivity
+  callRobotAuthActivity,
+  callRobotInstanceStopActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -281,6 +282,24 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
         if (planResult.data?.instance_paused === true && planResult.data?.waiting_for_instructions === true) {
           console.log(`⏸️ Instance is paused and waiting for instructions`);
           console.log(`📝 Message: ${planResult.data?.message || 'Instance is paused. Provide a new prompt to resume.'}`);
+          console.log(`⏳ Waiting 5 minutes before stopping instance...`);
+          
+          // Wait 5 minutes before stopping the instance
+          await sleep('5m');
+          
+          // Stop the instance after 5 minutes
+          console.log(`🛑 Stopping instance after 5-minute pause timeout...`);
+          try {
+            const stopResult = await callRobotInstanceStopActivity({ instance_id });
+            if (stopResult.success) {
+              console.log(`✅ Instance stopped successfully after pause timeout`);
+            } else {
+              console.error(`❌ Failed to stop instance: ${stopResult.error}`);
+            }
+          } catch (stopError) {
+            console.error(`❌ Error stopping instance: ${stopError}`);
+          }
+          
           console.log(`🛑 Terminating workflow as instance requires manual intervention`);
           
           // Marcar el plan como fallido por pausa de instancia
@@ -606,6 +625,22 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
       const failureReason = lastResult?.failure_reason || 'Plan execution failed - check planResults for details';
       
       return finalizeWorkflow(false, failureReason, input, planResults, totalPlanCycles, planParams);
+    }
+
+    // Plan completed successfully - wait 5 minutes then stop instance
+    console.log(`✅ Plan completed successfully, waiting 5 minutes before stopping instance...`);
+    await sleep('5m');
+    
+    console.log(`🛑 Stopping instance after plan completion...`);
+    try {
+      const stopResult = await callRobotInstanceStopActivity({ instance_id });
+      if (stopResult.success) {
+        console.log(`✅ Instance stopped successfully after plan completion`);
+      } else {
+        console.error(`❌ Failed to stop instance: ${stopResult.error}`);
+      }
+    } catch (stopError) {
+      console.error(`❌ Error stopping instance: ${stopError}`);
     }
 
     return finalizeWorkflow(true, 'Plan completed successfully with all steps executed', input, planResults, totalPlanCycles, planParams);

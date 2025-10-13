@@ -5,7 +5,7 @@ const workflow_1 = require("@temporalio/workflow");
 const humanInterventionWorkflow_1 = require("./humanInterventionWorkflow");
 const agentResponseParser_1 = require("../utils/agentResponseParser");
 // Define the activity interface and options
-const { callRobotPlanActActivity, callRobotPlanActivity, callRobotAuthActivity } = (0, workflow_1.proxyActivities)({
+const { callRobotPlanActActivity, callRobotPlanActivity, callRobotAuthActivity, callRobotInstanceStopActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes',
     retry: {
         maximumAttempts: 3,
@@ -167,6 +167,23 @@ async function robotWorkflow(input) {
                 if (planResult.data?.instance_paused === true && planResult.data?.waiting_for_instructions === true) {
                     console.log(`⏸️ Instance is paused and waiting for instructions`);
                     console.log(`📝 Message: ${planResult.data?.message || 'Instance is paused. Provide a new prompt to resume.'}`);
+                    console.log(`⏳ Waiting 5 minutes before stopping instance...`);
+                    // Wait 5 minutes before stopping the instance
+                    await (0, workflow_1.sleep)('5m');
+                    // Stop the instance after 5 minutes
+                    console.log(`🛑 Stopping instance after 5-minute pause timeout...`);
+                    try {
+                        const stopResult = await callRobotInstanceStopActivity({ instance_id });
+                        if (stopResult.success) {
+                            console.log(`✅ Instance stopped successfully after pause timeout`);
+                        }
+                        else {
+                            console.error(`❌ Failed to stop instance: ${stopResult.error}`);
+                        }
+                    }
+                    catch (stopError) {
+                        console.error(`❌ Error stopping instance: ${stopError}`);
+                    }
                     console.log(`🛑 Terminating workflow as instance requires manual intervention`);
                     // Marcar el plan como fallido por pausa de instancia
                     planFailed = true;
@@ -463,6 +480,22 @@ async function robotWorkflow(input) {
             const lastResult = planResults.length > 0 ? planResults[planResults.length - 1] : null;
             const failureReason = lastResult?.failure_reason || 'Plan execution failed - check planResults for details';
             return finalizeWorkflow(false, failureReason, input, planResults, totalPlanCycles, planParams);
+        }
+        // Plan completed successfully - wait 5 minutes then stop instance
+        console.log(`✅ Plan completed successfully, waiting 5 minutes before stopping instance...`);
+        await (0, workflow_1.sleep)('5m');
+        console.log(`🛑 Stopping instance after plan completion...`);
+        try {
+            const stopResult = await callRobotInstanceStopActivity({ instance_id });
+            if (stopResult.success) {
+                console.log(`✅ Instance stopped successfully after plan completion`);
+            }
+            else {
+                console.error(`❌ Failed to stop instance: ${stopResult.error}`);
+            }
+        }
+        catch (stopError) {
+            console.error(`❌ Error stopping instance: ${stopError}`);
         }
         return finalizeWorkflow(true, 'Plan completed successfully with all steps executed', input, planResults, totalPlanCycles, planParams);
     }

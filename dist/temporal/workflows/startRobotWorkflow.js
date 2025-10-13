@@ -30,12 +30,12 @@ const { callRobotInstanceActivity, callRobotPlanActivity, callRobotInstanceResum
  * After successful plan creation and execution start, this workflow ends.
  * The child robotWorkflow continues running independently until plan completion.
  *
- * Input: site_id, activity, and optionally user_id and instance_id
+ * Input: site_id, activity, and optionally user_id, instance_id, message, and context
  * Child workflow receives: site_id, activity, instance_id, instance_plan_id, and optionally user_id
  */
 async function startRobotWorkflow(input) {
-    const { site_id, activity, user_id, instance_id: providedInstanceId } = input;
-    console.log(`🚀 Starting robot workflow for site: ${site_id}, activity: ${activity}${user_id ? `, user: ${user_id}` : ''}`);
+    const { site_id, activity, user_id, instance_id: providedInstanceId, message, context } = input;
+    console.log(`🚀 Starting robot workflow for site: ${site_id}, activity: ${activity}${user_id ? `, user: ${user_id}` : ''}${message ? `, message: ${message}` : ''}${context ? `, context: ${JSON.stringify(context)}` : ''}`);
     try {
         // Resolve instance_id: use provided one or create a new instance
         let instance_id;
@@ -78,69 +78,98 @@ async function startRobotWorkflow(input) {
             instanceAPIData = instanceResult.data;
             console.log(`✅ Robot instance call completed successfully. Instance ID: ${instance_id}`);
         }
-        // Step 2: Call robot plan API with instance_id
-        console.log(`🔄 Step 2: Calling robot plan API with instance_id: ${instance_id}...`);
-        const planParams = {
-            site_id,
-            activity,
-            instance_id
-        };
-        if (user_id) {
-            planParams.user_id = user_id;
-        }
-        const planResult = await callRobotPlanActivity(planParams);
-        if (!planResult.success) {
-            console.error(`❌ Robot plan call failed for site ${site_id}:`, planResult.error);
-            throw new Error(`Plan call failed: ${planResult.error}`);
-        }
-        // Extract instance_plan_id from plan call
-        const instance_plan_id = planResult.instance_plan_id;
-        console.log(`✅ Robot plan call completed successfully for site: ${site_id}`);
-        if (instance_plan_id) {
-            console.log(`🆔 Instance plan ID obtained: ${instance_plan_id}`);
-        }
-        console.log(`✅ Start robot workflow completed successfully for site: ${site_id}. Plan created and ready for execution.`);
-        // Automatically start the robot execution workflow
-        console.log(`🚀 Starting robot execution workflow for site: ${site_id}...`);
-        try {
-            const robotExecutionHandle = await (0, workflow_1.startChild)(robotWorkflow_1.robotWorkflow, {
-                args: [{
-                        site_id,
-                        activity,
-                        instance_id,
-                        instance_plan_id,
-                        user_id
-                    }],
-                workflowId: `robot-execution-${site_id}-${instance_id}-${Date.now()}`,
-                taskQueue: 'default', // Use the same task queue as the parent workflow
-                parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON // ✅ Child continues independently
-            });
-            console.log(`✅ Robot execution workflow started successfully with ID: ${robotExecutionHandle.workflowId}`);
-            console.log(`🔄 Child workflow will continue running independently after parent completes`);
-            return {
-                success: true,
-                instance_id,
-                instance_plan_id,
-                instanceData: instanceAPIData,
-                planData: planResult.data,
-                robotExecutionWorkflowId: robotExecutionHandle.workflowId,
+        // Step 2: Call robot plan API with instance_id (only if message is provided)
+        let instance_plan_id;
+        let planResult = undefined;
+        if (message) {
+            console.log(`🔄 Step 2: Calling robot plan API with instance_id: ${instance_id}...`);
+            const planParams = {
                 site_id,
                 activity,
-                user_id,
-                executedAt: new Date().toISOString()
+                instance_id
             };
+            if (user_id) {
+                planParams.user_id = user_id;
+            }
+            planParams.message = message;
+            if (context) {
+                planParams.context = context;
+            }
+            planResult = await callRobotPlanActivity(planParams);
+            if (!planResult.success) {
+                console.error(`❌ Robot plan call failed for site ${site_id}:`, planResult.error);
+                throw new Error(`Plan call failed: ${planResult.error}`);
+            }
+            // Extract instance_plan_id from plan call
+            instance_plan_id = planResult.instance_plan_id;
+            console.log(`✅ Robot plan call completed successfully for site: ${site_id}`);
+            if (instance_plan_id) {
+                console.log(`🆔 Instance plan ID obtained: ${instance_plan_id}`);
+            }
         }
-        catch (robotError) {
-            const robotErrorMessage = robotError instanceof Error ? robotError.message : String(robotError);
-            console.error(`❌ Failed to start robot execution workflow for site ${site_id}:`, robotErrorMessage);
-            // Still return success for the plan creation, but note the execution failure
+        else {
+            console.log(`⏭️ Skipping plan creation - no message provided. Only instance started.`);
+        }
+        console.log(`✅ Start robot workflow completed successfully for site: ${site_id}.${message ? ' Plan created and ready for execution.' : ' Instance started without plan.'}`);
+        // Only start the robot execution workflow if we have a plan (message was provided)
+        if (message && instance_plan_id) {
+            console.log(`🚀 Starting robot execution workflow for site: ${site_id}...`);
+            try {
+                const robotExecutionHandle = await (0, workflow_1.startChild)(robotWorkflow_1.robotWorkflow, {
+                    args: [{
+                            site_id,
+                            activity,
+                            instance_id,
+                            instance_plan_id,
+                            user_id
+                        }],
+                    workflowId: `robot-execution-${site_id}-${instance_id}-${Date.now()}`,
+                    taskQueue: 'default', // Use the same task queue as the parent workflow
+                    parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON // ✅ Child continues independently
+                });
+                console.log(`✅ Robot execution workflow started successfully with ID: ${robotExecutionHandle.workflowId}`);
+                console.log(`🔄 Child workflow will continue running independently after parent completes`);
+                return {
+                    success: true,
+                    instance_id,
+                    instance_plan_id,
+                    instanceData: instanceAPIData,
+                    planData: planResult?.data,
+                    robotExecutionWorkflowId: robotExecutionHandle.workflowId,
+                    site_id,
+                    activity,
+                    user_id,
+                    executedAt: new Date().toISOString()
+                };
+            }
+            catch (robotError) {
+                const robotErrorMessage = robotError instanceof Error ? robotError.message : String(robotError);
+                console.error(`❌ Failed to start robot execution workflow for site ${site_id}:`, robotErrorMessage);
+                // Still return success for the plan creation, but note the execution failure
+                return {
+                    success: true,
+                    instance_id,
+                    instance_plan_id,
+                    instanceData: instanceAPIData,
+                    planData: planResult?.data,
+                    error: `Plan created successfully but failed to start execution workflow: ${robotErrorMessage}`,
+                    site_id,
+                    activity,
+                    user_id,
+                    executedAt: new Date().toISOString()
+                };
+            }
+        }
+        else {
+            // No message provided, just return the instance data without starting execution workflow
+            console.log(`✅ Instance started successfully without plan execution workflow`);
             return {
                 success: true,
                 instance_id,
-                instance_plan_id,
+                instance_plan_id: undefined,
                 instanceData: instanceAPIData,
-                planData: planResult.data,
-                error: `Plan created successfully but failed to start execution workflow: ${robotErrorMessage}`,
+                planData: undefined,
+                robotExecutionWorkflowId: undefined,
                 site_id,
                 activity,
                 user_id,

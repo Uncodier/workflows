@@ -163,6 +163,8 @@ export async function callRobotPlanActivity(params: {
   instance_plan_id?: string;
   user_id?: string;
   error_context?: string;
+  message?: string;
+  context?: any;
 }): Promise<{
   success: boolean;
   data?: any;
@@ -170,9 +172,9 @@ export async function callRobotPlanActivity(params: {
   plan_completed?: boolean;
   instance_plan_id?: string;
 }> {
-  const { site_id, activity, instance_id, instance_plan_id, user_id, error_context } = params;
+  const { site_id, activity, instance_id, instance_plan_id, user_id, error_context, message, context } = params;
 
-  console.log(`🤖 Calling robot plan API for site: ${site_id}, activity: ${activity}, instance: ${instance_id}${instance_plan_id ? `, plan: ${instance_plan_id}` : ''}${user_id ? `, user: ${user_id}` : ''}${error_context ? ' (with error context)' : ''}`);
+  console.log(`🤖 Calling robot plan API for site: ${site_id}, activity: ${activity}, instance: ${instance_id}${instance_plan_id ? `, plan: ${instance_plan_id}` : ''}${user_id ? `, user: ${user_id}` : ''}${error_context ? ' (with error context)' : ''}${message ? ' (with message)' : ''}${context ? ' (with context)' : ''}`);
 
   try {
     // Build request payload, always include instance_id, optionally include instance_plan_id, user_id and error_context
@@ -193,6 +195,16 @@ export async function callRobotPlanActivity(params: {
     if (error_context) {
       payload.error_context = error_context;
       console.log(`🔄 Including error context for new plan creation`);
+    }
+    
+    if (message) {
+      payload.message = message;
+      console.log(`🔄 Including message for plan creation`);
+    }
+    
+    if (context) {
+      payload.context = context;
+      console.log(`🔄 Including context for plan creation`);
     }
 
     const response = await apiService.post('/api/agents/growth/robot/plan', payload);
@@ -437,6 +449,44 @@ export async function callRobotInstanceResumeActivity(params: {
   } catch (error) {
     console.error('❌ Robot instance resume operation failed:', error);
     throw new Error(`Robot instance resume activity failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Activity to call the robot instance stop API
+ */
+export async function callRobotInstanceStopActivity(params: {
+  instance_id: string;
+}): Promise<{
+  success: boolean;
+  data?: any;
+  error?: string;
+}> {
+  const { instance_id } = params;
+
+  console.log(`🛑 Calling robot instance stop API for instance: ${instance_id}`);
+
+  try {
+    const payload = {
+      instance_id
+    };
+
+    const response = await apiService.post('/api/robots/instance/stop', payload);
+
+    if (!response.success) {
+      throw new Error(`Robot instance stop API call failed: ${response.error?.message || 'Unknown error'}`);
+    }
+
+    console.log('✅ Robot instance stop API call successful');
+    
+    return {
+      success: true,
+      data: response.data
+    };
+    
+  } catch (error) {
+    console.error('❌ Robot instance stop operation failed:', error);
+    throw new Error(`Robot instance stop activity failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
