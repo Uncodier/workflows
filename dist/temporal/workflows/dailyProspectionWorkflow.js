@@ -10,7 +10,7 @@ const { validateCommunicationChannelsActivity, getProspectionLeadsActivity, upda
     },
 });
 // Import general activities
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, startLeadFollowUpWorkflowActivity, validateAndCleanStuckCronStatusActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getSettingsActivity, startLeadFollowUpWorkflowActivity, validateAndCleanStuckCronStatusActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes',
     retry: {
         maximumAttempts: 3,
@@ -412,6 +412,26 @@ async function dailyProspectionWorkflow(options) {
         siteName = site.name;
         siteUrl = site.url;
         console.log(`✅ Retrieved site information: ${siteName} (${siteUrl})`);
+        // Fetch settings to check if lead assignment is enabled
+        console.log(`⚙️ Step 1.5: Fetching settings for ${site_id}...`);
+        const settingsResult = await getSettingsActivity(site_id);
+        let assignLeadsEnabled = false;
+        if (settingsResult.success && settingsResult.settings?.activities?.assign_leads_to_team?.status === 'active') {
+            assignLeadsEnabled = true;
+            console.log(`✅ Lead assignment to team is ENABLED`);
+        }
+        else {
+            console.log(`⚠️ Lead assignment to team is DISABLED or not configured`);
+            if (settingsResult.error) {
+                console.log(`   - Settings fetch error: ${settingsResult.error}`);
+            }
+            else if (!settingsResult.settings?.activities?.assign_leads_to_team) {
+                console.log(`   - assign_leads_to_team not declared in settings`);
+            }
+            else {
+                console.log(`   - assign_leads_to_team.status = ${settingsResult.settings?.activities?.assign_leads_to_team?.status || 'undefined'}`);
+            }
+        }
         console.log(`🔍 Step 2: Getting prospection leads with pagination...`);
         console.log(`📋 Pagination configuration:`);
         console.log(`   - Max pages to search: ${maxPages}`);
@@ -499,32 +519,37 @@ async function dailyProspectionWorkflow(options) {
                 selectedLeads = salesAgentResult.selectedLeads || [];
                 leadsPriority = salesAgentResult.priority;
                 console.log(`✅ Sales agent processed ${leads.length} leads and selected ${selectedLeads.length} for prioritization`);
-                // Step 2.6: Assign priority leads based on sales agent response
-                console.log(`📋 Step 2.6: Assigning priority leads based on sales agent recommendations...`);
-                const assignmentResult = await assignPriorityLeadsActivity({
-                    site_id: site_id,
-                    salesAgentResponse: salesAgentResponse,
-                    userId: options.userId || site.user_id,
-                    additionalData: {
-                        // Only include essential data to avoid 414 errors
-                        siteName: siteName,
-                        siteUrl: siteUrl,
-                        workflowId: realWorkflowId,
-                        workflowType: 'dailyProspection'
-                        // Exclude large objects that could cause 414 errors
+                // Step 2.6: Assign priority leads based on sales agent response (ONLY if enabled)
+                if (assignLeadsEnabled) {
+                    console.log(`📋 Step 2.6: Assigning priority leads based on sales agent recommendations...`);
+                    const assignmentResult = await assignPriorityLeadsActivity({
+                        site_id: site_id,
+                        salesAgentResponse: salesAgentResponse,
+                        userId: options.userId || site.user_id,
+                        additionalData: {
+                            // Only include essential data to avoid 414 errors
+                            siteName: siteName,
+                            siteUrl: siteUrl,
+                            workflowId: realWorkflowId,
+                            workflowType: 'dailyProspection'
+                            // Exclude large objects that could cause 414 errors
+                        }
+                    });
+                    if (assignmentResult.success) {
+                        assignedLeads = assignmentResult.assignedLeads || [];
+                        notificationResults = assignmentResult.notificationResults || [];
+                        console.log(`✅ Lead assignment completed: ${assignedLeads.length} leads assigned`);
+                        console.log(`📧 Notifications sent: ${notificationResults.filter(r => r.success).length}/${notificationResults.length} successful`);
                     }
-                });
-                if (assignmentResult.success) {
-                    assignedLeads = assignmentResult.assignedLeads || [];
-                    notificationResults = assignmentResult.notificationResults || [];
-                    console.log(`✅ Lead assignment completed: ${assignedLeads.length} leads assigned`);
-                    console.log(`📧 Notifications sent: ${notificationResults.filter(r => r.success).length}/${notificationResults.length} successful`);
+                    else {
+                        const errorMsg = `Lead assignment failed: ${assignmentResult.error}`;
+                        console.error(`❌ ${errorMsg}`);
+                        errors.push(errorMsg);
+                        console.log(`⚠️ Continuing with prospection despite assignment failure`);
+                    }
                 }
                 else {
-                    const errorMsg = `Lead assignment failed: ${assignmentResult.error}`;
-                    console.error(`❌ ${errorMsg}`);
-                    errors.push(errorMsg);
-                    console.log(`⚠️ Continuing with prospection despite assignment failure`);
+                    console.log(`⏭️ Step 2.6: SKIPPED - Lead assignment is disabled in settings`);
                 }
             }
             else {
