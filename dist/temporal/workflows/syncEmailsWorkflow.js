@@ -4,7 +4,7 @@ exports.syncEmailsWorkflow = syncEmailsWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, validateAndCleanStuckCronStatusActivity, validateCommunicationChannelsActivity, analyzeEmailsLeadsReplyActivity, analyzeEmailsAliasReplyActivity, analyzeEmailsReplyActivity, syncSentEmailsActivity, deliveryStatusActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, validateAndCleanStuckCronStatusActivity, validateWorkflowConfigActivity, validateCommunicationChannelsActivity, analyzeEmailsLeadsReplyActivity, analyzeEmailsAliasReplyActivity, analyzeEmailsReplyActivity, syncSentEmailsActivity, deliveryStatusActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '15 minutes', // ✅ FIXED: Increased timeout to 15 minutes to handle slow email API
     retry: {
         maximumAttempts: 3,
@@ -22,6 +22,35 @@ async function syncEmailsWorkflow(options) {
     const workflowId = `sync-emails-${userId}`;
     console.log(`📧 Starting email sync workflow for user ${userId} (${options.provider})`);
     console.log(`📋 Options:`, JSON.stringify(options, null, 2));
+    // STEP 0: Validate workflow configuration
+    console.log('🔐 Step 0: Validating workflow configuration...');
+    const configValidation = await validateWorkflowConfigActivity(siteId, 'email_sync');
+    if (!configValidation.shouldExecute) {
+        console.log(`⛔ Workflow execution blocked: ${configValidation.reason}`);
+        // Log blocked execution
+        await logWorkflowExecutionActivity({
+            workflowId,
+            workflowType: 'syncEmailsWorkflow',
+            status: 'BLOCKED',
+            input: options,
+            error: `Workflow is ${configValidation.activityStatus} in site settings`,
+        });
+        return {
+            success: false,
+            provider: options.provider,
+            userId,
+            siteId,
+            syncedEmails: 0,
+            batchesProcessed: 0,
+            batches: [],
+            syncDuration: '0ms',
+            syncedAt: new Date().toISOString(),
+            nextSyncRecommended: new Date().toISOString(),
+            errors: [`Workflow is ${configValidation.activityStatus} in site settings`],
+            analysisResult: null,
+        };
+    }
+    console.log(`✅ Configuration validated: ${configValidation.reason}`);
     // Validate and clean any stuck cron status records before execution
     console.log('🔍 Validating cron status before email sync execution...');
     const cronValidation = await validateAndCleanStuckCronStatusActivity('syncEmailsWorkflow', siteId, 12 // 12 hours threshold - email sync should not be stuck longer than 12h

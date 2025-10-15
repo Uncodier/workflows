@@ -12,6 +12,7 @@ import type {
 const {
   logWorkflowExecutionActivity,
   saveCronStatusActivity,
+  validateWorkflowConfigActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: { maximumAttempts: 3 },
@@ -76,6 +77,36 @@ export async function idealClientProfileMiningWorkflow(
   const pageSize = options.pageSize ?? 20;
   const targetLeadsWithEmail = options.targetLeadsWithEmail ?? 40;
   const errors: string[] = [];
+
+  // STEP 0: Validate workflow configuration
+  console.log('🔐 Step 0: Validating workflow configuration...');
+  const configValidation = await validateWorkflowConfigActivity(
+    options.site_id,
+    'icp_lead_generation'
+  );
+  
+  if (!configValidation.shouldExecute) {
+    console.log(`⛔ Workflow execution blocked: ${configValidation.reason}`);
+    
+    // Log blocked execution
+    await logWorkflowExecutionActivity({
+      workflowId,
+      workflowType: 'idealClientProfileMiningWorkflow',
+      status: 'BLOCKED',
+      input: options,
+      error: `Workflow is ${configValidation.activityStatus} in site settings`,
+    });
+
+    return {
+      success: false,
+      icp_mining_id: options.icp_mining_id || 'unknown',
+      processed: 0,
+      foundMatches: 0,
+      errors: [`Workflow is ${configValidation.activityStatus} in site settings`],
+    };
+  }
+  
+  console.log(`✅ Configuration validated: ${configValidation.reason}`);
 
   await logWorkflowExecutionActivity({
     workflowId,

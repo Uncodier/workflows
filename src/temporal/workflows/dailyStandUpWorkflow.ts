@@ -6,6 +6,7 @@ const {
   logWorkflowExecutionActivity,
   saveCronStatusActivity,
   validateAndCleanStuckCronStatusActivity,
+  validateWorkflowConfigActivity,
   cmoWrapUpActivity,
   sendDailyStandUpNotificationActivity,
 } = proxyActivities<Activities>({
@@ -88,6 +89,36 @@ export async function dailyStandUpWorkflow(
   const scheduleSource = parentScheduleId ? 'parent dailyOperations' : 
                        (options.additionalData?.scheduleType ? 'scheduleType' : 'fallback');
   console.log(`📋 Schedule ID: ${scheduleId} (from ${scheduleSource})`);
+
+  // STEP 0: Validate workflow configuration
+  console.log('🔐 Step 0: Validating workflow configuration...');
+  const configValidation = await validateWorkflowConfigActivity(
+    site_id,
+    'daily_resume_and_stand_up'
+  );
+  
+  if (!configValidation.shouldExecute) {
+    console.log(`⛔ Workflow execution blocked: ${configValidation.reason}`);
+    
+    // Log blocked execution
+    await logWorkflowExecutionActivity({
+      workflowId,
+      workflowType: 'dailyStandUpWorkflow',
+      status: 'BLOCKED',
+      input: options,
+      error: `Workflow is ${configValidation.activityStatus} in site settings`,
+    });
+
+    return {
+      success: false,
+      siteId: site_id,
+      errors: [`Workflow is ${configValidation.activityStatus} in site settings`],
+      executionTime: `${Date.now() - startTime}ms`,
+      completedAt: new Date().toISOString(),
+    };
+  }
+  
+  console.log(`✅ Configuration validated: ${configValidation.reason}`);
 
   // Validate and clean any stuck cron status records before execution
   console.log('🔍 Validating cron status before daily standup execution...');

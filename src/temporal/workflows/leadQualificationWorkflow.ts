@@ -28,6 +28,7 @@ const {
   getSiteActivity,
   startLeadFollowUpWorkflowActivity,
   getQualificationLeadsActivity,
+  validateWorkflowConfigActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -45,6 +46,40 @@ export async function leadQualificationWorkflow(
 
   const workflowId = `lead-qualification-${site_id}`;
   const startTime = Date.now();
+
+  // STEP 0: Validate workflow configuration
+  console.log('🔐 Step 0: Validating workflow configuration...');
+  const configValidation = await validateWorkflowConfigActivity(
+    site_id,
+    'leads_follow_up'
+  );
+  
+  if (!configValidation.shouldExecute) {
+    console.log(`⛔ Workflow execution blocked: ${configValidation.reason}`);
+    
+    // Log blocked execution
+    await logWorkflowExecutionActivity({
+      workflowId,
+      workflowType: 'leadQualificationWorkflow',
+      status: 'BLOCKED',
+      input: options,
+      error: `Workflow is ${configValidation.activityStatus} in site settings`,
+    });
+
+    return {
+      success: false,
+      siteId: site_id,
+      qualifiedLeads: 0,
+      followUpWorkflowsStarted: 0,
+      thresholdDate: '',
+      results: [],
+      errors: [`Workflow is ${configValidation.activityStatus} in site settings`],
+      executionTime: '0ms',
+      completedAt: new Date().toISOString(),
+    };
+  }
+  
+  console.log(`✅ Configuration validated: ${configValidation.reason}`);
 
   await logWorkflowExecutionActivity({
     workflowId,

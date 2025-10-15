@@ -29,6 +29,7 @@ const {
   getSettingsActivity,
   startLeadFollowUpWorkflowActivity,
   validateAndCleanStuckCronStatusActivity,
+  validateWorkflowConfigActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -460,6 +461,41 @@ export async function dailyProspectionWorkflow(
 
     throw new Error(`Workflow blocked: ${cronValidation.reason}`);
   }
+
+  // STEP 0: Validate workflow configuration
+  console.log('🔐 Step 0: Validating workflow configuration...');
+  const configValidation = await validateWorkflowConfigActivity(
+    site_id,
+    'leads_initial_cold_outreach'
+  );
+  
+  if (!configValidation.shouldExecute) {
+    console.log(`⛔ Workflow execution blocked: ${configValidation.reason}`);
+    
+    // Log blocked execution
+    await logWorkflowExecutionActivity({
+      workflowId: realWorkflowId,
+      workflowType: 'dailyProspectionWorkflow',
+      status: 'BLOCKED',
+      input: options,
+      error: `Workflow is ${configValidation.activityStatus} in site settings`,
+    });
+
+    return {
+      success: false,
+      siteId: site_id,
+      leadsFound: 0,
+      leadsProcessed: 0,
+      tasksCreated: 0,
+      statusUpdated: 0,
+      prospectionResults: [],
+      errors: [`Workflow is ${configValidation.activityStatus} in site settings`],
+      executionTime: `${Date.now() - startTime}ms`,
+      completedAt: new Date().toISOString(),
+    };
+  }
+  
+  console.log(`✅ Configuration validated: ${configValidation.reason}`);
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({

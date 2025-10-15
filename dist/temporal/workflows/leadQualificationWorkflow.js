@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.leadQualificationWorkflow = leadQualificationWorkflow;
 const workflow_1 = require("@temporalio/workflow");
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, startLeadFollowUpWorkflowActivity, getQualificationLeadsActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, startLeadFollowUpWorkflowActivity, getQualificationLeadsActivity, validateWorkflowConfigActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes',
     retry: {
         initialInterval: '3s',
@@ -16,6 +16,32 @@ async function leadQualificationWorkflow(options) {
         throw new Error('site_id is required');
     const workflowId = `lead-qualification-${site_id}`;
     const startTime = Date.now();
+    // STEP 0: Validate workflow configuration
+    console.log('🔐 Step 0: Validating workflow configuration...');
+    const configValidation = await validateWorkflowConfigActivity(site_id, 'leads_follow_up');
+    if (!configValidation.shouldExecute) {
+        console.log(`⛔ Workflow execution blocked: ${configValidation.reason}`);
+        // Log blocked execution
+        await logWorkflowExecutionActivity({
+            workflowId,
+            workflowType: 'leadQualificationWorkflow',
+            status: 'BLOCKED',
+            input: options,
+            error: `Workflow is ${configValidation.activityStatus} in site settings`,
+        });
+        return {
+            success: false,
+            siteId: site_id,
+            qualifiedLeads: 0,
+            followUpWorkflowsStarted: 0,
+            thresholdDate: '',
+            results: [],
+            errors: [`Workflow is ${configValidation.activityStatus} in site settings`],
+            executionTime: '0ms',
+            completedAt: new Date().toISOString(),
+        };
+    }
+    console.log(`✅ Configuration validated: ${configValidation.reason}`);
     await logWorkflowExecutionActivity({
         workflowId,
         workflowType: 'leadQualificationWorkflow',
