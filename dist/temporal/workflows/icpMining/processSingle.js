@@ -188,7 +188,8 @@ async function processSingleIcp(args) {
     }
     const targetReached = totalFoundMatches >= targetLeadsWithEmail;
     const allTargetsProcessed = typeof totalTargets === 'number' && totalTargets > 0 && totalProcessed >= totalTargets;
-    if (targetReached || allTargetsProcessed) {
+    // Only mark as completed when ALL targets have been processed
+    if (allTargetsProcessed) {
         const failed = false;
         await deps.markIcpMiningCompletedActivity({ id: icpId, failed, last_error: null });
         await deps.logWorkflowExecutionActivity({
@@ -202,12 +203,14 @@ async function processSingleIcp(args) {
                     totalProcessed,
                     totalFoundMatches,
                     totalTargets,
-                    reason: targetReached ? 'target_reached' : 'all_targets_processed',
+                    reason: 'all_targets_processed',
+                    targetReached, // log if target was also reached
                 },
             },
         });
     }
     else {
+        // Keep as pending whether target was reached or not
         await deps.updateIcpMiningProgressActivity({ id: icpId, status: 'pending', last_error: null });
         await deps.logWorkflowExecutionActivity({
             workflowId,
@@ -220,7 +223,8 @@ async function processSingleIcp(args) {
                     totalProcessed,
                     totalFoundMatches,
                     totalTargets,
-                    reason: typeof totalTargets === 'number' ? 'not_all_targets_processed' : 'no_valid_total_targets',
+                    targetReached,
+                    reason: targetReached ? 'target_reached_but_not_all_processed' : 'not_all_targets_processed',
                 },
             },
         });
