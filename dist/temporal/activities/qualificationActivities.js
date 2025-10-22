@@ -41,11 +41,13 @@ const supabaseService_1 = require("../services/supabaseService");
  * as long as we haven't sent a follow-up in the configured window.
  *
  * Excludes leads with status in ['new', 'converted', 'canceled', 'cancelled', 'lost'].
+ * Prevents spam by excluding leads that have received assistant messages within the threshold period.
  *
  * Strategy (conservative, multi-step for correctness):
  *  - Fetch candidate leads for the site by allowed statuses (ordered by updated_at DESC)
- *  - For each candidate, find their conversations and locate the latest ASSISTANT message timestamp
- *  - Include the lead if the latest assistant message is older than thresholdDate
+ *  - For each candidate, check if there are ANY assistant messages within the threshold period
+ *  - Skip leads that have recent assistant messages (within last N days)
+ *  - Include the lead only if the latest assistant message is older than thresholdDate AND no recent messages exist
  */
 async function getQualificationLeadsActivity(params) {
     const siteId = params.site_id;
@@ -116,7 +118,26 @@ async function getQualificationLeadsActivity(params) {
             }
             // For a small set of latest conversations, find the latest ASSISTANT message
             let latestAssistantMessageIso = null;
+            let hasRecentMessages = false;
             for (const conv of conversations || []) {
+                // Check if there are ANY assistant messages within the threshold period
+                const { data: recentMessages, error: recentError } = await supabaseServiceRole
+                    .from('messages')
+                    .select('id, created_at')
+                    .eq('conversation_id', conv.id)
+                    .eq('role', 'assistant')
+                    .gte('created_at', thresholdIso) // Messages newer than threshold
+                    .limit(1);
+                if (recentError) {
+                    errors.push(`Failed to fetch recent assistant messages for conversation ${conv.id}: ${recentError.message}`);
+                    continue;
+                }
+                if (recentMessages && recentMessages.length > 0) {
+                    hasRecentMessages = true;
+                    console.log(`⏭️ Lead ${lead.id} has recent assistant message within last ${daysWithoutReply} days - skipping`);
+                    break; // No need to check other conversations
+                }
+                // Also get the latest message for historical reference
                 const { data: assistantMsg, error: msgError } = await supabaseServiceRole
                     .from('messages')
                     .select('id, created_at')
@@ -136,7 +157,23 @@ async function getQualificationLeadsActivity(params) {
                 }
             }
             // Fallback: If no assistant message found via conversations, try by lead_id
-            if (!latestAssistantMessageIso) {
+            if (!latestAssistantMessageIso && !hasRecentMessages) {
+                // Check for recent messages by lead_id as well
+                const { data: recentMessagesByLead, error: recentByLeadError } = await supabaseServiceRole
+                    .from('messages')
+                    .select('id, created_at')
+                    .eq('lead_id', lead.id)
+                    .eq('role', 'assistant')
+                    .gte('created_at', thresholdIso) // Messages newer than threshold
+                    .limit(1);
+                if (recentByLeadError) {
+                    errors.push(`Failed to fetch recent assistant messages by lead ${lead.id}: ${recentByLeadError.message}`);
+                }
+                if (recentMessagesByLead && recentMessagesByLead.length > 0) {
+                    hasRecentMessages = true;
+                    console.log(`⏭️ Lead ${lead.id} has recent assistant message within last ${daysWithoutReply} days (fallback check) - skipping`);
+                }
+                // Also get the latest message for historical reference
                 const { data: assistantMsgByLead, error: byLeadError } = await supabaseServiceRole
                     .from('messages')
                     .select('id, created_at')
@@ -152,13 +189,18 @@ async function getQualificationLeadsActivity(params) {
                     latestAssistantMessageIso = assistantMsgByLead.created_at;
                 }
             }
+            // Skip if there are recent assistant messages (within last 7 days)
+            if (hasRecentMessages) {
+                console.log(`⏭️ Skipping lead ${lead.id} - has assistant message within last ${daysWithoutReply} days`);
+                continue;
+            }
             // Must have at least one assistant message historically
             if (!latestAssistantMessageIso)
                 continue;
             // Log decision context for auditing
             console.log(`Qualification check lead=${lead.id} lastAssistant=${latestAssistantMessageIso} threshold=${thresholdIso}`);
-            // Include if the last assistant message is older than threshold
-            if (latestAssistantMessageIso < thresholdIso) {
+            // Only include if there's at least one old message AND no recent messages
+            if (latestAssistantMessageIso && latestAssistantMessageIso < thresholdIso) {
                 results.push(lead);
             }
         }
