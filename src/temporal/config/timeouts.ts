@@ -46,7 +46,7 @@ export const WORKFLOW_TIMEOUTS = {
 export const RETRY_POLICIES = {
   // Customer Support - retry menos porque pueden ser costosos
   CUSTOMER_SUPPORT: {
-    maximumAttempts: 2,
+    maximumAttempts: 4, // Initial attempt + 3 retries
     backoffCoefficient: 2.0,
     initialIntervalMs: 5000, // 5 segundos
     maximumIntervalMs: 60000, // 1 minuto

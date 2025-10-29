@@ -30,7 +30,7 @@ const timeouts_1 = require("../config/timeouts");
 //   }
 // }
 // Configure activity options using centralized timeouts
-const { sendCustomerSupportMessageActivity, startLeadAttentionWorkflowActivity, updateTaskStatusToCompletedActivity } = (0, workflow_1.proxyActivities)({
+const { sendCustomerSupportMessageActivity, startLeadAttentionWorkflowActivity, updateTaskStatusToCompletedActivity, saveCronStatusActivity, logWorkflowExecutionActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: timeouts_1.ACTIVITY_TIMEOUTS.CUSTOMER_SUPPORT, // ✅ Using centralized config (5 minutes)
     retry: timeouts_1.RETRY_POLICIES.CUSTOMER_SUPPORT, // ✅ Using appropriate retry policy for customer support
 });
@@ -63,6 +63,9 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
     };
     console.log(`🔄 Origin: ${effectiveBaseParams.origin}`);
     console.log(`🤖 Agent ID: ${effectiveBaseParams.agentId || 'not specified'}`);
+    // Get workflow ID for status tracking
+    const workflowId = messageData?.workflowId || `customer-support-${Date.now()}`;
+    const siteId = messageData?.site_id || messageData?.siteId;
     try {
         // ✅ NEW: If messageData has website_chat origin, process as-is without transformation
         if (effectiveBaseParams.origin === 'website_chat' && 'message' in messageData) {
@@ -310,7 +313,44 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
         }
     }
     catch (error) {
-        console.error('❌ Customer support workflow failed:', error);
-        throw new Error(`Customer support workflow failed: ${error instanceof Error ? error.message : String(error)}`);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error('❌ Customer support workflow failed:', errorMessage);
+        // Update cron status to FAILED if we have a siteId
+        if (siteId) {
+            try {
+                await saveCronStatusActivity({
+                    siteId,
+                    workflowId,
+                    scheduleId: `customer-support-${siteId}`,
+                    activityName: 'customerSupportMessageWorkflow',
+                    status: 'FAILED',
+                    lastRun: new Date().toISOString(),
+                    errorMessage: errorMessage,
+                    retryCount: 1
+                });
+                console.log('✅ Updated cron status to FAILED');
+            }
+            catch (statusError) {
+                console.error(`❌ Failed to update cron status to FAILED: ${statusError}`);
+                // Continue even if status update fails
+            }
+        }
+        // Log workflow execution failure
+        try {
+            await logWorkflowExecutionActivity({
+                workflowId,
+                workflowType: 'customerSupportMessageWorkflow',
+                status: 'FAILED',
+                input: messageData,
+                error: errorMessage,
+            });
+            console.log('✅ Logged workflow execution as FAILED');
+        }
+        catch (logError) {
+            console.error(`❌ Failed to log workflow execution failure: ${logError}`);
+            // Continue even if logging fails
+        }
+        // Throw error to properly fail the workflow
+        throw new Error(`Customer support workflow failed: ${errorMessage}`);
     }
 }

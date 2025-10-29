@@ -65,6 +65,7 @@ async function getQualificationLeadsActivity(params) {
                 leads: [],
                 totalChecked: 0,
                 considered: 0,
+                excludedByAssignee: 0,
                 thresholdDate: thresholdIso,
                 errors: ['Database not available']
             };
@@ -75,7 +76,7 @@ async function getQualificationLeadsActivity(params) {
         // Exclude: new, converted, canceled/cancelled, lost
         const { data: candidateLeads, error: leadsError } = await supabaseServiceRole
             .from('leads')
-            .select('id, name, email, phone, status, site_id')
+            .select('id, name, email, phone, status, site_id, assignee_id')
             .eq('site_id', siteId)
             .neq('status', 'new')
             .neq('status', 'converted')
@@ -90,17 +91,25 @@ async function getQualificationLeadsActivity(params) {
                 leads: [],
                 totalChecked: 0,
                 considered: 0,
+                excludedByAssignee: 0,
                 thresholdDate: thresholdIso,
                 errors: [leadsError.message]
             };
         }
         const results = [];
         let totalChecked = 0;
+        let excludedByAssignee = 0;
         // Step 2: For each candidate, find latest ASSISTANT (our) message across their conversations
         for (const lead of candidateLeads || []) {
             if (results.length >= limit)
                 break;
             totalChecked++;
+            // Skip leads that have an assignee_id
+            if (lead.assignee_id) {
+                console.log(`⏭️ Skipping lead ${lead.id} - has assignee_id (${lead.assignee_id})`);
+                excludedByAssignee++;
+                continue;
+            }
             // Find conversations for the lead (most recent first)
             const { data: conversations, error: convError } = await supabaseServiceRole
                 .from('conversations')
@@ -204,11 +213,13 @@ async function getQualificationLeadsActivity(params) {
                 results.push(lead);
             }
         }
+        console.log(`📊 Qualification leads summary: ${results.length} qualified, ${excludedByAssignee} excluded by assignee, ${totalChecked} total checked`);
         return {
             success: true,
             leads: results,
             totalChecked,
             considered: candidateLeads?.length || 0,
+            excludedByAssignee,
             thresholdDate: thresholdIso,
             errors: errors.length ? errors : undefined
         };
@@ -220,6 +231,7 @@ async function getQualificationLeadsActivity(params) {
             leads: [],
             totalChecked: 0,
             considered: 0,
+            excludedByAssignee: 0,
             thresholdDate: thresholdIso,
             errors: [message]
         };

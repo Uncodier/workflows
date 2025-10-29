@@ -599,6 +599,54 @@ export async function leadFollowUpWorkflow(
       const errorMsg = `Failed to execute lead follow-up: ${followUpResult.error}`;
       console.error(`❌ ${errorMsg}`);
       errors.push(errorMsg);
+      
+      // Check if this is a NO_VALID_CHANNELS error that should fail the workflow
+      let isNoValidChannelsError = false;
+      try {
+        // Parse the error to check for NO_VALID_CHANNELS code
+        const errorObj = typeof followUpResult.error === 'string' ? 
+          JSON.parse(followUpResult.error) : followUpResult.error;
+        
+        if (errorObj && errorObj.code === 'NO_VALID_CHANNELS') {
+          isNoValidChannelsError = true;
+          console.log(`🚫 NO_VALID_CHANNELS error detected - this is a business logic failure, not a retryable error`);
+        }
+      } catch (parseError) {
+        // If we can't parse the error, check if the string contains the error code
+        if (typeof followUpResult.error === 'string' && 
+            followUpResult.error.includes('NO_VALID_CHANNELS')) {
+          isNoValidChannelsError = true;
+          console.log(`🚫 NO_VALID_CHANNELS error detected in error string - this is a business logic failure`);
+        }
+      }
+      
+      // For NO_VALID_CHANNELS errors, update status to FAILED before throwing
+      if (isNoValidChannelsError) {
+        console.log(`📊 Updating cron status to FAILED for NO_VALID_CHANNELS error...`);
+        
+        // Update cron status to indicate failure
+        await saveCronStatusActivity({
+          siteId: site_id,
+          workflowId,
+          scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+          activityName: 'leadFollowUpWorkflow',
+          status: 'FAILED',
+          lastRun: new Date().toISOString(),
+          errorMessage: errorMsg
+        });
+
+        // Log workflow execution failure
+        await logWorkflowExecutionActivity({
+          workflowId,
+          workflowType: 'leadFollowUpWorkflow',
+          status: 'FAILED',
+          input: options,
+          error: errorMsg,
+        });
+        
+        console.log(`✅ Cron status and workflow logs updated to FAILED for NO_VALID_CHANNELS error`);
+      }
+      
       throw new Error(errorMsg);
     }
     
