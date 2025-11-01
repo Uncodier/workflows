@@ -102,7 +102,9 @@ async function processSingleIcp(args) {
     await deps.updateIcpMiningProgressActivity({ id: icpId, currentPage });
     // If still unknown, proceed by pages until target reached using hasMore as guard
     const shouldUseGuardedPaging = !(typeof totalTargets === 'number' && totalTargets > 0);
-    while (currentPage < maxPages &&
+    // Track pages processed in this execution run (not absolute page numbers)
+    let pagesProcessedInRun = 0;
+    while (pagesProcessedInRun < maxPages &&
         totalFoundMatches < targetLeadsWithEmail &&
         (shouldUseGuardedPaging || (typeof totalTargets === 'number' && totalProcessed < totalTargets))) {
         await deps.logWorkflowExecutionActivity({
@@ -174,6 +176,8 @@ async function processSingleIcp(args) {
                 },
             },
         });
+        // Increment pages processed in this run (after processing the page, before break checks)
+        pagesProcessedInRun++;
         if (totalFoundMatches >= targetLeadsWithEmail) {
             break;
         }

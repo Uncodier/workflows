@@ -144,8 +144,11 @@ export async function processSingleIcp(args: {
   // If still unknown, proceed by pages until target reached using hasMore as guard
   const shouldUseGuardedPaging = !(typeof totalTargets === 'number' && totalTargets > 0);
 
+  // Track pages processed in this execution run (not absolute page numbers)
+  let pagesProcessedInRun = 0;
+
   while (
-    currentPage < maxPages &&
+    pagesProcessedInRun < maxPages &&
     totalFoundMatches < targetLeadsWithEmail &&
     (shouldUseGuardedPaging || (typeof totalTargets === 'number' && totalProcessed < totalTargets))
   ) {
@@ -223,6 +226,9 @@ export async function processSingleIcp(args: {
         },
       },
     });
+
+    // Increment pages processed in this run (after processing the page, before break checks)
+    pagesProcessedInRun++;
 
     if (totalFoundMatches >= targetLeadsWithEmail) {
       break;
