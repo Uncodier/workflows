@@ -46,3 +46,4 @@ export * from './promptRobotWorkflow';
 export * from './webhookDispatchWorkflow';
 export * from './idealClientProfileMiningWorkflow';
 export * from './idealClientProfilePageSearchWorkflow';
+export * from './agentSupervisorWorkflow';

@@ -12,7 +12,7 @@ exports.TASK_QUEUES = {
     // Critical workflows that need immediate attention
     CRITICAL: 'critical-priority',
     // High priority workflows (customer support, urgent issues)
-    HIGH: 'high-priority',
+    HIGH: 'high',
     // Normal priority workflows (daily operations)
     NORMAL: 'default',
     // Low priority workflows (reports, analytics)

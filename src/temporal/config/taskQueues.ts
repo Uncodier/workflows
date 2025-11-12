@@ -10,7 +10,7 @@ export const TASK_QUEUES = {
   CRITICAL: 'critical-priority',
   
   // High priority workflows (customer support, urgent issues)
-  HIGH: 'high-priority',
+  HIGH: 'high',
   
   // Normal priority workflows (daily operations)
   NORMAL: 'default',

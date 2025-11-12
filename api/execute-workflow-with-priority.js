@@ -68,7 +68,7 @@ module.exports = async (req, res) => {
     // Task Queue Priority Mapping (replicate from taskQueues.ts)
     const TASK_QUEUES = {
       CRITICAL: 'critical-priority',
-      HIGH: 'high-priority',
+      HIGH: 'high',
       NORMAL: 'default',
       LOW: 'low-priority',
       BACKGROUND: 'background-priority'

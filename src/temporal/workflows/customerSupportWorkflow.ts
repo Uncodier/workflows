@@ -3,8 +3,10 @@ import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
 import { emailCustomerSupportMessageWorkflow } from './emailCustomerSupportWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
+import { agentSupervisorWorkflow } from './agentSupervisorWorkflow';
 import type { WhatsAppMessageData } from '../activities/whatsappActivities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
+import { TASK_QUEUES } from '../config/taskQueues';
 
 /**
  * Helper function to map WhatsApp intents to EmailData intents
@@ -37,7 +39,8 @@ const {
   startLeadAttentionWorkflowActivity,
   updateTaskStatusToCompletedActivity,
   saveCronStatusActivity,
-  logWorkflowExecutionActivity
+  logWorkflowExecutionActivity,
+  notifyTeamOnInboundActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.CUSTOMER_SUPPORT, // ✅ Using centralized config (5 minutes)
   retry: RETRY_POLICIES.CUSTOMER_SUPPORT, // ✅ Using appropriate retry policy for customer support
@@ -161,6 +164,65 @@ export async function customerSupportMessageWorkflow(
           console.error('❌ Lead attention workflow failed to start - failing entire workflow:', leadAttentionError);
           throw leadAttentionError; // Re-throw to fail the entire workflow
         }
+      
+      // 🎯 Start agent supervisor workflow as child (fire-and-forget, high priority)
+      try {
+        const commandId = response.data?.command_id;
+        const conversationId = response.data?.conversation_id;
+        
+        if (commandId || conversationId) {
+          console.log('🎯 Starting agent supervisor workflow as child (high priority, fire-and-forget)...');
+          
+          await startChild(agentSupervisorWorkflow, {
+            args: [{
+              command_id: commandId,
+              conversation_id: conversationId
+            }],
+            workflowId: `agent-supervisor-${commandId || conversationId}-${Date.now()}`,
+            taskQueue: TASK_QUEUES.HIGH, // High priority task queue
+            parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON // Fire-and-forget
+          });
+          
+          console.log('✅ Agent supervisor workflow started successfully (running independently)');
+        } else {
+          console.log('⚠️ No command_id or conversation_id available for supervisor call');
+        }
+      } catch (supervisorError) {
+        console.error('❌ Agent supervisor workflow start error (non-blocking):', supervisorError);
+        // Don't throw - workflow continues normally
+      }
+
+      // 🔔 Notify team on inbound message (non-blocking, complementary activity)
+      try {
+        const leadId = response.data?.lead_id;
+        const conversationId = response.data?.conversation_id;
+        const userMessage = response.data?.messages?.user?.content || 
+                           messageData.message || 
+                           'Website chat inquiry';
+        const notifySiteId = response.data?.site_id || messageData.site_id || siteId;
+
+        if (leadId && conversationId && notifySiteId) {
+          console.log('🔔 Calling notify team on inbound activity...');
+          
+          const notifyResult = await notifyTeamOnInboundActivity({
+            lead_id: leadId,
+            conversation_id: conversationId,
+            message: userMessage,
+            site_id: notifySiteId
+          });
+
+          if (notifyResult.success) {
+            console.log('✅ Team notification sent successfully');
+          } else {
+            console.log(`⚠️ Team notification skipped or failed (non-blocking): ${notifyResult.error}`);
+          }
+        } else {
+          console.log('⚠️ Missing required parameters for team notification (lead_id, conversation_id, or site_id)');
+        }
+      } catch (notifyError) {
+        console.error('❌ Notify team activity error (non-blocking):', notifyError);
+        // Don't throw - workflow continues normally
+      }
       
       console.log('✅ Website chat customer support message workflow completed successfully');
       return {
@@ -351,6 +413,65 @@ export async function customerSupportMessageWorkflow(
           console.error('❌ Lead attention workflow failed to start - failing entire workflow:', leadAttentionError);
           throw leadAttentionError; // Re-throw to fail the entire workflow
         }
+      
+      // 🎯 Start agent supervisor workflow as child (fire-and-forget, high priority)
+      try {
+        const commandId = response.data?.command_id;
+        const conversationId = response.data?.conversation_id;
+        
+        if (commandId || conversationId) {
+          console.log('🎯 Starting agent supervisor workflow as child (high priority, fire-and-forget)...');
+          
+          await startChild(agentSupervisorWorkflow, {
+            args: [{
+              command_id: commandId,
+              conversation_id: conversationId
+            }],
+            workflowId: `agent-supervisor-${commandId || conversationId}-${Date.now()}`,
+            taskQueue: TASK_QUEUES.HIGH, // High priority task queue
+            parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON // Fire-and-forget
+          });
+          
+          console.log('✅ Agent supervisor workflow started successfully (running independently)');
+        } else {
+          console.log('⚠️ No command_id or conversation_id available for supervisor call');
+        }
+      } catch (supervisorError) {
+        console.error('❌ Agent supervisor workflow start error (non-blocking):', supervisorError);
+        // Don't throw - workflow continues normally
+      }
+
+      // 🔔 Notify team on inbound message (non-blocking, complementary activity)
+      try {
+        const leadId = response.data?.lead_id || emailDataForCS.analysis_id;
+        const conversationId = response.data?.conversation_id;
+        const userMessage = response.data?.messages?.user?.content || 
+                           whatsappData.messageContent || 
+                           'WhatsApp inquiry';
+        const siteId = response.data?.site_id || emailDataForCS.site_id;
+
+        if (leadId && conversationId && siteId) {
+          console.log('🔔 Calling notify team on inbound activity...');
+          
+          const notifyResult = await notifyTeamOnInboundActivity({
+            lead_id: leadId,
+            conversation_id: conversationId,
+            message: userMessage,
+            site_id: siteId
+          });
+
+          if (notifyResult.success) {
+            console.log('✅ Team notification sent successfully');
+          } else {
+            console.log(`⚠️ Team notification skipped or failed (non-blocking): ${notifyResult.error}`);
+          }
+        } else {
+          console.log('⚠️ Missing required parameters for team notification (lead_id, conversation_id, or site_id)');
+        }
+      } catch (notifyError) {
+        console.error('❌ Notify team activity error (non-blocking):', notifyError);
+        // Don't throw - workflow continues normally
+      }
       
       console.log('✅ WhatsApp customer support message workflow completed successfully');
       return {
