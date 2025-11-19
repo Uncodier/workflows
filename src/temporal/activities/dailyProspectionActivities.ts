@@ -183,23 +183,6 @@ export async function validateCommunicationChannelsActivity(
     if (!hasAnyChannel) {
       console.log('❌ No communication channels (email or WhatsApp) are configured and enabled');
       
-      // Send notification about missing channel configuration
-      console.log('📤 Sending channels setup required notification...');
-      try {
-        const notificationResponse = await apiService.post('/api/notifications/channelsSetupRequired', {
-          site_id: params.site_id
-        });
-        
-        if (notificationResponse.success) {
-          console.log('✅ Channels setup notification sent successfully');
-        } else {
-          console.error('❌ Failed to send channels setup notification:', notificationResponse.error);
-        }
-      } catch (notificationError) {
-        const errorMessage = notificationError instanceof Error ? notificationError.message : String(notificationError);
-        console.error('❌ Exception sending channels setup notification:', errorMessage);
-      }
-      
       return {
         success: true,
         hasEmailChannel: false,
