@@ -1201,9 +1201,27 @@ export async function scheduleIndividualDailyStandUpsActivity(
 }> {
   const { timezone = 'America/Mexico_City' } = options;
   
+  // Safety check: Only allow daily standups on Monday (1) and Friday (5)
+  const today = new Date();
+  const dayOfWeek = today.getDay(); // 0=Sunday, 1=Monday, etc.
+  const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek];
+  const isMondayOrFriday = dayOfWeek === 1 || dayOfWeek === 5;
+  
+  if (!isMondayOrFriday) {
+    console.log(`⏭️ Daily standups restriction: Today is ${dayName} (${dayOfWeek}), standups only execute on Monday and Friday`);
+    console.log(`   - Skipping daily standups scheduling`);
+    return {
+      scheduled: 0,
+      failed: 0,
+      results: [],
+      errors: [`Daily standups only execute on Monday and Friday (today is ${dayName})`]
+    };
+  }
+  
   console.log(`📅 Scheduling individual Daily Stand Up workflows using TIMERS`);
   console.log(`   - Default timezone: ${timezone}`);
   console.log(`   - Sites with business_hours: ${businessHoursAnalysis.openSites?.length || 0}`);
+  console.log(`   - Day check passed: ${dayName} (${dayOfWeek}) - standups allowed`);
   
   const results: ScheduleWorkflowResult[] = [];
   const errors: string[] = [];

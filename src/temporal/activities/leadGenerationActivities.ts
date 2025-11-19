@@ -3009,10 +3009,12 @@ export async function determineMaxVenuesActivity(
     const plan = billingData?.plan || 'free';
     const channels = settingsData?.channels || {};
     
-    // Check if channels are configured (non-empty object with at least one enabled channel)
+    // Check if channels are configured (non-empty object with at least one enabled and active channel)
     const hasChannels = channels && typeof channels === 'object' && Object.keys(channels).length > 0 &&
       Object.values(channels).some((channel: any) => 
-        channel && typeof channel === 'object' && channel.enabled === true
+        channel && typeof channel === 'object' && 
+        channel.enabled === true && 
+        channel.status === 'active'
       );
 
     let maxVenues = 1; // Default for free plan without channels (reduced by half due to email validation quality improvement)

@@ -142,6 +142,16 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
       });
     }
     
+    // Check if daily standups should execute (only Monday and Friday)
+    const isMondayOrFriday = dayOfWeek === 1 || dayOfWeek === 5; // Monday = 1, Friday = 5
+    if (!isMondayOrFriday) {
+      console.log(`📅 Daily standups restriction: Today is ${dayName}, standups only execute on Monday and Friday`);
+      console.log(`   - Daily standups will be SKIPPED`);
+      console.log(`   - Other operations (prospection, lead generation, etc.) will continue as normal`);
+    } else {
+      console.log(`📅 Daily standups allowed: Today is ${dayName}, standups will execute`);
+    }
+    
     // NEW: Enhanced decision logic with timing
     const shouldExecute = businessHoursAnalysis.shouldExecuteOperations;
     const shouldExecuteNow = businessHoursAnalysis.shouldExecuteNow;
@@ -353,42 +363,57 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
       console.log('⏰ Step 2: SCHEDULING operations for later execution...');
       
       try {
-        console.log(`📅 Creating individual schedules for each site at their specific business hours`);
-        
-        // Use the new individual scheduling approach instead of global scheduling
-        const scheduleResult = await scheduleIndividualDailyStandUpsActivity(
-          businessHoursAnalysis,
-          {
-            timezone: 'America/Mexico_City',
-            parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
-          }
-        );
-        
-        if (scheduleResult.scheduled > 0) {
-          console.log(`✅ Successfully created ${scheduleResult.scheduled} individual schedules`);
-          if (scheduleResult.failed > 0) {
-            console.log(`⚠️ Failed to schedule ${scheduleResult.failed} sites`);
-          }
+        // Only schedule daily standups on Monday and Friday
+        if (isMondayOrFriday) {
+          console.log(`📅 Creating individual schedules for each site at their specific business hours`);
           
-          operationsResult = {
-            scheduled: true,
-            scheduledTime: scheduledForTime,
-            individualSchedules: scheduleResult.scheduled,
-            failedSchedules: scheduleResult.failed,
-            scheduleDetails: scheduleResult.results,
-            message: `Individual schedules created: ${scheduleResult.scheduled} sites will execute at their specific business hours`,
-            approach: 'individual-site-schedules'
-          };
+          // Use the new individual scheduling approach instead of global scheduling
+          const scheduleResult = await scheduleIndividualDailyStandUpsActivity(
+            businessHoursAnalysis,
+            {
+              timezone: 'America/Mexico_City',
+              parentScheduleId: realScheduleId // PASS parent schedule ID for proper tracking
+            }
+          );
+        
+          if (scheduleResult.scheduled > 0) {
+            console.log(`✅ Successfully created ${scheduleResult.scheduled} individual schedules`);
+            if (scheduleResult.failed > 0) {
+              console.log(`⚠️ Failed to schedule ${scheduleResult.failed} sites`);
+            }
+            
+            operationsResult = {
+              scheduled: true,
+              scheduledTime: scheduledForTime,
+              individualSchedules: scheduleResult.scheduled,
+              failedSchedules: scheduleResult.failed,
+              scheduleDetails: scheduleResult.results,
+              message: `Individual schedules created: ${scheduleResult.scheduled} sites will execute at their specific business hours`,
+              approach: 'individual-site-schedules'
+            };
+          } else {
+            console.error(`❌ No schedules were created successfully`);
+            operationsResult = {
+              scheduled: false,
+              scheduledTime: scheduledForTime,
+              individualSchedules: 0,
+              failedSchedules: scheduleResult.failed,
+              errors: scheduleResult.errors,
+              message: `Failed to create individual schedules: ${scheduleResult.errors.join(', ')}`,
+              approach: 'individual-site-schedules'
+            };
+          }
         } else {
-          console.error(`❌ No schedules were created successfully`);
+          console.log(`⏭️ Skipping daily standups scheduling - only execute on Monday and Friday`);
           operationsResult = {
             scheduled: false,
             scheduledTime: scheduledForTime,
             individualSchedules: 0,
-            failedSchedules: scheduleResult.failed,
-            errors: scheduleResult.errors,
-            message: `Failed to create individual schedules: ${scheduleResult.errors.join(', ')}`,
-            approach: 'individual-site-schedules'
+            failedSchedules: 0,
+            message: `Daily standups skipped - only execute on Monday and Friday (today is ${dayName})`,
+            approach: 'individual-site-schedules',
+            standupsSkipped: true,
+            skipReason: `Day restriction: standups only on Monday and Friday`
           };
         }
         

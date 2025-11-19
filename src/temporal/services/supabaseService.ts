@@ -232,9 +232,9 @@ export class SupabaseService {
       throw new Error(`Failed to fetch settings: ${settingsError.message}`);
     }
 
-    // Filter settings that have email.enabled = true
+    // Filter settings that have email.enabled = true and status = active
     const enabledEmailSettings = (settingsData || []).filter(setting => 
-      setting.channels?.email?.enabled === true
+      setting.channels?.email?.enabled === true && setting.channels?.email?.status === 'active'
     );
 
     console.log(`✅ Found ${enabledEmailSettings.length} settings with email enabled`);
