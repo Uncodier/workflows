@@ -130,7 +130,7 @@ export async function validateCommunicationChannelsActivity(
       console.log(`📋 Processing channels as array with ${channels.length} configurations`);
       
       emailConfig = channels.find((channel: any) => 
-        channel.type === 'email' && channel.enabled === true && channel.status === 'active'
+        channel.type === 'email' && channel.enabled === true && (channel.status === 'active' || channel.status === 'synced')
       );
       
       whatsappConfig = channels.find((channel: any) => 
@@ -148,7 +148,8 @@ export async function validateCommunicationChannelsActivity(
       if (channels.email && typeof channels.email === 'object') {
         // Set config regardless of enabled status so callers can inspect aliases
         emailConfig = channels.email;
-        hasEmailChannel = channels.email.enabled === true && channels.email.status === 'active';
+        // Email accepts "active" or "synced" status
+        hasEmailChannel = channels.email.enabled === true && (channels.email.status === 'active' || channels.email.status === 'synced');
         console.log(`   - Email enabled: ${hasEmailChannel}`, channels.email);
         // Detect aliases: accept string, array or truthy value
         const aliasesValue = channels.email.aliases;

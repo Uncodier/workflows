@@ -85,8 +85,9 @@ export async function validateEmailConfigurationActivity(
     const channels = siteSettings.channels || [];
     
     // Check if email configuration exists
+    // Email accepts "active" or "synced" status
     const emailConfig = channels.find((channel: any) => 
-      channel.type === 'email' && channel.enabled === true && channel.status === 'active'
+      channel.type === 'email' && channel.enabled === true && (channel.status === 'active' || channel.status === 'synced')
     );
     
     if (!emailConfig) {
