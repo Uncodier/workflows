@@ -74,12 +74,20 @@ services:
       - key: WORKFLOW_TASK_QUEUE
         value: "default"
       # Worker Versioning Configuration
+      # REQUIRED: Enable worker versioning (set to "true" to enable)
       - key: TEMPORAL_WORKER_USE_VERSIONING
         value: "true"
+      # REQUIRED: Deployment name to identify this worker deployment
       - key: TEMPORAL_WORKER_DEPLOYMENT_NAME
         value: "workflows_worker"
-      # TEMPORAL_WORKER_BUILD_ID will default to package.json version if not set
-      # TEMPORAL_WORKER_VERSIONING_BEHAVIOR will default to UNSPECIFIED if not set
+      # OPTIONAL: Build ID (defaults to package.json version if not set)
+      # Example: "0.2.6" or "v1.0.0" or "commit-abc123"
+      # - key: TEMPORAL_WORKER_BUILD_ID
+      #   value: "0.2.6"
+      # OPTIONAL: Default versioning behavior: PINNED or AUTO_UPGRADE
+      # If not set or set to UNSPECIFIED, no default behavior is set
+      # - key: TEMPORAL_WORKER_VERSIONING_BEHAVIOR
+      #   value: "UNSPECIFIED"
       - key: SUPABASE_URL
         fromService:
           type: envVarGroup

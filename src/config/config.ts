@@ -70,7 +70,11 @@ const logLevel = process.env.LOG_LEVEL || 'info';
 const useWorkerVersioning = process.env.TEMPORAL_WORKER_USE_VERSIONING === 'true';
 const buildId = process.env.TEMPORAL_WORKER_BUILD_ID || getPackageVersion();
 const deploymentName = process.env.TEMPORAL_WORKER_DEPLOYMENT_NAME || 'workflows_worker';
-const versioningBehavior = (process.env.TEMPORAL_WORKER_VERSIONING_BEHAVIOR || 'UNSPECIFIED') as 'UNSPECIFIED' | 'PINNED' | 'AUTO_UPGRADE';
+// Normalize versioning behavior: empty string, undefined, or 'UNSPECIFIED' all mean "not set"
+const rawBehavior = process.env.TEMPORAL_WORKER_VERSIONING_BEHAVIOR?.trim().toUpperCase() || 'UNSPECIFIED';
+const versioningBehavior = (rawBehavior === 'UNSPECIFIED' || rawBehavior === '') 
+  ? 'UNSPECIFIED' 
+  : (rawBehavior as 'PINNED' | 'AUTO_UPGRADE');
 
 const workerVersioningConfig: WorkerVersioningConfig = {
   useWorkerVersioning,

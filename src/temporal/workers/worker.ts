@@ -99,27 +99,33 @@ export async function startWorker() {
         },
       };
 
-      // Only include defaultVersioningBehavior if it's not UNSPECIFIED
-      // UNSPECIFIED means "don't set a default", so we omit the field
-      if (workerVersioningConfig.defaultVersioningBehavior !== 'UNSPECIFIED') {
-        deploymentOptions.defaultVersioningBehavior = workerVersioningConfig.defaultVersioningBehavior;
+      // Only include defaultVersioningBehavior if it's explicitly set to PINNED or AUTO_UPGRADE
+      // UNSPECIFIED, undefined, or empty means "don't set a default", so we omit the field completely
+      const behavior = workerVersioningConfig.defaultVersioningBehavior;
+      const validBehaviors = ['PINNED', 'AUTO_UPGRADE'];
+      
+      if (behavior && validBehaviors.includes(behavior)) {
+        deploymentOptions.defaultVersioningBehavior = behavior;
       }
+      // Explicitly do NOT set the field if behavior is UNSPECIFIED, undefined, or any other value
 
       workerOptions.workerDeploymentOptions = deploymentOptions;
 
       console.log('📦 Worker versioning enabled:', {
         buildId: workerVersioningConfig.buildId,
         deploymentName: workerVersioningConfig.deploymentName,
-        defaultVersioningBehavior: workerVersioningConfig.defaultVersioningBehavior === 'UNSPECIFIED' 
-          ? 'not set (UNSPECIFIED)' 
-          : workerVersioningConfig.defaultVersioningBehavior
+        defaultVersioningBehavior: validBehaviors.includes(behavior || '') 
+          ? behavior 
+          : 'not set (UNSPECIFIED or invalid)',
+        rawBehavior: behavior
       });
       logger.info('📦 Worker versioning enabled', {
         buildId: workerVersioningConfig.buildId,
         deploymentName: workerVersioningConfig.deploymentName,
-        defaultVersioningBehavior: workerVersioningConfig.defaultVersioningBehavior === 'UNSPECIFIED' 
-          ? 'not set (UNSPECIFIED)' 
-          : workerVersioningConfig.defaultVersioningBehavior
+        defaultVersioningBehavior: validBehaviors.includes(behavior || '') 
+          ? behavior 
+          : 'not set (UNSPECIFIED or invalid)',
+        rawBehavior: behavior
       });
     }
     
