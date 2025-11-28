@@ -91,23 +91,35 @@ export async function startWorker() {
 
     // Add worker versioning configuration if enabled
     if (workerVersioningConfig.useWorkerVersioning) {
-      workerOptions.workerDeploymentOptions = {
+      const deploymentOptions: any = {
         useWorkerVersioning: true,
         version: {
           buildId: workerVersioningConfig.buildId,
           deploymentName: workerVersioningConfig.deploymentName,
         },
-        defaultVersioningBehavior: workerVersioningConfig.defaultVersioningBehavior,
       };
+
+      // Only include defaultVersioningBehavior if it's not UNSPECIFIED
+      // UNSPECIFIED means "don't set a default", so we omit the field
+      if (workerVersioningConfig.defaultVersioningBehavior !== 'UNSPECIFIED') {
+        deploymentOptions.defaultVersioningBehavior = workerVersioningConfig.defaultVersioningBehavior;
+      }
+
+      workerOptions.workerDeploymentOptions = deploymentOptions;
+
       console.log('📦 Worker versioning enabled:', {
         buildId: workerVersioningConfig.buildId,
         deploymentName: workerVersioningConfig.deploymentName,
-        defaultVersioningBehavior: workerVersioningConfig.defaultVersioningBehavior
+        defaultVersioningBehavior: workerVersioningConfig.defaultVersioningBehavior === 'UNSPECIFIED' 
+          ? 'not set (UNSPECIFIED)' 
+          : workerVersioningConfig.defaultVersioningBehavior
       });
       logger.info('📦 Worker versioning enabled', {
         buildId: workerVersioningConfig.buildId,
         deploymentName: workerVersioningConfig.deploymentName,
-        defaultVersioningBehavior: workerVersioningConfig.defaultVersioningBehavior
+        defaultVersioningBehavior: workerVersioningConfig.defaultVersioningBehavior === 'UNSPECIFIED' 
+          ? 'not set (UNSPECIFIED)' 
+          : workerVersioningConfig.defaultVersioningBehavior
       });
     }
     

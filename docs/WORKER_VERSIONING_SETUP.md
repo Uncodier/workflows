@@ -24,7 +24,8 @@ TEMPORAL_WORKER_DEPLOYMENT_NAME=workflows_worker
 # Build ID (defaults to package.json version if not set)
 TEMPORAL_WORKER_BUILD_ID=0.2.6
 
-# Default versioning behavior: UNSPECIFIED, PINNED, or AUTO_UPGRADE
+# Default versioning behavior: PINNED, or AUTO_UPGRADE
+# If not set or set to UNSPECIFIED, no default behavior is set (each workflow specifies its own)
 TEMPORAL_WORKER_VERSIONING_BEHAVIOR=UNSPECIFIED
 ```
 
@@ -39,7 +40,7 @@ After deploying, check the worker logs to confirm versioning is enabled:
 📦 Worker versioning enabled: {
   buildId: '0.2.6',
   deploymentName: 'workflows_worker',
-  defaultVersioningBehavior: 'UNSPECIFIED'
+  defaultVersioningBehavior: 'not set (UNSPECIFIED)'  # or 'PINNED' or 'AUTO_UPGRADE'
 }
 ```
 
