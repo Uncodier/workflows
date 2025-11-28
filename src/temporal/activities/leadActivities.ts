@@ -452,6 +452,40 @@ export async function startLeadAttentionWorkflowActivity(request: StartLeadAtten
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    // If we get a "workflow already started" error, handle it gracefully
+    // This can happen when multiple customer support messages arrive for the same lead_id
+    // Since leadAttentionWorkflow is idempotent (checks for existing notifications), 
+    // it's safe to treat an already-running workflow as success
+    if (errorMessage.includes('Workflow execution already started')) {
+      const workflowId = `lead-attention-${request.lead_id}`;
+      
+      console.log(`⚠️ Workflow already exists for lead ${request.lead_id}, this is expected when multiple messages arrive`);
+      console.log(`📋 Existing workflow is likely still running or completed recently`);
+      console.log(`🔄 This can happen when multiple customer support messages arrive for the same lead`);
+      
+      // Try to get the existing workflow handle to confirm it exists
+      try {
+        const client = await getTemporalClient();
+        const existingHandle = client.workflow.getHandle(workflowId);
+        console.log(`✅ Found existing workflow handle for ${workflowId}`);
+      } catch (handleError) {
+        // If we can't get the handle, that's okay - we still know the workflow exists
+        // The error from Temporal confirms the workflow is already running
+        console.log(`📋 Workflow ${workflowId} exists (confirmed by Temporal error)`);
+      }
+      
+      console.log(`✅ Handled duplicate workflow gracefully for lead ${request.lead_id}`);
+      console.log(`📊 This prevents the "Workflow execution already started" error from failing the customer support workflow`);
+      
+      // Return success since the workflow is already running/started
+      return {
+        success: true,
+        workflowId: workflowId,
+      };
+    }
+    
+    // For other errors, return failure
     console.error(`❌ Exception starting independent leadAttentionWorkflow for lead ${request.lead_id}:`, errorMessage);
     
     return {

@@ -1490,7 +1490,7 @@ segmentId // Add segment_id parameter
             site_id: site_id,
             user_id: userId || null,
             status: 'new',
-            origin: 'lead_generation_workflow',
+            origin: lead.origin || 'lead_generation_workflow', // Use provided origin or default
             metadata: lead.metadata || metadataToPersist, // Use provided metadata or fallback
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
@@ -2544,9 +2544,25 @@ async function determineMaxVenuesActivity(options) {
         }
         const plan = billingData?.plan || 'free';
         const channels = settingsData?.channels || {};
-        // Check if channels are configured (non-empty object with at least one enabled channel)
+        // Check if channels are configured (non-empty object with at least one enabled and active channel)
+        // For email: accept "active" or "synced" status. For WhatsApp: only "active"
         const hasChannels = channels && typeof channels === 'object' && Object.keys(channels).length > 0 &&
-            Object.values(channels).some((channel) => channel && typeof channel === 'object' && channel.enabled === true);
+            Object.entries(channels).some(([channelType, channel]) => {
+                if (!channel || typeof channel !== 'object' || channel.enabled !== true) {
+                    return false;
+                }
+                const status = channel.status;
+                if (channelType === 'email') {
+                    // Email can be "active" or "synced"
+                    return status === 'active' || status === 'synced';
+                }
+                else if (channelType === 'whatsapp') {
+                    // WhatsApp only accepts "active"
+                    return status === 'active';
+                }
+                // For other channel types, default to "active" only
+                return status === 'active';
+            });
         let maxVenues = 1; // Default for free plan without channels (reduced by half due to email validation quality improvement)
         // Apply business logic for venue limits (reduced by half due to higher quality validated leads)
         switch (plan.toLowerCase()) {

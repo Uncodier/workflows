@@ -192,18 +192,38 @@ async function validateContactInformation(request) {
     }
 }
 /**
+ * Helper function to normalize domain format
+ * Removes protocol (http://, https://) and www. prefix to get clean domain
+ * API expects domain in format "company.com" without protocol
+ */
+function normalizeDomain(domain) {
+    if (!domain || typeof domain !== 'string') {
+        return domain;
+    }
+    let normalized = domain.trim();
+    // Remove protocol if present
+    normalized = normalized.replace(/^https?:\/\//i, '');
+    // Remove www. prefix if present
+    normalized = normalized.replace(/^www\./i, '');
+    // Remove trailing slash and any path/query/fragment
+    normalized = normalized.split('/')[0].split('?')[0].split('#')[0];
+    return normalized.trim();
+}
+/**
  * Activity to generate contact information for leads without email
  * Calls the dataAnalyst leadContactGeneration API
  */
 async function leadContactGenerationActivity(request) {
     const { name, domain, context, site_id, leadId } = request;
+    // Normalize domain to ensure it has https:// prefix
+    const normalizedDomain = normalizeDomain(domain);
     console.log(`🔍 Lead Contact Generation Activity Started`);
-    console.log(`📋 Context: lead=${leadId}, name=${name}, domain=${domain}, site=${site_id}`);
+    console.log(`📋 Context: lead=${leadId}, name=${name}, domain=${domain} -> normalized: ${normalizedDomain}, site=${site_id}`);
     console.log(`📝 Context details: ${context}`);
     try {
         const response = await apiService_1.apiService.post('/api/agents/dataAnalyst/leadContactGeneration', {
             name,
-            domain,
+            domain: normalizedDomain,
             context,
             site_id
         });

@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.idealClientProfilePageSearchWorkflow = idealClientProfilePageSearchWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 // Finder + DB activities for ICP mining
-const { getRoleQueryByIdActivity, callPersonRoleSearchActivity, callPersonContactsLookupActivity, upsertPersonActivity, updatePersonEmailsActivity, leadContactGenerationActivity, validateContactInformation, createSingleLead, checkExistingPersonActivity, checkExistingLeadForPersonActivity, upsertCompanyActivity, getSegmentIdFromRoleQueryActivity, logWorkflowExecutionActivity, } = (0, workflow_1.proxyActivities)({
+const { getRoleQueryByIdActivity, callPersonRoleSearchActivity, callPersonWorkEmailsActivity, upsertPersonActivity, updatePersonEmailsActivity, leadContactGenerationActivity, validateContactInformation, createSingleLead, checkExistingPersonActivity, checkExistingLeadForPersonActivity, upsertCompanyActivity, getSegmentIdFromRoleQueryActivity, logWorkflowExecutionActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes',
     retry: { maximumAttempts: 3 },
 });
@@ -201,7 +201,7 @@ async function idealClientProfilePageSearchWorkflow(options) {
             }
         }
         if (!validatedEmail) {
-            const lookup = await callPersonContactsLookupActivity({
+            const lookup = await callPersonWorkEmailsActivity({
                 external_person_id,
                 full_name: full_name || undefined,
                 company_name: company_name || undefined,

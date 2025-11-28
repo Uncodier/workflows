@@ -90,8 +90,8 @@ async function validateCommunicationChannelsActivity(params) {
         if (Array.isArray(channels)) {
             // Array format: channels is an array of channel objects
             console.log(`📋 Processing channels as array with ${channels.length} configurations`);
-            emailConfig = channels.find((channel) => channel.type === 'email' && channel.enabled === true);
-            whatsappConfig = channels.find((channel) => channel.type === 'whatsapp' && channel.enabled === true);
+            emailConfig = channels.find((channel) => channel.type === 'email' && channel.enabled === true && (channel.status === 'active' || channel.status === 'synced'));
+            whatsappConfig = channels.find((channel) => channel.type === 'whatsapp' && channel.enabled === true && channel.status === 'active');
             hasEmailChannel = !!emailConfig;
             hasWhatsappChannel = !!whatsappConfig;
         }
@@ -102,7 +102,8 @@ async function validateCommunicationChannelsActivity(params) {
             if (channels.email && typeof channels.email === 'object') {
                 // Set config regardless of enabled status so callers can inspect aliases
                 emailConfig = channels.email;
-                hasEmailChannel = channels.email.enabled === true;
+                // Email accepts "active" or "synced" status
+                hasEmailChannel = channels.email.enabled === true && (channels.email.status === 'active' || channels.email.status === 'synced');
                 console.log(`   - Email enabled: ${hasEmailChannel}`, channels.email);
                 // Detect aliases: accept string, array or truthy value
                 const aliasesValue = channels.email.aliases;
@@ -118,7 +119,7 @@ async function validateCommunicationChannelsActivity(params) {
             }
             // Check WhatsApp configuration  
             if (channels.whatsapp && typeof channels.whatsapp === 'object') {
-                hasWhatsappChannel = channels.whatsapp.enabled === true;
+                hasWhatsappChannel = channels.whatsapp.enabled === true && channels.whatsapp.status === 'active';
                 if (hasWhatsappChannel) {
                     whatsappConfig = channels.whatsapp;
                 }
@@ -135,23 +136,6 @@ async function validateCommunicationChannelsActivity(params) {
         console.log(`   - Any channel available: ${hasAnyChannel ? '✅' : '❌'}`);
         if (!hasAnyChannel) {
             console.log('❌ No communication channels (email or WhatsApp) are configured and enabled');
-            // Send notification about missing channel configuration
-            console.log('📤 Sending channels setup required notification...');
-            try {
-                const notificationResponse = await apiService_1.apiService.post('/api/notifications/channelsSetupRequired', {
-                    site_id: params.site_id
-                });
-                if (notificationResponse.success) {
-                    console.log('✅ Channels setup notification sent successfully');
-                }
-                else {
-                    console.error('❌ Failed to send channels setup notification:', notificationResponse.error);
-                }
-            }
-            catch (notificationError) {
-                const errorMessage = notificationError instanceof Error ? notificationError.message : String(notificationError);
-                console.error('❌ Exception sending channels setup notification:', errorMessage);
-            }
             return {
                 success: true,
                 hasEmailChannel: false,

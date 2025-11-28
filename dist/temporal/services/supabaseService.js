@@ -197,8 +197,10 @@ class SupabaseService {
             console.error('❌ Error fetching settings with email:', settingsError);
             throw new Error(`Failed to fetch settings: ${settingsError.message}`);
         }
-        // Filter settings that have email.enabled = true
-        const enabledEmailSettings = (settingsData || []).filter(setting => setting.channels?.email?.enabled === true);
+        // Filter settings that have email.enabled = true and status = active or synced
+        // Email accepts "active" or "synced" status
+        const enabledEmailSettings = (settingsData || []).filter(setting => setting.channels?.email?.enabled === true &&
+            (setting.channels?.email?.status === 'active' || setting.channels?.email?.status === 'synced'));
         console.log(`✅ Found ${enabledEmailSettings.length} settings with email enabled`);
         if (enabledEmailSettings.length === 0) {
             return [];

@@ -5,7 +5,7 @@ import type { Activities } from '../activities';
 const {
   getRoleQueryByIdActivity,
   callPersonRoleSearchActivity,
-  callPersonContactsLookupActivity,
+  callPersonWorkEmailsActivity,
   upsertPersonActivity,
   updatePersonEmailsActivity,
   leadContactGenerationActivity,
@@ -19,7 +19,7 @@ const {
 } = proxyActivities<{
   getRoleQueryByIdActivity: (id: string) => Promise<{ success: boolean; roleQuery?: any; error?: string }>;
   callPersonRoleSearchActivity: (o: { role_query_id?: string; query?: any; page: number; page_size?: number; site_id?: string; userId?: string }) => Promise<{ success: boolean; persons?: any[]; total?: number; page?: number; pageSize?: number; hasMore?: boolean; error?: string }>;
-  callPersonContactsLookupActivity: (o: { external_person_id?: string | number; full_name?: string; company_name?: string }) => Promise<{ success: boolean; emails?: string[]; error?: string }>;
+  callPersonWorkEmailsActivity: (o: { external_person_id?: string | number; full_name?: string; company_name?: string }) => Promise<{ success: boolean; emails?: string[]; error?: string }>;
   upsertPersonActivity: (p: any) => Promise<{ success: boolean; person?: any; error?: string }>;
   updatePersonEmailsActivity: (o: { person_id: string; emails: string[] }) => Promise<{ success: boolean; error?: string }>;
   leadContactGenerationActivity: (o: { name: string; domain: string; context: string; site_id: string }) => Promise<{ success: boolean; email_generation_analysis?: string[]; error?: string }>;
@@ -272,7 +272,7 @@ export async function idealClientProfilePageSearchWorkflow(
     }
 
     if (!validatedEmail) {
-      const lookup = await callPersonContactsLookupActivity({
+      const lookup = await callPersonWorkEmailsActivity({
         external_person_id,
         full_name: full_name || undefined,
         company_name: company_name || undefined,

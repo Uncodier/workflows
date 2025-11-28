@@ -60,6 +60,8 @@ const validateEmailWorkflow_1 = require("./validateEmailWorkflow");
 const webhookDispatchWorkflow_1 = require("./webhookDispatchWorkflow");
 const idealClientProfileMiningWorkflow_1 = require("./idealClientProfileMiningWorkflow");
 const idealClientProfilePageSearchWorkflow_1 = require("./idealClientProfilePageSearchWorkflow");
+const enrichLeadWorkflow_1 = require("./enrichLeadWorkflow");
+const generatePersonEmailWorkflow_1 = require("./generatePersonEmailWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -99,6 +101,8 @@ __exportStar(require("./validateEmailWorkflow"), exports);
 __exportStar(require("./webhookDispatchWorkflow"), exports);
 __exportStar(require("./idealClientProfileMiningWorkflow"), exports);
 __exportStar(require("./idealClientProfilePageSearchWorkflow"), exports);
+__exportStar(require("./enrichLeadWorkflow"), exports);
+__exportStar(require("./generatePersonEmailWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -143,6 +147,8 @@ exports.workflows = {
     webhookDispatchWorkflow: webhookDispatchWorkflow_1.webhookDispatchWorkflow,
     idealClientProfileMiningWorkflow: idealClientProfileMiningWorkflow_1.idealClientProfileMiningWorkflow,
     idealClientProfilePageSearchWorkflow: idealClientProfilePageSearchWorkflow_1.idealClientProfilePageSearchWorkflow,
+    enrichLeadWorkflow: enrichLeadWorkflow_1.enrichLeadWorkflow,
+    generatePersonEmailWorkflow: generatePersonEmailWorkflow_1.generatePersonEmailWorkflow,
     // Alias for backward compatibility
     whatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
     // ✅ Aliases for agent workflows with different naming conventions
@@ -193,6 +199,8 @@ exports.workflowNames = {
     webhookDispatchWorkflow: 'webhookDispatchWorkflow',
     idealClientProfileMiningWorkflow: 'idealClientProfileMiningWorkflow',
     idealClientProfilePageSearchWorkflow: 'idealClientProfilePageSearchWorkflow',
+    enrichLeadWorkflow: 'enrichLeadWorkflow',
+    generatePersonEmailWorkflow: 'generatePersonEmailWorkflow',
     // Alias for backward compatibility
     whatsappMessageWorkflow: 'whatsappMessageWorkflow',
     // ✅ Aliases for agent workflows with different naming conventions

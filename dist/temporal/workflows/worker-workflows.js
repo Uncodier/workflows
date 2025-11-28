@@ -65,3 +65,5 @@ __exportStar(require("./webhookDispatchWorkflow"), exports);
 __exportStar(require("./idealClientProfileMiningWorkflow"), exports);
 __exportStar(require("./idealClientProfilePageSearchWorkflow"), exports);
 __exportStar(require("./agentSupervisorWorkflow"), exports);
+__exportStar(require("./enrichLeadWorkflow"), exports);
+__exportStar(require("./generatePersonEmailWorkflow"), exports);

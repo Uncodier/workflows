@@ -1784,7 +1784,7 @@ export async function createSingleLead(
       site_id: site_id,
       user_id: userId || null,
       status: 'new',
-      origin: 'lead_generation_workflow',
+      origin: (lead as any).origin || 'lead_generation_workflow', // Use provided origin or default
       metadata: lead.metadata || metadataToPersist, // Use provided metadata or fallback
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()

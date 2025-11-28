@@ -79,27 +79,311 @@ export async function callPersonRoleSearchActivity(options: {
 }
 
 // Finder API: person contacts lookup (work emails)
-export async function callPersonContactsLookupActivity(options: {
+export async function callPersonWorkEmailsActivity(options: {
+  external_person_id?: string | number;
+  full_name?: string;
+  company_name?: string;
+  person_id?: string;
+  linkedin_profile?: string;
+}): Promise<{
+  success: boolean;
+  data?: any;
+  emails?: Array<{
+    email: string;
+    email_type?: string;
+    validation_status?: string;
+  }>;
+  error?: string;
+}> {
+  try {
+    const requestBody: any = {};
+    if (options.person_id) {
+      requestBody.person_id = options.person_id;
+    } else if (options.linkedin_profile) {
+      requestBody.linkedin_profile = options.linkedin_profile;
+    } else if (options.external_person_id) {
+      requestBody.external_person_id = options.external_person_id;
+    }
+    if (options.full_name) requestBody.full_name = options.full_name;
+    if (options.company_name) requestBody.company_name = options.company_name;
+
+    const response = await apiService.post('/api/finder/person_contacts_lookup/work_emails', requestBody);
+    if (!response.success) {
+      return { success: false, error: response.error?.message || 'Finder person_contacts_lookup failed' };
+    }
+
+    const payload = response.data?.data || response.data;
+    // Return structured array format
+    const emails = Array.isArray(payload) ? payload : (payload?.emails || payload?.work_emails || []);
+    return { success: true, data: payload, emails };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message };
+  }
+}
+
+// Legacy alias for backward compatibility (deprecated - use callPersonWorkEmailsActivity)
+export const callPersonContactsLookupActivity = callPersonWorkEmailsActivity;
+
+// Finder API: person contacts lookup (phone numbers)
+export async function callPersonContactsLookupPhoneNumbersActivity(options: {
+  person_id?: string;
+  linkedin_profile?: string;
   external_person_id?: string | number;
   full_name?: string;
   company_name?: string;
 }): Promise<{
   success: boolean;
   data?: any;
-  emails?: string[];
+  phoneNumbers?: Array<{
+    phone_number: string;
+  }>;
   error?: string;
 }> {
   try {
-    const response = await apiService.post('/api/finder/person_contacts_lookup/work_emails', options);
+    const requestBody: any = {};
+    if (options.person_id) {
+      requestBody.person_id = options.person_id;
+    } else if (options.linkedin_profile) {
+      requestBody.linkedin_profile = options.linkedin_profile;
+    } else if (options.external_person_id) {
+      requestBody.external_person_id = options.external_person_id;
+    }
+    if (options.full_name) requestBody.full_name = options.full_name;
+    if (options.company_name) requestBody.company_name = options.company_name;
+
+    const response = await apiService.post('/api/finder/person_contacts_lookup/phone_numbers', requestBody);
     if (!response.success) {
-      return { success: false, error: response.error?.message || 'Finder person_contacts_lookup failed' };
+      return { success: false, error: response.error?.message || 'Finder person_contacts_lookup phone_numbers failed' };
     }
 
     const payload = response.data?.data || response.data;
-    const emails: string[] = payload?.emails || payload?.work_emails || [];
+    // Return structured array format
+    const phoneNumbers = Array.isArray(payload) ? payload : (payload?.phone_numbers || payload?.phones || []);
+    return { success: true, data: payload, phoneNumbers };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message };
+  }
+}
+
+// Finder API: person contacts lookup (personal emails)
+export async function callPersonContactsLookupPersonalEmailsActivity(options: {
+  person_id?: string;
+  linkedin_profile?: string;
+  external_person_id?: string | number;
+  full_name?: string;
+  company_name?: string;
+}): Promise<{
+  success: boolean;
+  data?: any;
+  emails?: Array<{
+    email: string;
+    email_type?: string;
+    validation_status?: string;
+  }>;
+  error?: string;
+}> {
+  try {
+    const requestBody: any = {};
+    if (options.person_id) {
+      requestBody.person_id = options.person_id;
+    } else if (options.linkedin_profile) {
+      requestBody.linkedin_profile = options.linkedin_profile;
+    } else if (options.external_person_id) {
+      requestBody.external_person_id = options.external_person_id;
+    }
+    if (options.full_name) requestBody.full_name = options.full_name;
+    if (options.company_name) requestBody.company_name = options.company_name;
+
+    const response = await apiService.post('/api/finder/person_contacts_lookup/personal_emails', requestBody);
+    if (!response.success) {
+      return { success: false, error: response.error?.message || 'Finder person_contacts_lookup personal_emails failed' };
+    }
+
+    const payload = response.data?.data || response.data;
+    // Return structured array format
+    const emails = Array.isArray(payload) ? payload : (payload?.emails || payload?.personal_emails || []);
     return { success: true, data: payload, emails };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message };
+  }
+}
+
+// Finder API: person contacts lookup (details) - creates person, companies, and lead
+export async function callPersonContactsLookupDetailsActivity(options: {
+  person_id: string | number; // Required: external person_id from Finder API
+  site_id?: string; // Optional: site_id for lead creation
+  userId?: string; // Optional: user_id for lead creation
+}): Promise<{
+  success: boolean;
+  person?: any;
+  companies?: any[];
+  lead?: any;
+  error?: string;
+}> {
+  try {
+    const supabaseService = getSupabaseService();
+    const isConnected = await supabaseService.getConnectionStatus();
+    if (!isConnected) {
+      return { success: false, error: 'Database not available' };
+    }
+
+    // Call API endpoint
+    const requestBody = { person_id: options.person_id };
+    console.log(`📞 Calling person_contacts_lookup/details with person_id: ${options.person_id}`);
+
+    const response = await apiService.post('/api/finder/person_contacts_lookup/details', requestBody);
+    if (!response.success) {
+      return { success: false, error: response.error?.message || 'Finder person_contacts_lookup/details failed' };
+    }
+
+    const personData = response.data?.data || response.data;
+    if (!personData) {
+      return { success: false, error: 'No data returned from API' };
+    }
+
+    console.log(`✅ Received person details data for person_id: ${personData.id}`);
+
+    // Extract current role (is_current: true)
+    const currentRole = personData.roles?.find((r: any) => r.is_current === true) || personData.roles?.[0];
+    const currentOrganization = currentRole?.organization;
+
+    // Extract person data
+    const personLocation = personData.location?.name || null;
+    const linkedinUrl = personData.linkedin_info?.public_profile_url || null;
+
+    // Prepare person record
+    const personRecord = {
+      external_person_id: personData.id,
+      external_role_id: currentRole?.id || null,
+      external_organization_id: currentOrganization?.id || null,
+      full_name: personData.full_name || null,
+      role_title: currentRole?.role_title || null,
+      company_name: currentRole?.organization_name || currentOrganization?.name || null,
+      start_date: currentRole?.start_date || null,
+      end_date: currentRole?.end_date || null,
+      is_current: currentRole?.is_current || false,
+      location: personLocation,
+      emails: null, // Will be enriched later
+      phones: null, // Will be enriched later
+      raw_result: personData,
+    };
+
+    // Create/update person
+    console.log(`👤 Creating/updating person: ${personRecord.full_name}`);
+    const personResult = await upsertPersonActivity(personRecord);
+    if (!personResult.success) {
+      return { success: false, error: `Failed to create/update person: ${personResult.error}` };
+    }
+
+    const createdPerson = personResult.person;
+    console.log(`✅ Person created/updated: ${createdPerson.id}`);
+
+    // Extract and create/update companies from all roles
+    const companies: any[] = [];
+    const organizationsMap = new Map<string, any>();
+
+    // Collect unique organizations from roles
+    if (personData.roles && Array.isArray(personData.roles)) {
+      for (const role of personData.roles) {
+        if (role.organization && !organizationsMap.has(role.organization.id?.toString() || role.organization.name)) {
+          organizationsMap.set(
+            role.organization.id?.toString() || role.organization.name,
+            role.organization
+          );
+        }
+      }
+    }
+
+    // Also check educations for organization data
+    if (personData.educations && Array.isArray(personData.educations)) {
+      for (const education of personData.educations) {
+        if (education.organization && !organizationsMap.has(education.organization.id?.toString() || education.organization.name)) {
+          organizationsMap.set(
+            education.organization.id?.toString() || education.organization.name,
+            education.organization
+          );
+        }
+      }
+    }
+
+    // Create/update companies
+    console.log(`🏢 Creating/updating ${organizationsMap.size} companies`);
+    let currentCompanyId: string | undefined = undefined;
+    
+    for (const [key, org] of organizationsMap.entries()) {
+      try {
+        const companyData: any = {
+          name: org.name || null,
+          website: org.domain || null,
+          linkedin_url: org.linkedin_info?.public_profile_url || null,
+        };
+
+        // Extract industry if available
+        if (org.linkedin_info?.industry?.name) {
+          companyData.industry = org.linkedin_info.industry.name;
+        }
+
+        if (companyData.name) {
+          const company = await supabaseService.upsertCompany(companyData);
+          companies.push(company);
+          console.log(`✅ Company created/updated: ${company.name} (${company.id})`);
+          
+          // Track the current company (from current role) for lead association
+          if (currentOrganization && 
+              (org.id?.toString() === currentOrganization.id?.toString() || 
+               org.name === currentOrganization.name)) {
+            currentCompanyId = company.id;
+            console.log(`🔗 Current company identified for lead: ${company.name} (${company.id})`);
+          }
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Failed to create/update company ${org.name}: ${errorMsg}`);
+        // Continue with other companies
+      }
+    }
+
+    // Create/update lead if site_id is provided
+    let lead: any = null;
+    if (options.site_id && createdPerson) {
+      console.log(`📋 Creating/updating lead for site: ${options.site_id}`);
+      
+      // Extract primary email and phone if available (from person data or roles)
+      // Note: The details endpoint might not include contact info, so we'll create lead without it
+      // Contact enrichment can happen later via other endpoints
+      
+      const leadResult = await upsertLeadForPersonActivity({
+        person_id: createdPerson.id,
+        site_id: options.site_id,
+        name: personRecord.full_name || undefined,
+        email: undefined, // Will be enriched later
+        phone: undefined, // Will be enriched later
+        personal_email: undefined, // Will be enriched later
+        userId: options.userId,
+        company_id: currentCompanyId, // Associate lead with current company
+      });
+
+      if (leadResult.success) {
+        lead = leadResult.lead;
+        console.log(`✅ Lead created/updated: ${leadResult.leadId}`);
+      } else {
+        console.error(`❌ Failed to create/update lead: ${leadResult.error}`);
+        // Don't fail the whole operation if lead creation fails
+      }
+    }
+
+    return {
+      success: true,
+      person: createdPerson,
+      companies,
+      lead,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Error in callPersonContactsLookupDetailsActivity: ${message}`);
     return { success: false, error: message };
   }
 }
@@ -378,6 +662,121 @@ export async function checkExistingPersonActivity(options: {
   }
 }
 
+// Check person by LinkedIn profile URL or person_id
+export async function checkPersonByLinkedInActivity(options: {
+  linkedin_profile?: string;
+  person_id?: string;
+}): Promise<{
+  success: boolean;
+  hasExistingPerson: boolean;
+  existingPerson?: any;
+  error?: string;
+}> {
+  try {
+    const supabaseService = getSupabaseService();
+    const isConnected = await supabaseService.getConnectionStatus();
+    if (!isConnected) return { success: false, hasExistingPerson: false, error: 'Database not available' };
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    // If person_id is provided, check if it's a UUID or external_person_id
+    if (options.person_id) {
+      // Check if person_id is a valid UUID format
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const isUUID = uuidRegex.test(options.person_id);
+      
+      let person: any = null;
+      let error: any = null;
+      
+      if (isUUID) {
+        // Search by UUID (id field)
+        const result = await supabaseServiceRole
+          .from('persons')
+          .select('*')
+          .eq('id', options.person_id)
+          .maybeSingle();
+        person = result.data;
+        error = result.error;
+      } else {
+        // Search by external_person_id (numeric string)
+        // Note: There might be multiple persons with same external_person_id but different external_role_id
+        // We'll get the first one and log if there are multiple
+        const result = await supabaseServiceRole
+          .from('persons')
+          .select('*')
+          .eq('external_person_id', options.person_id)
+          .order('created_at', { ascending: false }) // Get the most recent one
+          .limit(1)
+          .maybeSingle();
+        person = result.data;
+        error = result.error;
+        
+        // Check if there are multiple matches (for logging)
+        if (!error && person) {
+          const countResult = await supabaseServiceRole
+            .from('persons')
+            .select('id', { count: 'exact', head: true })
+            .eq('external_person_id', options.person_id);
+          
+          if (countResult.count && countResult.count > 1) {
+            console.log(`⚠️ Found ${countResult.count} persons with external_person_id ${options.person_id}, using the most recent one`);
+          }
+        }
+      }
+
+      if (error) return { success: false, hasExistingPerson: false, error: error.message };
+      
+      return { 
+        success: true, 
+        hasExistingPerson: !!person, 
+        existingPerson: person || undefined 
+      };
+    }
+
+    // If linkedin_profile is provided, search in raw_result
+    if (options.linkedin_profile) {
+      // Fetch persons and filter in memory since JSONB queries can be complex
+      // We'll fetch a reasonable batch and filter
+      const { data: allPersons, error: fetchError } = await supabaseServiceRole
+        .from('persons')
+        .select('*')
+        .limit(1000); // Reasonable limit for search
+
+      if (fetchError) {
+        console.error('❌ Error fetching persons for LinkedIn search:', fetchError);
+        return { success: false, hasExistingPerson: false, error: fetchError.message };
+      }
+
+      // Filter in memory to find matching LinkedIn URL
+      const matchingPerson = allPersons?.find((p: any) => {
+        const rawResult = p.raw_result;
+        if (!rawResult || !options.linkedin_profile) return false;
+        
+        // Check multiple possible paths for LinkedIn URL
+        const linkedinUrl1 = rawResult?.linkedin_info?.public_profile_url;
+        const linkedinUrl2 = rawResult?.person?.linkedin_info?.public_profile_url;
+        const linkedinUrl3 = rawResult?.linkedin_url;
+        
+        const normalizedLinkedIn = options.linkedin_profile.trim();
+        
+        return linkedinUrl1 === normalizedLinkedIn || 
+               linkedinUrl2 === normalizedLinkedIn || 
+               linkedinUrl3 === normalizedLinkedIn;
+      });
+
+      return { 
+        success: true, 
+        hasExistingPerson: !!matchingPerson, 
+        existingPerson: matchingPerson || undefined 
+      };
+    }
+
+    return { success: true, hasExistingPerson: false };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, hasExistingPerson: false, error: message };
+  }
+}
+
 // Check if lead already exists for a person
 export async function checkExistingLeadForPersonActivity(options: {
   person_id: string;
@@ -397,7 +796,7 @@ export async function checkExistingLeadForPersonActivity(options: {
     // Check if there's already a lead for this person
     const { data: existingLead, error } = await supabaseServiceRole
       .from('leads')
-      .select('id, name, email, phone, status, created_at')
+      .select('id, name, email, phone, personal_email, status, created_at, company_id')
       .eq('site_id', options.site_id)
       .eq('person_id', options.person_id)
       .limit(1)
@@ -552,6 +951,168 @@ export async function getSegmentIdFromRoleQueryActivity(roleQueryId: string): Pr
     console.log(`✅ Found segment_id: ${roleQuerySegment.segment_id} for role_query_id: ${roleQueryId}`);
     return { success: true, segmentId: roleQuerySegment.segment_id };
     
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message };
+  }
+}
+
+// Upsert lead for person with enriched contact data
+export async function upsertLeadForPersonActivity(options: {
+  person_id: string;
+  site_id: string;
+  email?: string;
+  phone?: string;
+  personal_email?: string;
+  name?: string;
+  notes?: string;
+  userId?: string;
+  company_id?: string;
+  person_emails?: string[]; // Optional: pass person emails to avoid DB query
+}): Promise<{
+  success: boolean;
+  lead?: any;
+  leadId?: string;
+  error?: string;
+}> {
+  try {
+    const supabaseService = getSupabaseService();
+    const isConnected = await supabaseService.getConnectionStatus();
+    if (!isConnected) return { success: false, error: 'Database not available' };
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    // Check if lead already exists
+    const { data: existingLead, error: checkError } = await supabaseServiceRole
+      .from('leads')
+      .select('*')
+      .eq('person_id', options.person_id)
+      .eq('site_id', options.site_id)
+      .maybeSingle();
+
+    if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is "not found" which is OK
+      return { success: false, error: checkError.message };
+    }
+
+    // Get person data for name if not provided
+    let leadName = options.name;
+    if (!leadName) {
+      const { data: person } = await supabaseServiceRole
+        .from('persons')
+        .select('full_name')
+        .eq('id', options.person_id)
+        .single();
+      leadName = person?.full_name || 'Unknown';
+    }
+
+    // Validate that person has at least one contact method: work email, personal email, or phone
+    // Check person's emails (work emails) - use provided person_emails if available, otherwise query DB
+    let personEmails: string[] = [];
+    if (options.person_emails) {
+      personEmails = Array.isArray(options.person_emails) ? options.person_emails : [];
+    } else {
+      const { data: personData } = await supabaseServiceRole
+        .from('persons')
+        .select('emails')
+        .eq('id', options.person_id)
+        .single();
+      personEmails = personData?.emails || [];
+    }
+    
+    const hasPersonWorkEmail = Array.isArray(personEmails) && personEmails.length > 0 && personEmails[0]?.trim() !== '';
+    
+    // Check if we have at least one contact method: work email, personal email, or phone
+    const hasPersonalEmail = options.personal_email && options.personal_email.trim() !== '';
+    const hasPhone = options.phone && options.phone.trim() !== '';
+    
+    // Also check existing lead for personal email or phone if not provided in options
+    let hasExistingContact = false;
+    if (existingLead) {
+      const existingPersonalEmail = existingLead.personal_email && existingLead.personal_email.trim() !== '';
+      const existingPhone = existingLead.phone && existingLead.phone.trim() !== '';
+      hasExistingContact = existingPersonalEmail || existingPhone;
+    }
+    
+    const hasAtLeastOneContact = hasPersonWorkEmail || hasPersonalEmail || hasPhone || hasExistingContact;
+    
+    if (!hasAtLeastOneContact) {
+      return { success: false, error: 'Person must have at least 1 contact method (work email, personal email, or phone) to create/update lead' };
+    }
+
+    const leadData: any = {
+      person_id: options.person_id,
+      site_id: options.site_id,
+      name: leadName,
+      // If company_id is provided, it means lead will be enriched, so allow null/empty email
+      // Otherwise, require email or phone for lead creation
+      email: options.email !== undefined ? (options.email || '') : (options.company_id ? null : ''),
+      phone: options.phone || null,
+      personal_email: options.personal_email || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Add company_id if provided
+    if (options.company_id) {
+      leadData.company_id = options.company_id;
+    }
+
+    // Append notes if provided
+    if (options.notes) {
+      if (existingLead?.notes) {
+        leadData.notes = `${existingLead.notes}\n${options.notes}`;
+      } else {
+        leadData.notes = options.notes;
+      }
+    }
+
+    if (options.userId) {
+      leadData.user_id = options.userId;
+    }
+
+    let resultLead: any;
+
+    if (existingLead) {
+      // Update existing lead
+      const { data, error } = await supabaseServiceRole
+        .from('leads')
+        .update(leadData)
+        .eq('id', existingLead.id)
+        .select()
+        .single();
+
+      if (error) return { success: false, error: error.message };
+      resultLead = data;
+    } else {
+      // Create new lead
+      if (!options.userId) {
+        // Try to get user_id from site
+        const { data: site } = await supabaseServiceRole
+          .from('sites')
+          .select('user_id')
+          .eq('id', options.site_id)
+          .single();
+        
+        if (site?.user_id) {
+          leadData.user_id = site.user_id;
+        } else {
+          return { success: false, error: 'user_id is required to create lead' };
+        }
+      }
+
+      leadData.status = 'new';
+      leadData.origin = 'lead_enrichment_workflow';
+      leadData.created_at = new Date().toISOString();
+
+      const { data, error } = await supabaseServiceRole
+        .from('leads')
+        .insert([leadData])
+        .select()
+        .single();
+
+      if (error) return { success: false, error: error.message };
+      resultLead = data;
+    }
+
+    return { success: true, lead: resultLead, leadId: resultLead.id };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { success: false, error: message };
