@@ -73,6 +73,13 @@ services:
         value: "true"
       - key: WORKFLOW_TASK_QUEUE
         value: "default"
+      # Worker Versioning Configuration
+      - key: TEMPORAL_WORKER_USE_VERSIONING
+        value: "true"
+      - key: TEMPORAL_WORKER_DEPLOYMENT_NAME
+        value: "workflows_worker"
+      # TEMPORAL_WORKER_BUILD_ID will default to package.json version if not set
+      # TEMPORAL_WORKER_VERSIONING_BEHAVIOR will default to UNSPECIFIED if not set
       - key: SUPABASE_URL
         fromService:
           type: envVarGroup
