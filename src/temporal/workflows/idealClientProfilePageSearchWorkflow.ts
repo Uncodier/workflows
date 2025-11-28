@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 // Finder + DB activities for ICP mining
@@ -67,6 +67,10 @@ export async function idealClientProfilePageSearchWorkflow(
   let processed = 0;
   let foundMatches = 0;
   const leadsCreated: string[] = [];
+  
+  // Get deterministic timestamp from workflow start time
+  // Using workflowInfo().startTime ensures determinism during replay
+  const deterministicTimestamp = workflowInfo().startTime;
 
   await logWorkflowExecutionActivity({
     workflowId,
@@ -345,8 +349,8 @@ export async function idealClientProfilePageSearchWorkflow(
               : location
               ? { full_location: location }
               : {},
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
+            created_at: deterministicTimestamp.toISOString(),
+            updated_at: deterministicTimestamp.toISOString(),
           };
 
           const companyResult = await upsertCompanyActivity(companyData);
@@ -406,7 +410,7 @@ export async function idealClientProfilePageSearchWorkflow(
             end_date: p.end_date,
             raw_person_data: p.raw_result || null,
             source: 'icp_mining_workflow',
-            mining_date: new Date().toISOString(),
+            mining_date: deterministicTimestamp.toISOString(),
             role_query_id: role_query_id,
             icp_mining_id: icp_mining_id || null,
           },

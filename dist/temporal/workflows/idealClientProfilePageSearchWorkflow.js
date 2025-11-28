@@ -18,6 +18,9 @@ async function idealClientProfilePageSearchWorkflow(options) {
     let processed = 0;
     let foundMatches = 0;
     const leadsCreated = [];
+    // Get deterministic timestamp from workflow start time
+    // Using workflowInfo().startTime ensures determinism during replay
+    const deterministicTimestamp = (0, workflow_1.workflowInfo)().startTime;
     await logWorkflowExecutionActivity({
         workflowId,
         workflowType: 'idealClientProfilePageSearchWorkflow',
@@ -267,8 +270,8 @@ async function idealClientProfilePageSearchWorkflow(options) {
                             : location
                                 ? { full_location: location }
                                 : {},
-                        created_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString(),
+                        created_at: deterministicTimestamp.toISOString(),
+                        updated_at: deterministicTimestamp.toISOString(),
                     };
                     const companyResult = await upsertCompanyActivity(companyData);
                     if (companyResult.success && companyResult.company) {
@@ -327,7 +330,7 @@ async function idealClientProfilePageSearchWorkflow(options) {
                         end_date: p.end_date,
                         raw_person_data: p.raw_result || null,
                         source: 'icp_mining_workflow',
-                        mining_date: new Date().toISOString(),
+                        mining_date: deterministicTimestamp.toISOString(),
                         role_query_id: role_query_id,
                         icp_mining_id: icp_mining_id || null,
                     },
