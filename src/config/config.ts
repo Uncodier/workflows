@@ -1,8 +1,18 @@
 import { config } from 'dotenv';
-import packageJson from '../../package.json';
 
 // Load environment variables from .env.local
 config({ path: '.env.local' });
+
+// Get package version at runtime to avoid build issues
+const getPackageVersion = (): string => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const packageJson = require('../../package.json');
+    return packageJson.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+};
 
 interface TemporalConfig {
   serverUrl: string;
@@ -58,7 +68,7 @@ const logLevel = process.env.LOG_LEVEL || 'info';
 
 // Worker Versioning Configuration
 const useWorkerVersioning = process.env.TEMPORAL_WORKER_USE_VERSIONING === 'true';
-const buildId = process.env.TEMPORAL_WORKER_BUILD_ID || packageJson.version;
+const buildId = process.env.TEMPORAL_WORKER_BUILD_ID || getPackageVersion();
 const deploymentName = process.env.TEMPORAL_WORKER_DEPLOYMENT_NAME || 'workflows_worker';
 const versioningBehavior = (process.env.TEMPORAL_WORKER_VERSIONING_BEHAVIOR || 'UNSPECIFIED') as 'UNSPECIFIED' | 'PINNED' | 'AUTO_UPGRADE';
 
