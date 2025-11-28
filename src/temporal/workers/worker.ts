@@ -1,7 +1,7 @@
 import { NativeConnection, Worker as TemporalWorker } from '@temporalio/worker';
 import { activities } from '../activities';
 import { logger } from '../../lib/logger';
-import { temporalConfig } from '../../config/config';
+import { temporalConfig, workerVersioningConfig } from '../../config/config';
 import * as workflows from '../workflows/worker-workflows';
 
 /**
@@ -30,7 +30,12 @@ export async function startWorker() {
       taskQueue: temporalConfig.taskQueue,
       tls: temporalConfig.tls,
       hasApiKey: !!temporalConfig.apiKey,
-      environment: process.env.NODE_ENV
+      environment: process.env.NODE_ENV,
+      workerVersioning: workerVersioningConfig.useWorkerVersioning ? {
+        buildId: workerVersioningConfig.buildId,
+        deploymentName: workerVersioningConfig.deploymentName,
+        defaultVersioningBehavior: workerVersioningConfig.defaultVersioningBehavior
+      } : 'disabled'
     });
 
     // Log available activities and workflows for debugging
@@ -73,7 +78,7 @@ export async function startWorker() {
     console.log('🔧 Creating Temporal worker...');
     logger.info('🔧 Creating Temporal worker...');
     
-    const workerOptions = {
+    const workerOptions: any = {
       connection,
       namespace: temporalConfig.namespace,
       taskQueue: temporalConfig.taskQueue,
@@ -83,6 +88,28 @@ export async function startWorker() {
       maxConcurrentActivityTaskExecutions: 10,
       maxConcurrentWorkflowTaskExecutions: 10,
     };
+
+    // Add worker versioning configuration if enabled
+    if (workerVersioningConfig.useWorkerVersioning) {
+      workerOptions.workerDeploymentOptions = {
+        useWorkerVersioning: true,
+        version: {
+          buildId: workerVersioningConfig.buildId,
+          deploymentName: workerVersioningConfig.deploymentName,
+        },
+        defaultVersioningBehavior: workerVersioningConfig.defaultVersioningBehavior,
+      };
+      console.log('📦 Worker versioning enabled:', {
+        buildId: workerVersioningConfig.buildId,
+        deploymentName: workerVersioningConfig.deploymentName,
+        defaultVersioningBehavior: workerVersioningConfig.defaultVersioningBehavior
+      });
+      logger.info('📦 Worker versioning enabled', {
+        buildId: workerVersioningConfig.buildId,
+        deploymentName: workerVersioningConfig.deploymentName,
+        defaultVersioningBehavior: workerVersioningConfig.defaultVersioningBehavior
+      });
+    }
     
     console.log('Worker options:', JSON.stringify({
       ...workerOptions,

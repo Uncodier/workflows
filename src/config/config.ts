@@ -1,4 +1,5 @@
 import { config } from 'dotenv';
+import packageJson from '../../package.json';
 
 // Load environment variables from .env.local
 config({ path: '.env.local' });
@@ -20,6 +21,13 @@ interface SupabaseConfig {
 interface ApiConfig {
   baseUrl: string;
   apiKey: string;
+}
+
+interface WorkerVersioningConfig {
+  useWorkerVersioning: boolean;
+  buildId: string;
+  deploymentName: string;
+  defaultVersioningBehavior: 'UNSPECIFIED' | 'PINNED' | 'AUTO_UPGRADE';
 }
 
 // Determine if we're using localhost (development) or remote server (production)
@@ -48,12 +56,27 @@ const apiConfig: ApiConfig = {
 
 const logLevel = process.env.LOG_LEVEL || 'info';
 
+// Worker Versioning Configuration
+const useWorkerVersioning = process.env.TEMPORAL_WORKER_USE_VERSIONING === 'true';
+const buildId = process.env.TEMPORAL_WORKER_BUILD_ID || packageJson.version;
+const deploymentName = process.env.TEMPORAL_WORKER_DEPLOYMENT_NAME || 'workflows_worker';
+const versioningBehavior = (process.env.TEMPORAL_WORKER_VERSIONING_BEHAVIOR || 'UNSPECIFIED') as 'UNSPECIFIED' | 'PINNED' | 'AUTO_UPGRADE';
+
+const workerVersioningConfig: WorkerVersioningConfig = {
+  useWorkerVersioning,
+  buildId,
+  deploymentName,
+  defaultVersioningBehavior: versioningBehavior,
+};
+
 export {
   temporalConfig,
   supabaseConfig,
   apiConfig,
+  workerVersioningConfig,
   logLevel,
   type TemporalConfig,
   type SupabaseConfig,
-  type ApiConfig
+  type ApiConfig,
+  type WorkerVersioningConfig
 }; 

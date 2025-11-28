@@ -11,7 +11,7 @@
 ### Update code on the VM
 ```bash
 ssh <user>@<worker-ip>
-cd /path/to/Workflows
+cd /opt/uncodie-workflows
 git fetch origin
 git switch main && git pull --rebase --autostash origin main
 npm ci

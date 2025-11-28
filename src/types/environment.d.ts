@@ -8,6 +8,12 @@ declare global {
       TEMPORAL_API_KEY?: string;
       TEMPORAL_TLS?: string;
       
+      // Temporal Worker Versioning Configuration
+      TEMPORAL_WORKER_USE_VERSIONING?: string;
+      TEMPORAL_WORKER_BUILD_ID?: string;
+      TEMPORAL_WORKER_DEPLOYMENT_NAME?: string;
+      TEMPORAL_WORKER_VERSIONING_BEHAVIOR?: string;
+      
       // Supabase Configuration
       SUPABASE_URL?: string;
       SUPABASE_KEY?: string;
