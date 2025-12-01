@@ -62,7 +62,12 @@ async function startWorker() {
             taskQueue: config_1.temporalConfig.taskQueue,
             tls: config_1.temporalConfig.tls,
             hasApiKey: !!config_1.temporalConfig.apiKey,
-            environment: process.env.NODE_ENV
+            environment: process.env.NODE_ENV,
+            workerVersioning: config_1.workerVersioningConfig.useWorkerVersioning ? {
+                buildId: config_1.workerVersioningConfig.buildId,
+                deploymentName: config_1.workerVersioningConfig.deploymentName,
+                defaultVersioningBehavior: config_1.workerVersioningConfig.defaultVersioningBehavior
+            } : 'disabled'
         });
         // Log available activities and workflows for debugging
         console.log('📦 Loading activities and workflows...');
@@ -108,6 +113,66 @@ async function startWorker() {
             maxConcurrentActivityTaskExecutions: 10,
             maxConcurrentWorkflowTaskExecutions: 10,
         };
+        // Add worker versioning configuration if enabled
+        if (config_1.workerVersioningConfig.useWorkerVersioning) {
+            // Only include defaultVersioningBehavior if it's explicitly set to PINNED or AUTO_UPGRADE
+            // UNSPECIFIED, undefined, or empty means "don't set a default", so we omit the field completely
+            const behavior = config_1.workerVersioningConfig.defaultVersioningBehavior;
+            const validBehaviors = ['PINNED', 'AUTO_UPGRADE'];
+            // Build deployment options object conditionally
+            const deploymentOptions = {
+                useWorkerVersioning: true,
+                version: {
+                    buildId: config_1.workerVersioningConfig.buildId,
+                    deploymentName: config_1.workerVersioningConfig.deploymentName,
+                },
+            };
+            // Only add defaultVersioningBehavior if it's a valid value
+            // This ensures the field is completely omitted if behavior is UNSPECIFIED, undefined, or invalid
+            if (behavior && typeof behavior === 'string' && validBehaviors.includes(behavior)) {
+                deploymentOptions.defaultVersioningBehavior = behavior;
+            }
+            // Log the final object structure for debugging
+            console.log('📦 Worker deployment options structure:', JSON.stringify({
+                useWorkerVersioning: deploymentOptions.useWorkerVersioning,
+                version: deploymentOptions.version,
+                hasDefaultVersioningBehavior: 'defaultVersioningBehavior' in deploymentOptions,
+                defaultVersioningBehavior: deploymentOptions.defaultVersioningBehavior || 'NOT SET'
+            }, null, 2));
+            // Final verification: ensure defaultVersioningBehavior is not undefined
+            // Remove it completely if it's not a valid value
+            if ('defaultVersioningBehavior' in deploymentOptions &&
+                (!deploymentOptions.defaultVersioningBehavior ||
+                    !validBehaviors.includes(deploymentOptions.defaultVersioningBehavior))) {
+                delete deploymentOptions.defaultVersioningBehavior;
+            }
+            workerOptions.workerDeploymentOptions = deploymentOptions;
+            console.log('📦 Worker versioning enabled:', {
+                buildId: config_1.workerVersioningConfig.buildId,
+                deploymentName: config_1.workerVersioningConfig.deploymentName,
+                defaultVersioningBehavior: validBehaviors.includes(behavior || '')
+                    ? behavior
+                    : 'not set (UNSPECIFIED or invalid)',
+                rawBehavior: behavior
+            });
+            logger_1.logger.info('📦 Worker versioning enabled', {
+                buildId: config_1.workerVersioningConfig.buildId,
+                deploymentName: config_1.workerVersioningConfig.deploymentName,
+                defaultVersioningBehavior: validBehaviors.includes(behavior || '')
+                    ? behavior
+                    : 'not set (UNSPECIFIED or invalid)',
+                rawBehavior: behavior
+            });
+        }
+        // Final safety check: ensure workerDeploymentOptions doesn't have undefined defaultVersioningBehavior
+        if (workerOptions.workerDeploymentOptions) {
+            const depOpts = workerOptions.workerDeploymentOptions;
+            if (depOpts.defaultVersioningBehavior === undefined ||
+                depOpts.defaultVersioningBehavior === null ||
+                depOpts.defaultVersioningBehavior === 'UNSPECIFIED') {
+                delete depOpts.defaultVersioningBehavior;
+            }
+        }
         console.log('Worker options:', JSON.stringify({
             ...workerOptions,
             connection: '[CONNECTION_OBJECT]',

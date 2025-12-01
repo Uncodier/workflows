@@ -1,9 +1,20 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.logLevel = exports.apiConfig = exports.supabaseConfig = exports.temporalConfig = void 0;
+exports.logLevel = exports.workerVersioningConfig = exports.apiConfig = exports.supabaseConfig = exports.temporalConfig = void 0;
 const dotenv_1 = require("dotenv");
 // Load environment variables from .env.local
 (0, dotenv_1.config)({ path: '.env.local' });
+// Get package version at runtime to avoid build issues
+const getPackageVersion = () => {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const packageJson = require('../../package.json');
+        return packageJson.version || '0.0.0';
+    }
+    catch {
+        return '0.0.0';
+    }
+};
 // Determine if we're using localhost (development) or remote server (production)
 const serverUrl = process.env.TEMPORAL_SERVER_URL || 'localhost:7233';
 const isLocalhost = serverUrl.includes('localhost') || serverUrl.includes('127.0.0.1');
@@ -29,3 +40,19 @@ const apiConfig = {
 exports.apiConfig = apiConfig;
 const logLevel = process.env.LOG_LEVEL || 'info';
 exports.logLevel = logLevel;
+// Worker Versioning Configuration
+const useWorkerVersioning = process.env.TEMPORAL_WORKER_USE_VERSIONING === 'true';
+const buildId = process.env.TEMPORAL_WORKER_BUILD_ID || getPackageVersion();
+const deploymentName = process.env.TEMPORAL_WORKER_DEPLOYMENT_NAME || 'workflows_worker';
+// Normalize versioning behavior: empty string, undefined, or 'UNSPECIFIED' all mean "not set"
+const rawBehavior = process.env.TEMPORAL_WORKER_VERSIONING_BEHAVIOR?.trim().toUpperCase() || 'UNSPECIFIED';
+const versioningBehavior = (rawBehavior === 'UNSPECIFIED' || rawBehavior === '')
+    ? 'UNSPECIFIED'
+    : rawBehavior;
+const workerVersioningConfig = {
+    useWorkerVersioning,
+    buildId,
+    deploymentName,
+    defaultVersioningBehavior: versioningBehavior,
+};
+exports.workerVersioningConfig = workerVersioningConfig;

@@ -12,24 +12,42 @@ This guide explains how to configure and activate Worker Versioning in Temporal.
 
 ### 1. Environment Variables
 
-The worker versioning is controlled by these environment variables:
+#### Required Variables (Must Set)
 
 ```bash
-# Enable worker versioning
+# REQUIRED: Enable worker versioning
 TEMPORAL_WORKER_USE_VERSIONING=true
 
-# Deployment name (identifies your worker deployment)
+# REQUIRED: Deployment name (identifies your worker deployment)
+# This name will appear in Temporal UI
 TEMPORAL_WORKER_DEPLOYMENT_NAME=workflows_worker
+```
 
-# Build ID (defaults to package.json version if not set)
+#### Optional Variables (Have Defaults)
+
+```bash
+# OPTIONAL: Build ID (defaults to package.json version if not set)
+# Examples: "0.2.6", "v1.0.0", "commit-abc123"
 TEMPORAL_WORKER_BUILD_ID=0.2.6
 
-# Default versioning behavior: PINNED, or AUTO_UPGRADE
-# If not set or set to UNSPECIFIED, no default behavior is set (each workflow specifies its own)
+# OPTIONAL: Default versioning behavior
+# Values: PINNED, AUTO_UPGRADE, or UNSPECIFIED (default)
+# - PINNED: Workflows stay on the same version until completion
+# - AUTO_UPGRADE: Workflows automatically move to new versions  
+# - UNSPECIFIED: Each workflow specifies its own behavior (recommended)
 TEMPORAL_WORKER_VERSIONING_BEHAVIOR=UNSPECIFIED
 ```
 
-These are already configured in `render.yaml` for the worker service.
+#### Default Values Summary
+
+| Variable | Required | Default Value | Description |
+|----------|----------|---------------|-------------|
+| `TEMPORAL_WORKER_USE_VERSIONING` | ✅ Yes | `false` | Must be `"true"` to enable |
+| `TEMPORAL_WORKER_DEPLOYMENT_NAME` | ✅ Yes | `"workflows_worker"` | Name shown in Temporal UI |
+| `TEMPORAL_WORKER_BUILD_ID` | ❌ No | `package.json` version | Auto-detected from package.json |
+| `TEMPORAL_WORKER_VERSIONING_BEHAVIOR` | ❌ No | `UNSPECIFIED` | No default behavior set |
+
+**Note**: These are already configured in `render.yaml` for the worker service with sensible defaults.
 
 ### 2. Verify Worker is Running with Versioning
 
