@@ -6,7 +6,7 @@
     "test": "jest",
     "dev": "next dev",
     "build": "echo '🚀 Building version: v0.2.6-email-validation-gateway-policy' && NEXT_CACHE_DIR=/tmp/next-cache TURBOPACK_CACHE_DIR=/tmp/next-turbo-cache npx next build",
-    "build:all": "echo '🚀 Building version: v0.2.6-email-validation-gateway-policy' && rm -rf .next .turbo && mkdir -p /tmp/next-cache /tmp/next-turbo-cache && npm run build && npx tsc --project worker.tsconfig.json",
+    "build:all": "echo '🚀 Building version: v0.2.6-email-validation-gateway-policy' && rm -rf .next .turbo dist && mkdir -p /tmp/next-cache /tmp/next-turbo-cache && npm run build && npx tsc --project worker.tsconfig.json",
     "start": "next start",
     "lint": "next lint",
     "start-worker": "npx tsx src/scripts/start-worker.ts",

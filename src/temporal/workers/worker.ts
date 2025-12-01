@@ -148,13 +148,40 @@ export async function startWorker() {
     }
     
     // Final safety check: ensure workerDeploymentOptions doesn't have undefined defaultVersioningBehavior
+    // This is critical because the SDK throws an error if the field exists with undefined value
     if (workerOptions.workerDeploymentOptions) {
       const depOpts = workerOptions.workerDeploymentOptions as any;
-      if (depOpts.defaultVersioningBehavior === undefined || 
-          depOpts.defaultVersioningBehavior === null ||
-          depOpts.defaultVersioningBehavior === 'UNSPECIFIED') {
+      const validBehaviors = ['PINNED', 'AUTO_UPGRADE'];
+      
+      // Remove the field if it's not a valid value
+      if (!depOpts.defaultVersioningBehavior || 
+          !validBehaviors.includes(depOpts.defaultVersioningBehavior) ||
+          depOpts.defaultVersioningBehavior === 'UNSPECIFIED' ||
+          depOpts.defaultVersioningBehavior === undefined ||
+          depOpts.defaultVersioningBehavior === null) {
+        // Use Reflect.deleteProperty to ensure complete removal
+        Reflect.deleteProperty(depOpts, 'defaultVersioningBehavior');
+        // Also try delete as fallback
         delete depOpts.defaultVersioningBehavior;
       }
+      
+      // Final verification: ensure the field is completely gone
+      if ('defaultVersioningBehavior' in depOpts) {
+        console.warn('⚠️ WARNING: defaultVersioningBehavior still present after cleanup, forcing removal');
+        Reflect.deleteProperty(depOpts, 'defaultVersioningBehavior');
+        delete depOpts.defaultVersioningBehavior;
+      }
+    }
+
+    // Log final structure before creating worker
+    if (workerOptions.workerDeploymentOptions) {
+      const depOpts = workerOptions.workerDeploymentOptions as any;
+      console.log('📦 Final workerDeploymentOptions structure:', JSON.stringify({
+        useWorkerVersioning: depOpts.useWorkerVersioning,
+        version: depOpts.version,
+        hasDefaultVersioningBehavior: 'defaultVersioningBehavior' in depOpts,
+        defaultVersioningBehavior: depOpts.defaultVersioningBehavior || 'FIELD NOT PRESENT'
+      }, null, 2));
     }
 
     console.log('Worker options:', JSON.stringify({
