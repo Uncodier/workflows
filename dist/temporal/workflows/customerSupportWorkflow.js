@@ -32,7 +32,7 @@ const taskQueues_1 = require("../config/taskQueues");
 //   }
 // }
 // Configure activity options using centralized timeouts
-const { sendCustomerSupportMessageActivity, startLeadAttentionWorkflowActivity, updateTaskStatusToCompletedActivity, saveCronStatusActivity, logWorkflowExecutionActivity, notifyTeamOnInboundActivity } = (0, workflow_1.proxyActivities)({
+const { sendCustomerSupportMessageActivity, startLeadAttentionWorkflowActivity, updateTaskStatusToCompletedActivity, saveCronStatusActivity, logWorkflowExecutionActivity, notifyTeamOnInboundActivity, getSiteIdFromCommandOrConversationActivity, validateWorkflowConfigActivity } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: timeouts_1.ACTIVITY_TIMEOUTS.CUSTOMER_SUPPORT, // ✅ Using centralized config (5 minutes)
     retry: timeouts_1.RETRY_POLICIES.CUSTOMER_SUPPORT, // ✅ Using appropriate retry policy for customer support
 });
@@ -137,17 +137,46 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
                 const commandId = response.data?.command_id;
                 const conversationId = response.data?.conversation_id;
                 if (commandId || conversationId) {
-                    console.log('🎯 Starting agent supervisor workflow as child (high priority, fire-and-forget)...');
-                    await (0, workflow_1.startChild)(agentSupervisorWorkflow_1.agentSupervisorWorkflow, {
-                        args: [{
-                                command_id: commandId,
-                                conversation_id: conversationId
-                            }],
-                        workflowId: `agent-supervisor-${commandId || conversationId}-${Date.now()}`,
-                        taskQueue: taskQueues_1.TASK_QUEUES.HIGH, // High priority task queue
-                        parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON // Fire-and-forget
-                    });
-                    console.log('✅ Agent supervisor workflow started successfully (running independently)');
+                    // Get site_id for validation
+                    let siteIdForValidation = response.data?.site_id || messageData.site_id || siteId;
+                    // If site_id is not available, try to get it from command_id or conversation_id
+                    if (!siteIdForValidation) {
+                        console.log('🔍 Site ID not in response, fetching from command/conversation...');
+                        const siteIdResult = await getSiteIdFromCommandOrConversationActivity({
+                            command_id: commandId,
+                            conversation_id: conversationId
+                        });
+                        if (siteIdResult.success && siteIdResult.site_id) {
+                            siteIdForValidation = siteIdResult.site_id;
+                            console.log(`✅ Found site_id from command/conversation: ${siteIdForValidation}`);
+                        }
+                    }
+                    // Validate that supervise_conversations activity is active before starting workflow
+                    if (siteIdForValidation) {
+                        console.log('🔐 Validating supervise_conversations activity status before starting supervisor workflow...');
+                        const configValidation = await validateWorkflowConfigActivity(siteIdForValidation, 'supervise_conversations');
+                        if (!configValidation.shouldExecute) {
+                            console.log(`⛔ Supervisor workflow blocked: ${configValidation.reason}`);
+                            console.log('⚠️ Skipping agent supervisor workflow - supervise_conversations is not active');
+                        }
+                        else {
+                            console.log(`✅ Activity validation passed: ${configValidation.reason}`);
+                            console.log('🎯 Starting agent supervisor workflow as child (high priority, fire-and-forget)...');
+                            await (0, workflow_1.startChild)(agentSupervisorWorkflow_1.agentSupervisorWorkflow, {
+                                args: [{
+                                        command_id: commandId,
+                                        conversation_id: conversationId
+                                    }],
+                                workflowId: `agent-supervisor-${commandId || conversationId}-${Date.now()}`,
+                                taskQueue: taskQueues_1.TASK_QUEUES.HIGH, // High priority task queue
+                                parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON // Fire-and-forget
+                            });
+                            console.log('✅ Agent supervisor workflow started successfully (running independently)');
+                        }
+                    }
+                    else {
+                        console.log('⚠️ Could not determine site_id for validation - skipping supervisor workflow');
+                    }
                 }
                 else {
                     console.log('⚠️ No command_id or conversation_id available for supervisor call');
@@ -363,17 +392,46 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
                 const commandId = response.data?.command_id;
                 const conversationId = response.data?.conversation_id;
                 if (commandId || conversationId) {
-                    console.log('🎯 Starting agent supervisor workflow as child (high priority, fire-and-forget)...');
-                    await (0, workflow_1.startChild)(agentSupervisorWorkflow_1.agentSupervisorWorkflow, {
-                        args: [{
-                                command_id: commandId,
-                                conversation_id: conversationId
-                            }],
-                        workflowId: `agent-supervisor-${commandId || conversationId}-${Date.now()}`,
-                        taskQueue: taskQueues_1.TASK_QUEUES.HIGH, // High priority task queue
-                        parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON // Fire-and-forget
-                    });
-                    console.log('✅ Agent supervisor workflow started successfully (running independently)');
+                    // Get site_id for validation
+                    let siteIdForValidation = response.data?.site_id || emailDataForCS.site_id;
+                    // If site_id is not available, try to get it from command_id or conversation_id
+                    if (!siteIdForValidation) {
+                        console.log('🔍 Site ID not in response, fetching from command/conversation...');
+                        const siteIdResult = await getSiteIdFromCommandOrConversationActivity({
+                            command_id: commandId,
+                            conversation_id: conversationId
+                        });
+                        if (siteIdResult.success && siteIdResult.site_id) {
+                            siteIdForValidation = siteIdResult.site_id;
+                            console.log(`✅ Found site_id from command/conversation: ${siteIdForValidation}`);
+                        }
+                    }
+                    // Validate that supervise_conversations activity is active before starting workflow
+                    if (siteIdForValidation) {
+                        console.log('🔐 Validating supervise_conversations activity status before starting supervisor workflow...');
+                        const configValidation = await validateWorkflowConfigActivity(siteIdForValidation, 'supervise_conversations');
+                        if (!configValidation.shouldExecute) {
+                            console.log(`⛔ Supervisor workflow blocked: ${configValidation.reason}`);
+                            console.log('⚠️ Skipping agent supervisor workflow - supervise_conversations is not active');
+                        }
+                        else {
+                            console.log(`✅ Activity validation passed: ${configValidation.reason}`);
+                            console.log('🎯 Starting agent supervisor workflow as child (high priority, fire-and-forget)...');
+                            await (0, workflow_1.startChild)(agentSupervisorWorkflow_1.agentSupervisorWorkflow, {
+                                args: [{
+                                        command_id: commandId,
+                                        conversation_id: conversationId
+                                    }],
+                                workflowId: `agent-supervisor-${commandId || conversationId}-${Date.now()}`,
+                                taskQueue: taskQueues_1.TASK_QUEUES.HIGH, // High priority task queue
+                                parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON // Fire-and-forget
+                            });
+                            console.log('✅ Agent supervisor workflow started successfully (running independently)');
+                        }
+                    }
+                    else {
+                        console.log('⚠️ Could not determine site_id for validation - skipping supervisor workflow');
+                    }
                 }
                 else {
                     console.log('⚠️ No command_id or conversation_id available for supervisor call');
