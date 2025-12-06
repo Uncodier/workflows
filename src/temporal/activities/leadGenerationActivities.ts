@@ -1781,6 +1781,7 @@ export async function createSingleLead(
       address: lead.address || {}, // Store complete address structure as provided
       social_networks: lead.social_networks || {}, // Store social networks data
       position: lead.position || null,
+      notes: (lead as any).notes || null, // Add notes field if provided
       site_id: site_id,
       user_id: userId || null,
       status: 'new',

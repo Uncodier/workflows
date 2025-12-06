@@ -47,6 +47,7 @@ import { idealClientProfileMiningWorkflow } from './idealClientProfileMiningWork
 import { idealClientProfilePageSearchWorkflow } from './idealClientProfilePageSearchWorkflow';
 import { enrichLeadWorkflow } from './enrichLeadWorkflow';
 import { generatePersonEmailWorkflow } from './generatePersonEmailWorkflow';
+import { leadGenerationDomainSearchWorkflow } from './leadGenerationDomainSearchWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -89,6 +90,7 @@ export * from './idealClientProfileMiningWorkflow';
 export * from './idealClientProfilePageSearchWorkflow';
 export * from './enrichLeadWorkflow';
 export * from './generatePersonEmailWorkflow';
+export * from './leadGenerationDomainSearchWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -136,6 +138,7 @@ export const workflows = {
   idealClientProfilePageSearchWorkflow,
   enrichLeadWorkflow,
   generatePersonEmailWorkflow,
+  leadGenerationDomainSearchWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
   // ✅ Aliases for agent workflows with different naming conventions
@@ -189,6 +192,7 @@ export const workflowNames = {
   idealClientProfilePageSearchWorkflow: 'idealClientProfilePageSearchWorkflow',
   enrichLeadWorkflow: 'enrichLeadWorkflow',
   generatePersonEmailWorkflow: 'generatePersonEmailWorkflow',
+  leadGenerationDomainSearchWorkflow: 'leadGenerationDomainSearchWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',
   // ✅ Aliases for agent workflows with different naming conventions

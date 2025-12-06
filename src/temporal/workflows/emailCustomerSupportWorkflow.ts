@@ -28,6 +28,7 @@ export async function emailCustomerSupportMessageWorkflow(
   baseParams: {
     agentId?: string;
     origin?: string; // Parámetro opcional para identificar el origen
+    origin_message_id?: string;
   }
 ): Promise<{
   success: boolean;

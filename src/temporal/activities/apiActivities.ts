@@ -334,6 +334,88 @@ export async function leadContactGenerationActivity(request: {
 }
 
 /**
+ * Activity to generate generic admin contact information for companies
+ * Calls the dataAnalyst companyContactGeneration API (sister of leadContactGeneration)
+ * Does not require a name parameter - generates generic admin names
+ */
+export async function companyGenericContactGenerationActivity(request: {
+  domain: string;
+  context: string;
+  site_id: string;
+}): Promise<{
+  success: boolean;
+  email_generation_analysis?: string[];
+  emailAnalysisData?: {
+    domain: string;
+    contact_name: string;
+    recommendations: string[];
+    generated_emails: string[];
+  };
+  data?: any;
+  error?: string;
+}> {
+  const { domain, context, site_id } = request;
+  
+  // Normalize domain to ensure it has https:// prefix
+  const normalizedDomain = normalizeDomain(domain);
+  
+  console.log(`🔍 Company Generic Contact Generation Activity Started`);
+  console.log(`📋 Context: domain=${domain} -> normalized: ${normalizedDomain}, site=${site_id}`);
+  console.log(`📝 Context details: ${context}`);
+  
+  try {
+    const response = await apiService.post('/api/agents/dataAnalyst/companyContactGeneration', {
+      domain: normalizedDomain,
+      context,
+      site_id
+    });
+    
+    if (!response.success) {
+      console.error(`❌ Company generic contact generation API call failed: ${response.error?.message}`);
+      return {
+        success: false,
+        error: response.error?.message || 'Company generic contact generation failed'
+      };
+    }
+    
+    // Handle case where API response wraps data in a 'data' property
+    const data = response.data?.data || response.data;
+    console.log(`✅ Company generic contact generation response:`, data);
+    
+    // Extract emails from the new structure
+    const emailAnalysis = data?.email_generation_analysis;
+    const emailList = emailAnalysis?.generated_emails || [];
+    
+    console.log(`📧 Generated ${emailList.length} potential emails for ${emailAnalysis?.contact_name || 'generic admin contact'}`);
+    if (emailAnalysis?.domain) {
+      console.log(`🌐 Target domain: ${emailAnalysis.domain}`);
+    }
+    if (emailAnalysis?.recommendations && emailAnalysis.recommendations.length > 0) {
+      console.log(`💡 AI Recommendations:`);
+      emailAnalysis.recommendations.forEach((rec: string, index: number) => {
+        console.log(`   ${index + 1}. ${rec}`);
+      });
+    }
+    
+    return {
+      success: true,
+      email_generation_analysis: emailList,
+      emailAnalysisData: emailAnalysis,
+      data: data
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception during company generic contact generation: ${errorMessage}`);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
  * Activity to send daily stand up notification
  */
 export async function sendDailyStandUpNotificationActivity(params: {

@@ -24,6 +24,7 @@ baseParams) {
     let contactName;
     let contactEmail;
     let contactPhone;
+    let origin_message_id;
     // Detect if this is EmailData format (has valid contact_info) or direct website chat format
     if (emailData.contact_info && typeof emailData.contact_info === 'object') {
         // EmailData format
@@ -34,6 +35,7 @@ baseParams) {
         conversation_id = emailData.conversation_id;
         visitor_id = emailData.visitor_id;
         lead_id = emailData.lead_id;
+        origin_message_id = emailData.origin_message_id;
         contactName = emailData.contact_info.name;
         contactEmail = emailData.contact_info.email;
         contactPhone = emailData.contact_info.phone;
@@ -47,11 +49,16 @@ baseParams) {
         conversation_id = emailData.conversationId;
         visitor_id = emailData.visitor_id;
         lead_id = emailData.lead_id;
+        origin_message_id = emailData.origin_message_id;
         contactName = emailData.name;
         contactEmail = emailData.email;
         contactPhone = emailData.phone;
     }
-    const { agentId, origin } = baseParams;
+    const { agentId, origin, origin_message_id: baseParamsOriginMessageId } = baseParams;
+    // Use origin_message_id from baseParams if not found in emailData
+    if (!origin_message_id && baseParamsOriginMessageId) {
+        origin_message_id = baseParamsOriginMessageId;
+    }
     // Build the message request payload con SOLO los parámetros requeridos por el API
     const messageRequest = {
         message: message,
@@ -97,6 +104,11 @@ baseParams) {
     }
     else {
         console.log(`⚠️ No lead_id provided - API will handle lead creation/matching if needed`);
+    }
+    // Add origin_message_id if available
+    if (origin_message_id) {
+        messageRequest.origin_message_id = origin_message_id;
+        console.log(`📨 Using origin_message_id: ${origin_message_id}`);
     }
     console.log('📤 Sending customer support message with payload:', {
         message: messageRequest.message?.substring(0, 50) + '...',

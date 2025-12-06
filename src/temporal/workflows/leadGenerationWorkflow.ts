@@ -1,8 +1,8 @@
 import { proxyActivities, startChild, workflowInfo, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { deepResearchWorkflow, type DeepResearchOptions } from './deepResearchWorkflow';
+import { leadGenerationDomainSearchWorkflow, type LeadGenerationDomainSearchOptions } from './leadGenerationDomainSearchWorkflow';
 import type { 
-  LeadGenerationApiOptions,
   LeadData,
   RegionSearchApiOptions,
   RegionVenuesMultipleSearchOptions,
@@ -28,7 +28,6 @@ const {
 const {
   callRegionSearchApiActivity,
   callRegionVenuesWithMultipleSearchTermsActivity,
-  callLeadGenerationApiActivity,
   createCompaniesFromVenuesActivity,
   saveLeadsFromDeepResearchActivity,
   searchLeadsByCompanyCityActivity,
@@ -37,10 +36,12 @@ const {
   determineMaxVenuesActivity,
   notifyNewLeadsActivity,
   validateAndGenerateEmployeeContactsActivity,
+  companyGenericContactGenerationActivity,
+  createSingleLead,
+  validateContactInformation,
 } = proxyActivities<{
   callRegionSearchApiActivity: (options: RegionSearchApiOptions) => Promise<any>;
   callRegionVenuesWithMultipleSearchTermsActivity: (options: RegionVenuesMultipleSearchOptions) => Promise<any>;
-  callLeadGenerationApiActivity: (options: LeadGenerationApiOptions) => Promise<any>;
   createCompaniesFromVenuesActivity: (options: any) => Promise<any>;
   saveLeadsFromDeepResearchActivity: (options: any) => Promise<any>;
   searchLeadsByCompanyCityActivity: (options: { site_id: string; city: string; region?: string; userId?: string }) => Promise<{ success: boolean; companyNames?: string[]; error?: string }>;
@@ -49,6 +50,9 @@ const {
   determineMaxVenuesActivity: (options: { site_id: string; userId?: string }) => Promise<{ success: boolean; maxVenues?: number; plan?: string; hasChannels?: boolean; error?: string }>;
   notifyNewLeadsActivity: (options: { site_id: string; leadNames: string[]; userId?: string; additionalData?: any }) => Promise<{ success: boolean; error?: string }>;
   validateAndGenerateEmployeeContactsActivity: (options: { employees: any[]; companyInfo: any; site_id: string; userId?: string }) => Promise<{ success: boolean; validatedEmployees: LeadData[]; emailsGenerated: number; emailsValidated: number; employeesSkipped: number; error?: string }>;
+  companyGenericContactGenerationActivity: (options: { domain: string; context: string; site_id: string }) => Promise<{ success: boolean; email_generation_analysis?: string[]; emailAnalysisData?: any; data?: any; error?: string }>;
+  createSingleLead: (lead: any, site_id: string, userId?: string, companyId?: string, segmentId?: string) => Promise<{ success: boolean; leadId?: string; error?: string }>;
+  validateContactInformation: (o: { email?: string; hasEmailMessage?: boolean; hasWhatsAppMessage?: boolean; leadId?: string; phone?: string; leadMetadata?: any }) => Promise<{ success: boolean; isValid: boolean; reason?: string }>;
 }>({
   startToCloseTimeout: '10 minutes', // Longer timeout for lead generation processes
   retry: {
@@ -174,6 +178,48 @@ function cleanCompanyForDeepResearch(company: CompanyData): any {
     coordinates: company.coordinates,
     // Exclude: reviews, photos, amenities, opening_hours, types, venue_id, _research_timestamp, _research_source
   };
+}
+
+/**
+ * Extract domain from company data
+ * Checks website, domain field, or constructs from company name
+ * Returns null if no domain can be extracted
+ */
+function extractDomainFromCompany(company: CompanyData): string | null {
+  const getDomainFromUrl = (input: string): string => {
+    try {
+      const sanitized = String(input).trim();
+      return sanitized
+        .replace(/^https?:\/\//i, '')
+        .replace(/^www\./i, '')
+        .split('/')[0]
+        .split('?')[0]
+        .split('#')[0];
+    } catch {
+      return '';
+    }
+  };
+
+  // Priority 1: Check company.domain field
+  if (company.domain && typeof company.domain === 'string' && company.domain.trim() !== '') {
+    const domain = getDomainFromUrl(company.domain);
+    if (domain) return domain;
+  }
+
+  // Priority 2: Check company.website field
+  if (company.website && typeof company.website === 'string' && company.website.trim() !== '') {
+    const domain = getDomainFromUrl(company.website);
+    if (domain) return domain;
+  }
+
+  // Priority 3: Check for domain in company data (any field that might contain domain)
+  if (company.web && typeof company.web === 'string' && company.web.trim() !== '') {
+    const domain = getDomainFromUrl(company.web);
+    if (domain) return domain;
+  }
+
+  // No domain found
+  return null;
 }
 
 /**
@@ -652,13 +698,17 @@ export async function leadGenerationWorkflow(
       userId: options.userId || site.user_id
     });
 
-    let maxVenues = 1; // Default fallback
-    if (maxVenuesResult.success && maxVenuesResult.maxVenues) {
-      maxVenues = maxVenuesResult.maxVenues;
-      console.log(`✅ Venue limits determined: ${maxVenues} venues (Plan: ${maxVenuesResult.plan}, Channels: ${maxVenuesResult.hasChannels ? 'Yes' : 'No'})`);
-    } else {
-      console.log(`⚠️ Failed to determine venue limits, using default: ${maxVenues} venues. Error: ${maxVenuesResult.error}`);
-    }
+    // DEBUG: Force maxVenues to 1 for debugging purposes
+    let maxVenues = 1; // Forced to 1 for debugging
+    console.log(`🐛 DEBUG: Forcing maxVenues to 1 for debugging (API returned: ${maxVenuesResult.success && maxVenuesResult.maxVenues ? maxVenuesResult.maxVenues : 'N/A'})`);
+    
+    // Original logic (commented for debugging):
+    // if (maxVenuesResult.success && maxVenuesResult.maxVenues) {
+    //   maxVenues = maxVenuesResult.maxVenues;
+    //   console.log(`✅ Venue limits determined: ${maxVenues} venues (Plan: ${maxVenuesResult.plan}, Channels: ${maxVenuesResult.hasChannels ? 'Yes' : 'No'})`);
+    // } else {
+    //   console.log(`⚠️ Failed to determine venue limits, using default: ${maxVenues} venues. Error: ${maxVenuesResult.error}`);
+    // }
     
     // Call region venues API with multiple search terms strategy
     try {
@@ -747,13 +797,17 @@ export async function leadGenerationWorkflow(
             companiesCreated = companiesCreateResult.companies || [];
             console.log(`✅ Companies created successfully - ${companiesCreated.length} companies`);
             
+            // DEBUG: Limit to only 1 company for debugging
+            const companiesToProcess = companiesCreated.slice(0, 1);
+            console.log(`🐛 DEBUG: Limiting iteration to 1 company for debugging (total companies: ${companiesCreated.length})`);
+            
             // Step 4: For each company, generate leads
-            if (companiesCreated.length > 0) {
-              console.log(`👥 Step 4: Processing ${companiesCreated.length} companies for lead generation...`);
+            if (companiesToProcess.length > 0) {
+              console.log(`👥 Step 4: Processing ${companiesToProcess.length} company(ies) for lead generation (DEBUG: limited to 1)...`);
               
-              for (let i = 0; i < companiesCreated.length; i++) {
-                const company = companiesCreated[i];
-                console.log(`🏢 Processing company ${i + 1}/${companiesCreated.length}: ${company.name}`);
+              for (let i = 0; i < companiesToProcess.length; i++) {
+                const company = companiesToProcess[i];
+                console.log(`🏢 Processing company ${i + 1}/${companiesToProcess.length}: ${company.name}`);
                 
                 const companyResult: any = {
                   company: company,
@@ -761,291 +815,128 @@ export async function leadGenerationWorkflow(
                 };
                 
                 try {
-                  // Step 4a: Call lead generation API for this specific company
-                  console.log(`🔥 Step 4a: Calling lead generation API for company: ${company.name}`);
-                  
-                  const companyLeadGenOptions: LeadGenerationApiOptions = {
-                    site_id: site_id,
-                    userId: options.userId || site.user_id,
-                    additionalData: {
-                      ...options.additionalData,
-                      company: company,
-                      businessTypes: businessTypes,
-                      targetCompany: company.name,
-                      targetIndustry: company.industry,
-                      targetLocation: company.location,
-                      siteName: siteName,
-                      siteUrl: siteUrl
-                    }
-                  };
-                  
-                  const companyLeadGenResult = await callLeadGenerationApiActivity(companyLeadGenOptions);
-                  companyResult.leadGenerationResult = companyLeadGenResult;
-                  
-                  console.log(`🔍 Lead generation result for ${company.name}:`, {
-                    success: companyLeadGenResult.success,
-                    hasSearchTopic: !!companyLeadGenResult.searchTopic,
-                    searchTopicLength: companyLeadGenResult.searchTopic?.length || 0,
-                    hasError: !!companyLeadGenResult.error,
-                    error: companyLeadGenResult.error
-                  });
-                  
-                  // Check for critical errors that should fail the entire workflow
-                  if (!companyLeadGenResult.success && companyLeadGenResult.error) {
-                    const errorMsg = String(companyLeadGenResult.error);
+                  // Step 4: New flow - Check for domain and use Finder API or deep research
+                  console.log(`👥 Step 4: Processing company ${company.name} for lead generation...`);
                     
-                    // Check for 414 Request-URI Too Large or similar critical errors
-                    if (errorMsg.includes('414') || 
-                        errorMsg.includes('Request-URI Too Large') ||
-                        errorMsg.includes('URL too long') ||
-                        errorMsg.includes('<html>') || // HTML error pages from Cloudflare
-                        errorMsg.includes('cloudflare') ||
-                        errorMsg.includes('HTTP_414') ||
-                        errorMsg.includes('Server returned HTML error page')) {
+                    // Step 4b.1: Extract domain from company
+                    let companyDomain = extractDomainFromCompany(company);
+                    let domainFoundViaDeepResearch = false;
+                    
+                    if (companyDomain) {
+                      console.log(`✅ Company ${company.name} has domain: ${companyDomain}`);
+                    } else {
+                      console.log(`⚠️ Company ${company.name} has no domain, searching for domain using deep research...`);
                       
-                      const criticalError = `Critical API error (414 Request-URI Too Large) in Lead Generation API: ${errorMsg}`;
-                      console.error(`🚨 CRITICAL ERROR: ${criticalError}`);
-                      console.error(`🛑 This error requires immediate attention and workflow termination`);
-                      console.error(`🔧 The API request payload is too large. Check recent optimizations.`);
-                      
-                      // Add to main errors array and throw to fail entire workflow
-                      errors.push(criticalError);
-                      throw new Error(criticalError);
-                    }
-                  }
-                  
-                  if (companyLeadGenResult.success && companyLeadGenResult.searchTopic) {
-                    console.log(`✅ Lead generation for ${company.name} successful`);
-                    console.log(`🔍 Search topic received: "${companyLeadGenResult.searchTopic}"`);
-                    
-                    // Step 4b: Call deep research for employees of this company
-                    console.log(`👥 Step 4b: Researching employees for company: ${company.name}`);
-                    
-                    const employeeDeliverables = generateEmployeeDeliverables(company);
-                    
-                    // Create search topic for employees with specific venue address and regional context
+                      // Step 4b.1a: Use deep research to find domain
                     const locationInfo = [];
-                    
                     try {
-                      // Add specific venue address
                       if (company.address) {
-                        // Handle both string and object address formats
                         const addressString = typeof company.address === 'string' 
                           ? company.address 
                           : `${company.address.street || ''} ${company.address.city || ''} ${company.address.state || ''}`.trim();
-                        
                         if (addressString) {
                           locationInfo.push(addressString);
                         }
                       }
-                      
-                      // Add regional context if different from venue address
-                      if (targetCity) {
-                        const companyAddressString = typeof company.address === 'string' 
-                          ? company.address 
-                          : (company.address?.city || company.address?.street || '');
-                        
-                        if (!companyAddressString || !companyAddressString.toLowerCase().includes(targetCity.toLowerCase())) {
-                          locationInfo.push(targetCity);
-                        }
-                      }
-                      
-                      if (targetRegion) {
-                        const companyAddressString = typeof company.address === 'string' 
-                          ? company.address 
-                          : (company.address?.state || company.address?.city || company.address?.street || '');
-                        
-                        if (!companyAddressString || !companyAddressString.toLowerCase().includes(targetRegion.toLowerCase())) {
-                          locationInfo.push(targetRegion);
-                        }
-                      }
-                    } catch (addressError) {
-                      const addressErrorMessage = addressError instanceof Error ? addressError.message : String(addressError);
-                      console.error(`❌ Error processing company address for ${company.name}: ${addressErrorMessage}`);
-                      console.error(`🔍 Company address data:`, JSON.stringify(company.address, null, 2));
-                      
-                      // Continue with basic location info
                       if (targetCity) locationInfo.push(targetCity);
                       if (targetRegion) locationInfo.push(targetRegion);
-                    }
-                    
-                    // Build contact information context
-                    const contactInfo = [];
-                    if (company.phone) {
-                      contactInfo.push(`phone: ${company.phone}`);
-                    }
-                    if (company.email) {
-                      contactInfo.push(`email: ${company.email}`);
-                    }
-                    if (company.website) {
-                      contactInfo.push(`website: ${company.website}`);
-                    }
+                      } catch {}
                     
                     const locationContext = locationInfo.length > 0 ? ` located at ${locationInfo.join(', ')}` : '';
-                    const contactContext = contactInfo.length > 0 ? ` (Contact info: ${contactInfo.join(', ')})` : '';
-                    
-                    const employeeSearchTopic = `Find individual employees, staff members, key contacts, and decision makers who work at ${company.name}${locationContext}${contactContext}. ONLY find personal information about the employees themselves: their names, email addresses, phone numbers, job titles, and LinkedIn profiles. DO NOT research or provide any company information since we already have that data.`;
-                    
-                    console.log(`🎯 Enhanced research topic for ${company.name}:`);
-                    console.log(`   "${employeeSearchTopic}"`);
-                    if (locationInfo.length > 0) {
-                      console.log(`📍 Specific location context: ${locationInfo.join(' → ')}`);
-                    }
-                    if (contactInfo.length > 0) {
-                      console.log(`📞 Available contact info: ${contactInfo.join(' | ')}`);
-                    }
-                    
-                    console.log(`🚀 Starting deep research workflow for ${company.name}...`);
-                    
-                    const employeeResearchOptions: DeepResearchOptions = {
+                      const domainSearchTopic = `Find the official website domain for ${company.name}${locationContext}. Return only the website URL and domain name.`;
+                      
+                      const domainResearchDeliverables = {
+                        website: "official company website URL",
+                        domain: "extracted domain name (e.g., example.com)"
+                      };
+                      
+                      const domainResearchOptions: DeepResearchOptions = {
                       site_id: site_id,
-                      research_topic: employeeSearchTopic,
+                        research_topic: domainSearchTopic,
                       userId: options.userId || site.user_id,
-                      deliverables: employeeDeliverables,
-                      scheduleId: realScheduleId, // Pass the schedule ID from parent workflow
-                      parentWorkflowType: 'leadGenerationWorkflow', // Identify the parent workflow type
+                        deliverables: domainResearchDeliverables,
+                        scheduleId: realScheduleId,
+                        parentWorkflowType: 'leadGenerationWorkflow',
                       additionalData: {
                         ...options.additionalData,
                         company: cleanCompanyForDeepResearch(company),
                         businessTypes: businessTypes,
-                        leadGenerationResult: companyLeadGenResult,
-                        researchContext: 'employee_research_workflow',
+                          researchContext: 'domain_discovery_workflow',
                         siteName: siteName,
                         siteUrl: siteUrl
                       }
                     };
                     
-                    const employeeResearchHandle = await startChild(deepResearchWorkflow, {
-                      args: [employeeResearchOptions],
-                      workflowId: `employee-research-${company.name.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
-                      parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON, // ✅ Child continues independently
-                    });
-                    
-                    const employeeResearchResult = await employeeResearchHandle.result();
-                    companyResult.employeeResearchResult = employeeResearchResult;
-                    
-                    if (employeeResearchResult.success) {
-                      console.log(`✅ Employee research for ${company.name} successful`);
+                      const domainResearchHandle = await startChild(deepResearchWorkflow, {
+                        args: [domainResearchOptions],
+                        workflowId: `domain-research-${company.name.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
+                        parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+                      });
                       
-                      // Extract employees as leads
-                      let empDeliverables = null;
-                      if (employeeResearchResult.data && employeeResearchResult.data.deliverables) {
-                        empDeliverables = employeeResearchResult.data.deliverables;
-                      }
+                      const domainResearchResult = await domainResearchHandle.result();
                       
-                      if (empDeliverables) {
-                        // Extract raw employees from deliverables
-                        const rawEmployees = extractEmployeesFromDeliverablesRaw(empDeliverables);
+                      if (domainResearchResult.success && domainResearchResult.data?.deliverables) {
+                        const deliverables = domainResearchResult.data.deliverables;
+                        // Try to extract domain from deliverables
+                        if (deliverables.domain && typeof deliverables.domain === 'string') {
+                          companyDomain = deliverables.domain.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].split('?')[0].split('#')[0];
+                        } else if (deliverables.website && typeof deliverables.website === 'string') {
+                          companyDomain = deliverables.website.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].split('?')[0].split('#')[0];
+                        }
                         
-                        console.log(`📧 Step 4b.3a: Validating and generating contacts for ${rawEmployees.length} employees from ${company.name}...`);
-                        
-                        // Use new activity to validate and generate emails
-                        const contactValidationResult = await validateAndGenerateEmployeeContactsActivity({
-                          employees: rawEmployees,
-                          companyInfo: company,
-                          site_id: site_id,
-                          userId: options.userId || site.user_id
-                        });
-                        
-                        if (contactValidationResult.success) {
-                          console.log(`✅ Contact validation completed for ${company.name}:`);
-                          console.log(`   - Employees processed: ${rawEmployees.length}`);
-                          console.log(`   - Valid leads generated: ${contactValidationResult.validatedEmployees.length}`);
-                          console.log(`   - Emails generated: ${contactValidationResult.emailsGenerated}`);
-                          console.log(`   - Emails validated: ${contactValidationResult.emailsValidated}`);
-                          console.log(`   - Employees skipped: ${contactValidationResult.employeesSkipped}`);
-                          
-                          companyResult.leadsGenerated = contactValidationResult.validatedEmployees;
+                        if (companyDomain) {
+                          domainFoundViaDeepResearch = true;
+                          console.log(`✅ Domain found via deep research: ${companyDomain}`);
                         } else {
-                          console.error(`❌ Contact validation failed for ${company.name}: ${contactValidationResult.error}`);
-                          companyResult.leadsGenerated = [];
+                          console.log(`⚠️ Deep research completed but no domain extracted from deliverables`);
                         }
-                        
-                        const employeeLeads = contactValidationResult.validatedEmployees;
-                        
-                        // Step 4b.4: If no leads generated, save venue as failed in system_memories
-                        if (employeeLeads.length === 0) {
-                          console.log(`📝 Step 4b.4: No leads generated for ${company.name}, saving venue as failed...`);
-                          
-                          const upsertResult = await upsertVenueFailedActivity({
-                            site_id: site_id,
-                            city: targetCity,
-                            region: targetRegion,
-                            venueName: company.name,
-                            userId: options.userId || site.user_id
-                          });
-                          
-                          if (upsertResult.success) {
-                            console.log(`✅ Successfully saved failed venue ${company.name} to system_memories`);
                           } else {
-                            const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
-                            console.warn(`⚠️ ${warningMsg}`);
-                            // Don't add to errors since this is not critical for the main workflow
+                        console.log(`⚠️ Deep research for domain failed: ${domainResearchResult.error || 'Unknown error'}`);
                           }
                         }
                         
-                        // Step 4b.5: Save leads from deep research (visible workflow step)
-                        console.log(`💾 Step 4b.5: Saving ${employeeLeads.length} leads from deep research for ${company.name}...`);
+                    // Step 4b.2: If we have a domain, use Finder API to search for persons
+                    if (companyDomain) {
+                      console.log(`🔍 Step 4b.2: Searching for persons using Finder API with domain: ${companyDomain}`);
                         
-                        const saveLeadsResult = await saveLeadsFromDeepResearchActivity({
+                      const domainSearchOptions: LeadGenerationDomainSearchOptions = {
+                        domains: [companyDomain],
+                        page: 0,
+                        page_size: 10,
                           site_id: site_id,
-                          leads: employeeLeads,
-                          company: cleanCompanyForDeepResearch(company),
-                          create: options.create !== false, // Default to true unless explicitly set to false
                           userId: options.userId || site.user_id,
-                          segment_id: segmentId, // Add segment_id from regionSearch (extracted from target_segment_id)
-                          additionalData: {
-                            ...options.additionalData,
-                            businessTypes: businessTypes,
-                            targetCity: targetCity,
-                            targetRegion: targetRegion,
-                            workflowId: workflowId,
-                            deepResearchCompleted: true
-                          }
-                        });
-                        
-                        leadCreationResults.push(saveLeadsResult);
-                        
-                        if (saveLeadsResult.success) {
-                          console.log(`✅ Successfully saved ${saveLeadsResult.leadsCreated || 0} leads from deep research for ${company.name}`);
-                          console.log(`📊 Leads processed: ${saveLeadsResult.leadsValidated || 0} validated, ${saveLeadsResult.leadsCreated || 0} created`);
+                        company: cleanCompanyForDeepResearch(company),
+                        segmentId: segmentId,
+                      };
+                      
+                      const domainSearchHandle = await startChild(leadGenerationDomainSearchWorkflow, {
+                        args: [domainSearchOptions],
+                        workflowId: `domain-search-${company.name.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
+                        parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+                      });
+                      
+                      const domainSearchResult = await domainSearchHandle.result();
+                      companyResult.employeeResearchResult = domainSearchResult; // Keep for compatibility
+                      
+                      let companyLeadsGenerated = 0; // Track leads for this specific company
+                      
+                        if (domainSearchResult.success && domainSearchResult.foundMatches > 0) {
+                          console.log(`✅ Found ${domainSearchResult.foundMatches} persons via Finder API for ${company.name}`);
+                          console.log(`📊 Leads created: ${domainSearchResult.leadsCreated.length}`);
                           
-                          // Update total leads generated counter with successfully created leads
-                          if (saveLeadsResult.leadsCreated && saveLeadsResult.leadsCreated > 0) {
-                            totalLeadsGenerated += saveLeadsResult.leadsCreated;
-                            console.log(`✅ Successfully created ${saveLeadsResult.leadsCreated} valid leads for ${company.name}`);
-                          }
-                          
-                          // Check if no leads were actually created due to validation failures
-                          if (saveLeadsResult.leadsCreated === 0) {
-                            console.log(`📝 Step 4b.4.1: No valid leads created for ${company.name} (validation failures), saving venue as failed...`);
-                            
-                            const upsertResult = await upsertVenueFailedActivity({
-                              site_id: site_id,
-                              city: targetCity,
-                              region: targetRegion,
-                              venueName: company.name,
-                              userId: options.userId || site.user_id
-                            });
-                            
-                            if (upsertResult.success) {
-                              console.log(`✅ Successfully saved failed venue ${company.name} to system_memories (validation failures)`);
-                            } else {
-                              const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
-                              console.warn(`⚠️ ${warningMsg}`);
-                              // Don't add to errors since this is not critical for the main workflow
-                            }
-                          } else {
-                            // Step 4b.6: Update agent memory with lead statistics (visible workflow step)
-                            if (targetCity && targetRegion) {
-                              console.log(`🧠 Step 4b.6: Updating agent memory with ${saveLeadsResult.leadsCreated} leads...`);
+                          companyLeadsGenerated = domainSearchResult.foundMatches;
+                          totalLeadsGenerated += domainSearchResult.foundMatches;
+                        
+                        // Update memory if leads were created
+                        if (domainSearchResult.foundMatches > 0 && targetCity && targetRegion) {
+                          console.log(`🧠 Updating agent memory with ${domainSearchResult.foundMatches} leads...`);
                               
                               const updateMemoryResult = await updateMemoryActivity({
                                 siteId: site_id,
                                 city: targetCity,
                                 region: targetRegion,
                                 segmentId: segmentId,
-                                leadsCount: saveLeadsResult.leadsCreated
+                            leadsCount: domainSearchResult.foundMatches
                               });
                               
                               if (updateMemoryResult.success) {
@@ -1053,90 +944,123 @@ export async function leadGenerationWorkflow(
                               } else {
                                 const warningMsg = `Failed to update agent memory for ${company.name}: ${updateMemoryResult.error}`;
                                 console.warn(`⚠️ ${warningMsg}`);
-                                // Don't add to errors since this is not critical for the main workflow
-                              }
-                            } else {
-                              console.log(`ℹ️ Skipping memory update: missing location data`);
                             }
                           }
                         } else {
-                          const errorMsg = `Failed to save leads from deep research for ${company.name}: ${saveLeadsResult.error}`;
-                          console.error(`❌ ${errorMsg}`);
-                          companyResult.errors.push(errorMsg);
+                        console.log(`⚠️ No persons found via Finder API for ${company.name}, generating generic admin contact...`);
+                        
+                        // Step 4b.3: Generate generic admin contact when no persons found
+                        if (company.phone) {
+                          console.log(`📞 Step 4b.3: Generating generic admin contact with phone: ${company.phone}`);
                           
-                          // Step 4b.4.2: Save leads processing failed, save venue as failed in system_memories
-                          console.log(`📝 Step 4b.4.2: Save leads processing failed for ${company.name}, saving venue as failed...`);
+                          const context = `Company: ${company.name}\nPhone: ${company.phone}\nContext: Lead generation generic admin contact for local business without found employees`;
                           
-                          const upsertResult = await upsertVenueFailedActivity({
-                            site_id: site_id,
-                            city: targetCity,
-                            region: targetRegion,
-                            venueName: company.name,
-                            userId: options.userId || site.user_id
+                          const genericContactResult = await companyGenericContactGenerationActivity({
+                            domain: companyDomain,
+                            context: context,
+                            site_id: site_id
                           });
                           
-                          if (upsertResult.success) {
-                            console.log(`✅ Successfully saved failed venue ${company.name} to system_memories (save processing failed)`);
+                          if (genericContactResult.success && genericContactResult.emailAnalysisData) {
+                            const adminName = genericContactResult.emailAnalysisData.contact_name || 'Admin';
+                            const generatedEmails = genericContactResult.email_generation_analysis || [];
+                            
+                            if (generatedEmails.length > 0) {
+                              console.log(`📧 Validating ${generatedEmails.length} generated emails for generic admin contact...`);
+                              
+                              // Validate emails - find first valid email
+                              let validatedEmail: string | null = null;
+                              for (const email of generatedEmails) {
+                                const val = await validateContactInformation({ 
+                                  email, 
+                                  hasEmailMessage: true, 
+                                  hasWhatsAppMessage: false 
+                                });
+                                if (val.success && val.isValid) {
+                                  validatedEmail = email;
+                                  console.log(`✅ Valid email found: ${email}`);
+                                  break;
                           } else {
-                            const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
-                            console.warn(`⚠️ ${warningMsg}`);
-                            // Don't add to errors since this is not critical for the main workflow
-                          }
-                        }
-                      } else {
-                        console.log(`⚠️ No employee deliverables found for ${company.name}`);
-                        
-                        // Step 4b.4: No deliverables found, save venue as failed in system_memories
-                        console.log(`📝 Step 4b.4: No deliverables found for ${company.name}, saving venue as failed...`);
-                        
-                        const upsertResult = await upsertVenueFailedActivity({
-                          site_id: site_id,
+                                  console.log(`❌ Email validation failed for ${email}: ${val.reason || 'Invalid'}`);
+                                }
+                              }
+                              
+                              if (validatedEmail) {
+                                console.log(`✅ Generated and validated generic admin contact: ${adminName} <${validatedEmail}>`);
+                                
+                                // Create lead with generic admin contact
+                                try {
+                                  const leadData = {
+                                    name: adminName,
+                                    email: validatedEmail,
+                                    company_name: company.name,
+                                    position: 'Admin',
+                                    telephone: company.phone,
+                                    web: company.website || null,
+                                    address: company.address || (targetCity ? { city: targetCity, region: targetRegion } : {}),
+                                    company: {
+                                      name: company.name,
+                                      website: company.website || null,
+                                      domain: companyDomain,
+                                      industry: company.industry || null,
+                                      size: company.size || null,
+                                      description: company.description || null,
+                                    },
+                                    notes: 'generic contact lead for initial conversation',
+                                    metadata: {
+                                      source: 'lead_generation_generic_admin_contact',
+                                      generated_via: 'companyGenericContactGeneration',
+                                      company_phone: company.phone,
+                                      domain: companyDomain,
+                                    },
+                                  };
+                                  
+                                  const leadResult = await createSingleLead(leadData, site_id, options.userId || site.user_id, company.id, segmentId);
+                                  
+                                  if (leadResult.success && leadResult.leadId) {
+                                    console.log(`✅ Created generic admin lead: ${leadResult.leadId}`);
+                                    companyLeadsGenerated = 1;
+                                    totalLeadsGenerated += 1;
+                                    
+                                    // Update memory
+                                    if (targetCity && targetRegion) {
+                                      const updateMemoryResult = await updateMemoryActivity({
+                                        siteId: site_id,
                           city: targetCity,
                           region: targetRegion,
-                          venueName: company.name,
-                          userId: options.userId || site.user_id
-                        });
-                        
-                        if (upsertResult.success) {
-                          console.log(`✅ Successfully saved failed venue ${company.name} to system_memories`);
+                                        segmentId: segmentId,
+                                        leadsCount: 1
+                                      });
+                                      
+                                      if (updateMemoryResult.success) {
+                                        console.log(`✅ Agent memory updated for generic admin contact`);
+                                      }
+                                    }
                         } else {
-                          const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
-                          console.warn(`⚠️ ${warningMsg}`);
-                          // Don't add to errors since this is not critical for the main workflow
+                                    console.error(`❌ Failed to create generic admin lead: ${leadResult.error}`);
                         }
+                                } catch (leadError) {
+                                  const errorMessage = leadError instanceof Error ? leadError.message : String(leadError);
+                                  console.error(`❌ Exception creating generic admin lead: ${errorMessage}`);
+                                  companyResult.errors.push(`Generic admin lead creation failed: ${errorMessage}`);
                       }
                     } else {
-                      const errorMsg = `Employee research for ${company.name} failed: ${employeeResearchResult.error}`;
-                      console.error(`❌ ${errorMsg}`);
-                      companyResult.errors.push(errorMsg);
-                      
-                      // Step 4b.4: Employee research failed, save venue as failed in system_memories
-                      console.log(`📝 Step 4b.4: Employee research failed for ${company.name}, saving venue as failed...`);
-                      
-                      const upsertResult = await upsertVenueFailedActivity({
-                        site_id: site_id,
-                        city: targetCity,
-                        region: targetRegion,
-                        venueName: company.name,
-                        userId: options.userId || site.user_id
-                      });
-                      
-                      if (upsertResult.success) {
-                        console.log(`✅ Successfully saved failed venue ${company.name} to system_memories`);
+                                console.log(`⚠️ No valid emails found after validation for generic admin contact (${generatedEmails.length} emails generated, all invalid)`);
+                              }
                       } else {
-                        const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
-                        console.warn(`⚠️ ${warningMsg}`);
-                        // Don't add to errors since this is not critical for the main workflow
+                              console.log(`⚠️ No emails generated for generic admin contact`);
+                            }
+                      } else {
+                            console.error(`❌ Generic contact generation failed: ${genericContactResult.error}`);
+                            companyResult.errors.push(`Generic contact generation failed: ${genericContactResult.error}`);
                       }
+                      } else {
+                          console.log(`⚠️ No phone number available for generic admin contact generation`);
                     }
-                  } else if (companyLeadGenResult.success && !companyLeadGenResult.searchTopic) {
-                    const errorMsg = `Lead generation for ${company.name} succeeded but no search topic received`;
-                    console.error(`❌ ${errorMsg}`);
-                    console.error(`🔍 Lead generation result:`, JSON.stringify(companyLeadGenResult, null, 2));
-                    companyResult.errors.push(errorMsg);
                     
-                    // Step 4b.4: Lead generation succeeded but no search topic, save venue as failed
-                    console.log(`📝 Step 4b.4: No search topic received for ${company.name}, saving venue as failed...`);
+                        // Save venue as failed if no leads generated for this company
+                        if (companyLeadsGenerated === 0) {
+                          console.log(`📝 No leads generated for ${company.name}, saving venue as failed...`);
                     
                     const upsertResult = await upsertVenueFailedActivity({
                       site_id: site_id,
@@ -1148,18 +1072,12 @@ export async function leadGenerationWorkflow(
                     
                     if (upsertResult.success) {
                       console.log(`✅ Successfully saved failed venue ${company.name} to system_memories`);
-                    } else {
-                      const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
-                      console.warn(`⚠️ ${warningMsg}`);
-                      // Don't add to errors since this is not critical for the main workflow
+                          }
+                        }
                     }
                   } else {
-                    const errorMsg = `Lead generation for ${company.name} failed: ${companyLeadGenResult.error}`;
-                    console.error(`❌ ${errorMsg}`);
-                    companyResult.errors.push(errorMsg);
-                    
-                    // Step 4b.4: Lead generation failed, save venue as failed in system_memories
-                    console.log(`📝 Step 4b.4: Lead generation failed for ${company.name}, saving venue as failed...`);
+                      // No domain found - skip this company
+                      console.log(`⚠️ No domain found for ${company.name} (neither existing nor via deep research), skipping company...`);
                     
                     const upsertResult = await upsertVenueFailedActivity({
                       site_id: site_id,
@@ -1170,11 +1088,7 @@ export async function leadGenerationWorkflow(
                     });
                     
                     if (upsertResult.success) {
-                      console.log(`✅ Successfully saved failed venue ${company.name} to system_memories`);
-                    } else {
-                      const warningMsg = `Failed to save failed venue ${company.name}: ${upsertResult.error}`;
-                      console.warn(`⚠️ ${warningMsg}`);
-                      // Don't add to errors since this is not critical for the main workflow
+                        console.log(`✅ Successfully saved failed venue ${company.name} to system_memories (no domain)`);
                     }
                   }
                 } catch (companyError) {
@@ -1203,7 +1117,7 @@ export async function leadGenerationWorkflow(
                 }
                 
                 companyResults.push(companyResult);
-                console.log(`📊 Completed processing company ${i + 1}/${companiesCreated.length}: ${company.name}`);
+                console.log(`📊 Completed processing company ${i + 1}/${companiesToProcess.length}: ${company.name}`);
               }
             } else {
               console.log(`⚠️ No companies processed for lead generation`);

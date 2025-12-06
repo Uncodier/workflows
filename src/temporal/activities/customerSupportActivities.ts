@@ -70,6 +70,7 @@ export interface CustomerSupportMessageRequest {
   site_id?: string;
   lead_notification?: string;
   origin?: string; // Nuevo parámetro opcional: "whatsapp" | "email"
+  origin_message_id?: string;
 }
 
 export interface AgentSupervisorRequest {
@@ -97,6 +98,7 @@ export async function sendCustomerSupportMessageActivity(
   baseParams: {
     agentId?: string;
     origin?: string; // Parámetro opcional para identificar el origen
+    origin_message_id?: string;
   }
 ): Promise<{
   success: boolean;
@@ -115,6 +117,7 @@ export async function sendCustomerSupportMessageActivity(
   let contactName: string | undefined;
   let contactEmail: string | undefined;
   let contactPhone: string | undefined;
+  let origin_message_id: string | undefined;
   
   // Detect if this is EmailData format (has valid contact_info) or direct website chat format
   if (emailData.contact_info && typeof emailData.contact_info === 'object') {
@@ -126,6 +129,7 @@ export async function sendCustomerSupportMessageActivity(
     conversation_id = emailData.conversation_id;
     visitor_id = emailData.visitor_id;
     lead_id = emailData.lead_id;
+    origin_message_id = emailData.origin_message_id;
     contactName = emailData.contact_info.name;
     contactEmail = emailData.contact_info.email;
     contactPhone = emailData.contact_info.phone;
@@ -138,12 +142,18 @@ export async function sendCustomerSupportMessageActivity(
     conversation_id = emailData.conversationId;
     visitor_id = emailData.visitor_id;
     lead_id = emailData.lead_id;
+    origin_message_id = emailData.origin_message_id;
     contactName = emailData.name;
     contactEmail = emailData.email;
     contactPhone = emailData.phone;
   }
   
-  const { agentId, origin } = baseParams;
+  const { agentId, origin, origin_message_id: baseParamsOriginMessageId } = baseParams;
+  
+  // Use origin_message_id from baseParams if not found in emailData
+  if (!origin_message_id && baseParamsOriginMessageId) {
+    origin_message_id = baseParamsOriginMessageId;
+  }
   
   // Build the message request payload con SOLO los parámetros requeridos por el API
   const messageRequest: CustomerSupportMessageRequest = {
@@ -195,6 +205,12 @@ export async function sendCustomerSupportMessageActivity(
     console.log(`📋 Using explicitly provided lead_id: ${lead_id}`);
   } else {
     console.log(`⚠️ No lead_id provided - API will handle lead creation/matching if needed`);
+  }
+
+  // Add origin_message_id if available
+  if (origin_message_id) {
+    messageRequest.origin_message_id = origin_message_id;
+    console.log(`📨 Using origin_message_id: ${origin_message_id}`);
   }
 
   console.log('📤 Sending customer support message with payload:', {

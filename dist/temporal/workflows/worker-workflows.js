@@ -67,3 +67,4 @@ __exportStar(require("./idealClientProfilePageSearchWorkflow"), exports);
 __exportStar(require("./agentSupervisorWorkflow"), exports);
 __exportStar(require("./enrichLeadWorkflow"), exports);
 __exportStar(require("./generatePersonEmailWorkflow"), exports);
+__exportStar(require("./leadGenerationDomainSearchWorkflow"), exports);

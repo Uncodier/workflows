@@ -59,6 +59,7 @@ export async function customerSupportMessageWorkflow(
   baseParams?: {
     agentId?: string;
     origin?: string;
+    origin_message_id?: string;
   }
 ): Promise<{
   success: boolean;
@@ -71,6 +72,7 @@ export async function customerSupportMessageWorkflow(
   // If baseParams is undefined or missing values, look for them in messageData
   let origin = baseParams?.origin;
   let agentId = baseParams?.agentId;
+  let originMessageId = baseParams?.origin_message_id;
   
   // If not found in baseParams, check messageData root level
   if (!origin && messageData && typeof messageData === 'object' && 'origin' in messageData) {
@@ -83,14 +85,21 @@ export async function customerSupportMessageWorkflow(
     console.log(`🔍 Found agentId in messageData root: ${agentId}`);
   }
   
+  if (!originMessageId && messageData && typeof messageData === 'object' && 'origin_message_id' in messageData) {
+    originMessageId = (messageData as any).origin_message_id;
+    console.log(`🔍 Found origin_message_id in messageData root: ${originMessageId}`);
+  }
+  
   // Create effective baseParams for internal use
   const effectiveBaseParams = {
     origin: origin || 'not specified',
-    agentId: agentId
+    agentId: agentId,
+    origin_message_id: originMessageId
   };
   
   console.log(`🔄 Origin: ${effectiveBaseParams.origin}`);
   console.log(`🤖 Agent ID: ${effectiveBaseParams.agentId || 'not specified'}`);
+  console.log(`📨 Origin Message ID: ${effectiveBaseParams.origin_message_id || 'not specified'}`);
   
   // Get workflow ID for status tracking
   const workflowId = (messageData as any)?.workflowId || `customer-support-${Date.now()}`;
