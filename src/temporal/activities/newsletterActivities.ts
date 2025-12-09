@@ -84,13 +84,37 @@ export async function validateEmailConfigurationActivity(
     const siteSettings = settings[0];
     const channels = siteSettings.channels || [];
     
-    // Check if email configuration exists
-    // Email accepts "active" or "synced" status
-    const emailConfig = channels.find((channel: any) => 
-      channel.type === 'email' && channel.enabled === true && (channel.status === 'active' || channel.status === 'synced')
-    );
+    let emailConfig = null;
+    let agentConfig = null;
+    let agentMailConfig = null;
+
+    // Handle both array and object formats for channels
+    if (Array.isArray(channels)) {
+      // Array format
+      emailConfig = channels.find((channel: any) => 
+        channel.type === 'email' && channel.enabled === true && (channel.status === 'active' || channel.status === 'synced')
+      );
+      agentConfig = channels.find((channel: any) => 
+        channel.type === 'agent' && channel.enabled === true && channel.status === 'active'
+      );
+      agentMailConfig = channels.find((channel: any) => 
+        channel.type === 'agent_mail' && channel.enabled === true && channel.status === 'active'
+      );
+    } else if (typeof channels === 'object' && channels !== null) {
+      // Object format
+      if (channels.email && channels.email.enabled === true && (channels.email.status === 'active' || channels.email.status === 'synced')) {
+        emailConfig = channels.email;
+      }
+      if (channels.agent && channels.agent.enabled === true && channels.agent.status === 'active') {
+        agentConfig = channels.agent;
+      }
+      if (channels.agent_mail && channels.agent_mail.enabled === true && channels.agent_mail.status === 'active') {
+        agentMailConfig = channels.agent_mail;
+      }
+    }
     
-    if (!emailConfig) {
+    // Check if any valid email sending channel exists
+    if (!emailConfig && !agentConfig && !agentMailConfig) {
       console.log('❌ No email configuration found or email is disabled');
       return {
         success: true,
@@ -99,24 +123,28 @@ export async function validateEmailConfigurationActivity(
       };
     }
 
-    // Validate email configuration has required fields
-    const requiredFields = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_password'];
-    const missingFields = requiredFields.filter(field => !emailConfig[field]);
-    
-    if (missingFields.length > 0) {
-      console.log(`❌ Email configuration missing required fields: ${missingFields.join(', ')}`);
-      return {
-        success: true,
-        hasEmailConfig: false,
-        error: `Email configuration missing required fields: ${missingFields.join(', ')}`
-      };
+    // Validate email configuration has required fields if it exists.
+    // Even if agent config exists, if emailConfig is present it takes precedence and must be valid.
+    if (emailConfig) {
+      const requiredFields = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_password'];
+      const missingFields = requiredFields.filter(field => !emailConfig[field]);
+      
+      if (missingFields.length > 0) {
+        console.log(`❌ Email configuration missing required fields: ${missingFields.join(', ')}`);
+        return {
+          success: true,
+          hasEmailConfig: false,
+          error: `Email configuration missing required fields: ${missingFields.join(', ')}`
+        };
+      }
     }
 
     console.log('✅ Email configuration validated successfully');
     return {
       success: true,
       hasEmailConfig: true,
-      emailConfig
+      // Return the most relevant config, prioritizing direct email if available, then agent
+      emailConfig: emailConfig || agentConfig || agentMailConfig
     };
     
   } catch (error) {

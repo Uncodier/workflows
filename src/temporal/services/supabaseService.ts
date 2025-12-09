@@ -4,11 +4,19 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { DatabaseConfig } from './supabase-impl/types';
 
-export interface DatabaseConfig {
-  url: string;
-  key: string;
-}
+// Import implementations
+import * as SitesImpl from './supabase-impl/sites';
+import * as SettingsImpl from './supabase-impl/settings';
+import * as ContentImpl from './supabase-impl/content';
+import * as CronImpl from './supabase-impl/cron';
+import * as LeadsImpl from './supabase-impl/leads';
+import * as CompaniesImpl from './supabase-impl/companies';
+import * as AgentsImpl from './supabase-impl/agents';
+import * as SegmentsImpl from './supabase-impl/segments';
+
+export type { DatabaseConfig };
 
 export class SupabaseService {
   private client: SupabaseClient;
@@ -79,820 +87,155 @@ export class SupabaseService {
   }
 
   /**
-   * Fetch all sites from the database
+   * Ensure database is connected before proceeding
    */
+  private async ensureConnection(): Promise<void> {
+    const isConnected = await this.getConnectionStatus();
+    if (!isConnected) {
+      throw new Error('Database not connected');
+    }
+  }
+
+  // --- SITES ---
+
   async fetchSites(): Promise<any[]> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log('🔍 Fetching sites from Supabase...');
-    const { data, error } = await this.client
-      .from('sites')
-      .select('*');
-
-    if (error) {
-      console.error('❌ Error fetching sites:', error);
-      throw new Error(`Failed to fetch sites: ${error.message}`);
-    }
-
-    console.log(`✅ Successfully fetched ${data?.length || 0} sites from database`);
-    return data || [];
+    await this.ensureConnection();
+    return SitesImpl.fetchSites(this.client);
   }
 
-  /**
-   * Fetch settings for specific site IDs
-   */
-  async fetchSettings(siteIds: string[]): Promise<any[]> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🔍 Fetching settings for ${siteIds.length} sites from Supabase...`);
-    const { data, error } = await this.client
-      .from('settings')
-      .select('site_id, channels')
-      .in('site_id', siteIds);
-
-    if (error) {
-      console.error('❌ Error fetching settings:', error);
-      throw new Error(`Failed to fetch settings: ${error.message}`);
-    }
-
-    console.log(`✅ Successfully fetched ${data?.length || 0} settings from database`);
-    return data || [];
-  }
-
-  /**
-   * Fetch complete settings for specific site IDs including business_hours
-   */
-  async fetchCompleteSettings(siteIds: string[]): Promise<any[]> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🔍 Fetching complete settings for ${siteIds.length} sites from Supabase...`);
-    const { data, error } = await this.client
-      .from('settings')
-      .select('*')
-      .in('site_id', siteIds);
-
-    if (error) {
-      console.error('❌ Error fetching complete settings:', error);
-      throw new Error(`Failed to fetch complete settings: ${error.message}`);
-    }
-
-    console.log(`✅ Successfully fetched ${data?.length || 0} complete settings from database`);
-    
-    // Log which fields we actually got for debugging
-    if (data && data.length > 0) {
-      const availableFields = Object.keys(data[0]);
-      console.log(`📊 Available settings fields:`, {
-        about: availableFields.includes('about'),
-        industry: availableFields.includes('industry'),
-        company_size: availableFields.includes('company_size'),
-        products: availableFields.includes('products'),
-        services: availableFields.includes('services'),
-        goals: availableFields.includes('goals'),
-        competitors: availableFields.includes('competitors'),
-        branding: availableFields.includes('branding'),
-        team_members: availableFields.includes('team_members'),
-        locations: availableFields.includes('locations'),
-        business_hours: availableFields.includes('business_hours'),
-        channels: availableFields.includes('channels'),
-        social_media: availableFields.includes('social_media'),
-        swot: availableFields.includes('swot'),
-        marketing_channels: availableFields.includes('marketing_channels'),
-        marketing_budget: availableFields.includes('marketing_budget'),
-        team_roles: availableFields.includes('team_roles'),
-        org_structure: availableFields.includes('org_structure')
-      });
-    }
-    
-    return data || [];
-  }
-
-  /**
-   * Update site settings by site_id
-   */
-  async updateSiteSettings(siteId: string, updateData: any): Promise<any> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🔍 Updating settings for site: ${siteId}`);
-    console.log(`📝 Update data:`, JSON.stringify(updateData, null, 2));
-    
-    const { data, error } = await this.client
-      .from('settings')
-      .update({
-        ...updateData,
-        updated_at: new Date().toISOString()
-      })
-      .eq('site_id', siteId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error(`❌ Error updating settings for site ${siteId}:`, error);
-      throw new Error(`Failed to update settings: ${error.message}`);
-    }
-
-    if (!data) {
-      throw new Error(`Settings for site ${siteId} not found or update failed`);
-    }
-
-    console.log(`✅ Successfully updated settings for site ${siteId}`);
-    return data;
-  }
-
-  /**
-   * Fetch sites that have email sync enabled (channels.email.enabled = true)
-   */
   async fetchSitesWithEmailEnabled(): Promise<any[]> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log('🔍 Fetching sites with email sync enabled...');
-    
-    // First, get all settings that have email enabled
-    const { data: settingsData, error: settingsError } = await this.client
-      .from('settings')
-      .select('site_id, channels')
-      .not('channels->email->enabled', 'is', null);
-
-    if (settingsError) {
-      console.error('❌ Error fetching settings with email:', settingsError);
-      throw new Error(`Failed to fetch settings: ${settingsError.message}`);
-    }
-
-    // Filter settings that have email.enabled = true and status = active or synced
-    // Email accepts "active" or "synced" status
-    const enabledEmailSettings = (settingsData || []).filter(setting => 
-      setting.channels?.email?.enabled === true && 
-      (setting.channels?.email?.status === 'active' || setting.channels?.email?.status === 'synced')
-    );
-
-    console.log(`✅ Found ${enabledEmailSettings.length} settings with email enabled`);
-
-    if (enabledEmailSettings.length === 0) {
-      return [];
-    }
-
-    // Get the corresponding sites
-    const siteIds = enabledEmailSettings.map(setting => setting.site_id);
-    console.log(`🔍 Fetching sites data for ${siteIds.length} site IDs...`);
-
-    const { data: sitesData, error: sitesError } = await this.client
-      .from('sites')
-      .select('*')
-      .in('id', siteIds);
-
-    if (sitesError) {
-      console.error('❌ Error fetching sites:', sitesError);
-      throw new Error(`Failed to fetch sites: ${sitesError.message}`);
-    }
-
-    console.log(`✅ Successfully fetched ${sitesData?.length || 0} sites with email enabled`);
-
-    // Combine sites with their email settings
-    const sitesWithEmailConfig = (sitesData || []).map(site => {
-      const siteSettings = enabledEmailSettings.find(setting => setting.site_id === site.id);
-      return {
-        ...site,
-        emailSettings: siteSettings?.channels?.email || null
-      };
-    });
-
-    return sitesWithEmailConfig;
+    await this.ensureConnection();
+    return SitesImpl.fetchSitesWithEmailEnabled(this.client);
   }
 
-  /**
-   * Fetch draft content for a specific site
-   */
+  // --- SETTINGS ---
+
+  async fetchSettings(siteIds: string[]): Promise<any[]> {
+    await this.ensureConnection();
+    return SettingsImpl.fetchSettings(this.client, siteIds);
+  }
+
+  async fetchCompleteSettings(siteIds: string[]): Promise<any[]> {
+    await this.ensureConnection();
+    return SettingsImpl.fetchCompleteSettings(this.client, siteIds);
+  }
+
+  async updateSiteSettings(siteId: string, updateData: any): Promise<any> {
+    await this.ensureConnection();
+    return SettingsImpl.updateSiteSettings(this.client, siteId, updateData);
+  }
+
+  // --- CONTENT & ANALYSIS ---
+
   async fetchDraftContent(siteId: string): Promise<any[]> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🔍 Fetching draft content for site: ${siteId}`);
-    const { data, error } = await this.client
-      .from('content')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('status', 'draft');
-
-    if (error) {
-      console.error('❌ Error fetching draft content:', error);
-      throw new Error(`Failed to fetch draft content: ${error.message}`);
-    }
-
-    console.log(`✅ Successfully fetched ${data?.length || 0} draft content records from database`);
-    return data || [];
+    await this.ensureConnection();
+    return ContentImpl.fetchDraftContent(this.client, siteId);
   }
 
-  /**
-   * Fetch cron status records for specific activity and site IDs
-   */
+  async fetchSiteAnalysis(siteId: string): Promise<any[]> {
+    await this.ensureConnection();
+    return ContentImpl.fetchSiteAnalysis(this.client, siteId);
+  }
+
+  async hasSiteAnalysis(siteId: string): Promise<{ hasAnalysis: boolean; lastAnalysis?: any; count: number }> {
+    await this.ensureConnection();
+    // hasSiteAnalysis handles its own error catching, but we still check connection
+    // although fetchSiteAnalysis inside it checks connection, redundant check is fine.
+    // However, the original code had connection check inside fetchSiteAnalysis but hasSiteAnalysis called it.
+    // Let's keep consistency.
+    return ContentImpl.hasSiteAnalysis(this.client, siteId);
+  }
+
+  // --- CRON ---
+
   async fetchCronStatus(activityName: string, siteIds: string[]): Promise<any[]> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🔍 Fetching cron status for activity '${activityName}' and ${siteIds.length} sites...`);
-    const { data, error } = await this.client
-      .from('cron_status')
-      .select('*')
-      .eq('activity_name', activityName)
-      .in('site_id', siteIds);
-
-    if (error) {
-      console.error('❌ Error fetching cron status:', error);
-      throw new Error(`Failed to fetch cron status: ${error.message}`);
-    }
-
-    console.log(`✅ Successfully fetched ${data?.length || 0} cron status records from database`);
-    return data || [];
+    await this.ensureConnection();
+    return CronImpl.fetchCronStatus(this.client, activityName, siteIds);
   }
 
-  /**
-   * Update or insert cron status record
-   */
   async upsertCronStatus(cronStatusRecord: any): Promise<void> {
-    if (!this.isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🔍 Upserting cron status for site ${cronStatusRecord.site_id}...`);
-
-    // Try to find existing record
-    const { data: existingRecord, error: selectError } = await this.client
-      .from('cron_status')
-      .select('id')
-      .eq('site_id', cronStatusRecord.site_id)
-      .eq('activity_name', cronStatusRecord.activity_name)
-      .single();
-
-    if (selectError && selectError.code !== 'PGRST116') { // PGRST116 = no rows returned
-      console.error('❌ Error checking existing cron status:', selectError);
-      throw new Error(`Failed to check existing cron status: ${selectError.message}`);
-    }
-
-    if (existingRecord) {
-      // Update existing record
-      console.log(`📝 Updating existing cron status record ${existingRecord.id}...`);
-      const { error: updateError } = await this.client
-        .from('cron_status')
-        .update({
-          ...cronStatusRecord,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', existingRecord.id);
-
-      if (updateError) {
-        console.error('❌ Error updating cron status:', updateError);
-        throw new Error(`Failed to update cron status: ${updateError.message}`);
-      }
-      console.log('✅ Successfully updated cron status record');
-    } else {
-      // Insert new record
-      console.log('📝 Inserting new cron status record...');
-      const { error: insertError } = await this.client
-        .from('cron_status')
-        .insert({
-          ...cronStatusRecord,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
-
-      if (insertError) {
-        console.error('❌ Error inserting cron status:', insertError);
-        throw new Error(`Failed to insert cron status: ${insertError.message}`);
-      }
-      console.log('✅ Successfully inserted new cron status record');
-    }
+    await this.ensureConnection();
+    return CronImpl.upsertCronStatus(this.client, cronStatusRecord);
   }
 
-  /**
-   * Batch update multiple cron status records
-   */
   async batchUpsertCronStatus(records: any[]): Promise<void> {
-    console.log(`📝 Batch upserting ${records.length} cron status records...`);
-    for (const record of records) {
-      await this.upsertCronStatus(record);
-    }
-    console.log(`✅ Successfully processed ${records.length} cron status records`);
+    await this.ensureConnection();
+    // batchUpsert calls upsertCronStatus which checks connection, but let's check here too or let it propagate
+    // The implementation receives client.
+    return CronImpl.batchUpsertCronStatus(this.client, records);
   }
 
-  /**
-   * Fetch lead information by lead ID
-   */
+  async fetchStuckCronStatus(hoursThreshold: number = 2): Promise<any[]> {
+    await this.ensureConnection();
+    return CronImpl.fetchStuckCronStatus(this.client, hoursThreshold);
+  }
+
+  async fetchAllRunningCronStatus(): Promise<any[]> {
+    await this.ensureConnection();
+    return CronImpl.fetchAllRunningCronStatus(this.client);
+  }
+
+  async resetCronStatusToFailed(recordId: string, errorMessage: string): Promise<void> {
+    await this.ensureConnection();
+    return CronImpl.resetCronStatusToFailed(this.client, recordId, errorMessage);
+  }
+
+  async fetchRecentCronStatus(limit: number = 10): Promise<any[]> {
+    await this.ensureConnection();
+    return CronImpl.fetchRecentCronStatus(this.client, limit);
+  }
+
+  // --- LEADS ---
+
   async fetchLead(leadId: string): Promise<any> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🔍 Fetching lead information for: ${leadId}`);
-    const { data, error } = await this.client
-      .from('leads')
-      .select('*')
-      .eq('id', leadId)
-      .single();
-
-    if (error) {
-      console.error(`❌ Error fetching lead ${leadId}:`, error);
-      throw new Error(`Failed to fetch lead: ${error.message}`);
-    }
-
-    if (!data) {
-      throw new Error(`Lead ${leadId} not found`);
-    }
-
-    console.log(`✅ Successfully fetched lead information for ${leadId}`);
-    return data;
+    await this.ensureConnection();
+    return LeadsImpl.fetchLead(this.client, leadId);
   }
 
-  /**
-   * Update lead information by lead ID
-   */
   async updateLead(leadId: string, updateData: any): Promise<any> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🔍 Updating lead information for: ${leadId}`);
-    console.log(`📝 Update data:`, JSON.stringify(updateData, null, 2));
-    
-    const { data, error } = await this.client
-      .from('leads')
-      .update({
-        ...updateData,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', leadId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error(`❌ Error updating lead ${leadId}:`, error);
-      throw new Error(`Failed to update lead: ${error.message}`);
-    }
-
-    if (!data) {
-      throw new Error(`Lead ${leadId} not found or update failed`);
-    }
-
-    console.log(`✅ Successfully updated lead information for ${leadId}`);
-    return data;
+    await this.ensureConnection();
+    return LeadsImpl.updateLead(this.client, leadId, updateData);
   }
 
-  /**
-   * Fetch company by ID
-   */
-  async fetchCompany(companyId: string): Promise<any> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🏢 Fetching company: ${companyId}`);
-    const { data, error } = await this.client
-      .from('companies')
-      .select('*')
-      .eq('id', companyId)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') { // No rows returned
-        console.log(`⚠️  Company ${companyId} not found`);
-        return null;
-      }
-      console.error('❌ Error fetching company:', error);
-      throw new Error(`Failed to fetch company: ${error.message}`);
-    }
-
-    console.log(`✅ Successfully fetched company: ${data.name}`);
-    return data;
-  }
-
-  /**
-   * Create or update company information
-   */
-  async upsertCompany(companyData: any): Promise<any> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🏢 Upserting company: ${companyData.name}`);
-    console.log(`📝 Company data:`, JSON.stringify(companyData, null, 2));
-
-    // If ID is provided, try to update first
-    if (companyData.id) {
-      const { data: updateData, error: updateError } = await this.client
-        .from('companies')
-        .update({
-          ...companyData,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', companyData.id)
-        .select()
-        .single();
-
-      if (!updateError) {
-        console.log(`✅ Successfully updated existing company: ${updateData.name}`);
-        return updateData;
-      }
-      
-      // If update failed and it's not a "not found" error, throw
-      if (updateError.code !== 'PGRST116') {
-        console.error('❌ Error updating company:', updateError);
-        throw new Error(`Failed to update company: ${updateError.message}`);
-      }
-    }
-
-    // If no ID provided or company not found, try to find by name first
-    if (companyData.name) {
-      const { data: existingCompany } = await this.client
-        .from('companies')
-        .select('*')
-        .eq('name', companyData.name)
-        .single();
-
-      if (existingCompany) {
-        // Update existing company found by name
-        const { data: updateData, error: updateError } = await this.client
-          .from('companies')
-          .update({
-            ...companyData,
-            id: existingCompany.id,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', existingCompany.id)
-          .select()
-          .single();
-
-        if (updateError) {
-          console.error('❌ Error updating existing company by name:', updateError);
-          throw new Error(`Failed to update company: ${updateError.message}`);
-        }
-
-        console.log(`✅ Successfully updated existing company by name: ${updateData.name}`);
-        return updateData;
-      }
-    }
-
-    // Create new company
-    const { data: insertData, error: insertError } = await this.client
-      .from('companies')
-      .insert({
-        ...companyData,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .select()
-      .single();
-
-    if (insertError) {
-      console.error('❌ Error creating company:', insertError);
-      throw new Error(`Failed to create company: ${insertError.message}`);
-    }
-
-    console.log(`✅ Successfully created new company: ${insertData.name}`);
-    return insertData;
-  }
-
-  /**
-   * Fetch segments for a specific site
-   */
-  async fetchSegments(siteId: string): Promise<any[]> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🔍 Fetching segments for site: ${siteId}`);
-    const { data, error } = await this.client
-      .from('segments')
-      .select('*')
-      .eq('site_id', siteId)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('❌ Error fetching segments:', error);
-      throw new Error(`Failed to fetch segments: ${error.message}`);
-    }
-
-    console.log(`✅ Successfully fetched ${data?.length || 0} segments from database`);
-    return data || [];
-  }
-
-  /**
-   * Create agents in the database
-   */
-  async createAgents(agents: any[]): Promise<any[]> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🔍 Creating ${agents.length} agents in Supabase...`);
-    const { data, error } = await this.client
-      .from('agents')
-      .insert(agents)
-      .select();
-
-    if (error) {
-      console.error('❌ Error creating agents:', error);
-      throw new Error(`Failed to create agents: ${error.message}`);
-    }
-
-    console.log(`✅ Successfully created ${data?.length || 0} agents in database`);
-    return data || [];
-  }
-
-  /**
-   * Create a single agent in the database
-   */
-  async createAgent(agentData: any): Promise<any> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🔍 Creating agent '${agentData.name}' in Supabase...`);
-    const { data, error } = await this.client
-      .from('agents')
-      .insert([agentData])
-      .select()
-      .single();
-
-    if (error) {
-      console.error('❌ Error creating agent:', error);
-      throw new Error(`Failed to create agent: ${error.message}`);
-    }
-
-    console.log(`✅ Successfully created agent '${agentData.name}' with ID: ${data.id}`);
-    return data;
-  }
-
-  /**
-   * Fetch leads by segments and status with optional filters
-   * Business Rules:
-   * - segmentIds: if empty array, no segment filter is applied
-   * - status: if empty array, no status filter is applied
-   * - Always orders by created_at DESC (newest first)
-   * - Always filters for leads with email (NOT NULL and not empty)
-   * - Respects limit (brings latest X leads if more than limit)
-   */
   async fetchLeadsBySegmentsAndStatus(
     siteId: string,
     segmentIds: string[],
     status: string[],
     limit?: number
   ): Promise<{ data: any[] | null; error: any }> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      return { data: null, error: { message: 'Database not connected' } };
-    }
-
-    // Log the query parameters for debugging
-    const hasSegmentFilter = segmentIds.length > 0;
-    const hasStatusFilter = status.length > 0;
-    
-    console.log(`🔍 Fetching leads for site: ${siteId}`);
-    console.log(`   - Segment filter: ${hasSegmentFilter ? segmentIds.join(', ') : 'None (all segments)'}`);
-    console.log(`   - Status filter: ${hasStatusFilter ? status.join(', ') : 'None (all statuses)'}`);
-    console.log(`   - Limit: ${limit || 500}`);
-    console.log(`   - Order: Latest created first (created_at DESC)`);
-    
-    // Build query starting with basic filters
-    let query = this.client
-      .from('leads')
-      .select('*')
-      .eq('site_id', siteId)
-      .not('email', 'is', null)     // Email is not null
-      .neq('email', '');            // Email is not empty string
-    
-    // Apply segment filter only if segmentIds is not empty
-    if (hasSegmentFilter) {
-      query = query.in('segment_id', segmentIds);
-      console.log(`   ✓ Applied segment filter for ${segmentIds.length} segments`);
-    }
-    
-    // Apply status filter only if status is not empty
-    if (hasStatusFilter) {
-      query = query.in('status', status);
-      console.log(`   ✓ Applied status filter for ${status.length} statuses`);
-    }
-    
-    // Always order by created_at DESC to get latest leads first
-    query = query.order('created_at', { ascending: false });
-    
-    // Apply limit
-    if (limit) {
-      query = query.limit(limit);
-    }
-    
-    const { data, error } = await query;
-    
-    if (error) {
-      console.error('❌ Error fetching leads:', error);
-      return { data: null, error };
-    }
-    
-    const resultCount = data?.length || 0;
-    console.log(`✅ Successfully fetched ${resultCount} leads from database`);
-    
-    // Log filter results for transparency
-    if (!hasSegmentFilter && !hasStatusFilter) {
-      console.log(`   📋 Query result: All leads with email from site (newest first)`);
-    } else if (!hasSegmentFilter) {
-      console.log(`   📋 Query result: All segments + status filter + email required (newest first)`);
-    } else if (!hasStatusFilter) {
-      console.log(`   📋 Query result: Segment filter + all statuses + email required (newest first)`);
-    } else {
-      console.log(`   📋 Query result: Segment filter + status filter + email required (newest first)`);
-    }
-    
-    return { data, error: null };
+    await this.ensureConnection();
+    return LeadsImpl.fetchLeadsBySegmentsAndStatus(this.client, siteId, segmentIds, status, limit);
   }
 
-  /**
-   * Check if a site has analysis records
-   */
-  async fetchSiteAnalysis(siteId: string): Promise<any[]> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
+  // --- COMPANIES ---
 
-    console.log(`🔍 Checking analysis records for site: ${siteId}`);
-    const { data, error } = await this.client
-      .from('analysis')
-      .select('*')
-      .eq('site_id', siteId)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('❌ Error fetching site analysis:', error);
-      throw new Error(`Failed to fetch site analysis: ${error.message}`);
-    }
-
-    console.log(`✅ Found ${data?.length || 0} analysis records for site ${siteId}`);
-    return data || [];
+  async fetchCompany(companyId: string): Promise<any> {
+    await this.ensureConnection();
+    return CompaniesImpl.fetchCompany(this.client, companyId);
   }
 
-  /**
-   * Check if site has any completed analysis
-   */
-  async hasSiteAnalysis(siteId: string): Promise<{ hasAnalysis: boolean; lastAnalysis?: any; count: number }> {
-    try {
-      const analysisRecords = await this.fetchSiteAnalysis(siteId);
-      const completedAnalysis = analysisRecords.filter(record => 
-        record.status === 'completed' || record.status === null // null is also considered completed
-      );
-      
-      const hasAnalysis = completedAnalysis.length > 0;
-      const lastAnalysis = hasAnalysis ? completedAnalysis[0] : null; // First one is most recent due to ordering
-      
-      console.log(`📊 Site ${siteId} analysis status: ${hasAnalysis ? 'HAS ANALYSIS' : 'NO ANALYSIS'} (${completedAnalysis.length} completed records)`);
-      
-      return {
-        hasAnalysis,
-        lastAnalysis,
-        count: completedAnalysis.length
-      };
-    } catch (error) {
-      console.error(`❌ Error checking site analysis for ${siteId}:`, error);
-      // In case of error, assume no analysis to be safe
-      return { hasAnalysis: false, count: 0 };
-    }
+  async upsertCompany(companyData: any): Promise<any> {
+    await this.ensureConnection();
+    return CompaniesImpl.upsertCompany(this.client, companyData);
   }
 
-  /**
-   * Fetch stuck RUNNING cron status records (older than specified hours)
-   */
-  async fetchStuckCronStatus(hoursThreshold: number = 2): Promise<any[]> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
+  // --- AGENTS ---
 
-    console.log(`🔍 Fetching stuck RUNNING cron status records older than ${hoursThreshold} hours...`);
-    const thresholdTime = new Date(Date.now() - hoursThreshold * 60 * 60 * 1000).toISOString();
-    
-    const { data, error } = await this.client
-      .from('cron_status')
-      .select('*')
-      .eq('status', 'RUNNING')
-      .lt('updated_at', thresholdTime)
-      .order('updated_at', { ascending: false });
-
-    if (error) {
-      console.error('❌ Error fetching stuck cron status records:', error);
-      throw new Error(`Failed to fetch stuck cron status: ${error.message}`);
-    }
-
-    console.log(`✅ Found ${data?.length || 0} stuck RUNNING records`);
-    return data || [];
+  async createAgents(agents: any[]): Promise<any[]> {
+    await this.ensureConnection();
+    return AgentsImpl.createAgents(this.client, agents);
   }
 
-  /**
-   * Fetch all RUNNING cron status records
-   */
-  async fetchAllRunningCronStatus(): Promise<any[]> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log('🔍 Fetching all RUNNING cron status records...');
-    
-    const { data, error } = await this.client
-      .from('cron_status')
-      .select('*')
-      .eq('status', 'RUNNING')
-      .order('updated_at', { ascending: false });
-
-    if (error) {
-      console.error('❌ Error fetching running cron status records:', error);
-      throw new Error(`Failed to fetch running cron status: ${error.message}`);
-    }
-
-    console.log(`✅ Found ${data?.length || 0} RUNNING records`);
-    return data || [];
+  async createAgent(agentData: any): Promise<any> {
+    await this.ensureConnection();
+    return AgentsImpl.createAgent(this.client, agentData);
   }
 
-  /**
-   * Reset a cron status record to FAILED with error message
-   */
-  async resetCronStatusToFailed(recordId: string, errorMessage: string): Promise<void> {
-    if (!this.isConnected) {
-      throw new Error('Database not connected');
-    }
+  // --- SEGMENTS ---
 
-    console.log(`📝 Resetting cron status record ${recordId} to FAILED...`);
-    
-    const { error } = await this.client
-      .from('cron_status')
-      .update({
-        status: 'FAILED',
-        error_message: errorMessage,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', recordId);
-
-    if (error) {
-      console.error('❌ Error resetting cron status:', error);
-      throw new Error(`Failed to reset cron status: ${error.message}`);
-    }
-
-    console.log('✅ Successfully reset cron status record to FAILED');
-  }
-
-  /**
-   * Fetch recent cron status records for analysis
-   */
-  async fetchRecentCronStatus(limit: number = 10): Promise<any[]> {
-    const isConnected = await this.getConnectionStatus();
-    if (!isConnected) {
-      throw new Error('Database not connected');
-    }
-
-    console.log(`🔍 Fetching ${limit} most recent cron status records...`);
-    
-    const { data, error } = await this.client
-      .from('cron_status')
-      .select(`
-        id,
-        workflow_id,
-        schedule_id,
-        activity_name,
-        status,
-        created_at,
-        updated_at
-      `)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    if (error) {
-      console.error('❌ Error fetching recent cron status records:', error);
-      throw new Error(`Failed to fetch recent cron status: ${error.message}`);
-    }
-
-    console.log(`✅ Found ${data?.length || 0} recent records`);
-    return data || [];
+  async fetchSegments(siteId: string): Promise<any[]> {
+    await this.ensureConnection();
+    return SegmentsImpl.fetchSegments(this.client, siteId);
   }
 }
 
@@ -904,4 +247,4 @@ export function getSupabaseService(config?: DatabaseConfig): SupabaseService {
     supabaseServiceInstance = new SupabaseService(config);
   }
   return supabaseServiceInstance;
-} 
+}
