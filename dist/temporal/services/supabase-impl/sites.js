@@ -36,9 +36,10 @@ async function fetchSitesWithEmailEnabled(client) {
         // Check agent (accepts "active")
         const isAgentEnabled = channels.agent?.enabled === true &&
             channels.agent?.status === 'active';
-        // Check agent_mail (accepts "active")
-        const isAgentMailEnabled = channels.agent_mail?.enabled === true &&
-            channels.agent_mail?.status === 'active';
+        // Check agent_mail or agent_email (accepts "active" or "synced" or enabled=true)
+        const agentChannel = channels.agent_mail || channels.agent_email;
+        const isAgentMailEnabled = agentChannel && agentChannel.enabled === true && (agentChannel.status === 'active' ||
+            agentChannel.status === 'synced');
         return isEmailEnabled || isAgentEnabled || isAgentMailEnabled;
     });
     console.log(`✅ Found ${enabledEmailSettings.length} settings with email enabled`);

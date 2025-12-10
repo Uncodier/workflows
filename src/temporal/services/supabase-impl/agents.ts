@@ -32,3 +32,4 @@ export async function createAgent(client: SupabaseClient, agentData: any): Promi
   console.log(`✅ Successfully created agent '${agentData.name}' with ID: ${data.id}`);
   return data;
 }
+

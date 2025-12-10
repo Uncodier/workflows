@@ -48,7 +48,8 @@ async function validateCommunicationChannelsActivity(params) {
             console.log(`📋 Processing channels as array with ${channels.length} configurations`);
             emailConfig = channels.find((channel) => channel.type === 'email' && channel.enabled === true && (channel.status === 'active' || channel.status === 'synced'));
             const agentConfig = channels.find((channel) => channel.type === 'agent' && channel.enabled === true && channel.status === 'active');
-            const agentMailConfig = channels.find((channel) => channel.type === 'agent_mail' && channel.enabled === true && channel.status === 'active');
+            const agentMailConfig = channels.find((channel) => (channel.type === 'agent_mail' || channel.type === 'agent_email') &&
+                channel.enabled === true && (channel.status === 'active' || channel.status === 'synced'));
             whatsappConfig = channels.find((channel) => channel.type === 'whatsapp' && channel.enabled === true && channel.status === 'active');
             hasEmailChannel = !!emailConfig || !!agentConfig || !!agentMailConfig;
             hasWhatsappChannel = !!whatsappConfig;
@@ -81,10 +82,12 @@ async function validateCommunicationChannelsActivity(params) {
             if (channels.agent) {
                 console.log(`   - Agent enabled: ${isAgentActive}`, channels.agent);
             }
-            // Check agent_mail channel
-            const isAgentMailActive = channels.agent_mail && channels.agent_mail.enabled === true && channels.agent_mail.status === 'active';
-            if (channels.agent_mail) {
-                console.log(`   - Agent Mail enabled: ${isAgentMailActive}`, channels.agent_mail);
+            // Check agent_mail channel (and agent_email) with relaxed validation
+            const agentMailChannel = channels.agent_mail || channels.agent_email;
+            const isAgentMailActive = agentMailChannel && agentMailChannel.enabled === true && (agentMailChannel.status === 'active' ||
+                agentMailChannel.status === 'synced');
+            if (agentMailChannel) {
+                console.log(`   - Agent Mail/Email found (status=${agentMailChannel.status}): ${isAgentMailActive}`, agentMailChannel);
             }
             hasEmailChannel = isEmailActive || isAgentActive || isAgentMailActive;
             // Check WhatsApp configuration  

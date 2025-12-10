@@ -16,3 +16,4 @@ export async function fetchSegments(client: SupabaseClient, siteId: string): Pro
   console.log(`✅ Successfully fetched ${data?.length || 0} segments from database`);
   return data || [];
 }
+

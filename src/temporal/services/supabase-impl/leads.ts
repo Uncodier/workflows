@@ -116,3 +116,4 @@ export async function fetchLeadsBySegmentsAndStatus(
   
   return { data, error: null };
 }
+

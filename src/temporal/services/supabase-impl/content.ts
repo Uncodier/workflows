@@ -57,3 +57,4 @@ export async function hasSiteAnalysis(client: SupabaseClient, siteId: string): P
     return { hasAnalysis: false, count: 0 };
   }
 }
+

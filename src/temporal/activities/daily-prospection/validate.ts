@@ -67,7 +67,8 @@ export async function validateCommunicationChannelsActivity(
       );
 
       const agentMailConfig = channels.find((channel: any) => 
-        channel.type === 'agent_mail' && channel.enabled === true && channel.status === 'active'
+        (channel.type === 'agent_mail' || channel.type === 'agent_email') && 
+        channel.enabled === true && (channel.status === 'active' || channel.status === 'synced')
       );
       
       whatsappConfig = channels.find((channel: any) => 
@@ -106,10 +107,15 @@ export async function validateCommunicationChannelsActivity(
          console.log(`   - Agent enabled: ${isAgentActive}`, channels.agent);
       }
       
-      // Check agent_mail channel
-      const isAgentMailActive = channels.agent_mail && channels.agent_mail.enabled === true && channels.agent_mail.status === 'active';
-      if (channels.agent_mail) {
-         console.log(`   - Agent Mail enabled: ${isAgentMailActive}`, channels.agent_mail);
+      // Check agent_mail channel (and agent_email) with relaxed validation
+      const agentMailChannel = channels.agent_mail || channels.agent_email;
+      const isAgentMailActive = agentMailChannel && agentMailChannel.enabled === true && (
+        agentMailChannel.status === 'active' || 
+        agentMailChannel.status === 'synced'
+      );
+      
+      if (agentMailChannel) {
+         console.log(`   - Agent Mail/Email found (status=${agentMailChannel.status}): ${isAgentMailActive}`, agentMailChannel);
       }
 
       hasEmailChannel = isEmailActive || isAgentActive || isAgentMailActive;
@@ -170,3 +176,4 @@ export async function validateCommunicationChannelsActivity(
     };
   }
 }
+

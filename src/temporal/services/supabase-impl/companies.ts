@@ -99,3 +99,4 @@ export async function upsertCompany(client: SupabaseClient, companyData: any): P
   console.log(`✅ Successfully created new company: ${insertData.name}`);
   return insertData;
 }
+

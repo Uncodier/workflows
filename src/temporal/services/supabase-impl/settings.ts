@@ -84,3 +84,4 @@ export async function updateSiteSettings(client: SupabaseClient, siteId: string,
   console.log(`✅ Successfully updated settings for site ${siteId}`);
   return data;
 }
+

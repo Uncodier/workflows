@@ -159,3 +159,4 @@ export async function fetchRecentCronStatus(client: SupabaseClient, limit: numbe
   console.log(`✅ Found ${data?.length || 0} recent records`);
   return data || [];
 }
+
