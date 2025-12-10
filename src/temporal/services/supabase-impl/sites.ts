@@ -42,9 +42,9 @@ export async function fetchSitesWithEmailEnabled(client: SupabaseClient): Promis
     const isAgentEnabled = channels.agent?.enabled === true && 
       channels.agent?.status === 'active';
 
-    // Check agent_mail or agent_email (accepts "active" or "synced" or enabled=true)
+    // Check agent_mail or agent_email (accepts "active" or "synced", enabled can be missing/undefined/true, but not false)
     const agentChannel = channels.agent_mail || channels.agent_email;
-    const isAgentMailEnabled = agentChannel && agentChannel.enabled === true && (
+    const isAgentMailEnabled = agentChannel && (agentChannel.enabled !== false) && (
       agentChannel.status === 'active' || 
       agentChannel.status === 'synced'
     );

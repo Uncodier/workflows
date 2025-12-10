@@ -76,7 +76,7 @@ async function validateEmailConfigurationActivity(params) {
             emailConfig = channels.find((channel) => channel.type === 'email' && channel.enabled === true && (channel.status === 'active' || channel.status === 'synced'));
             agentConfig = channels.find((channel) => channel.type === 'agent' && channel.enabled === true && channel.status === 'active');
             agentMailConfig = channels.find((channel) => (channel.type === 'agent_mail' || channel.type === 'agent_email') &&
-                channel.enabled === true && (channel.status === 'active' || channel.status === 'synced'));
+                (channel.enabled !== false) && (channel.status === 'active' || channel.status === 'synced'));
         }
         else if (typeof channels === 'object' && channels !== null) {
             // Object format
@@ -87,7 +87,7 @@ async function validateEmailConfigurationActivity(params) {
                 agentConfig = channels.agent;
             }
             const agentChannel = channels.agent_mail || channels.agent_email;
-            if (agentChannel && agentChannel.enabled === true && (agentChannel.status === 'active' || agentChannel.status === 'synced')) {
+            if (agentChannel && (agentChannel.enabled !== false) && (agentChannel.status === 'active' || agentChannel.status === 'synced')) {
                 agentMailConfig = agentChannel;
             }
         }

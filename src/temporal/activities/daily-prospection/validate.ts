@@ -68,7 +68,7 @@ export async function validateCommunicationChannelsActivity(
 
       const agentMailConfig = channels.find((channel: any) => 
         (channel.type === 'agent_mail' || channel.type === 'agent_email') && 
-        channel.enabled === true && (channel.status === 'active' || channel.status === 'synced')
+        (channel.enabled !== false) && (channel.status === 'active' || channel.status === 'synced')
       );
       
       whatsappConfig = channels.find((channel: any) => 
@@ -109,7 +109,7 @@ export async function validateCommunicationChannelsActivity(
       
       // Check agent_mail channel (and agent_email) with relaxed validation
       const agentMailChannel = channels.agent_mail || channels.agent_email;
-      const isAgentMailActive = agentMailChannel && agentMailChannel.enabled === true && (
+      const isAgentMailActive = agentMailChannel && (agentMailChannel.enabled !== false) && (
         agentMailChannel.status === 'active' || 
         agentMailChannel.status === 'synced'
       );
