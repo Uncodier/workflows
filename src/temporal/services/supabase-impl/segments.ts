@@ -17,3 +17,4 @@ export async function fetchSegments(client: SupabaseClient, siteId: string): Pro
   return data || [];
 }
 
+

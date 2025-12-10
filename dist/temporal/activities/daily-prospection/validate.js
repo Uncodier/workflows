@@ -37,6 +37,9 @@ async function validateCommunicationChannelsActivity(params) {
         const siteSettings = settings[0];
         const channels = siteSettings.channels || {};
         console.log(`🔍 Checking channel configurations for channels:`, channels);
+        console.log(`🔍 DEBUG: channels type:`, typeof channels);
+        console.log(`🔍 DEBUG: channels isArray:`, Array.isArray(channels));
+        console.log(`🔍 DEBUG: channels value:`, JSON.stringify(channels, null, 2));
         let hasEmailChannel = false;
         let hasWhatsappChannel = false;
         let emailConfig = null;
@@ -57,6 +60,8 @@ async function validateCommunicationChannelsActivity(params) {
         else if (typeof channels === 'object' && channels !== null) {
             // Object format: channels.email.enabled, channels.whatsapp.enabled
             console.log(`📋 Processing channels as object structure`);
+            console.log(`🔍 DEBUG: Channels object keys:`, Object.keys(channels));
+            console.log(`🔍 DEBUG: Full channels object:`, JSON.stringify(channels, null, 2));
             // Check email configuration
             let isEmailActive = false;
             if (channels.email && typeof channels.email === 'object') {
@@ -83,11 +88,25 @@ async function validateCommunicationChannelsActivity(params) {
                 console.log(`   - Agent enabled: ${isAgentActive}`, channels.agent);
             }
             // Check agent_mail channel (and agent_email) with relaxed validation
+            console.log(`🔍 DEBUG: Checking agent_mail/agent_email channels...`);
+            console.log(`🔍 DEBUG: channels.agent_mail =`, channels.agent_mail);
+            console.log(`🔍 DEBUG: channels.agent_email =`, channels.agent_email);
             const agentMailChannel = channels.agent_mail || channels.agent_email;
+            console.log(`🔍 DEBUG: agentMailChannel =`, agentMailChannel);
+            if (agentMailChannel) {
+                console.log(`🔍 DEBUG: agentMailChannel.enabled =`, agentMailChannel.enabled);
+                console.log(`🔍 DEBUG: agentMailChannel.enabled !== false =`, agentMailChannel.enabled !== false);
+                console.log(`🔍 DEBUG: agentMailChannel.status =`, agentMailChannel.status);
+                console.log(`🔍 DEBUG: status check =`, agentMailChannel.status === 'active' || agentMailChannel.status === 'synced');
+            }
             const isAgentMailActive = agentMailChannel && (agentMailChannel.enabled !== false) && (agentMailChannel.status === 'active' ||
                 agentMailChannel.status === 'synced');
+            console.log(`🔍 DEBUG: isAgentMailActive =`, isAgentMailActive);
             if (agentMailChannel) {
-                console.log(`   - Agent Mail/Email found (status=${agentMailChannel.status}): ${isAgentMailActive}`, agentMailChannel);
+                console.log(`   - Agent Mail/Email found (status=${agentMailChannel.status}, enabled=${agentMailChannel.enabled}): ${isAgentMailActive}`, agentMailChannel);
+            }
+            else {
+                console.log(`   - Agent Mail/Email NOT FOUND in channels object`);
             }
             hasEmailChannel = isEmailActive || isAgentActive || isAgentMailActive;
             // Check WhatsApp configuration  
