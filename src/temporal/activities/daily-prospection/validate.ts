@@ -75,7 +75,8 @@ export async function validateCommunicationChannelsActivity(
       );
       
       whatsappConfig = channels.find((channel: any) => 
-        channel.type === 'whatsapp' && channel.enabled === true && channel.status === 'active'
+        (channel.type === 'whatsapp' || channel.type === 'agent_whatsapp') && 
+        (channel.enabled !== false) && channel.status === 'active'
       );
       
       hasEmailChannel = !!emailConfig || !!agentConfig || !!agentMailConfig;
@@ -142,13 +143,28 @@ export async function validateCommunicationChannelsActivity(
 
       hasEmailChannel = isEmailActive || isAgentActive || isAgentMailActive;
       
-      // Check WhatsApp configuration  
-      if (channels.whatsapp && typeof channels.whatsapp === 'object') {
-        hasWhatsappChannel = channels.whatsapp.enabled === true && channels.whatsapp.status === 'active';
+      // Check WhatsApp configuration (including agent_whatsapp)
+      console.log(`🔍 DEBUG: Checking WhatsApp channels...`);
+      console.log(`🔍 DEBUG: channels.whatsapp =`, channels.whatsapp);
+      console.log(`🔍 DEBUG: channels.agent_whatsapp =`, channels.agent_whatsapp);
+      
+      const whatsappChannel = channels.whatsapp || channels.agent_whatsapp;
+      console.log(`🔍 DEBUG: whatsappChannel =`, whatsappChannel);
+      
+      if (whatsappChannel && typeof whatsappChannel === 'object') {
+        console.log(`🔍 DEBUG: whatsappChannel.enabled =`, whatsappChannel.enabled);
+        console.log(`🔍 DEBUG: whatsappChannel.enabled !== false =`, whatsappChannel.enabled !== false);
+        console.log(`🔍 DEBUG: whatsappChannel.status =`, whatsappChannel.status);
+        console.log(`🔍 DEBUG: status check =`, whatsappChannel.status === 'active');
+        
+        hasWhatsappChannel = (whatsappChannel.enabled !== false) && whatsappChannel.status === 'active';
         if (hasWhatsappChannel) {
-          whatsappConfig = channels.whatsapp;
+          whatsappConfig = whatsappChannel;
         }
-        console.log(`   - WhatsApp enabled: ${hasWhatsappChannel}`, channels.whatsapp);
+        console.log(`🔍 DEBUG: hasWhatsappChannel =`, hasWhatsappChannel);
+        console.log(`   - WhatsApp/Agent WhatsApp enabled: ${hasWhatsappChannel}`, whatsappChannel);
+      } else {
+        console.log(`   - WhatsApp/Agent WhatsApp NOT FOUND in channels object`);
       }
       
     } else {
