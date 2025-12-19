@@ -341,4 +341,5 @@ export async function dailyStrategicAccountsWorkflow(
     // Throw error to properly fail the workflow
     throw new Error(`Daily strategic accounts workflow failed: ${errorMessage}`);
   }
-} 
+}
+

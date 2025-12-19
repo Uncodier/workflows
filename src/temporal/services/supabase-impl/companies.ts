@@ -101,3 +101,4 @@ export async function upsertCompany(client: SupabaseClient, companyData: any): P
 }
 
 
+
