@@ -30,6 +30,7 @@ const {
   startLeadFollowUpWorkflowActivity,
   validateAndCleanStuckCronStatusActivity,
   validateWorkflowConfigActivity,
+  countPendingMessagesActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -412,7 +413,7 @@ export async function dailyProspectionWorkflow(
   const { 
     site_id, 
     hoursThreshold = 48, 
-    maxLeads = 30, 
+    maxLeads = 100, 
     updateStatus = false,
     maxPages = 10,
     minLeadsRequired = 30
@@ -981,6 +982,67 @@ export async function dailyProspectionWorkflow(
 
     // Step 7: Start follow-up workflows for leads not assigned to humans
     console.log(`🔄 Step 7: Starting follow-up workflows for unassigned leads...`);
+    
+    // Step 7.1: Check pending messages count before queuing new follow-ups
+    console.log(`🔍 Step 7.1: Checking pending messages count for queue throttling...`);
+    
+    const pendingMessagesCheck = await countPendingMessagesActivity({
+      site_id: site_id
+    });
+    
+    if (!pendingMessagesCheck.success) {
+      const errorMsg = `Failed to check pending messages count: ${pendingMessagesCheck.error}`;
+      console.error(`❌ ${errorMsg}`);
+      errors.push(errorMsg);
+      // Continue with follow-up workflows despite error (don't block the workflow)
+      console.log(`⚠️ Continuing with follow-up workflows despite pending messages check failure`);
+    } else {
+      const pendingCount = pendingMessagesCheck.count || 0;
+      console.log(`📊 Pending messages count: ${pendingCount}`);
+      
+      if (pendingCount >= 100) {
+        const throttleMsg = `Queue throttling: ${pendingCount} pending messages (>= 100) - skipping follow-up workflow queue`;
+        console.log(`⏸️ ${throttleMsg}`);
+        errors.push(throttleMsg);
+        
+        // Update result to indicate queue was throttled
+        result.followUpWorkflowsStarted = 0;
+        result.followUpResults = [];
+        result.unassignedLeads = [];
+        
+        console.log(`🎉 Daily prospection workflow completed (queue throttled)!`);
+        console.log(`📊 Summary: Daily prospection for site ${siteName} completed in ${executionTime}`);
+        console.log(`   - Site: ${siteName} (${siteUrl})`);
+        console.log(`   - Leads found: ${leadsFound}`);
+        console.log(`   - Leads after channel filtering: ${leadsFiltered} (${leadsFound - leadsFiltered} filtered out)`);
+        console.log(`   - Leads processed: ${leadsProcessed}`);
+        console.log(`   - Queue throttled: ${pendingCount} pending messages (>= 100)`);
+        console.log(`   - Follow-up workflows skipped due to queue throttling`);
+        
+        // Update cron status to indicate successful completion
+        await saveCronStatusActivity({
+          siteId: site_id,
+          workflowId: realWorkflowId,
+          scheduleId: realScheduleId,
+          activityName: 'dailyProspectionWorkflow',
+          status: 'COMPLETED',
+          lastRun: new Date().toISOString()
+        });
+
+        // Log successful completion
+        await logWorkflowExecutionActivity({
+          workflowId: realWorkflowId,
+          workflowType: 'dailyProspectionWorkflow',
+          status: 'COMPLETED',
+          input: options,
+          output: result,
+        });
+
+        return result;
+      } else {
+        console.log(`✅ Pending messages count (${pendingCount}) is below threshold (100) - proceeding with follow-up workflows`);
+      }
+    }
     
     // Identify leads that were NOT assigned to humans
     const assignedLeadIds = assignedLeads.map((lead: any) => lead.id || lead.lead_id);

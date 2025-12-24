@@ -22,6 +22,7 @@ const {
   validateContactInformation,
   invalidateEmailOnlyActivity,
   validateCommunicationChannelsActivity,
+  checkMessageStatusActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
   retry: {
@@ -806,15 +807,171 @@ export async function leadFollowUpWorkflow(
 
     // Note: We trust the logs endpoint - if it returns message_ids, we proceed with delivery
 
-    // Step 5: Wait 2 hours before sending follow-up message
+    // Step 5: Wait 2 hours first, then check message status
     if (response && (response.data?.messages || response.messages) && (response.data?.lead || response.lead)) {
-      console.log(`⏰ Step 5: Waiting 2 hours before sending follow-up message...`);
+      const primaryMessageId = logsResult?.message_ids?.[0];
       
-      // Wait 2 hours before sending the message
+      // Step 5.1: Wait 2 hours first (as per original flow)
+      console.log(`⏰ Step 5: Waiting 2 hours before checking message status...`);
       await sleep('2 hours');
       
-            // Step 5.1: Final validation before sending - ensure messages still exist after the 2-hour wait
-      console.log(`🔍 Step 5.1: Performing final validation before message sending...`);
+      // Step 5.2: After 2 hours, check message status
+      if (!primaryMessageId) {
+        console.log(`⚠️ No message ID available from logs - proceeding with validation and sending`);
+      } else {
+        console.log(`🔍 Step 5.2: Checking message status after 2-hour wait...`);
+        console.log(`📝 Message ID: ${primaryMessageId}`);
+        
+        // Check message status after 2-hour wait
+        const statusCheck = await checkMessageStatusActivity({
+          message_id: primaryMessageId,
+          site_id: site_id
+        });
+        
+        if (!statusCheck.success) {
+          console.error(`❌ Failed to check message status: ${statusCheck.error}`);
+          errors.push(`Failed to check message status: ${statusCheck.error}`);
+          // Continue with sending as fallback
+        } else if (!statusCheck.message_exists) {
+          console.log(`⚠️ Message ${primaryMessageId} does not exist - proceeding with validation`);
+        } else {
+          const currentStatus = statusCheck.status;
+          console.log(`📊 Message status after 2-hour wait: ${currentStatus || 'undefined'}`);
+          
+          // If status is still pending, poll every hour until it becomes accepted
+          if (currentStatus === 'pending') {
+            console.log(`⏳ Message is still pending after 2 hours - polling every 1 hour until status changes to accepted...`);
+            
+            const maxPollingHours = 24; // Maximum 24 hours of polling
+            let pollingHours = 0;
+            let messageStatus: string | undefined = currentStatus;
+            
+            while (messageStatus === 'pending' && pollingHours < maxPollingHours) {
+              console.log(`⏰ Waiting 1 hour before next status check... (${pollingHours + 1}/${maxPollingHours} hours)`);
+              await sleep('1 hour');
+              pollingHours++;
+              
+              console.log(`🔍 Checking message status (check #${pollingHours})...`);
+              const nextStatusCheck = await checkMessageStatusActivity({
+                message_id: primaryMessageId,
+                site_id: site_id
+              });
+              
+              if (!nextStatusCheck.success) {
+                console.error(`❌ Failed to check message status: ${nextStatusCheck.error}`);
+                errors.push(`Failed to check message status during polling: ${nextStatusCheck.error}`);
+                // Continue polling despite error
+                continue;
+              }
+              
+              if (!nextStatusCheck.message_exists) {
+                console.log(`⚠️ Message ${primaryMessageId} no longer exists - stopping polling`);
+                messageStatus = undefined;
+                break;
+              }
+              
+              messageStatus = nextStatusCheck.status;
+              console.log(`📊 Message status after ${pollingHours} hour(s) of polling: ${messageStatus || 'undefined'}`);
+              
+              if (messageStatus === 'accepted') {
+                console.log(`✅ Message status changed to accepted after ${pollingHours} hour(s) of polling - proceeding with sending`);
+                break;
+              } else if (messageStatus === 'sent' || messageStatus === 'failed') {
+                console.log(`⚠️ Message status is already '${messageStatus}' - skipping send`);
+                // Complete workflow without sending
+                const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+                const result: LeadFollowUpResult = {
+                  success: true,
+                  leadId: lead_id,
+                  siteId: site_id,
+                  siteName,
+                  siteUrl,
+                  followUpActions,
+                  nextSteps,
+                  data: response,
+                  messageSent: undefined,
+                  errors: [...errors, `Message status is '${messageStatus}' - already processed`],
+                  executionTime,
+                  completedAt: new Date().toISOString()
+                };
+
+                await saveCronStatusActivity({
+                  siteId: site_id,
+                  workflowId,
+                  scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+                  activityName: 'leadFollowUpWorkflow',
+                  status: 'COMPLETED',
+                  lastRun: new Date().toISOString()
+                });
+
+                await logWorkflowExecutionActivity({
+                  workflowId,
+                  workflowType: 'leadFollowUpWorkflow',
+                  status: 'COMPLETED',
+                  input: options,
+                  output: result,
+                });
+
+                return result;
+              }
+            }
+            
+            if (messageStatus === 'pending' && pollingHours >= maxPollingHours) {
+              console.log(`⏰ Maximum polling time (${maxPollingHours} hours) reached - message still pending, proceeding with sending`);
+              errors.push(`Message remained pending after ${maxPollingHours} hours of polling - proceeding anyway`);
+            } else if (messageStatus === 'accepted') {
+              console.log(`✅ Message accepted after polling - proceeding with sending`);
+            } else if (messageStatus === undefined) {
+              console.log(`⚠️ Message no longer exists - proceeding with sending as fallback`);
+              errors.push('Message was deleted during polling - proceeding anyway');
+            }
+          } else if (currentStatus === 'accepted') {
+            console.log(`✅ Message is already accepted - proceeding with sending`);
+          } else if (currentStatus === 'sent' || currentStatus === 'failed') {
+            console.log(`⚠️ Message status is already '${currentStatus}' - skipping send`);
+            // Complete workflow without sending
+            const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+            const result: LeadFollowUpResult = {
+              success: true,
+              leadId: lead_id,
+              siteId: site_id,
+              siteName,
+              siteUrl,
+              followUpActions,
+              nextSteps,
+              data: response,
+              messageSent: undefined,
+              errors: [...errors, `Message status is '${currentStatus}' - already processed`],
+              executionTime,
+              completedAt: new Date().toISOString()
+            };
+
+            await saveCronStatusActivity({
+              siteId: site_id,
+              workflowId,
+              scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+              activityName: 'leadFollowUpWorkflow',
+              status: 'COMPLETED',
+              lastRun: new Date().toISOString()
+            });
+
+            await logWorkflowExecutionActivity({
+              workflowId,
+              workflowType: 'leadFollowUpWorkflow',
+              status: 'COMPLETED',
+              input: options,
+              output: result,
+            });
+
+            return result;
+          } else {
+            console.log(`⚠️ Message status is '${currentStatus || 'undefined'}' - proceeding with sending as fallback`);
+          }
+        }
+      }
+      
+            // Step 5.3: Final validation before sending - ensure messages still exist after the wait period
+      console.log(`🔍 Step 5.3: Performing final validation before message sending...`);
       console.log(`📝 Validating message IDs from logs: ${logsResult?.message_ids?.join(', ') || 'None'}`);
       console.log(`💬 Validating conversation IDs from logs: ${logsResult?.conversation_ids?.join(', ') || 'None'}`);
       console.log(`🎯 Primary message_id for validation: ${logsResult?.message_ids?.[0] || 'None'}`);
@@ -931,7 +1088,7 @@ export async function leadFollowUpWorkflow(
         console.log(`   - Message ${messageValidationResult.message_id} exists and is ready for processing`);
       }
       
-              console.log(`📤 Step 5.2: Now sending follow-up message based on communication channel...`);
+              console.log(`📤 Step 5.3: Now sending follow-up message based on communication channel...`);
       
       try {
         const responseData = response; // response is already the response data
@@ -1208,7 +1365,7 @@ export async function leadFollowUpWorkflow(
           }
         }
 
-        // Step 5.3: Mark first_contact task as completed after successful message delivery
+        // Step 5.4: Mark first_contact task as completed after successful message delivery
         if (emailSent || whatsappSent) {
           console.log(`📝 Step 5.3: Marking first_contact task as completed after successful message delivery...`);
           
@@ -1244,7 +1401,7 @@ export async function leadFollowUpWorkflow(
       }
     }
 
-    // Step 5.4: Update message status to 'sent' after successful delivery
+        // Step 5.5: Update message status to 'sent' after successful delivery
     if (messageSent && messageSent.success) {
       console.log(`📝 Step 5.4: Updating message status to 'sent'...`);
       
@@ -1297,7 +1454,7 @@ export async function leadFollowUpWorkflow(
       console.log(`⚠️ Skipping message status update - no successful delivery`);
     }
 
-    // Step 5.4.1: Update message timestamp to sync with real delivery time
+    // Step 5.5.1: Update message timestamp to sync with real delivery time
     if (messageSent && messageSent.success) {
       console.log(`⏰ Step 5.4.1: Syncing message timestamp with actual delivery time...`);
       
@@ -1339,7 +1496,7 @@ export async function leadFollowUpWorkflow(
       console.log(`⚠️ Skipping message timestamp sync - no successful delivery`);
     }
 
-    // Step 5.5: Activate conversation after successful follow-up
+    // Step 5.6: Activate conversation after successful follow-up
     if (messageSent && messageSent.success) {
       console.log(`💬 Step 5.5: Activating conversation after successful lead follow-up...`);
       console.log(`🔍 Conversation IDs from logs: ${logsResult?.conversation_ids?.join(', ') || 'None'}`);

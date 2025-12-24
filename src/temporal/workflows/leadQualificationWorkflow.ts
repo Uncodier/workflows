@@ -6,7 +6,7 @@ export interface LeadQualificationOptions {
   site_id: string;
   userId?: string;
   daysWithoutReply?: number; // default 7
-  maxLeads?: number; // default 30
+  maxLeads?: number; // default 100
   additionalData?: any;
 }
 
@@ -29,6 +29,7 @@ const {
   startLeadFollowUpWorkflowActivity,
   getQualificationLeadsActivity,
   validateWorkflowConfigActivity,
+  countPendingMessagesActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -109,7 +110,7 @@ export async function leadQualificationWorkflow(
     }
 
     const daysWithoutReply = typeof options.daysWithoutReply === 'number' ? options.daysWithoutReply : 7;
-    const maxLeads = typeof options.maxLeads === 'number' ? options.maxLeads : 30;
+    const maxLeads = typeof options.maxLeads === 'number' ? options.maxLeads : 100;
 
     const qualification = await getQualificationLeadsActivity({
       site_id,
@@ -125,6 +126,35 @@ export async function leadQualificationWorkflow(
     }
 
     const leads = qualification.leads || [];
+
+    // Check pending messages count before queuing new follow-ups
+    console.log(`🔍 Checking pending messages count for queue throttling...`);
+    
+    const pendingMessagesCheck = await countPendingMessagesActivity({
+      site_id: site_id
+    });
+    
+    if (!pendingMessagesCheck.success) {
+      const errorMsg = `Failed to check pending messages count: ${pendingMessagesCheck.error}`;
+      console.error(`❌ ${errorMsg}`);
+      errors.push(errorMsg);
+      // Continue with follow-up workflows despite error (don't block the workflow)
+      console.log(`⚠️ Continuing with follow-up workflows despite pending messages check failure`);
+    } else {
+      const pendingCount = pendingMessagesCheck.count || 0;
+      console.log(`📊 Pending messages count: ${pendingCount}`);
+      
+      if (pendingCount >= 100) {
+        const throttleMsg = `Queue throttling: ${pendingCount} pending messages (>= 100) - skipping follow-up workflow queue`;
+        console.log(`⏸️ ${throttleMsg}`);
+        errors.push(throttleMsg);
+        
+        // Return early with appropriate result indicating queue is full
+        return finalize('COMPLETED');
+      } else {
+        console.log(`✅ Pending messages count (${pendingCount}) is below threshold (100) - proceeding with follow-up workflows`);
+      }
+    }
 
     for (const lead of leads) {
       try {

@@ -1111,10 +1111,14 @@ export async function validateMessageAndConversationActivity(request: {
         console.log(`   - Current status: ${messageStatus || 'undefined'}`);
         console.log(`   - Already processed: ${alreadyProcessed || false}`);
         
-        if (alreadyProcessed && messageStatus === 'sent') {
+        // If status is 'accepted', it's always valid (ready to send)
+        if (messageStatus === 'accepted') {
+          console.log(`✅ Message is accepted and ready for sending`);
+          messageIsValid = true;
+        } else if (alreadyProcessed && messageStatus === 'sent') {
           console.log(`⚠️ Message was already sent - this might be a duplicate workflow`);
           messageIsValid = false;
-        } else if (messageStatus && messageStatus !== 'pending' && messageStatus !== 'sent') {
+        } else if (messageStatus && messageStatus !== 'pending' && messageStatus !== 'sent' && messageStatus !== 'accepted') {
           console.log(`⚠️ Message has unexpected status: ${messageStatus}`);
           messageIsValid = false;
         } else {
@@ -1359,9 +1363,9 @@ export async function updateMessageStatusToSentActivity(request: {
       };
     }
 
-    if (currentStatus && currentStatus !== 'pending' && currentStatus !== 'sent') {
+    if (currentStatus && currentStatus !== 'pending' && currentStatus !== 'sent' && currentStatus !== 'accepted') {
       console.log(`⚠️ Message ${messageId} has unexpected status: ${currentStatus}`);
-      console.log(`   - Expected: 'pending' or 'sent'`);
+      console.log(`   - Expected: 'pending', 'sent', or 'accepted'`);
       console.log(`   - Proceeding with update anyway`);
     }
 
@@ -2867,9 +2871,28 @@ export async function cleanupFailedFollowUpActivity(request: {
       }
     }
 
-    // Step 5: Reset lead status to 'new' if no other conversations exist
-    if (!cleanupSummary.other_conversations_exist) {
-      console.log(`🔄 Resetting lead ${request.lead_id} status to 'new' (no other conversations exist)...`);
+    // Step 5: Check if lead has any remaining messages across all conversations
+    console.log(`🔍 Checking if lead has any remaining messages...`);
+    
+    const { count: totalMessagesCount, error: messagesCountError } = await supabaseServiceRole
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('lead_id', request.lead_id)
+      .eq('site_id', request.site_id);
+
+    if (messagesCountError) {
+      console.error(`❌ Error counting lead messages:`, messagesCountError);
+    }
+
+    const messagesCount = totalMessagesCount || 0;
+    console.log(`📊 Total messages for lead ${request.lead_id}: ${messagesCount}`);
+
+    // Step 5.1: Reset lead status to 'new' if no messages exist (regardless of conversations)
+    // This ensures that if the message wasn't sent and there are no more messages, the lead goes back to 'new'
+    if (messagesCount === 0) {
+      const resetReason = 'no messages exist for this lead (message not sent and no other messages)';
+      
+      console.log(`🔄 Resetting lead ${request.lead_id} status to 'new' (${resetReason})...`);
       
       const { data: leadData, error: resetError } = await supabaseServiceRole
         .from('leads')
@@ -2900,7 +2923,7 @@ export async function cleanupFailedFollowUpActivity(request: {
         console.log(`✅ Successfully reset lead ${request.lead_id} status to 'new'`);
       }
     } else {
-      console.log(`⚠️ Keeping lead status unchanged (${cleanupSummary.conversations_found} total conversations exist)`);
+      console.log(`⚠️ Keeping lead status unchanged (${messagesCount} messages still exist for this lead)`);
     }
 
     // Step 6: Log cleanup summary
@@ -3359,6 +3382,204 @@ export async function invalidateReferredLeads(request: {
       success: false,
       invalidated_leads: invalidatedLeads,
       errors: [...errors, errorMessage]
+    };
+  }
+}
+
+/**
+ * Activity to count pending messages for a specific site
+ * Used to throttle follow-up workflow queue when too many messages are pending
+ */
+export async function countPendingMessagesActivity(request: {
+  site_id: string;
+}): Promise<{ success: boolean; count?: number; error?: string }> {
+  console.log(`🔍 Counting pending messages for site: ${request.site_id}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot count pending messages');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, counting pending messages...');
+    
+    // Import supabase service role client (bypasses RLS)
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    // First, get all conversation IDs for this site
+    const { data: conversations, error: convError } = await supabaseServiceRole
+      .from('conversations')
+      .select('id')
+      .eq('site_id', request.site_id);
+
+    if (convError) {
+      console.error(`❌ Error querying conversations:`, convError);
+      return {
+        success: false,
+        error: `Failed to query conversations: ${convError.message}`
+      };
+    }
+
+    if (!conversations || conversations.length === 0) {
+      console.log(`✅ No conversations found for site ${request.site_id} - no pending messages`);
+      return {
+        success: true,
+        count: 0
+      };
+    }
+
+    const conversationIds = conversations.map(c => c.id);
+
+    // Count messages with pending status for conversations in this site
+    const { count, error: queryError } = await supabaseServiceRole
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('role', 'assistant') // Only assistant messages
+      .eq('custom_data->>status', 'pending') // Status is pending
+      .in('conversation_id', conversationIds); // Filter by site conversations
+
+    if (queryError) {
+      console.error(`❌ Error counting pending messages:`, queryError);
+      return {
+        success: false,
+        error: `Failed to count pending messages: ${queryError.message}`
+      };
+    }
+
+    const pendingCount = count || 0;
+
+    console.log(`✅ Found ${pendingCount} pending messages for site ${request.site_id}`);
+    console.log(`📊 Conversations checked: ${conversationIds.length}, Pending messages: ${pendingCount}`);
+
+    return {
+      success: true,
+      count: pendingCount
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception counting pending messages:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * Activity to check the status of a specific message
+ * Used to poll message status in leadFollowUpWorkflow
+ */
+export async function checkMessageStatusActivity(request: {
+  message_id: string;
+  site_id: string;
+}): Promise<{ success: boolean; status?: string; error?: string; message_exists?: boolean }> {
+  console.log(`🔍 Checking message status for message: ${request.message_id}`);
+  
+  try {
+    const supabaseService = getSupabaseService();
+    
+    console.log('🔍 Checking database connection...');
+    const isConnected = await supabaseService.getConnectionStatus();
+    
+    if (!isConnected) {
+      console.log('⚠️  Database not available, cannot check message status');
+      return {
+        success: false,
+        error: 'Database not available'
+      };
+    }
+
+    console.log('✅ Database connection confirmed, checking message status...');
+    
+    // Import supabase service role client (bypasses RLS)
+    const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+    // Query the specific message
+    const { data: message, error: queryError } = await supabaseServiceRole
+      .from('messages')
+      .select('id, conversation_id, custom_data')
+      .eq('id', request.message_id)
+      .single();
+
+    if (queryError) {
+      if (queryError.code === 'PGRST116') {
+        // Message not found
+        console.log(`⚠️  Message ${request.message_id} not found`);
+        return {
+          success: true,
+          message_exists: false,
+          status: undefined
+        };
+      }
+      
+      console.error(`❌ Error querying message:`, queryError);
+      return {
+        success: false,
+        error: `Failed to query message: ${queryError.message}`
+      };
+    }
+
+    if (!message) {
+      console.log(`⚠️  Message ${request.message_id} not found`);
+      return {
+        success: true,
+        message_exists: false,
+        status: undefined
+      };
+    }
+
+    // Verify site_id matches (security check) - get site_id from conversation
+    const { data: conversation, error: convError } = await supabaseServiceRole
+      .from('conversations')
+      .select('site_id')
+      .eq('id', message.conversation_id)
+      .single();
+    
+    if (convError) {
+      console.error(`❌ Error querying conversation:`, convError);
+      return {
+        success: false,
+        error: `Failed to query conversation: ${convError.message}`
+      };
+    }
+    
+    if (conversation && conversation.site_id !== request.site_id) {
+      console.error(`❌ Message site_id mismatch: expected ${request.site_id}, got ${conversation.site_id}`);
+      return {
+        success: false,
+        error: 'Message site_id mismatch'
+      };
+    }
+
+    const customData = message.custom_data || {};
+    const status = customData.status;
+
+    console.log(`✅ Message ${request.message_id} status: ${status || 'undefined'}`);
+    console.log(`📊 Message exists: true, Status: ${status || 'undefined'}`);
+
+    return {
+      success: true,
+      status: status,
+      message_exists: true
+    };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Exception checking message status:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
     };
   }
 } 
