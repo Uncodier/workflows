@@ -833,7 +833,69 @@ export async function leadFollowUpWorkflow(
           errors.push(`Failed to check message status: ${statusCheck.error}`);
           // Continue with sending as fallback
         } else if (!statusCheck.message_exists) {
-          console.log(`⚠️ Message ${primaryMessageId} does not exist - proceeding with validation`);
+          console.log(`⚠️ Message ${primaryMessageId} does not exist - message was deleted, cancelling delivery`);
+          errors.push('Message was deleted from database - delivery cancelled');
+          
+          // Execute cleanup since message was deleted
+          console.log(`🧹 Message was deleted - executing cleanup...`);
+          
+          try {
+            const cleanupResult = await cleanupFailedFollowUpActivity({
+              lead_id: lead_id,
+              site_id: site_id,
+              conversation_id: logsResult?.conversation_ids?.[0],
+              message_id: primaryMessageId,
+              failure_reason: 'message_deleted_by_user_before_delivery',
+              delivery_channel: undefined
+            });
+            
+            if (cleanupResult.success) {
+              console.log(`✅ Cleanup completed after message deletion`);
+            } else {
+              console.error(`⚠️ Cleanup failed: ${cleanupResult.error}`);
+              errors.push(`Cleanup failed: ${cleanupResult.error}`);
+            }
+          } catch (cleanupError) {
+            const cleanupErrorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+            console.error(`⚠️ Exception during cleanup: ${cleanupErrorMessage}`);
+            errors.push(`Cleanup exception: ${cleanupErrorMessage}`);
+          }
+          
+          // Complete workflow without sending
+          const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+          const result: LeadFollowUpResult = {
+            success: true,
+            leadId: lead_id,
+            siteId: site_id,
+            siteName,
+            siteUrl,
+            followUpActions,
+            nextSteps,
+            data: response,
+            messageSent: undefined,
+            errors: errors,
+            executionTime,
+            completedAt: new Date().toISOString()
+          };
+
+          await saveCronStatusActivity({
+            siteId: site_id,
+            workflowId,
+            scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+            activityName: 'leadFollowUpWorkflow',
+            status: 'COMPLETED',
+            lastRun: new Date().toISOString()
+          });
+
+          await logWorkflowExecutionActivity({
+            workflowId,
+            workflowType: 'leadFollowUpWorkflow',
+            status: 'COMPLETED',
+            input: options,
+            output: result,
+          });
+
+          return result;
         } else {
           const currentStatus = statusCheck.status;
           console.log(`📊 Message status after 2-hour wait: ${currentStatus || 'undefined'}`);
@@ -842,7 +904,7 @@ export async function leadFollowUpWorkflow(
           if (currentStatus === 'pending') {
             console.log(`⏳ Message is still pending after 2 hours - polling every 1 hour until status changes to accepted...`);
             
-            const maxPollingHours = 24; // Maximum 24 hours of polling
+            const maxPollingHours = 336; // Maximum 2 weeks (14 days * 24 hours) of polling
             let pollingHours = 0;
             let messageStatus: string | undefined = currentStatus;
             
@@ -917,13 +979,138 @@ export async function leadFollowUpWorkflow(
             }
             
             if (messageStatus === 'pending' && pollingHours >= maxPollingHours) {
-              console.log(`⏰ Maximum polling time (${maxPollingHours} hours) reached - message still pending, proceeding with sending`);
-              errors.push(`Message remained pending after ${maxPollingHours} hours of polling - proceeding anyway`);
+              console.log(`⏰ Maximum polling time (${maxPollingHours} hours / 2 weeks) reached - message still pending, cancelling workflow`);
+              errors.push(`Message remained pending after ${maxPollingHours} hours (2 weeks) of polling - workflow cancelled`);
+              
+              // Execute cleanup since timeout was reached
+              console.log(`🧹 Polling timeout reached - executing cleanup (delete message and conversation if only message)...`);
+              
+              try {
+                const cleanupResult = await cleanupFailedFollowUpActivity({
+                  lead_id: lead_id,
+                  site_id: site_id,
+                  conversation_id: logsResult?.conversation_ids?.[0],
+                  message_id: primaryMessageId,
+                  failure_reason: 'message_timeout_after_polling_period',
+                  delivery_channel: undefined
+                });
+                
+                if (cleanupResult.success) {
+                  console.log(`✅ Cleanup completed after polling timeout:`);
+                  console.log(`   - Message deleted: ${cleanupResult.message_deleted}`);
+                  console.log(`   - Conversation deleted: ${cleanupResult.conversation_deleted}`);
+                  console.log(`   - Messages remaining in conversation: ${cleanupResult.cleanup_summary?.messages_in_conversation || 0}`);
+                } else {
+                  console.error(`⚠️ Cleanup failed: ${cleanupResult.error}`);
+                  errors.push(`Cleanup failed: ${cleanupResult.error}`);
+                }
+              } catch (cleanupError) {
+                const cleanupErrorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+                console.error(`⚠️ Exception during cleanup: ${cleanupErrorMessage}`);
+                errors.push(`Cleanup exception: ${cleanupErrorMessage}`);
+              }
+              
+              // Complete workflow without sending
+              const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+              const result: LeadFollowUpResult = {
+                success: true,
+                leadId: lead_id,
+                siteId: site_id,
+                siteName,
+                siteUrl,
+                followUpActions,
+                nextSteps,
+                data: response,
+                messageSent: undefined,
+                errors: errors,
+                executionTime,
+                completedAt: new Date().toISOString()
+              };
+
+              await saveCronStatusActivity({
+                siteId: site_id,
+                workflowId,
+                scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+                activityName: 'leadFollowUpWorkflow',
+                status: 'COMPLETED',
+                lastRun: new Date().toISOString()
+              });
+
+              await logWorkflowExecutionActivity({
+                workflowId,
+                workflowType: 'leadFollowUpWorkflow',
+                status: 'COMPLETED',
+                input: options,
+                output: result,
+              });
+
+              return result;
             } else if (messageStatus === 'accepted') {
               console.log(`✅ Message accepted after polling - proceeding with sending`);
             } else if (messageStatus === undefined) {
-              console.log(`⚠️ Message no longer exists - proceeding with sending as fallback`);
-              errors.push('Message was deleted during polling - proceeding anyway');
+              console.log(`⚠️ Message no longer exists - message was deleted during polling, cancelling delivery`);
+              errors.push('Message was deleted during polling - delivery cancelled');
+              
+              // Execute cleanup since message was deleted
+              console.log(`🧹 Message was deleted during polling - executing cleanup...`);
+              
+              try {
+                const cleanupResult = await cleanupFailedFollowUpActivity({
+                  lead_id: lead_id,
+                  site_id: site_id,
+                  conversation_id: logsResult?.conversation_ids?.[0],
+                  message_id: primaryMessageId,
+                  failure_reason: 'message_deleted_by_user_during_polling',
+                  delivery_channel: undefined
+                });
+                
+                if (cleanupResult.success) {
+                  console.log(`✅ Cleanup completed after message deletion during polling`);
+                } else {
+                  console.error(`⚠️ Cleanup failed: ${cleanupResult.error}`);
+                  errors.push(`Cleanup failed: ${cleanupResult.error}`);
+                }
+              } catch (cleanupError) {
+                const cleanupErrorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+                console.error(`⚠️ Exception during cleanup: ${cleanupErrorMessage}`);
+                errors.push(`Cleanup exception: ${cleanupErrorMessage}`);
+              }
+              
+              // Complete workflow without sending
+              const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+              const result: LeadFollowUpResult = {
+                success: true,
+                leadId: lead_id,
+                siteId: site_id,
+                siteName,
+                siteUrl,
+                followUpActions,
+                nextSteps,
+                data: response,
+                messageSent: undefined,
+                errors: errors,
+                executionTime,
+                completedAt: new Date().toISOString()
+              };
+
+              await saveCronStatusActivity({
+                siteId: site_id,
+                workflowId,
+                scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+                activityName: 'leadFollowUpWorkflow',
+                status: 'COMPLETED',
+                lastRun: new Date().toISOString()
+              });
+
+              await logWorkflowExecutionActivity({
+                workflowId,
+                workflowType: 'leadFollowUpWorkflow',
+                status: 'COMPLETED',
+                input: options,
+                output: result,
+              });
+
+              return result;
             }
           } else if (currentStatus === 'accepted') {
             console.log(`✅ Message is already accepted - proceeding with sending`);

@@ -62,7 +62,7 @@ export async function getQualificationLeadsActivity(
     const { supabaseServiceRole } = await import('../../lib/supabase/client');
 
     // Step 1: Fetch candidate leads by status for this site
-    // Exclude: new, converted, canceled/cancelled, lost
+    // Exclude: new, converted, canceled/cancelled, lost, cold, not_qualified
     const { data: candidateLeads, error: leadsError } = await supabaseServiceRole
       .from('leads')
       .select('id, name, email, phone, status, site_id, assignee_id')
@@ -72,6 +72,8 @@ export async function getQualificationLeadsActivity(
       .neq('status', 'canceled')
       .neq('status', 'cancelled')
       .neq('status', 'lost')
+      .neq('status', 'cold')
+      .neq('status', 'not_qualified')
       .order('updated_at', { ascending: false })
       .limit(500); // cap to avoid excessive N+1 queries
 
