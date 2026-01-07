@@ -7,6 +7,7 @@ import { apiService } from '../services/apiService';
 import { getSupabaseService } from '../services/supabaseService';
 import { getTemporalClient } from '../client';
 import { temporalConfig } from '../../config/config';
+import { extractSearchAttributesFromInput } from '../utils/searchAttributes';
 
 // Lead interfaces
 export interface Lead {
@@ -428,18 +429,25 @@ export async function startLeadAttentionWorkflowActivity(request: StartLeadAtten
     // Get Temporal client directly (same pattern used throughout the codebase)
     const client = await getTemporalClient();
     
+    const workflowArgs = { lead_id: request.lead_id, user_message: request.user_message, system_message: request.system_message };
+    
+    // Extract search attributes from workflow arguments
+    const searchAttributes = extractSearchAttributesFromInput(workflowArgs);
+    
     console.log('📤 Starting workflow via Temporal client:', {
       workflowType: 'leadAttentionWorkflow',
       workflowId,
-      args: [{ lead_id: request.lead_id, user_message: request.user_message, system_message: request.system_message }],
-      taskQueue: temporalConfig.taskQueue
+      args: [workflowArgs],
+      taskQueue: temporalConfig.taskQueue,
+      searchAttributes
     });
     
     // Start the workflow using Temporal client (fire and forget)
     const handle = await client.workflow.start('leadAttentionWorkflow', {
-      args: [{ lead_id: request.lead_id, user_message: request.user_message, system_message: request.system_message }],
+      args: [workflowArgs],
       workflowId,
       taskQueue: temporalConfig.taskQueue,
+      searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
     });
     
     console.log(`✅ Independent leadAttentionWorkflow started successfully for lead ${request.lead_id}`);

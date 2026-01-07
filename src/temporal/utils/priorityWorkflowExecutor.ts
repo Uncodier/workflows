@@ -7,6 +7,7 @@
 
 import { getTemporalClient } from '../client';
 import { getTaskQueueForWorkflow, TASK_QUEUES, type TaskQueue } from '../config/taskQueues';
+import { extractSearchAttributesFromInput, mergeSearchAttributes } from './searchAttributes';
 
 export interface PriorityWorkflowOptions {
   /** Explicit priority override */
@@ -23,6 +24,18 @@ export interface PriorityWorkflowOptions {
   
   /** Additional metadata for tracking */
   metadata?: Record<string, any>;
+  
+  /**
+   * Custom search attributes to attach to the workflow
+   * These enable filtering workflows in Temporal UI and programmatically
+   */
+  searchAttributes?: Record<string, string[]>;
+  
+  /**
+   * Whether to automatically extract search attributes from the first argument
+   * @default true
+   */
+  autoExtractSearchAttributes?: boolean;
 }
 
 /**
@@ -53,11 +66,27 @@ export async function executeWorkflowWithPriority<T extends any[]>(
     // Default timeout based on priority
     const workflowRunTimeout = options.workflowRunTimeout || getDefaultTimeout(taskQueue);
     
+    // Auto-extract search attributes from first argument if it's an object
+    let searchAttributes: Record<string, string[]> = {};
+    
+    if (options.autoExtractSearchAttributes !== false && args[0] && typeof args[0] === 'object') {
+      const extracted = extractSearchAttributesFromInput(args[0] as Record<string, any>);
+      searchAttributes = extracted;
+    }
+    
+    // Merge with manually provided search attributes (manual takes precedence)
+    if (options.searchAttributes) {
+      searchAttributes = mergeSearchAttributes(searchAttributes, options.searchAttributes);
+    }
+    
     console.log(`🚀 Starting ${workflowType} with priority configuration:`);
     console.log(`   - Task Queue: ${taskQueue}`);
     console.log(`   - Workflow ID: ${workflowId}`);
     console.log(`   - Timeout: ${workflowRunTimeout}`);
     console.log(`   - Priority: ${options.priority || 'auto-assigned'}`);
+    if (Object.keys(searchAttributes).length > 0) {
+      console.log(`   - Search Attributes:`, searchAttributes);
+    }
     
     // Start workflow with priority-based configuration
     const handle = await client.workflow.start(workflowType, {
@@ -65,6 +94,8 @@ export async function executeWorkflowWithPriority<T extends any[]>(
       workflowId,
       taskQueue,
       workflowRunTimeout,
+      // Only add searchAttributes if we have any
+      ...(Object.keys(searchAttributes).length > 0 && { searchAttributes })
     });
     
     console.log(`✅ Workflow started successfully: ${handle.workflowId}`);

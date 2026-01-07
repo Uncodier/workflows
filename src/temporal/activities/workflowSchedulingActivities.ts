@@ -12,6 +12,7 @@ import {
 } from './cronActivities';
 import { logWorkflowExecutionActivity, checkSiteAnalysisActivity } from './supabaseActivities';
 import { getSupabaseService } from '../services/supabaseService';
+import { extractSearchAttributesFromInput } from '../utils/searchAttributes';
 
 export interface ScheduleWorkflowResult {
   workflowId: string;
@@ -550,6 +551,9 @@ export async function executeBuildSegmentsWorkflowActivity(
       aiModel: options.aiModel
     }];
 
+    // Extract search attributes from workflow arguments
+    const searchAttributes = extractSearchAttributesFromInput(workflowArgs[0]);
+    
     // Start immediate workflow execution
     console.log(`⚡ Starting build segments workflow for site: ${siteId}`);
     const handle = await client.workflow.start('buildSegmentsWorkflow', {
@@ -557,6 +561,7 @@ export async function executeBuildSegmentsWorkflowActivity(
       workflowId,
       taskQueue: temporalConfig.taskQueue,
       workflowRunTimeout: '1 hour',
+      searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
     });
 
     console.log(`✅ Successfully started build segments workflow for site: ${siteId}`);
@@ -686,6 +691,9 @@ export async function executeBuildContentWorkflowActivity(
       sortBy: options.sortBy
     }];
 
+    // Extract search attributes from workflow arguments
+    const searchAttributes = extractSearchAttributesFromInput(workflowArgs[0]);
+    
     // Start immediate workflow execution
     console.log(`⚡ Starting build content workflow for site: ${siteId}`);
     const handle = await client.workflow.start('buildContentWorkflow', {
@@ -693,6 +701,7 @@ export async function executeBuildContentWorkflowActivity(
       workflowId,
       taskQueue: temporalConfig.taskQueue,
       workflowRunTimeout: '45 minutes',
+      searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
     });
 
     console.log(`✅ Successfully started build content workflow for site: ${siteId}`);
