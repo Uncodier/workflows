@@ -2,6 +2,7 @@ import { proxyActivities, sleep, startChild, patched, deprecatePatch, ParentClos
 import type { Activities } from '../activities';
 import { leadResearchWorkflow, type LeadResearchOptions, type LeadResearchResult } from './leadResearchWorkflow';
 import { leadInvalidationWorkflow, type LeadInvalidationOptions } from './leadInvalidationWorkflow';
+import { leadCompanyResearchWorkflow, type LeadCompanyResearchOptions, type LeadCompanyResearchResult } from './leadCompanyResearchWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 
 // Define the activity interface and options
@@ -115,6 +116,51 @@ function shouldExecuteLeadResearch(leadInfo: any): boolean {
   }
 
   return needsResearch;
+}
+
+/**
+ * Checks if lead needs company website research
+ * Criteria: No notes AND has website/domain
+ */
+function shouldExecuteCompanyResearch(leadInfo: any): boolean {
+  const hasNotes = leadInfo.notes && typeof leadInfo.notes === 'string' && leadInfo.notes.trim() !== '';
+  
+  if (hasNotes) {
+    console.log(`📋 Lead has notes - skipping company research`);
+    return false;
+  }
+  
+  const website = extractWebsite(leadInfo);
+  
+  if (!website) {
+    console.log(`📋 No website found - skipping company research`);
+    return false;
+  }
+  
+  console.log(`✅ Lead needs company research - no notes but has website: ${website}`);
+  return true;
+}
+
+/**
+ * Extracts website URL from lead info
+ */
+function extractWebsite(leadInfo: any): string | null {
+  // Check lead.website
+  if (leadInfo.website && typeof leadInfo.website === 'string' && leadInfo.website.trim() !== '') {
+    return leadInfo.website.trim();
+  }
+  
+  // Check lead.company.website
+  if (leadInfo.company && typeof leadInfo.company === 'object' && leadInfo.company.website) {
+    return leadInfo.company.website.trim();
+  }
+  
+  // Check lead.metadata.website
+  if (leadInfo.metadata && leadInfo.metadata.website) {
+    return leadInfo.metadata.website.trim();
+  }
+  
+  return null;
 }
 
 /**
@@ -572,6 +618,54 @@ export async function leadFollowUpWorkflow(
         }
       } else {
         console.log(`⏭️ Skipping lead research - lead does not meet criteria`);
+      }
+      
+      // Check if lead needs company website research (lighter alternative)
+      if (!shouldExecuteLeadResearch(leadInfo) && shouldExecuteCompanyResearch(leadInfo)) {
+        console.log(`🌐 Step 2.3: Executing company website research...`);
+        
+        const website = extractWebsite(leadInfo);
+        
+        try {
+          const companyResearchOptions: LeadCompanyResearchOptions = {
+            lead_id: lead_id,
+            site_id: site_id,
+            website: website!,
+            userId: options.userId || site.user_id,
+            additionalData: {
+              ...options.additionalData,
+              executedBeforeFollowUp: true,
+              followUpWorkflowId: workflowId
+            }
+          };
+          
+          console.log(`🚀 Starting company website research workflow as child process...`);
+          
+          const companyResearchHandle = await startChild(leadCompanyResearchWorkflow, {
+            args: [companyResearchOptions],
+            workflowId: `lead-company-research-${lead_id}-${Date.now()}`,
+            parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON
+          });
+          
+          const companyResearchResult: LeadCompanyResearchResult = await companyResearchHandle.result();
+          
+          if (companyResearchResult.success) {
+            console.log(`✅ Company research completed successfully`);
+            console.log(`📊 Research results:`);
+            console.log(`   - Website analyzed: ${companyResearchResult.website}`);
+            console.log(`   - Company info extracted: ${companyResearchResult.companyInfo ? 'Yes' : 'No'}`);
+            console.log(`   - Execution time: ${companyResearchResult.executionTime}`);
+          } else {
+            console.error(`⚠️ Company research failed, but continuing with follow-up: ${companyResearchResult.errors.join(', ')}`);
+            errors.push(`Company research failed: ${companyResearchResult.errors.join(', ')}`);
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error(`⚠️ Exception during company research, but continuing with follow-up: ${errorMessage}`);
+          errors.push(`Company research exception: ${errorMessage}`);
+        }
+      } else {
+        console.log(`⏭️ Skipping company research - lead does not meet criteria (either has notes or no website)`);
       }
     } else {
       console.log(`⚠️ Running legacy path (v0) - skipping lead info check and research due to workflow versioning`);

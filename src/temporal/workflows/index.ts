@@ -27,6 +27,7 @@ import { buildContentWorkflow } from './buildContentWorkflow';
 import { leadFollowUpWorkflow } from './leadFollowUpWorkflow';
 import { leadQualificationWorkflow } from './leadQualificationWorkflow';
 import { leadResearchWorkflow } from './leadResearchWorkflow';
+import { leadCompanyResearchWorkflow } from './leadCompanyResearchWorkflow';
 import { buildSegmentsICPWorkflow, buildSingleSegmentICPWorkflow } from './buildSegmentsICPWorkflow';
 import { humanInterventionWorkflow } from './humanInterventionWorkflow';
 import { deepResearchWorkflow } from './deepResearchWorkflow';
@@ -72,6 +73,7 @@ export * from './buildContentWorkflow';
 export * from './leadFollowUpWorkflow';
 export * from './leadQualificationWorkflow';
 export * from './leadResearchWorkflow';
+export * from './leadCompanyResearchWorkflow';
 export * from './buildSegmentsICPWorkflow';
 export * from './humanInterventionWorkflow';
 export * from './deepResearchWorkflow';
@@ -116,6 +118,7 @@ export const workflows = {
   leadFollowUpWorkflow,
   leadQualificationWorkflow,
   leadResearchWorkflow,
+  leadCompanyResearchWorkflow,
   buildSegmentsICPWorkflow,
   buildSingleSegmentICPWorkflow,
   humanInterventionWorkflow,
@@ -170,6 +173,7 @@ export const workflowNames = {
   leadFollowUpWorkflow: 'leadFollowUpWorkflow',
   leadQualificationWorkflow: 'leadQualificationWorkflow',
   leadResearchWorkflow: 'leadResearchWorkflow',
+  leadCompanyResearchWorkflow: 'leadCompanyResearchWorkflow',
   buildSegmentsICPWorkflow: 'buildSegmentsICPWorkflow',
   buildSingleSegmentICPWorkflow: 'buildSingleSegmentICPWorkflow',
   humanInterventionWorkflow: 'humanInterventionWorkflow',

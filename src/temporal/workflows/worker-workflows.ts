@@ -28,6 +28,7 @@ export * from './buildContentWorkflow';
 export * from './leadFollowUpWorkflow';
 export * from './leadQualificationWorkflow';
 export * from './leadResearchWorkflow';
+export * from './leadCompanyResearchWorkflow';
 export * from './humanInterventionWorkflow';
 export * from './deepResearchWorkflow';
 export * from './dailyStandUpWorkflow';

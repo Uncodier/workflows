@@ -109,6 +109,9 @@ export async function scheduleEmailSyncWorkflowActivity(
       analysisLimit: 15     // Analyze up to 15 emails
     }];
 
+    // Extract search attributes from workflow arguments
+    const searchAttributes = extractSearchAttributesFromInput(workflowArgs[0]);
+    
     // Create immediate workflow execution (ASAP scheduling)
     console.log(`⚡ Starting immediate workflow execution for ${site.name}`);
     const handle = await client.workflow.start('syncEmailsWorkflow', {
@@ -116,6 +119,7 @@ export async function scheduleEmailSyncWorkflowActivity(
       workflowId,
       taskQueue: temporalConfig.taskQueue,
       workflowRunTimeout: '1 hour', // Email sync timeout
+      searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
     });
 
     console.log(`✅ Successfully started workflow for ${site.name}`);
@@ -431,6 +435,9 @@ export async function executeBuildCampaignsWorkflowActivity(
       additionalCampaignData: options.additionalCampaignData || {}
     }];
 
+    // Extract search attributes from workflow arguments
+    const searchAttributes = extractSearchAttributesFromInput(workflowArgs[0]);
+
     // Start immediate workflow execution
     console.log(`⚡ Starting build campaigns workflow for site: ${siteId}`);
     const handle = await client.workflow.start('buildCampaignsWorkflow', {
@@ -438,6 +445,7 @@ export async function executeBuildCampaignsWorkflowActivity(
       workflowId,
       taskQueue: temporalConfig.taskQueue,
       workflowRunTimeout: '30 minutes',
+      searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
     });
 
     console.log(`✅ Successfully started build campaigns workflow for site: ${siteId}`);
@@ -1005,25 +1013,31 @@ async function executeDailyStandUpWorkflow(
     console.log(`   Schedule type: ${executionOptions.scheduleType}`);
     console.log(`   Execute reason: ${executionOptions.executeReason}`);
     
+    const workflowArgs = [{
+      site_id: site.id,
+      userId: site.user_id,
+      additionalData: {
+        scheduledBy: executionOptions.scheduledBy,
+        executeReason: executionOptions.executeReason,
+        scheduleType: executionOptions.scheduleType,
+        scheduleTime: executionOptions.scheduleType === 'business-hours' ? 'business-hours-based' : 'immediate',
+        executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+        timezone: 'UTC',
+        executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
+        businessHoursAnalysis: executionOptions.businessHoursAnalysis,
+        parentScheduleId: executionOptions.parentScheduleId,
+        dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
+      }
+    }];
+    
+    // Extract search attributes from workflow arguments
+    const searchAttributes = extractSearchAttributesFromInput(workflowArgs[0]);
+    
     const handle = await client.workflow.start('dailyStandUpWorkflow', {
-      args: [{
-        site_id: site.id,
-        userId: site.user_id,
-        additionalData: {
-          scheduledBy: executionOptions.scheduledBy,
-          executeReason: executionOptions.executeReason,
-          scheduleType: executionOptions.scheduleType,
-          scheduleTime: executionOptions.scheduleType === 'business-hours' ? 'business-hours-based' : 'immediate',
-          executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-          timezone: 'UTC',
-          executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
-          businessHoursAnalysis: executionOptions.businessHoursAnalysis,
-          parentScheduleId: executionOptions.parentScheduleId,
-          dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
-        }
-      }],
+      args: workflowArgs,
       taskQueue: temporalConfig.taskQueue,
       workflowId: workflowId,
+      searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
     });
     
     console.log(`✅ Daily Stand Up workflow started for ${site.name}`);
@@ -2690,31 +2704,37 @@ async function executeDailyProspectionWorkflow(
     console.log(`   Hours threshold: ${executionOptions.hoursThreshold || 48} hours`);
     console.log(`   Max leads: ${executionOptions.maxLeads || 50}`);
     
+    const workflowArgs = [{
+      site_id: site.id,
+      userId: site.user_id,
+      hoursThreshold: executionOptions.hoursThreshold || 48,
+      maxLeads: executionOptions.maxLeads || 50,
+      minLeadsRequired: 30,
+      updateStatus: false,
+      additionalData: {
+        scheduledBy: executionOptions.scheduledBy,
+        executeReason: executionOptions.executeReason,
+        scheduleType: executionOptions.scheduleType,
+        scheduleTime: executionOptions.scheduleType === 'business-hours' ? 'business-hours-based' : 'immediate',
+        executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+        timezone: 'UTC',
+        executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
+        businessHoursAnalysis: executionOptions.businessHoursAnalysis,
+        triggeredBy: 'activityPrioritizationEngine',
+        followsAfter: 'dailyStandUpWorkflow',
+        parentScheduleId: executionOptions.parentScheduleId,
+        dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
+      }
+    }];
+    
+    // Extract search attributes from workflow arguments
+    const searchAttributes = extractSearchAttributesFromInput(workflowArgs[0]);
+    
     const handle = await client.workflow.start('dailyProspectionWorkflow', {
-      args: [{
-        site_id: site.id,
-        userId: site.user_id,
-        hoursThreshold: executionOptions.hoursThreshold || 48,
-        maxLeads: executionOptions.maxLeads || 30,
-        minLeadsRequired: 30,
-        updateStatus: false,
-        additionalData: {
-          scheduledBy: executionOptions.scheduledBy,
-          executeReason: executionOptions.executeReason,
-          scheduleType: executionOptions.scheduleType,
-          scheduleTime: executionOptions.scheduleType === 'business-hours' ? 'business-hours-based' : 'immediate',
-          executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-          timezone: 'UTC',
-          executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
-          businessHoursAnalysis: executionOptions.businessHoursAnalysis,
-          triggeredBy: 'activityPrioritizationEngine',
-          followsAfter: 'dailyStandUpWorkflow',
-          parentScheduleId: executionOptions.parentScheduleId,
-          dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
-        }
-      }],
+      args: workflowArgs,
       taskQueue: temporalConfig.taskQueue,
       workflowId: workflowId,
+      searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
     });
     
     console.log(`✅ Daily Prospection workflow started for ${site.name}`);

@@ -424,7 +424,8 @@ export async function startLeadAttentionWorkflowActivity(request: StartLeadAtten
   console.log(`🚀 Starting independent leadAttentionWorkflow for lead: ${request.lead_id}`);
   
   try {
-    const workflowId = `lead-attention-${request.lead_id}`;
+    // Add timestamp to workflowId to prevent collisions when multiple messages arrive for same lead
+    const workflowId = `lead-attention-${request.lead_id}-${Date.now()}`;
     
     // Get Temporal client directly (same pattern used throughout the codebase)
     const client = await getTemporalClient();
@@ -461,41 +462,12 @@ export async function startLeadAttentionWorkflowActivity(request: StartLeadAtten
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     
-    // If we get a "workflow already started" error, handle it gracefully
-    // This can happen when multiple customer support messages arrive for the same lead_id
-    // Since leadAttentionWorkflow is idempotent (checks for existing notifications), 
-    // it's safe to treat an already-running workflow as success
-    if (errorMessage.includes('Workflow execution already started')) {
-      const workflowId = `lead-attention-${request.lead_id}`;
-      
-      console.log(`⚠️ Workflow already exists for lead ${request.lead_id}, this is expected when multiple messages arrive`);
-      console.log(`📋 Existing workflow is likely still running or completed recently`);
-      console.log(`🔄 This can happen when multiple customer support messages arrive for the same lead`);
-      
-      // Try to get the existing workflow handle to confirm it exists
-      try {
-        const client = await getTemporalClient();
-        const existingHandle = client.workflow.getHandle(workflowId);
-        console.log(`✅ Found existing workflow handle for ${workflowId}`);
-      } catch (handleError) {
-        // If we can't get the handle, that's okay - we still know the workflow exists
-        // The error from Temporal confirms the workflow is already running
-        console.log(`📋 Workflow ${workflowId} exists (confirmed by Temporal error)`);
-      }
-      
-      console.log(`✅ Handled duplicate workflow gracefully for lead ${request.lead_id}`);
-      console.log(`📊 This prevents the "Workflow execution already started" error from failing the customer support workflow`);
-      
-      // Return success since the workflow is already running/started
-      return {
-        success: true,
-        workflowId: workflowId,
-      };
-    }
+    // Log error for debugging
+    console.error(`❌ Failed to start leadAttentionWorkflow for lead ${request.lead_id}:`, errorMessage);
+    console.error(`❌ Error details:`, error);
     
-    // For other errors, return failure
-    console.error(`❌ Exception starting independent leadAttentionWorkflow for lead ${request.lead_id}:`, errorMessage);
-    
+    // Return proper failure status - callers will handle this gracefully
+    // This allows proper error tracking and monitoring while keeping the operation non-blocking
     return {
       success: false,
       error: errorMessage
@@ -530,23 +502,30 @@ export async function startLeadFollowUpWorkflowActivity(request: StartLeadFollow
     // Get Temporal client directly (same pattern used throughout the codebase)
     const client = await getTemporalClient();
     
+    const workflowArgs = { 
+      lead_id: request.lead_id, 
+      site_id: request.site_id, 
+      userId: request.userId, 
+      additionalData: request.additionalData 
+    };
+    
+    // Extract search attributes from workflow arguments
+    const searchAttributes = extractSearchAttributesFromInput(workflowArgs);
+    
     console.log('📤 Starting leadFollowUpWorkflow via Temporal client:', {
       workflowType: 'leadFollowUpWorkflow',
       workflowId,
-      args: [{ lead_id: request.lead_id, site_id: request.site_id, userId: request.userId, additionalData: request.additionalData }],
-      taskQueue: temporalConfig.taskQueue
+      args: [workflowArgs],
+      taskQueue: temporalConfig.taskQueue,
+      searchAttributes
     });
     
     // Start the workflow using Temporal client (fire and forget)
     const handle = await client.workflow.start('leadFollowUpWorkflow', {
-      args: [{ 
-        lead_id: request.lead_id, 
-        site_id: request.site_id, 
-        userId: request.userId, 
-        additionalData: request.additionalData 
-      }],
+      args: [workflowArgs],
       workflowId,
       taskQueue: temporalConfig.taskQueue,
+      searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
     });
     
     console.log(`✅ Independent leadFollowUpWorkflow started successfully for lead ${request.lead_id}`);
