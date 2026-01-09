@@ -1,4 +1,4 @@
-import { proxyActivities, startChild } from '@temporalio/workflow';
+import { proxyActivities, startChild, patched, deprecatePatch, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { leadFollowUpWorkflow, type LeadFollowUpOptions } from './leadFollowUpWorkflow';
 
@@ -475,10 +475,29 @@ export async function leadInvalidationWorkflow(
             }
           };
           
-          await startChild(leadFollowUpWorkflow, {
-            args: [followUpOptions],
-            workflowId: `lead-follow-up-recovery-${lead_id}-${Date.now()}`
-          });
+          // Use versioning to handle non-deterministic changes in child workflow options
+          // This allows in-flight workflows to replay correctly with old behavior
+          // while new workflows use the updated code path with ABANDON policy
+          const shouldUseAbandonPolicy = patched('start-followup-child-recovery-v1');
+          
+          // Deprecate to encourage cleanup after migration period (30-60 days)
+          deprecatePatch('start-followup-child-recovery-v1');
+          
+          if (shouldUseAbandonPolicy) {
+            // NEW PATH: Start child workflow with ABANDON policy to prevent cascading cancellation
+            await startChild(leadFollowUpWorkflow, {
+              args: [followUpOptions],
+              workflowId: `lead-follow-up-recovery-${lead_id}-${Date.now()}`,
+              parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON
+            });
+          } else {
+            // OLD PATH: Start child workflow without ABANDON policy (original behavior)
+            // This ensures deterministic replay for workflows started before the patch
+            await startChild(leadFollowUpWorkflow, {
+              args: [followUpOptions],
+              workflowId: `lead-follow-up-recovery-${lead_id}-${Date.now()}`
+            });
+          }
           
           console.log(`✅ Lead follow-up workflow started for lead ${lead_id} with valid phone number`);
           console.log(`📞 Will attempt follow-up via WhatsApp to: ${updatedLead.phone}`);
