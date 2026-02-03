@@ -56,6 +56,7 @@ export interface LeadFollowUpOptions {
   lead_id: string;                    // Required: Lead ID
   site_id: string;                    // Required: Site ID
   userId?: string;
+  message_status?: string;
   additionalData?: any;
 }
 
@@ -679,6 +680,7 @@ export async function leadFollowUpWorkflow(
       lead_id: lead_id,
       site_id: site_id,
       userId: options.userId || site.user_id,
+      message_status: options.message_status,
       additionalData: options.additionalData
     };
     
@@ -784,6 +786,7 @@ export async function leadFollowUpWorkflow(
           siteId: site_id,
           leadId: lead_id,
           userId: options.userId || site.user_id,
+          message_status: options.message_status,
           data: response
         });
         
@@ -873,6 +876,7 @@ export async function leadFollowUpWorkflow(
         siteId: site_id,
         leadId: lead_id,
         userId: options.userId || site.user_id,
+        message_status: options.message_status,
         data: response
       });
       
@@ -1712,6 +1716,7 @@ export async function leadFollowUpWorkflow(
         site_id: site_id,
         delivery_channel: messageSent.channel,
         delivery_success: true,
+        sequence_stage: options.additionalData?.sequence_stage,
         delivery_details: {
           recipient: messageSent.recipient,
           message_id: messageSent.messageId,

@@ -190,6 +190,7 @@ export interface LeadFollowUpRequest {
   lead_id: string;
   site_id: string;
   userId?: string;
+  message_status?: string;
   additionalData?: any;
 }
 
@@ -229,6 +230,7 @@ export async function leadFollowUpActivity(request: LeadFollowUpRequest): Promis
       leadId: request.lead_id,        // Convert to camelCase for API
       siteId: request.site_id,        // Convert to camelCase for API
       userId: request.userId,
+      message_status: request.message_status,
       ...request.additionalData,
     };
 
@@ -480,6 +482,7 @@ export interface StartLeadFollowUpWorkflowRequest {
   lead_id: string;
   site_id: string;
   userId?: string;
+  message_status?: string;
   additionalData?: any;
 }
 
@@ -506,6 +509,7 @@ export async function startLeadFollowUpWorkflowActivity(request: StartLeadFollow
       lead_id: request.lead_id, 
       site_id: request.site_id, 
       userId: request.userId, 
+      message_status: request.message_status,
       additionalData: request.additionalData 
     };
     
@@ -554,6 +558,7 @@ export async function saveLeadFollowUpLogsActivity(request: {
   siteId: string;
   leadId: string;
   userId: string;
+  message_status?: string;
   data: any;
 }): Promise<{ 
   success: boolean; 
@@ -570,6 +575,7 @@ export async function saveLeadFollowUpLogsActivity(request: {
       siteId: request.siteId,
       leadId: request.leadId,
       userId: request.userId,
+      message_status: request.message_status,
       ...request.data  // Flatten the data fields (messages, lead, command_ids) directly to root
     };
     
@@ -1191,6 +1197,7 @@ export async function updateMessageStatusToSentActivity(request: {
   delivery_channel: 'email' | 'whatsapp';
   delivery_success: boolean;
   delivery_details?: any;
+  sequence_stage?: string;
 }): Promise<{ success: boolean; error?: string; updated_message_id?: string }> {
   console.log(`📝 Updating message status to 'sent' after follow-up delivery...`);
   console.log(`📋 Message ID: ${request.message_id}, Channel: ${request.delivery_channel}, Success: ${request.delivery_success}`);
@@ -1363,6 +1370,7 @@ export async function updateMessageStatusToSentActivity(request: {
     const updatedCustomData = {
       ...currentCustomData,
       status: targetStatus,
+      sequence_stage: request.sequence_stage || currentCustomData.sequence_stage,
       delivery: {
         channel: request.delivery_channel,
         success: request.delivery_success,

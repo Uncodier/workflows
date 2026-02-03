@@ -5,8 +5,9 @@ import type { Activities } from '../activities';
 export interface LeadQualificationOptions {
   site_id: string;
   userId?: string;
-  daysWithoutReply?: number; // default 7
-  maxLeads?: number; // default 100
+  daysWithoutReply?: number; // legacy, kept for compatibility
+  maxLeads?: number; // legacy, total limit
+  maxLeadsPerStage?: number; // default 10
   additionalData?: any;
 }
 
@@ -111,11 +112,13 @@ export async function leadQualificationWorkflow(
 
     const daysWithoutReply = typeof options.daysWithoutReply === 'number' ? options.daysWithoutReply : 7;
     const maxLeads = typeof options.maxLeads === 'number' ? options.maxLeads : 100;
+    const maxLeadsPerStage = typeof options.maxLeadsPerStage === 'number' ? options.maxLeadsPerStage : 10;
 
     const qualification = await getQualificationLeadsActivity({
       site_id,
       daysWithoutReply,
       limit: maxLeads,
+      maxLeadsPerStage,
     });
 
     thresholdDate = qualification.thresholdDate;
@@ -123,6 +126,10 @@ export async function leadQualificationWorkflow(
     if (!qualification.success) {
       errors.push(...(qualification.errors || ['Unknown error fetching qualification leads']));
       return finalize('COMPLETED');
+    }
+
+    if (qualification.stats) {
+      console.log(`📊 Selection stats:`, JSON.stringify(qualification.stats, null, 2));
     }
 
     const leads = qualification.leads || [];
@@ -158,14 +165,21 @@ export async function leadQualificationWorkflow(
 
     for (const lead of leads) {
       try {
+        const sequence_stage = lead.sequence_stage;
+        const sequence_reason = lead.sequence_reason;
+
+        console.log(`🚀 Starting follow-up for lead ${lead.id} [Stage: ${sequence_stage || 'N/A'}]`);
+
         const r = await startLeadFollowUpWorkflowActivity({
           lead_id: lead.id,
           site_id,
           userId: options.userId,
+          message_status: 'accepted',
           additionalData: {
             triggeredBy: 'leadQualificationWorkflow',
-            reason: 'stale_replied_lead_no_response_in_period',
+            reason: sequence_reason || 'stale_replied_lead_no_response_in_period',
             thresholdDate,
+            sequence_stage,
             ...options.additionalData,
           },
         });
