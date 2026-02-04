@@ -51,3 +51,4 @@ export * from './agentSupervisorWorkflow';
 export * from './enrichLeadWorkflow';
 export * from './generatePersonEmailWorkflow';
 export * from './leadGenerationDomainSearchWorkflow';
+export * from './sendApprovedMessagesWorkflow';
