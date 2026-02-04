@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, upsertSearchAttributes } from '@temporalio/workflow';
 import type * as activities from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 
@@ -50,6 +50,17 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
     if (!params.email || !params.subject || !params.message || !params.site_id) {
       throw new Error('Missing required email parameters: email, subject, message and site_id are all required');
     }
+
+    const searchAttributes: Record<string, string[]> = {
+      site_id: [params.site_id],
+    };
+    if (params.agent_id) {
+      searchAttributes.user_id = [params.agent_id];
+    }
+    if (params.lead_id) {
+      searchAttributes.lead_id = [params.lead_id];
+    }
+    upsertSearchAttributes(searchAttributes);
 
     console.log('📤 Sending email via agent API:', {
       recipient: params.email,

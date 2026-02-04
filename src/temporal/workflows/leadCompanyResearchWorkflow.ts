@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
+import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { deepResearchWorkflow, type DeepResearchOptions } from './deepResearchWorkflow';
 
@@ -107,7 +107,16 @@ export async function leadCompanyResearchWorkflow(
   if (!website) {
     throw new Error('No website URL provided');
   }
-  
+
+  const searchAttributes: Record<string, string[]> = {
+    site_id: [site_id],
+    lead_id: [lead_id],
+  };
+  if (options.userId) {
+    searchAttributes.user_id = [options.userId];
+  }
+  upsertSearchAttributes(searchAttributes);
+
   const workflowId = `lead-company-research-${lead_id}-${site_id}`;
   const startTime = Date.now();
   

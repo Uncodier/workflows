@@ -1,4 +1,4 @@
-import { proxyActivities, sleep, startChild, patched, deprecatePatch, ParentClosePolicy } from '@temporalio/workflow';
+import { proxyActivities, sleep, startChild, patched, deprecatePatch, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { leadResearchWorkflow, type LeadResearchOptions, type LeadResearchResult } from './leadResearchWorkflow';
 import { leadInvalidationWorkflow, type LeadInvalidationOptions } from './leadInvalidationWorkflow';
@@ -187,7 +187,16 @@ export async function leadFollowUpWorkflow(
   if (!site_id) {
     throw new Error('No site ID provided');
   }
-  
+
+  const searchAttributes: Record<string, string[]> = {
+    site_id: [site_id],
+    lead_id: [lead_id],
+  };
+  if (options.userId) {
+    searchAttributes.user_id = [options.userId];
+  }
+  upsertSearchAttributes(searchAttributes);
+
   const workflowId = `lead-follow-up-${lead_id}-${site_id}`;
   const startTime = Date.now();
   

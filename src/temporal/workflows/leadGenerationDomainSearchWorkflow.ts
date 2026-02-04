@@ -1,4 +1,4 @@
-import { proxyActivities, workflowInfo } from '@temporalio/workflow';
+import { proxyActivities, workflowInfo, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 // Finder + DB activities for domain-based person search
@@ -64,7 +64,15 @@ export async function leadGenerationDomainSearchWorkflow(
   let processed = 0;
   let foundMatches = 0;
   const leadsCreated: string[] = [];
-  
+
+  const searchAttributes: Record<string, string[]> = {
+    site_id: [site_id],
+  };
+  if (userId) {
+    searchAttributes.user_id = [userId];
+  }
+  upsertSearchAttributes(searchAttributes);
+
   // Get deterministic timestamp from workflow start time
   const deterministicTimestamp = workflowInfo().startTime;
 

@@ -1,4 +1,4 @@
-import { startChild, ParentClosePolicy } from '@temporalio/workflow';
+import { startChild, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { 
   WhatsAppMessageData 
 } from '../activities/whatsappActivities';
@@ -44,6 +44,16 @@ export async function answerWhatsappMessageWorkflow(
   workflow_id: string;
 }> {
   const workflowId = `whatsapp-message-${messageData.messageId || Date.now()}`;
+
+  if (messageData.siteId) {
+    const searchAttributes: Record<string, string[]> = {
+      site_id: [messageData.siteId],
+    };
+    if (messageData.userId) {
+      searchAttributes.user_id = [messageData.userId];
+    }
+    upsertSearchAttributes(searchAttributes);
+  }
   
   console.log('📱 Starting WhatsApp message workflow...');
   console.log(`🆔 Workflow ID: ${workflowId}`);

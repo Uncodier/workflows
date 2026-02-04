@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, upsertSearchAttributes } from '@temporalio/workflow';
 
 import type { Activities } from '../activities';
 
@@ -45,6 +45,14 @@ export async function leadQualificationWorkflow(
 ): Promise<LeadQualificationResult> {
   const { site_id } = options;
   if (!site_id) throw new Error('site_id is required');
+
+  const searchAttributes: Record<string, string[]> = {
+    site_id: [site_id],
+  };
+  if (options.userId) {
+    searchAttributes.user_id = [options.userId];
+  }
+  upsertSearchAttributes(searchAttributes);
 
   const workflowId = `lead-qualification-${site_id}`;
   const startTime = Date.now();

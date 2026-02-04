@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
+import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { scheduleCustomerSupportMessagesWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
 
@@ -66,9 +66,20 @@ export async function syncEmailsWorkflow(
 ): Promise<SyncEmailsResult> {
   // Handle both camelCase and snake_case parameter formats
   const userId = options.userId || options.user_id;
+  if (!userId) {
+    throw new Error('User ID is required for syncEmailsWorkflow');
+  }
   const siteId = options.siteId || options.site_id || userId;
   const workflowId = `sync-emails-${userId}`;
-  
+
+  const searchAttributes: Record<string, string[]> = {
+    user_id: [userId],
+  };
+  if (siteId) {
+    searchAttributes.site_id = [siteId];
+  }
+  upsertSearchAttributes(searchAttributes);
+
   console.log(`📧 Starting email sync workflow for user ${userId} (${options.provider})`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));
 

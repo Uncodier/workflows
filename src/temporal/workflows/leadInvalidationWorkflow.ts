@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, patched, deprecatePatch, ParentClosePolicy } from '@temporalio/workflow';
+import { proxyActivities, startChild, patched, deprecatePatch, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { leadFollowUpWorkflow, type LeadFollowUpOptions } from './leadFollowUpWorkflow';
 
@@ -73,10 +73,10 @@ export async function leadInvalidationWorkflow(
   // Map legacy reasons to proper communication failure reasons for metadata tracking
   if (reason === 'invalid_email') {
     reason = 'email_failed';
-  } else if (reason === 'invalid_phone') {
+  } else   if (reason === 'invalid_phone') {
     reason = 'whatsapp_failed';
   }
-  
+
   console.log(`📋 Original reason: ${options.reason}, Mapped reason: ${reason}`);
   
   if (!lead_id) {
@@ -86,6 +86,15 @@ export async function leadInvalidationWorkflow(
   if (!site_id) {
     throw new Error('No site ID provided');
   }
+
+  const searchAttributes: Record<string, string[]> = {
+    site_id: [site_id],
+    lead_id: [lead_id],
+  };
+  if (options.userId) {
+    searchAttributes.user_id = [options.userId];
+  }
+  upsertSearchAttributes(searchAttributes);
   
   const workflowId = `lead-invalidation-${lead_id}-${Date.now()}`;
   const startTime = Date.now();

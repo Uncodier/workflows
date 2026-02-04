@@ -1,4 +1,4 @@
-import { sleep, startChild, ParentClosePolicy } from '@temporalio/workflow';
+import { sleep, startChild, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { EmailData, ScheduleCustomerSupportParams } from '../activities/customerSupportActivities';
 import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
 import type { WhatsAppMessageData, WhatsAppAnalysisResponse } from '../activities/whatsappActivities';
@@ -65,7 +65,18 @@ export async function scheduleCustomerSupportMessagesWorkflow(
     agentId,
     origin // Pasar el origen a los workflows hijos
   };
-  
+
+  if (site_id) {
+    const searchAttributes: Record<string, string[]> = {
+      site_id: [site_id],
+    };
+    const uid = user_id || agentId;
+    if (uid) {
+      searchAttributes.user_id = [uid];
+    }
+    upsertSearchAttributes(searchAttributes);
+  }
+
   const results: Array<{
     index: number;
     workflowId: string;

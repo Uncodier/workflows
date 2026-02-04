@@ -1,4 +1,4 @@
-import { proxyActivities, executeChild } from '@temporalio/workflow';
+import { proxyActivities, executeChild, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { generatePersonEmailWorkflow } from './generatePersonEmailWorkflow';
 
@@ -74,6 +74,14 @@ export async function enrichLeadWorkflow(
   let personCreatedFromDetails = false; // Persistent flag to track if person was created from details API
 
   const workflowId = `enrich-lead-${person_id || linkedin_profile?.replace(/[^a-zA-Z0-9]/g, '-') || 'unknown'}-${site_id}`;
+
+  const searchAttributes: Record<string, string[]> = {
+    site_id: [site_id],
+  };
+  if (userId) {
+    searchAttributes.user_id = [userId];
+  }
+  upsertSearchAttributes(searchAttributes);
 
   console.log(`🔍 Starting enrich lead workflow for site ${site_id}`);
   console.log(`📋 Options:`, JSON.stringify(options, null, 2));

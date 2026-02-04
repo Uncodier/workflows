@@ -1,4 +1,4 @@
-import { proxyActivities, workflowInfo } from '@temporalio/workflow';
+import { proxyActivities, workflowInfo, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 // Import specific daily prospection activities
@@ -422,6 +422,14 @@ export async function dailyProspectionWorkflow(
   if (!site_id) {
     throw new Error('No site ID provided');
   }
+
+  const searchAttributes: Record<string, string[]> = {
+    site_id: [site_id],
+  };
+  if (options.userId) {
+    searchAttributes.user_id = [options.userId];
+  }
+  upsertSearchAttributes(searchAttributes);
   
   // Get REAL workflow information from Temporal
   const workflowInfo_real = workflowInfo();

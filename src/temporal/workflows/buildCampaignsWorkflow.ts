@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { CreateCampaignRequest } from '../activities/campaignActivities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
@@ -71,7 +71,15 @@ export async function buildCampaignsWorkflow(
     console.error(`❌ ${errorMessage}`);
     throw new Error(errorMessage);
   }
-  
+
+  const searchAttributes: Record<string, string[]> = {
+    site_id: [siteId],
+  };
+  if (params.userId) {
+    searchAttributes.user_id = [params.userId];
+  }
+  upsertSearchAttributes(searchAttributes);
+
   try {
     // 1. Validate site exists and get site information
     console.log('🔍 Validating site...');

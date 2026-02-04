@@ -1,4 +1,4 @@
-import { proxyActivities, workflowInfo } from '@temporalio/workflow';
+import { proxyActivities, workflowInfo, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 // Define the activity interface and options
@@ -200,6 +200,19 @@ export async function deepResearchWorkflow(
   if (!research_topic) {
     throw new Error('No research topic provided');
   }
+
+  const searchAttributes: Record<string, string[]> = {
+    site_id: [site_id],
+  };
+  if (options.userId) {
+    searchAttributes.user_id = [options.userId];
+  }
+  // Try to find lead_id in additionalData
+  const leadId = options.additionalData?.lead_id || options.additionalData?.leadId || options.additionalData?.leadInfo?.id;
+  if (leadId) {
+    searchAttributes.lead_id = [leadId];
+  }
+  upsertSearchAttributes(searchAttributes);
   
   // Get REAL workflow information from Temporal
   const workflowInfo_real = workflowInfo();

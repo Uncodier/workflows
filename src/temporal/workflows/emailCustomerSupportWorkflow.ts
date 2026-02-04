@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
+import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
@@ -41,6 +41,19 @@ export async function emailCustomerSupportMessageWorkflow(
   console.log(`📋 Processing email ID: ${emailData.analysis_id}`);
   console.log(`🏢 Site: ${emailData.site_id}, User: ${emailData.user_id}`);
   console.log(`🔄 Origin: ${baseParams.origin || 'not specified'}`);
+
+  if (emailData.site_id) {
+    const searchAttributes: Record<string, string[]> = {
+      site_id: [emailData.site_id],
+    };
+    if (emailData.user_id) {
+      searchAttributes.user_id = [emailData.user_id];
+    }
+    if (emailData.analysis_id) {
+      searchAttributes.lead_id = [emailData.analysis_id];
+    }
+    upsertSearchAttributes(searchAttributes);
+  }
   
   try {
     // First, process the email to determine if action is needed

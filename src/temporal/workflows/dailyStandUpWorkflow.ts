@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 // Define the activity interface and options
@@ -70,6 +70,14 @@ export async function dailyStandUpWorkflow(
   if (!site_id) {
     throw new Error('No site ID provided');
   }
+
+  const searchAttributes: Record<string, string[]> = {
+    site_id: [site_id],
+  };
+  if (options.userId) {
+    searchAttributes.user_id = [options.userId];
+  }
+  upsertSearchAttributes(searchAttributes);
 
   const workflowId = `daily-standup-${site_id}-${Date.now()}`;
   const startTime = Date.now();

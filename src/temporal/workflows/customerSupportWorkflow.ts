@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
+import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
 import { emailCustomerSupportMessageWorkflow } from './emailCustomerSupportWorkflow';
@@ -106,6 +106,21 @@ export async function customerSupportMessageWorkflow(
   // Get workflow ID for status tracking
   const workflowId = (messageData as any)?.workflowId || `customer-support-${Date.now()}`;
   const siteId = (messageData as any)?.site_id || (messageData as any)?.siteId;
+
+  if (siteId) {
+    const searchAttributes: Record<string, string[]> = {
+      site_id: [siteId],
+    };
+    if (effectiveBaseParams.agentId) {
+      searchAttributes.user_id = [effectiveBaseParams.agentId];
+    }
+    // Try to find lead_id in messageData or any
+    const leadId = (messageData as any)?.lead_id || (messageData as any)?.leadId;
+    if (leadId) {
+      searchAttributes.lead_id = [leadId];
+    }
+    upsertSearchAttributes(searchAttributes);
+  }
   
   try {
     // ✅ NEW: If messageData has website_chat origin, process as-is without transformation

@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, workflowInfo, ParentClosePolicy } from '@temporalio/workflow';
+import { proxyActivities, startChild, workflowInfo, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { deepResearchWorkflow } from './deepResearchWorkflow';
 
@@ -925,7 +925,15 @@ export async function analyzeSiteWorkflow(
   if (!site_id) {
     throw new Error('No site ID provided');
   }
-  
+
+  const searchAttributes: Record<string, string[]> = {
+    site_id: [site_id],
+  };
+  if (options.userId) {
+    searchAttributes.user_id = [options.userId];
+  }
+  upsertSearchAttributes(searchAttributes);
+
   // Get workflow information from Temporal to extract schedule ID
   const workflowInfo_real = workflowInfo();
   const realWorkflowId = workflowInfo_real.workflowId;

@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, workflowInfo, ParentClosePolicy } from '@temporalio/workflow';
+import { proxyActivities, startChild, workflowInfo, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { deepResearchWorkflow, type DeepResearchOptions } from './deepResearchWorkflow';
 import { leadGenerationDomainSearchWorkflow, type LeadGenerationDomainSearchOptions } from './leadGenerationDomainSearchWorkflow';
@@ -465,6 +465,14 @@ export async function leadGenerationWorkflow(
   
   const workflowId = `lead-generation-${site_id}`;
   const startTime = Date.now();
+
+  const searchAttributes: Record<string, string[]> = {
+    site_id: [site_id],
+  };
+  if (options.userId) {
+    searchAttributes.user_id = [options.userId];
+  }
+  upsertSearchAttributes(searchAttributes);
   
   // Extract scheduleId from additionalData.scheduleType (passed by scheduling activities)
   // Fallback to generic format if not provided

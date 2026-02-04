@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, upsertSearchAttributes } from '@temporalio/workflow';
 import type * as activities from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 
@@ -70,6 +70,8 @@ export async function leadAttentionWorkflow(params: LeadAttentionParams): Promis
     if (!params.lead_id) {
       throw new Error('Missing required parameter: lead_id is required');
     }
+
+    upsertSearchAttributes({ lead_id: [params.lead_id] });
 
     console.log('🔍 WORKFLOW: Checking lead attention notification requirements:', {
       lead_id: params.lead_id,
