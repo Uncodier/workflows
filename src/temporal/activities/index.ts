@@ -28,6 +28,8 @@ export * from './validateEmailActivities';
 export * from './webhookActivities';
 export * from './finderActivities';
 export * from './activityControlActivities';
+export * from './workflowActivities';
+export * from './messageActivities';
 
 // Bundle all activities for the worker
 import * as supabaseActivities from './supabaseActivities';
@@ -59,6 +61,8 @@ import * as validateEmailActivities from './validateEmailActivities';
 import * as webhookActivities from './webhookActivities';
 import * as finderActivities from './finderActivities';
 import * as activityControlActivities from './activityControlActivities';
+import * as workflowActivities from './workflowActivities';
+import * as messageActivities from './messageActivities';
 
 export const activities = {
   ...supabaseActivities,
@@ -90,6 +94,8 @@ export const activities = {
   ...webhookActivities,
   ...finderActivities,
   ...activityControlActivities,
+  ...workflowActivities,
+  ...messageActivities,
 };
 
 export type Activities = typeof activities; 

@@ -8,6 +8,7 @@ import { getSupabaseService } from '../services/supabaseService';
 import { getTemporalClient } from '../client';
 import { temporalConfig } from '../../config/config';
 import { extractSearchAttributesFromInput } from '../utils/searchAttributes';
+import { upsertSearchAttributes } from '@temporalio/workflow';
 
 // Lead interfaces
 export interface Lead {

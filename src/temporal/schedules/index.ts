@@ -6,6 +6,7 @@ type WorkflowArgs = {
   scheduleActivitiesWorkflow: [];
   syncEmailsWorkflow: [];
   syncEmailsScheduleWorkflow: [];
+  sendApprovedMessagesWorkflow: [];
 };
 
 export interface ScheduleSpec {
@@ -48,6 +49,18 @@ export const defaultSchedules: ScheduleSpec[] = [
     jitterMs: 60000, // 1 minute jitter to spread load
     pauseOnFailure: false,
     catchupWindow: '2h', // 2 hour catchup window
+    paused: false
+  },
+  {
+    id: 'send-approved-messages-schedule',
+    workflowType: 'sendApprovedMessagesWorkflow',
+    intervalMinutes: 60, // Every 60 minutes (1 hour)
+    args: [],
+    description: 'Check for and send approved messages every hour',
+    startAt: new Date(), // Start immediately
+    jitterMs: 60000, // 1 minute jitter
+    pauseOnFailure: false,
+    catchupWindow: '1h',
     paused: false
   }
 ];
@@ -441,4 +454,4 @@ export async function toggleSchedule(scheduleId: string, paused: boolean, note?:
     await (connection as any).close();
     return { message: `Schedule ${scheduleId} unpaused successfully` };
   }
-} 
+}
