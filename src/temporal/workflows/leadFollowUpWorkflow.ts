@@ -16,7 +16,6 @@ const {
   validateContactInformation,
   validateCommunicationChannelsActivity,
   invalidateEmailOnlyActivity,
-  upsertLeadSearchAttributesActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
   retry: {
@@ -54,8 +53,6 @@ export async function leadFollowUpWorkflow(
     searchAttributes.user_id = [options.userId];
   }
   upsertSearchAttributes(searchAttributes);
-
-  await upsertLeadSearchAttributesActivity(searchAttributes);
 
   const workflowId = `lead-follow-up-${lead_id}-${site_id}`;
   const startTime = Date.now();
