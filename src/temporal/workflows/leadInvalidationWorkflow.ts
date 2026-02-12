@@ -30,6 +30,7 @@ export interface LeadInvalidationOptions {
   email?: string;                     // Optional: Failed email address
   reason?: 'whatsapp_failed' | 'email_failed' | 'invalid_contact' | 'invalid_email' | 'invalid_phone'; // Optional: Reason for invalidation
   userId?: string;                    // Optional: User ID for logging
+  researchEnabled?: boolean;           // Optional: Whether to enable research in follow-up recovery
   additionalData?: any;               // Optional: Additional context data
   response_message?: string;          // Optional: Message to concatenate with existing notes
 }
@@ -477,6 +478,7 @@ export async function leadInvalidationWorkflow(
             lead_id: lead_id,
             site_id: originalSiteId,
             userId: options.userId,
+            researchEnabled: options.researchEnabled ?? false,
             additionalData: {
               source: 'lead_invalidation_recovery',
               previous_failed_contact: options.telephone || options.email,

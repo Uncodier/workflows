@@ -3,6 +3,7 @@ export interface LeadFollowUpOptions {
   site_id: string;                    // Required: Site ID
   userId?: string;
   message_status?: string;
+  researchEnabled?: boolean;
   additionalData?: any;
 }
 

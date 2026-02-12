@@ -8,6 +8,7 @@ export interface LeadQualificationOptions {
   daysWithoutReply?: number; // legacy, kept for compatibility
   maxLeads?: number; // legacy, total limit
   maxLeadsPerStage?: number; // default 10
+  researchEnabled?: boolean;
   additionalData?: any;
 }
 
@@ -31,6 +32,7 @@ const {
   getQualificationLeadsActivity,
   validateWorkflowConfigActivity,
   countPendingMessagesActivity,
+  validateCommunicationChannelsActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -56,6 +58,11 @@ export async function leadQualificationWorkflow(
 
   const workflowId = `lead-qualification-${site_id}`;
   const startTime = Date.now();
+
+  const errors: string[] = [];
+  let followUpWorkflowsStarted = 0;
+  const results: LeadQualificationResult['results'] = [];
+  let thresholdDate = '';
 
   // STEP 0: Validate workflow configuration
   console.log('🔐 Step 0: Validating workflow configuration...');
@@ -91,6 +98,34 @@ export async function leadQualificationWorkflow(
   
   console.log(`✅ Configuration validated: ${configValidation.reason}`);
 
+  // STEP 0.5: Validate communication channels
+  console.log(`📡 Step 0.5: Validating communication channels for ${site_id}...`);
+  const channelsValidation = await validateCommunicationChannelsActivity({
+    site_id: site_id,
+  });
+
+  if (!channelsValidation.success) {
+    const errorMsg = `Failed to validate communication channels: ${channelsValidation.error}`;
+    console.error(`❌ ${errorMsg}`);
+    errors.push(errorMsg);
+    // Even if validation fails, we might want to continue or fail. 
+    // In dailyProspection it throws if !success or returns if !hasAnyChannel.
+    // We'll follow the pattern of failing if we can't validate or have no channels.
+    return finalize('FAILED');
+  }
+
+  if (!channelsValidation.hasAnyChannel) {
+    const errorMsg = `No communication channels (email or WhatsApp) are configured and enabled for site ${site_id}. Qualification requires at least one communication channel to send follow-up messages.`;
+    console.error(`❌ ${errorMsg}`);
+    errors.push(errorMsg);
+
+    return finalize('FAILED');
+  }
+
+  console.log(`✅ Communication channels validated successfully:`);
+  console.log(`   - Email channel: ${channelsValidation.hasEmailChannel ? 'Available' : 'Not configured'}`);
+  console.log(`   - WhatsApp channel: ${channelsValidation.hasWhatsappChannel ? 'Available' : 'Not configured'}`);
+
   await logWorkflowExecutionActivity({
     workflowId,
     workflowType: 'leadQualificationWorkflow',
@@ -106,11 +141,6 @@ export async function leadQualificationWorkflow(
     status: 'RUNNING',
     lastRun: new Date().toISOString(),
   });
-
-  const errors: string[] = [];
-  let followUpWorkflowsStarted = 0;
-  const results: LeadQualificationResult['results'] = [];
-  let thresholdDate = '';
 
   try {
     const siteResult = await getSiteActivity(site_id);
@@ -183,6 +213,7 @@ export async function leadQualificationWorkflow(
           site_id,
           userId: options.userId,
           message_status: 'accepted',
+          researchEnabled: options.researchEnabled ?? false,
           additionalData: {
             triggeredBy: 'leadQualificationWorkflow',
             reason: sequence_reason || 'stale_replied_lead_no_response_in_period',

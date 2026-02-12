@@ -22,7 +22,7 @@ export async function performResearch({
   errors: string[];
 }): Promise<void> {
   // Check if lead needs research before follow-up (now that we know contact is valid)
-  if (shouldExecuteLeadResearch(leadInfo)) {
+  if (options.researchEnabled && shouldExecuteLeadResearch(leadInfo)) {
     console.log(`🔍 Step 2.2: Executing lead research after contact validation...`);
     
     try {
@@ -65,12 +65,14 @@ export async function performResearch({
       console.error(`⚠️ Exception during lead research, but continuing with follow-up: ${errorMessage}`);
       errors.push(`Lead research exception: ${errorMessage}`);
     }
+  } else if (shouldExecuteLeadResearch(leadInfo)) {
+    console.log(`⏭️ Skipping lead research - research is disabled (researchEnabled=${options.researchEnabled})`);
   } else {
     console.log(`⏭️ Skipping lead research - lead does not meet criteria`);
   }
   
   // Check if lead needs company website research (lighter alternative)
-  if (!shouldExecuteLeadResearch(leadInfo) && shouldExecuteCompanyResearch(leadInfo)) {
+  if (options.researchEnabled && !shouldExecuteLeadResearch(leadInfo) && shouldExecuteCompanyResearch(leadInfo)) {
     console.log(`🌐 Step 2.3: Executing company website research...`);
     
     const website = extractWebsite(leadInfo);
@@ -113,6 +115,8 @@ export async function performResearch({
       console.error(`⚠️ Exception during company research, but continuing with follow-up: ${errorMessage}`);
       errors.push(`Company research exception: ${errorMessage}`);
     }
+  } else if (!shouldExecuteLeadResearch(leadInfo) && shouldExecuteCompanyResearch(leadInfo)) {
+    console.log(`⏭️ Skipping company research - research is disabled (researchEnabled=${options.researchEnabled})`);
   } else {
     console.log(`⏭️ Skipping company research - lead does not meet criteria (either has notes or no website)`);
   }

@@ -484,6 +484,7 @@ export interface StartLeadFollowUpWorkflowRequest {
   site_id: string;
   userId?: string;
   message_status?: string;
+  researchEnabled?: boolean;
   additionalData?: any;
 }
 
@@ -511,6 +512,7 @@ export async function startLeadFollowUpWorkflowActivity(request: StartLeadFollow
       site_id: request.site_id, 
       userId: request.userId, 
       message_status: request.message_status,
+      researchEnabled: request.researchEnabled ?? false,
       additionalData: request.additionalData 
     };
     

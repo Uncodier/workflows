@@ -46,6 +46,7 @@ export interface DailyProspectionOptions {
   updateStatus?: boolean;            // Default false - whether to update lead status
   maxPages?: number;                 // Maximum pages to search (default 10 to prevent infinite loops)
   minLeadsRequired?: number;         // Minimum leads required to stop pagination (default 30)
+  researchEnabled?: boolean;
   additionalData?: any;
 }
 
@@ -1075,6 +1076,7 @@ export async function dailyProspectionWorkflow(
             lead_id: lead.id,
             site_id: site_id,
             userId: options.userId || site.user_id,
+            researchEnabled: options.researchEnabled ?? false,
             additionalData: {
               triggeredBy: 'dailyProspectionWorkflow',
               reason: 'lead_not_assigned_to_human',
