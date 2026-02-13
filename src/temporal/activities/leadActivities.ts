@@ -426,10 +426,10 @@ export interface StartLeadAttentionWorkflowResult {
 export async function startLeadAttentionWorkflowActivity(request: StartLeadAttentionWorkflowRequest): Promise<StartLeadAttentionWorkflowResult> {
   console.log(`🚀 Starting independent leadAttentionWorkflow for lead: ${request.lead_id}`);
   
+  // Add timestamp to workflowId to prevent collisions when multiple messages arrive for same lead
+  const workflowId = `lead-attention-${request.lead_id}-${Date.now()}`;
+
   try {
-    // Add timestamp to workflowId to prevent collisions when multiple messages arrive for same lead
-    const workflowId = `lead-attention-${request.lead_id}-${Date.now()}`;
-    
     // Get Temporal client directly (same pattern used throughout the codebase)
     const client = await getTemporalClient();
     
@@ -464,13 +464,23 @@ export async function startLeadAttentionWorkflowActivity(request: StartLeadAtten
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    
-    // Log error for debugging
+
+    // Graceful handling for "Workflow execution already started" - can occur with same-millisecond
+    // duplicates, retries, or Temporal server-side duplicate processing. leadAttentionWorkflow is
+    // idempotent (checks for existing notifications before sending), so treat as success.
+    if (errorMessage.includes('Workflow execution already started')) {
+      console.log(`⚠️ Workflow already started for lead ${request.lead_id} (idempotent - existing run will handle it)`);
+      console.log(`📋 Workflow ID: ${workflowId}`);
+      return {
+        success: true,
+        workflowId: workflowId
+      };
+    }
+
+    // Log error for debugging - other errors are real failures
     console.error(`❌ Failed to start leadAttentionWorkflow for lead ${request.lead_id}:`, errorMessage);
     console.error(`❌ Error details:`, error);
-    
-    // Return proper failure status - callers will handle this gracefully
-    // This allows proper error tracking and monitoring while keeping the operation non-blocking
+
     return {
       success: false,
       error: errorMessage
@@ -2870,19 +2880,33 @@ export async function cleanupFailedFollowUpActivity(request: {
     }
 
     // Step 5: Check if lead has any remaining messages across all conversations
+    // messages table has conversation_id, not site_id - must filter via conversations table
     console.log(`🔍 Checking if lead has any remaining messages...`);
-    
-    const { count: totalMessagesCount, error: messagesCountError } = await supabaseServiceRole
-      .from('messages')
-      .select('*', { count: 'exact', head: true })
+
+    const { data: leadConversations, error: convError } = await supabaseServiceRole
+      .from('conversations')
+      .select('id')
       .eq('lead_id', request.lead_id)
       .eq('site_id', request.site_id);
 
-    if (messagesCountError) {
-      console.error(`❌ Error counting lead messages:`, messagesCountError);
+    if (convError) {
+      console.error(`❌ Error querying lead conversations:`, convError);
     }
 
-    const messagesCount = totalMessagesCount || 0;
+    const conversationIds = leadConversations?.map((c) => c.id) ?? [];
+    let messagesCount = 0;
+
+    if (conversationIds.length > 0) {
+      const { count: totalMessagesCount, error: messagesCountError } = await supabaseServiceRole
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .in('conversation_id', conversationIds);
+
+      if (messagesCountError) {
+        console.error(`❌ Error counting lead messages:`, messagesCountError);
+      }
+      messagesCount = totalMessagesCount ?? 0;
+    }
     console.log(`📊 Total messages for lead ${request.lead_id}: ${messagesCount}`);
 
     // Step 5.1: Reset lead status to 'new' if no messages exist (regardless of conversations)
@@ -2892,12 +2916,27 @@ export async function cleanupFailedFollowUpActivity(request: {
       
       console.log(`🔄 Resetting lead ${request.lead_id} status to 'new' (${resetReason})...`);
       
+      // Fetch current lead data to preserve custom_data
+      const { data: currentLead, error: fetchError } = await supabaseServiceRole
+        .from('leads')
+        .select('custom_data')
+        .eq('id', request.lead_id)
+        .eq('site_id', request.site_id)
+        .single();
+
+      if (fetchError) {
+        console.error(`❌ Error fetching current lead data:`, fetchError);
+      }
+      
+      const existingCustomData = typeof currentLead?.custom_data === 'object' ? currentLead.custom_data : {};
+      
       const { data: leadData, error: resetError } = await supabaseServiceRole
         .from('leads')
         .update({
           status: 'new',
           updated_at: new Date().toISOString(),
           custom_data: {
+            ...existingCustomData,
             cleanup_performed: true,
             cleanup_reason: request.failure_reason,
             cleanup_timestamp: new Date().toISOString(),
