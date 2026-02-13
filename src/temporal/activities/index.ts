@@ -29,6 +29,7 @@ export * from './webhookActivities';
 export * from './finderActivities';
 export * from './activityControlActivities';
 export * from './messageActivities';
+export * from './icypeasActivities';
 
 // Bundle all activities for the worker
 import * as supabaseActivities from './supabaseActivities';
@@ -61,6 +62,7 @@ import * as webhookActivities from './webhookActivities';
 import * as finderActivities from './finderActivities';
 import * as activityControlActivities from './activityControlActivities';
 import * as messageActivities from './messageActivities';
+import * as icypeasActivities from './icypeasActivities';
 
 export const activities = {
   ...supabaseActivities,
@@ -93,6 +95,7 @@ export const activities = {
   ...finderActivities,
   ...activityControlActivities,
   ...messageActivities,
+  ...icypeasActivities,
 };
 
 export type Activities = typeof activities; 

@@ -12,10 +12,10 @@ const {
   callPersonContactsLookupDetailsActivity,
   upsertPersonActivity,
   upsertLeadForPersonActivity,
-  createSingleLead,
   leadContactGenerationActivity,
   validateContactInformation,
   logWorkflowExecutionActivity,
+  lookEmailOnIcyPeas,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -221,24 +221,120 @@ export async function enrichLeadWorkflow(
     const needsPhoneNumbers = !hasPersonPhone || !hasLeadPhone;
 
     console.log(`🔍 Enrichment needs:`);
-    console.log(`   - Work Emails: ✅ Always called`);
+    console.log(`   - Work Emails: ✅ Always checked in cascading flow`);
     console.log(`   - Personal Emails: ${needsPersonalEmails ? '✅ Needed' : '⏭️ Skip (already have)'}`);
     console.log(`   - Phone Numbers: ${needsPhoneNumbers ? '✅ Needed' : '⏭️ Skip (already have)'}`);
 
-    // Step 4: Call enrichment APIs only for missing data
-    console.log(`📞 Step 4: Calling enrichment APIs for missing data...`);
+    // Helper function to extract domain from URL (moved up for enrichment flow)
+    const getDomainFromUrl = (input: string): string => {
+      try {
+        const sanitized = String(input).trim();
+        return sanitized
+          .replace(/^https?:\/\//i, '')
+          .replace(/^www\./i, '')
+          .split('/')[0]
+          .split('?')[0]
+          .split('#')[0];
+      } catch {
+        return '';
+      }
+    };
+
+    // Extract domain from available sources (moved up for enrichment flow)
+    let domain = '';
+    let companyWebsite = '';
+
+    try {
+      // Priority 1: detailsResultData companies
+      if (detailsResultData?.companies?.[0]) {
+        const company = detailsResultData.companies[0];
+        if (company.domain) {
+          domain = getDomainFromUrl(company.domain);
+          console.log(`📋 Using domain from detailsResultData.companies[0].domain: ${domain}`);
+        } else if (company.website) {
+          domain = getDomainFromUrl(company.website);
+          companyWebsite = company.website;
+          console.log(`📋 Using domain from detailsResultData.companies[0].website: ${domain}`);
+        }
+      }
+
+      // Priority 2: existingLead web/website
+      if (!domain && existingLead) {
+        if (existingLead.web) {
+          domain = getDomainFromUrl(existingLead.web);
+          companyWebsite = existingLead.web;
+          console.log(`📋 Using domain from existingLead.web: ${domain}`);
+        } else if (existingLead.website) {
+          domain = getDomainFromUrl(existingLead.website);
+          companyWebsite = existingLead.website;
+          console.log(`📋 Using domain from existingLead.website: ${domain}`);
+        }
+      }
+
+      // Priority 3: person.raw_result roles organization (most reliable source)
+      if (!domain && person.raw_result) {
+        try {
+          // Check roles for organization domain (most reliable source)
+          if (person.raw_result.roles && Array.isArray(person.raw_result.roles)) {
+            // Get current role (is_current: true) or first role
+            const currentRole = person.raw_result.roles.find((r: any) => r.is_current === true) || person.raw_result.roles[0];
+            if (currentRole?.organization?.domain) {
+              domain = getDomainFromUrl(currentRole.organization.domain);
+              companyWebsite = currentRole.organization.domain;
+              console.log(`📋 Using domain from person.raw_result.roles[].organization.domain: ${domain}`);
+            } else if (currentRole?.organization?.website) {
+              domain = getDomainFromUrl(currentRole.organization.website);
+              companyWebsite = currentRole.organization.website;
+              console.log(`📋 Using domain from person.raw_result.roles[].organization.website: ${domain}`);
+            }
+          }
+          
+          // Fallback to organization.domain if roles didn't have it
+          if (!domain) {
+            const orgDomain = (person.raw_result?.organization?.domain ?? person.raw_result?.domain ?? '') as string;
+            if (orgDomain && typeof orgDomain === 'string') {
+              domain = getDomainFromUrl(orgDomain);
+              console.log(`📋 Using domain from person.raw_result.organization.domain: ${domain}`);
+            }
+          }
+
+          // Fallback to organization.website if still no domain
+          if (!domain && person.raw_result?.organization?.website) {
+            domain = getDomainFromUrl(person.raw_result.organization.website as string);
+            companyWebsite = person.raw_result.organization.website;
+            console.log(`📋 Using domain from person.raw_result.organization.website: ${domain}`);
+          }
+        } catch (error) {
+          console.warn(`⚠️ Error extracting domain from person.raw_result: ${error}`);
+        }
+      }
+
+      // Priority 4: Fallback to company_name
+      if (!domain && person.company_name) {
+        domain = (person.company_name as string).toLowerCase().replace(/\s+/g, '') + '.com';
+        console.log(`⚠️ Using fallback domain from company_name: ${domain}`);
+      }
+    } catch (error) {
+      console.warn(`⚠️ Error extracting domain: ${error}`);
+    }
+
+    // Step 4: Call enrichment APIs sequentially (Cascading Flow)
+    console.log(`📞 Step 4: Calling enrichment APIs sequentially...`);
     
+    // Results containers
+    let workEmails: any[] = [];
+    let phoneNumbers: any[] = [];
+    let personalEmails: any[] = [];
+
+    // Cascading state
+    let hasResult = false;
+
     // Prepare API request parameters
-    // For Forager API, person_id must be an integer (external_person_id), not UUID
     const apiParams: any = {};
-    
-    // Prefer external_person_id (integer) for Forager API, not the UUID from database
     if (person.external_person_id) {
       apiParams.person_id = person.external_person_id;
-      console.log(`📋 Using external_person_id (${person.external_person_id}) for API calls`);
     }
     
-    // Use linkedin_profile from options, or extract from person's raw_result
     let linkedinProfileToUse = linkedin_profile;
     if (!linkedinProfileToUse && person.raw_result) {
       const rawResult = person.raw_result;
@@ -248,111 +344,120 @@ export async function enrichLeadWorkflow(
     }
     if (linkedinProfileToUse) {
       apiParams.linkedin_profile = linkedinProfileToUse;
-      console.log(`📋 Using linkedin_profile for API calls`);
     }
     
-    // Add additional identifiers as fallback
     if (person.full_name) {
       apiParams.full_name = person.full_name;
     }
     if (person.company_name) {
       apiParams.company_name = person.company_name;
     }
-    
-    // Log final API parameters (without sensitive data)
-    console.log(`📋 API parameters:`, {
-      person_id: apiParams.person_id ? `${apiParams.person_id} (external_person_id)` : 'none',
-      linkedin_profile: apiParams.linkedin_profile ? 'provided' : 'none',
-      has_full_name: !!apiParams.full_name,
-      has_company_name: !!apiParams.company_name,
-    });
 
-    // Call APIs conditionally based on existing data (person and lead)
-    const apiCalls: Promise<any>[] = [];
-    
-    // ALWAYS call work emails as a separate, visible activity
-    console.log(`📧 Executing callPersonWorkEmailsActivity as separate activity...`);
-    const workEmailsResult = await callPersonWorkEmailsActivity(apiParams);
-    console.log(`✅ Work emails activity completed: ${workEmailsResult.success ? 'success' : 'failed'}`);
-    if (workEmailsResult.success) {
-      console.log(`📊 Work emails found: ${workEmailsResult.emails?.length || 0}`);
-    } else {
-      console.log(`⚠️ Work emails failed: ${workEmailsResult.error}`);
-    }
+    // 1. IcyPeas Email Search
+    if (!hasResult && domain && person.full_name) {
+      console.log(`🧊 Cascading Step 1: Calling IcyPeas...`);
+      
+      // Split name for IcyPeas
+      const nameParts = (person.full_name as string).trim().split(/\s+/);
+      const firstname = nameParts[0];
+      const lastname = nameParts.slice(1).join(' ') || undefined;
 
-    if (needsPhoneNumbers) {
-      console.log(`📞 Calling phone numbers API (missing in person or lead)...`);
-      apiCalls.push(callPersonContactsLookupPhoneNumbersActivity(apiParams).then(result => ({ type: 'phoneNumbers', result })));
-    } else {
-      console.log(`⏭️ Skipping phone numbers API (already have in person and lead)`);
-    }
+      try {
+        const icypeasResult = await lookEmailOnIcyPeas({
+          domainOrCompany: domain,
+          firstname,
+          lastname,
+        });
 
-    if (needsPersonalEmails) {
-      console.log(`📧 Calling personal emails API (missing in lead)...`);
-      apiCalls.push(callPersonContactsLookupPersonalEmailsActivity(apiParams).then(result => ({ type: 'personalEmails', result })));
-    } else {
-      console.log(`⏭️ Skipping personal emails API (already have in lead)`);
-    }
-
-    // Execute API calls in parallel (if any)
-    const apiResults = await Promise.all(apiCalls);
-
-    // Process results
-    let phoneNumbersResult: any = { success: true, phoneNumbers: [] };
-    let personalEmailsResult: any = { success: true, emails: [] };
-
-    apiResults.forEach(({ type, result }) => {
-      if (type === 'phoneNumbers') {
-        phoneNumbersResult = result;
-      } else if (type === 'personalEmails') {
-        personalEmailsResult = result;
+        if (icypeasResult.success && icypeasResult.data?.email) {
+          console.log(`✅ IcyPeas found email: ${icypeasResult.data.email}`);
+          workEmails = [{ 
+            email: icypeasResult.data.email, 
+            source: 'icypeas',
+            confidence: icypeasResult.data.confidence 
+          }];
+          hasResult = true;
+        } else {
+          console.log(`ℹ️ IcyPeas found no email`);
+        }
+      } catch (e) {
+        console.warn(`⚠️ IcyPeas call failed:`, e);
       }
-    });
+    }
 
-    // Process results - always use API result for work emails
-    let workEmails: any[] = [];
-    workEmails = workEmailsResult.success ? (workEmailsResult.emails || []) : [];
-    
-    // If API returned no emails but we have existing emails, keep them
-    if (workEmails.length === 0) {
+    // 2. Personal Emails (if still no result)
+    if (!hasResult && needsPersonalEmails) {
+      console.log(`📧 Cascading Step 2: Calling Personal Emails Lookup...`);
+      try {
+        const personalEmailsResult = await callPersonContactsLookupPersonalEmailsActivity(apiParams);
+        if (personalEmailsResult.success && personalEmailsResult.emails && personalEmailsResult.emails.length > 0) {
+          console.log(`✅ Personal emails found: ${personalEmailsResult.emails.length}`);
+          personalEmails = personalEmailsResult.emails;
+          hasResult = true;
+        } else {
+          console.log(`ℹ️ No personal emails found`);
+        }
+      } catch (e) {
+        console.warn(`⚠️ Personal emails call failed:`, e);
+      }
+    }
+
+    // 3. Work Emails (if still no result)
+    if (!hasResult) {
+      console.log(`📧 Cascading Step 3: Calling Finder Work Emails...`);
+      try {
+        const workEmailsResult = await callPersonWorkEmailsActivity(apiParams);
+        if (workEmailsResult.success && workEmailsResult.emails && workEmailsResult.emails.length > 0) {
+          console.log(`✅ Work emails found: ${workEmailsResult.emails.length}`);
+          workEmails = workEmailsResult.emails;
+          hasResult = true;
+        } else {
+          console.log(`ℹ️ No work emails found`);
+        }
+      } catch (e) {
+        console.warn(`⚠️ Work emails call failed:`, e);
+      }
+    }
+
+    // 4. Work Phones (if still no result)
+    if (!hasResult && needsPhoneNumbers) {
+      console.log(`📞 Cascading Step 4: Calling Finder Phone Numbers...`);
+      try {
+        const phoneNumbersResult = await callPersonContactsLookupPhoneNumbersActivity(apiParams);
+        if (phoneNumbersResult.success && phoneNumbersResult.phoneNumbers && phoneNumbersResult.phoneNumbers.length > 0) {
+          console.log(`✅ Phone numbers found: ${phoneNumbersResult.phoneNumbers.length}`);
+          phoneNumbers = phoneNumbersResult.phoneNumbers;
+          hasResult = true;
+        } else {
+          console.log(`ℹ️ No phone numbers found`);
+        }
+      } catch (e) {
+        console.warn(`⚠️ Phone numbers call failed:`, e);
+      }
+    }
+
+    // Fallback: If no API returned any emails, use existing data if available
+    if (workEmails.length === 0 && !hasResult) {
       const existingEmail = hasPersonEmail ? existingPersonEmails[0] : (hasLeadEmail ? existingLead.email : null);
       if (existingEmail) {
         workEmails = [{ email: existingEmail }];
-        console.log(`📧 Using existing email since API returned none: ${existingEmail}`);
+        console.log(`📧 Using existing email since all APIs returned none: ${existingEmail}`);
       }
     }
-    
-    let phoneNumbers: any[] = [];
-    if (!needsPhoneNumbers) {
-      // Use existing data - prefer person phone, fallback to lead phone
+
+    // Fallback: If no API returned any phones, use existing data if available
+    if (phoneNumbers.length === 0 && !hasResult) {
       const existingPhone = hasPersonPhone ? existingPersonPhones[0] : (hasLeadPhone ? existingLead.phone : null);
       if (existingPhone) {
         phoneNumbers = [{ phone_number: existingPhone }];
       }
-    } else {
-      phoneNumbers = phoneNumbersResult.success ? (phoneNumbersResult.phoneNumbers || []) : [];
     }
-    
-    let personalEmails: any[] = [];
-    if (!needsPersonalEmails) {
-      // Use existing personal email from lead
+
+    // Fallback: If no API returned any personal emails, use existing data if available
+    if (personalEmails.length === 0 && !hasResult) {
       if (hasLeadPersonalEmail) {
         personalEmails = [{ email: existingLead.personal_email }];
       }
-    } else {
-      personalEmails = personalEmailsResult.success ? (personalEmailsResult.emails || []) : [];
-    }
-
-    // Log work emails result
-    if (!workEmailsResult.success) {
-      console.warn(`⚠️ Work emails API failed: ${workEmailsResult.error} (continuing with existing data if available)`);
-      // Don't add to errors - we'll use existing data if available
-    }
-    if (needsPhoneNumbers && !phoneNumbersResult.success) {
-      errors.push(`Phone numbers API failed: ${phoneNumbersResult.error}`);
-    }
-    if (needsPersonalEmails && !personalEmailsResult.success) {
-      errors.push(`Personal emails API failed: ${personalEmailsResult.error}`);
     }
 
     console.log(`📊 Enrichment results:`);
@@ -367,100 +472,7 @@ export async function enrichLeadWorkflow(
     if (needsFallback && person.full_name && (person.company_name || detailsResultData?.companies?.[0])) {
       console.log(`🔄 No contact information found, attempting ICP mining fallback...`);
       
-      // Helper function to extract domain from URL (same as ICP mining)
-      const getDomainFromUrl = (input: string): string => {
-        try {
-          const sanitized = String(input).trim();
-          return sanitized
-            .replace(/^https?:\/\//i, '')
-            .replace(/^www\./i, '')
-            .split('/')[0]
-            .split('?')[0]
-            .split('#')[0];
-        } catch {
-          return '';
-        }
-      };
-
-      // Extract domain from available sources (same priority as ICP mining)
-      let domain = '';
-      let companyWebsite = '';
-
-      try {
-        // Priority 1: detailsResultData companies
-        if (detailsResultData?.companies?.[0]) {
-          const company = detailsResultData.companies[0];
-          if (company.domain) {
-            domain = getDomainFromUrl(company.domain);
-            console.log(`📋 Using domain from detailsResultData.companies[0].domain: ${domain}`);
-          } else if (company.website) {
-            domain = getDomainFromUrl(company.website);
-            companyWebsite = company.website;
-            console.log(`📋 Using domain from detailsResultData.companies[0].website: ${domain}`);
-          }
-        }
-
-        // Priority 2: existingLead web/website
-        if (!domain && existingLead) {
-          if (existingLead.web) {
-            domain = getDomainFromUrl(existingLead.web);
-            companyWebsite = existingLead.web;
-            console.log(`📋 Using domain from existingLead.web: ${domain}`);
-          } else if (existingLead.website) {
-            domain = getDomainFromUrl(existingLead.website);
-            companyWebsite = existingLead.website;
-            console.log(`📋 Using domain from existingLead.website: ${domain}`);
-          }
-        }
-
-        // Priority 3: person.raw_result roles organization (most reliable source)
-        if (!domain && person.raw_result) {
-          try {
-            // Check roles for organization domain (most reliable source)
-            if (person.raw_result.roles && Array.isArray(person.raw_result.roles)) {
-              // Get current role (is_current: true) or first role
-              const currentRole = person.raw_result.roles.find((r: any) => r.is_current === true) || person.raw_result.roles[0];
-              if (currentRole?.organization?.domain) {
-                domain = getDomainFromUrl(currentRole.organization.domain);
-                companyWebsite = currentRole.organization.domain;
-                console.log(`📋 Using domain from person.raw_result.roles[].organization.domain: ${domain}`);
-              } else if (currentRole?.organization?.website) {
-                domain = getDomainFromUrl(currentRole.organization.website);
-                companyWebsite = currentRole.organization.website;
-                console.log(`📋 Using domain from person.raw_result.roles[].organization.website: ${domain}`);
-              }
-            }
-            
-            // Fallback to organization.domain if roles didn't have it
-            if (!domain) {
-              const orgDomain = (person.raw_result?.organization?.domain ?? person.raw_result?.domain ?? '') as string;
-              if (orgDomain && typeof orgDomain === 'string') {
-                domain = getDomainFromUrl(orgDomain);
-                console.log(`📋 Using domain from person.raw_result.organization.domain: ${domain}`);
-              }
-            }
-
-            // Fallback to organization.website if still no domain
-            if (!domain && person.raw_result?.organization?.website) {
-              domain = getDomainFromUrl(person.raw_result.organization.website as string);
-              companyWebsite = person.raw_result.organization.website;
-              console.log(`📋 Using domain from person.raw_result.organization.website: ${domain}`);
-            }
-          } catch (error) {
-            console.warn(`⚠️ Error extracting domain from person.raw_result: ${error}`);
-          }
-        }
-
-        // Priority 4: Fallback to company_name (only if no real domain found)
-        // NOTE: This generates a domain from company name, which may not be accurate
-        // Only use as last resort
-        if (!domain && person.company_name) {
-          domain = (person.company_name as string).toLowerCase().replace(/\s+/g, '') + '.com';
-          console.log(`⚠️ Using fallback domain from company_name (may not be accurate): ${domain}`);
-        }
-      } catch (error) {
-        console.warn(`⚠️ Error extracting domain: ${error}`);
-      }
+      // Domain extraction logic was here, now moved up
 
       if (domain) {
         console.log(`🌐 Extracted domain: ${domain}`);
@@ -602,47 +614,12 @@ export async function enrichLeadWorkflow(
 
     let leadUpdate: any = null;
     
-    // If work emails failed and we don't have email/phone, use createSingleLead as fallback
-    if (!workEmailsResult.success && !primaryWorkEmail && !primaryPhone) {
-      console.log(`⚠️ Work emails API failed and no contact info available, using createSingleLead fallback...`);
-      
-      const leadData = {
-        name: person.full_name || 'Unknown',
-        email: undefined, // No email available
-        company_name: person.company_name || undefined,
-        position: person.role_title || undefined,
-        telephone: undefined, // No phone available
-        web: undefined,
-        address: {},
-        social_networks: {
-          linkedin_id: person.external_person_id || undefined,
-        },
-        company: person.company_name ? {
-          name: person.company_name,
-        } : {},
-        metadata: {
-          person_id: person.id,
-          external_person_id: person.external_person_id,
-          external_role_id: person.external_role_id,
-          source: 'enrich_lead_workflow',
-          enrichment_date: new Date().toISOString(),
-          work_emails_api_failed: true,
-        },
-        person_id: person.id,
-        origin: 'lead_enrichment_workflow', // Set origin for fallback flow
-      };
-
-      const createResult = await createSingleLead(leadData, site_id, userId, leadCompanyId);
-      
-      if (createResult.success) {
-        leadUpdate = { success: true, leadId: createResult.leadId };
-        console.log(`✅ Lead created using createSingleLead fallback: ${createResult.leadId}`);
-      } else {
-        const errorMsg = `Failed to create lead with createSingleLead fallback: ${createResult.error}`;
-        console.error(`❌ ${errorMsg}`);
-        errors.push(errorMsg);
-        throw new Error(errorMsg);
-      }
+    // Check if we have any valid contact info from cascading steps
+    const hasAnyContact = primaryWorkEmail || primaryPhone || primaryPersonalEmail;
+    
+    if (!hasAnyContact) {
+      console.log(`⚠️ No contact info found - skipping lead creation`);
+      leadUpdate = { success: true, leadId: undefined };
     } else {
       // Normal flow: use upsertLeadForPersonActivity
       // Pass person_emails to avoid database query (person was just updated)
@@ -666,7 +643,7 @@ export async function enrichLeadWorkflow(
       throw new Error(errorMsg);
     }
 
-    console.log(`✅ Lead ${leadUpdate.leadId ? 'created' : 'updated'} successfully`);
+    console.log(leadUpdate.leadId ? `✅ Lead created: ${leadUpdate.leadId}` : `✅ Lead not created (no contact info)`);
     }
 
     const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
