@@ -1,5 +1,6 @@
 import { proxyActivities, executeChild, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
+import { selectRoleForEnrichment } from '../utils/personRoleUtils';
 import { generatePersonEmailWorkflow } from './generatePersonEmailWorkflow';
 
 // Configure activity options
@@ -12,6 +13,7 @@ const {
   callPersonContactsLookupDetailsActivity,
   upsertPersonActivity,
   upsertLeadForPersonActivity,
+  upsertCompanyActivity,
   leadContactGenerationActivity,
   validateContactInformation,
   logWorkflowExecutionActivity,
@@ -28,6 +30,8 @@ export interface EnrichLeadOptions {
   person_id?: string;         // Person ID (at least one required)
   site_id: string;            // Required: Site ID
   userId?: string;            // Optional: User ID
+  company_name?: string;      // Optional: target company (matches role org for domain/email lookup)
+  segment_id?: string;        // Optional: segment_id for ICP parity (assigned to lead)
 }
 
 export interface EnrichLeadResult {
@@ -67,7 +71,7 @@ export interface EnrichLeadResult {
 export async function enrichLeadWorkflow(
   options: EnrichLeadOptions
 ): Promise<EnrichLeadResult> {
-  const { linkedin_profile, person_id, site_id, userId } = options;
+  const { linkedin_profile, person_id, site_id, userId, company_name: optionsCompanyName, segment_id } = options;
   const startTime = Date.now();
   const errors: string[] = [];
   let detailsResultData: any = null; // Store details result for later use
@@ -138,6 +142,7 @@ export async function enrichLeadWorkflow(
         person_id: person_id,
         site_id: site_id,
         userId: userId,
+        company_name: optionsCompanyName ?? undefined,
       });
 
       if (!detailsResult.success) {
@@ -243,6 +248,13 @@ export async function enrichLeadWorkflow(
     // Extract domain from available sources (moved up for enrichment flow)
     let domain = '';
     let companyWebsite = '';
+    let selectedRole: any = null;
+    if (person.raw_result?.roles && Array.isArray(person.raw_result.roles)) {
+      selectedRole = selectRoleForEnrichment(person.raw_result.roles, {
+        company_name: optionsCompanyName ?? undefined,
+        external_role_id: person.external_role_id ?? undefined,
+      }) ?? person.raw_result.roles[0];
+    }
 
     try {
       // Priority 1: detailsResultData companies
@@ -271,23 +283,25 @@ export async function enrichLeadWorkflow(
         }
       }
 
-      // Priority 3: person.raw_result roles organization (most reliable source)
+      // Priority 3: person.raw_result roles organization (selectedRole set above)
+      if (!domain && selectedRole) {
+        try {
+          if (selectedRole?.organization?.domain) {
+            domain = getDomainFromUrl(selectedRole.organization.domain);
+            companyWebsite = selectedRole.organization.domain;
+            console.log(`📋 Using domain from selected role organization.domain: ${domain}`);
+          } else if (selectedRole?.organization?.website) {
+            domain = getDomainFromUrl(selectedRole.organization.website);
+            companyWebsite = selectedRole.organization.website;
+            console.log(`📋 Using domain from selected role organization.website: ${domain}`);
+          }
+        } catch (err) {
+          console.warn(`⚠️ Error extracting domain from selected role: ${err}`);
+        }
+      }
+
       if (!domain && person.raw_result) {
         try {
-          // Check roles for organization domain (most reliable source)
-          if (person.raw_result.roles && Array.isArray(person.raw_result.roles)) {
-            // Get current role (is_current: true) or first role
-            const currentRole = person.raw_result.roles.find((r: any) => r.is_current === true) || person.raw_result.roles[0];
-            if (currentRole?.organization?.domain) {
-              domain = getDomainFromUrl(currentRole.organization.domain);
-              companyWebsite = currentRole.organization.domain;
-              console.log(`📋 Using domain from person.raw_result.roles[].organization.domain: ${domain}`);
-            } else if (currentRole?.organization?.website) {
-              domain = getDomainFromUrl(currentRole.organization.website);
-              companyWebsite = currentRole.organization.website;
-              console.log(`📋 Using domain from person.raw_result.roles[].organization.website: ${domain}`);
-            }
-          }
           
           // Fallback to organization.domain if roles didn't have it
           if (!domain) {
@@ -309,9 +323,12 @@ export async function enrichLeadWorkflow(
         }
       }
 
-      // Priority 4: Fallback to company_name
-      if (!domain && person.company_name) {
-        domain = (person.company_name as string).toLowerCase().replace(/\s+/g, '') + '.com';
+      // Priority 4: Fallback to company_name (selected role > options > person)
+      const fallbackCompanyName = (selectedRole?.organization?.name ?? selectedRole?.organization_name)
+        ?? optionsCompanyName
+        ?? person.company_name;
+      if (!domain && fallbackCompanyName) {
+        domain = (fallbackCompanyName as string).toLowerCase().replace(/\s+/g, '') + '.com';
         console.log(`⚠️ Using fallback domain from company_name: ${domain}`);
       }
     } catch (error) {
@@ -349,8 +366,12 @@ export async function enrichLeadWorkflow(
     if (person.full_name) {
       apiParams.full_name = person.full_name;
     }
-    if (person.company_name) {
-      apiParams.company_name = person.company_name;
+    // Use selected role's org > options.company_name > person.company_name
+    const apiCompanyName = (selectedRole?.organization?.name ?? selectedRole?.organization_name)
+      ?? optionsCompanyName
+      ?? person.company_name;
+    if (apiCompanyName) {
+      apiParams.company_name = apiCompanyName;
     }
 
     // 1. IcyPeas Email Search
@@ -469,7 +490,7 @@ export async function enrichLeadWorkflow(
     // Check if we need to use the fallback (no work emails, personal emails, or phone numbers)
     const needsFallback = workEmails.length === 0 && personalEmails.length === 0 && phoneNumbers.length === 0;
     
-    if (needsFallback && person.full_name && (person.company_name || detailsResultData?.companies?.[0])) {
+    if (needsFallback && person.full_name && (person.company_name || optionsCompanyName || detailsResultData?.companies?.[0])) {
       console.log(`🔄 No contact information found, attempting ICP mining fallback...`);
       
       // Domain extraction logic was here, now moved up
@@ -484,11 +505,12 @@ export async function enrichLeadWorkflow(
             args: [{
               person_id: person.id,
               external_person_id: person.external_person_id,
+              external_role_id: person.external_role_id,
               full_name: person.full_name,
-              company_name: person.company_name,
+              company_name: apiCompanyName ?? person.company_name,
               company_domain: domain,
               company_website: companyWebsite || undefined,
-              role_title: person.role_title,
+              role_title: selectedRole?.role_title ?? person.role_title,
               site_id,
               userId,
               person_raw_result: person.raw_result,
@@ -513,7 +535,7 @@ export async function enrichLeadWorkflow(
         console.log(`⚠️ Cannot use ICP mining fallback: No domain available for email generation`);
       }
     } else if (needsFallback) {
-      console.log(`⚠️ Cannot use ICP mining fallback: Missing required information (full_name: ${!!person.full_name}, company_name: ${!!person.company_name})`);
+      console.log(`⚠️ Cannot use ICP mining fallback: Missing required information (full_name: ${!!person.full_name}, company: ${!!(person.company_name || optionsCompanyName)})`);
     }
 
     // Step 6: Process and extract contact data
@@ -609,8 +631,33 @@ export async function enrichLeadWorkflow(
     // Step 7: Update/Create lead with enriched data
     console.log(`📋 Step 7: Updating/creating lead...`);
 
-    // Get company_id from existing lead if available, or from details result
-    const leadCompanyId = existingLead?.company_id || (detailsResultData?.companies?.[0]?.id);
+    // Resolve company_id: selected role org > details result (matching org) > existing lead
+    let leadCompanyId: string | undefined = undefined;
+    if (selectedRole?.organization) {
+      const org = selectedRole.organization;
+      const orgName = org.name || selectedRole.organization_name;
+      if (orgName) {
+        const companyResult = await upsertCompanyActivity({
+          name: orgName,
+          website: org.domain || org.website || null,
+          linkedin_url: org.linkedin_info?.public_profile_url || null,
+        });
+        if (companyResult.success && companyResult.company?.id) {
+          leadCompanyId = companyResult.company.id;
+          console.log(`🔗 Resolved company_id from selected role: ${orgName} (${leadCompanyId})`);
+        }
+      }
+    }
+    if (!leadCompanyId) {
+      leadCompanyId = existingLead?.company_id;
+    }
+    if (!leadCompanyId && detailsResultData?.companies?.length) {
+      const orgName = selectedRole?.organization?.name ?? selectedRole?.organization_name ?? optionsCompanyName;
+      const matching = orgName
+        ? detailsResultData.companies.find((c: any) => c.name === orgName)
+        : detailsResultData.companies[0];
+      leadCompanyId = matching?.id;
+    }
 
     let leadUpdate: any = null;
     
@@ -633,6 +680,7 @@ export async function enrichLeadWorkflow(
         notes: additionalNotes || undefined,
         userId,
         company_id: leadCompanyId,
+        segment_id: segment_id || undefined,
         person_emails: personEmails, // Pass updated emails to avoid DB query
       } as any); // Type assertion needed because Activities type is auto-generated
 

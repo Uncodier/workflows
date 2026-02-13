@@ -35,6 +35,13 @@ async function buildCampaignsWorkflow(params) {
         console.error(`❌ ${errorMessage}`);
         throw new Error(errorMessage);
     }
+    const searchAttributes = {
+        site_id: [siteId],
+    };
+    if (params.userId) {
+        searchAttributes.user_id = [params.userId];
+    }
+    (0, workflow_1.upsertSearchAttributes)(searchAttributes);
     try {
         // 1. Validate site exists and get site information
         console.log('🔍 Validating site...');

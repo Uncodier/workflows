@@ -1454,6 +1454,26 @@ segmentId // Add segment_id parameter
             }
         }
         console.log(`✅ No duplicates found, proceeding with lead creation`);
+        // Ensure userId is present (fetch from site if missing)
+        let finalUserId = userId;
+        if (!finalUserId) {
+            console.log(`🔍 No userId provided for createSingleLead, fetching from site ${site_id}`);
+            const { data: siteData, error: siteError } = await supabaseServiceRole
+                .from('sites')
+                .select('user_id')
+                .eq('id', site_id)
+                .single();
+            if (siteError) {
+                console.error(`❌ Error fetching site user_id for lead creation: ${siteError.message}`);
+                return { success: false, error: `Failed to fetch site user_id: ${siteError.message}` };
+            }
+            finalUserId = siteData?.user_id;
+            if (!finalUserId) {
+                console.error(`❌ Site ${site_id} has no user_id`);
+                return { success: false, error: `Site ${site_id} has no user_id configured` };
+            }
+            console.log(`✅ Using user_id ${finalUserId} from site ${site_id}`);
+        }
         // ✅ STEP 2: Prepare lead data for database
         // Prepare metadata to persist, preserving any metadata coming from upstream validation/generation
         const metadataToPersist = (() => {
@@ -1489,7 +1509,7 @@ segmentId // Add segment_id parameter
             position: lead.position || null,
             notes: lead.notes || null, // Add notes field if provided
             site_id: site_id,
-            user_id: userId || null,
+            user_id: finalUserId,
             status: 'new',
             origin: lead.origin || 'lead_generation_workflow', // Use provided origin or default
             metadata: lead.metadata || metadataToPersist, // Use provided metadata or fallback

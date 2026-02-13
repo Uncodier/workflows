@@ -164,7 +164,7 @@ async function activityPrioritizationEngineWorkflow() {
                         testMode: false, // PRODUCTION: Full production mode
                         businessHoursAnalysis, // PASS business hours analysis for filtering
                         hoursThreshold: 48, // Look for leads older than 48 hours
-                        maxLeads: 30, // Limit to 30 leads per site
+                        maxLeads: 100, // Limit to 100 leads per site
                         parentScheduleId: realScheduleId, // PASS parent schedule ID for proper tracking
                         activitiesMap
                     });
@@ -268,7 +268,7 @@ async function activityPrioritizationEngineWorkflow() {
                     const leadQualificationResult = await scheduleLeadQualificationActivity(businessHoursAnalysis, {
                         timezone: 'America/Mexico_City',
                         daysWithoutReply: 7,
-                        maxLeads: 30,
+                        maxLeads: 100,
                         parentScheduleId: realScheduleId,
                         activitiesMap
                     });
@@ -355,7 +355,7 @@ async function activityPrioritizationEngineWorkflow() {
                     const dailyProspectionSchedulingResult = await scheduleIndividualDailyProspectionActivity(businessHoursAnalysis, {
                         timezone: 'America/Mexico_City',
                         hoursThreshold: 48, // Look for leads older than 48 hours
-                        maxLeads: 30, // Limit to 30 leads per site
+                        maxLeads: 100, // Limit to 100 leads per site
                         parentScheduleId: realScheduleId, // PASS parent schedule ID for proper tracking
                         activitiesMap
                     });
@@ -388,7 +388,7 @@ async function activityPrioritizationEngineWorkflow() {
                     const leadQualificationResult = await scheduleLeadQualificationActivity(businessHoursAnalysis, {
                         timezone: 'America/Mexico_City',
                         daysWithoutReply: 7,
-                        maxLeads: 30,
+                        maxLeads: 100,
                         parentScheduleId: realScheduleId
                     });
                     operationsResult.leadQualificationScheduling = leadQualificationResult;

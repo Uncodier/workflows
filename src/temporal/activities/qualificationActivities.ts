@@ -1,5 +1,19 @@
 import { getSupabaseService } from '../services/supabaseService';
 
+const STAGE_ORDER = ['reminder', 'provide_value', 'breakup'] as const;
+
+/**
+ * Derives a flat leads array from leadsByStage for backward compatibility.
+ * Callers expecting only `leads` receive the correct structure regardless of workflow early-exit.
+ */
+function buildLeadsFromStages(
+  leadsByStage: Record<string, any[]>,
+  limit: number
+): any[] {
+  const combined = STAGE_ORDER.flatMap((stage) => leadsByStage[stage] ?? []);
+  return combined.slice(0, limit);
+}
+
 export interface GetQualificationLeadsParams {
   site_id: string;
   daysWithoutReply?: number; // legacy, default 7
@@ -9,7 +23,8 @@ export interface GetQualificationLeadsParams {
 
 export interface GetQualificationLeadsResult {
   success: boolean;
-  leads: any[]; // Combined leads for legacy compatibility
+  /** Flat array for legacy callers; always derived from leadsByStage, sliced to limit */
+  leads: any[];
   leadsByStage: Record<string, any[]>;
   totalChecked: number;
   considered: number;
@@ -63,10 +78,11 @@ export async function getQualificationLeadsActivity(
 
     const isConnected = await supabaseService.getConnectionStatus();
     if (!isConnected) {
+      const emptyByStage = { reminder: [], provide_value: [], breakup: [] };
       return {
         success: false,
-        leads: [],
-        leadsByStage: { reminder: [], provide_value: [], breakup: [] },
+        leads: buildLeadsFromStages(emptyByStage, legacyLimit),
+        leadsByStage: emptyByStage,
         totalChecked: 0,
         considered: 0,
         excludedByAssignee: 0,
@@ -88,10 +104,11 @@ export async function getQualificationLeadsActivity(
       .limit(500); 
 
     if (leadsError) {
+      const emptyByStage = { reminder: [], provide_value: [], breakup: [] };
       return {
         success: false,
-        leads: [],
-        leadsByStage: { reminder: [], provide_value: [], breakup: [] },
+        leads: buildLeadsFromStages(emptyByStage, legacyLimit),
+        leadsByStage: emptyByStage,
         totalChecked: 0,
         considered: 0,
         excludedByAssignee: 0,
@@ -215,11 +232,7 @@ export async function getQualificationLeadsActivity(
       }
     }
 
-    const combinedLeads = [
-      ...leadsByStage.reminder,
-      ...leadsByStage.provide_value,
-      ...leadsByStage.breakup
-    ].slice(0, legacyLimit);
+    const combinedLeads = buildLeadsFromStages(leadsByStage, legacyLimit);
 
     console.log(`📊 Qualification summary: ${combinedLeads.length} leads across stages:`, stats);
     
@@ -236,10 +249,11 @@ export async function getQualificationLeadsActivity(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const emptyByStage = { reminder: [], provide_value: [], breakup: [] };
     return {
       success: false,
-      leads: [],
-      leadsByStage: { reminder: [], provide_value: [], breakup: [] },
+      leads: buildLeadsFromStages(emptyByStage, legacyLimit),
+      leadsByStage: emptyByStage,
       totalChecked: 0,
       considered: 0,
       excludedByAssignee: 0,

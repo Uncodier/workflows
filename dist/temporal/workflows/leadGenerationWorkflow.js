@@ -339,6 +339,13 @@ async function leadGenerationWorkflow(options) {
     const realScheduleId = extractScheduleId(workflowInfo_real, options);
     const workflowId = `lead-generation-${site_id}`;
     const startTime = Date.now();
+    const searchAttributes = {
+        site_id: [site_id],
+    };
+    if (options.userId) {
+        searchAttributes.user_id = [options.userId];
+    }
+    (0, workflow_1.upsertSearchAttributes)(searchAttributes);
     // Extract scheduleId from additionalData.scheduleType (passed by scheduling activities)
     // Fallback to generic format if not provided
     const scheduleId = options.additionalData?.scheduleType || `lead-generation-${site_id}`;

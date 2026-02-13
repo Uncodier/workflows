@@ -1,5 +1,6 @@
 import { proxyActivities, executeChild } from '@temporalio/workflow';
 import type { Activities } from '../activities';
+import { selectRoleForEnrichment } from '../utils/personRoleUtils';
 import { validateEmailWorkflow } from './validateEmailWorkflow';
 
 // Configure activity options
@@ -16,8 +17,9 @@ const {
 export interface GeneratePersonEmailOptions {
   person_id?: string;           // Person UUID from database
   external_person_id?: string | number;  // External person ID
+  external_role_id?: string | number;    // Optional: match role for domain selection
   full_name: string;             // Required: Person's full name
-  company_name?: string;         // Company name
+  company_name?: string;         // Company name (also used to match role)
   company_domain?: string;       // Company domain (optional)
   company_website?: string;      // Company website (optional)
   role_title?: string;          // Person's role/title
@@ -69,6 +71,7 @@ export async function generatePersonEmailWorkflow(
   const { 
     person_id, 
     external_person_id,
+    external_role_id,
     full_name, 
     company_name, 
     company_domain, 
@@ -159,10 +162,12 @@ export async function generatePersonEmailWorkflow(
     // First, try to get domain from person_raw_result (roles organization domain)
     if (person_raw_result) {
       try {
-        // Check roles for organization domain (most reliable source)
+        // Check roles for organization domain (match by company_name or external_role_id)
         if (person_raw_result.roles && Array.isArray(person_raw_result.roles)) {
-          // Get current role (is_current: true) or first role
-          const currentRole = person_raw_result.roles.find((r: any) => r.is_current === true) || person_raw_result.roles[0];
+          const currentRole = selectRoleForEnrichment(person_raw_result.roles, {
+            company_name: company_name ?? undefined,
+            external_role_id: external_role_id ?? undefined,
+          }) ?? person_raw_result.roles[0];
           if (currentRole?.organization?.domain) {
             domain = getDomainFromUrl(currentRole.organization.domain);
             console.log(`📋 Using domain from person_raw_result.roles[].organization.domain: ${domain}`);

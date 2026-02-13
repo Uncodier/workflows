@@ -54,6 +54,7 @@ exports.getSegmentIdFromRoleQueryActivity = getSegmentIdFromRoleQueryActivity;
 exports.upsertLeadForPersonActivity = upsertLeadForPersonActivity;
 const apiService_1 = require("../services/apiService");
 const services_1 = require("../services");
+const personRoleUtils_1 = require("../utils/personRoleUtils");
 // Finder API: person role search
 async function callPersonRoleSearchActivity(options) {
     const { role_query_id, query, page, page_size = 10 } = options;
@@ -222,8 +223,10 @@ async function callPersonContactsLookupDetailsActivity(options) {
             return { success: false, error: 'No data returned from API' };
         }
         console.log(`✅ Received person details data for person_id: ${personData.id}`);
-        // Extract current role (is_current: true)
-        const currentRole = personData.roles?.find((r) => r.is_current === true) || personData.roles?.[0];
+        // Extract current role: match by company_name from context, or most recent start_date among is_current
+        const currentRole = (0, personRoleUtils_1.selectRoleForEnrichment)(personData.roles ?? [], {
+            company_name: options.company_name ?? undefined,
+        }) ?? personData.roles?.[0];
         const currentOrganization = currentRole?.organization;
         // Extract person data
         const personLocation = personData.location?.name || null;
@@ -893,6 +896,10 @@ async function upsertLeadForPersonActivity(options) {
         // Add company_id if provided
         if (options.company_id) {
             leadData.company_id = options.company_id;
+        }
+        // Add segment_id if provided
+        if (options.segment_id) {
+            leadData.segment_id = options.segment_id;
         }
         // Append notes if provided
         if (options.notes) {

@@ -21,9 +21,9 @@ const { getIcpMiningByIdActivity, getPendingIcpMiningActivity, markIcpMiningStar
  */
 async function idealClientProfileMiningWorkflow(options) {
     const workflowId = `icp-mining-${options.icp_mining_id || 'batch'}`;
-    const maxPages = options.maxPages ?? 20;
+    const maxPages = options.maxPages ?? 300;
     const pageSize = options.pageSize ?? 20;
-    const targetLeadsWithEmail = options.targetLeadsWithEmail ?? 40;
+    const targetLeadsWithEmail = options.targetLeadsWithEmail ?? 150;
     const errors = [];
     // STEP 0: Validate workflow configuration
     console.log('🔐 Step 0: Validating workflow configuration...');

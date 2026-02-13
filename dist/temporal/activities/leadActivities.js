@@ -64,10 +64,13 @@ exports.cleanupFailedFollowUpActivity = cleanupFailedFollowUpActivity;
 exports.deleteLeadConversationsActivity = deleteLeadConversationsActivity;
 exports.updateLeadEmailVerificationActivity = updateLeadEmailVerificationActivity;
 exports.invalidateReferredLeads = invalidateReferredLeads;
+exports.countPendingMessagesActivity = countPendingMessagesActivity;
+exports.checkMessageStatusActivity = checkMessageStatusActivity;
 const apiService_1 = require("../services/apiService");
 const supabaseService_1 = require("../services/supabaseService");
 const client_1 = require("../client");
 const config_1 = require("../../config/config");
+const searchAttributes_1 = require("../utils/searchAttributes");
 /**
  * Activity to check if a lead notification was already sent today
  */
@@ -205,6 +208,7 @@ async function leadFollowUpActivity(request) {
             leadId: request.lead_id, // Convert to camelCase for API
             siteId: request.site_id, // Convert to camelCase for API
             userId: request.userId,
+            message_status: request.message_status,
             ...request.additionalData,
         };
         console.log('📤 Sending lead follow-up request:', JSON.stringify(requestBody, null, 2));
@@ -332,20 +336,26 @@ async function leadAttentionActivity(request) {
 async function startLeadAttentionWorkflowActivity(request) {
     console.log(`🚀 Starting independent leadAttentionWorkflow for lead: ${request.lead_id}`);
     try {
-        const workflowId = `lead-attention-${request.lead_id}`;
+        // Add timestamp to workflowId to prevent collisions when multiple messages arrive for same lead
+        const workflowId = `lead-attention-${request.lead_id}-${Date.now()}`;
         // Get Temporal client directly (same pattern used throughout the codebase)
         const client = await (0, client_1.getTemporalClient)();
+        const workflowArgs = { lead_id: request.lead_id, user_message: request.user_message, system_message: request.system_message };
+        // Extract search attributes from workflow arguments
+        const searchAttributes = (0, searchAttributes_1.extractSearchAttributesFromInput)(workflowArgs);
         console.log('📤 Starting workflow via Temporal client:', {
             workflowType: 'leadAttentionWorkflow',
             workflowId,
-            args: [{ lead_id: request.lead_id, user_message: request.user_message, system_message: request.system_message }],
-            taskQueue: config_1.temporalConfig.taskQueue
+            args: [workflowArgs],
+            taskQueue: config_1.temporalConfig.taskQueue,
+            searchAttributes
         });
         // Start the workflow using Temporal client (fire and forget)
         const handle = await client.workflow.start('leadAttentionWorkflow', {
-            args: [{ lead_id: request.lead_id, user_message: request.user_message, system_message: request.system_message }],
+            args: [workflowArgs],
             workflowId,
             taskQueue: config_1.temporalConfig.taskQueue,
+            searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
         });
         console.log(`✅ Independent leadAttentionWorkflow started successfully for lead ${request.lead_id}`);
         console.log(`📋 Workflow ID: ${handle.workflowId}`);
@@ -356,36 +366,21 @@ async function startLeadAttentionWorkflowActivity(request) {
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        // If we get a "workflow already started" error, handle it gracefully
-        // This can happen when multiple customer support messages arrive for the same lead_id
-        // Since leadAttentionWorkflow is idempotent (checks for existing notifications), 
-        // it's safe to treat an already-running workflow as success
+        // Graceful handling for "Workflow execution already started" - can occur with same-millisecond
+        // duplicates, retries, or Temporal server-side duplicate processing. leadAttentionWorkflow is
+        // idempotent (checks for existing notifications before sending), so treat as success.
         if (errorMessage.includes('Workflow execution already started')) {
-            const workflowId = `lead-attention-${request.lead_id}`;
-            console.log(`⚠️ Workflow already exists for lead ${request.lead_id}, this is expected when multiple messages arrive`);
-            console.log(`📋 Existing workflow is likely still running or completed recently`);
-            console.log(`🔄 This can happen when multiple customer support messages arrive for the same lead`);
-            // Try to get the existing workflow handle to confirm it exists
-            try {
-                const client = await (0, client_1.getTemporalClient)();
-                const existingHandle = client.workflow.getHandle(workflowId);
-                console.log(`✅ Found existing workflow handle for ${workflowId}`);
-            }
-            catch (handleError) {
-                // If we can't get the handle, that's okay - we still know the workflow exists
-                // The error from Temporal confirms the workflow is already running
-                console.log(`📋 Workflow ${workflowId} exists (confirmed by Temporal error)`);
-            }
-            console.log(`✅ Handled duplicate workflow gracefully for lead ${request.lead_id}`);
-            console.log(`📊 This prevents the "Workflow execution already started" error from failing the customer support workflow`);
-            // Return success since the workflow is already running/started
+            const logicalWorkflowId = `lead-attention-${request.lead_id}`;
+            console.log(`⚠️ Workflow already started for lead ${request.lead_id} (idempotent - existing run will handle it)`);
+            console.log(`📋 Workflow ID pattern: ${logicalWorkflowId}-*`);
             return {
                 success: true,
-                workflowId: workflowId,
+                workflowId: logicalWorkflowId
             };
         }
-        // For other errors, return failure
-        console.error(`❌ Exception starting independent leadAttentionWorkflow for lead ${request.lead_id}:`, errorMessage);
+        // Log error for debugging - other errors are real failures
+        console.error(`❌ Failed to start leadAttentionWorkflow for lead ${request.lead_id}:`, errorMessage);
+        console.error(`❌ Error details:`, error);
         return {
             success: false,
             error: errorMessage
@@ -402,22 +397,29 @@ async function startLeadFollowUpWorkflowActivity(request) {
         const workflowId = `lead-follow-up-${request.lead_id}-${request.site_id}-${Date.now()}`;
         // Get Temporal client directly (same pattern used throughout the codebase)
         const client = await (0, client_1.getTemporalClient)();
+        const workflowArgs = {
+            lead_id: request.lead_id,
+            site_id: request.site_id,
+            userId: request.userId,
+            message_status: request.message_status,
+            researchEnabled: request.researchEnabled ?? false,
+            additionalData: request.additionalData
+        };
+        // Extract search attributes from workflow arguments
+        const searchAttributes = (0, searchAttributes_1.extractSearchAttributesFromInput)(workflowArgs);
         console.log('📤 Starting leadFollowUpWorkflow via Temporal client:', {
             workflowType: 'leadFollowUpWorkflow',
             workflowId,
-            args: [{ lead_id: request.lead_id, site_id: request.site_id, userId: request.userId, additionalData: request.additionalData }],
-            taskQueue: config_1.temporalConfig.taskQueue
+            args: [workflowArgs],
+            taskQueue: config_1.temporalConfig.taskQueue,
+            searchAttributes
         });
         // Start the workflow using Temporal client (fire and forget)
         const handle = await client.workflow.start('leadFollowUpWorkflow', {
-            args: [{
-                    lead_id: request.lead_id,
-                    site_id: request.site_id,
-                    userId: request.userId,
-                    additionalData: request.additionalData
-                }],
+            args: [workflowArgs],
             workflowId,
             taskQueue: config_1.temporalConfig.taskQueue,
+            searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
         });
         console.log(`✅ Independent leadFollowUpWorkflow started successfully for lead ${request.lead_id}`);
         console.log(`📋 Workflow ID: ${handle.workflowId}`);
@@ -446,6 +448,7 @@ async function saveLeadFollowUpLogsActivity(request) {
             siteId: request.siteId,
             leadId: request.leadId,
             userId: request.userId,
+            message_status: request.message_status,
             ...request.data // Flatten the data fields (messages, lead, command_ids) directly to root
         };
         console.log('📤 Sending lead follow-up logs:', JSON.stringify(requestBody, null, 2));
@@ -847,11 +850,16 @@ async function validateMessageAndConversationActivity(request) {
                 console.log(`🔍 Message status validation:`);
                 console.log(`   - Current status: ${messageStatus || 'undefined'}`);
                 console.log(`   - Already processed: ${alreadyProcessed || false}`);
-                if (alreadyProcessed && messageStatus === 'sent') {
+                // If status is 'accepted', it's always valid (ready to send)
+                if (messageStatus === 'accepted') {
+                    console.log(`✅ Message is accepted and ready for sending`);
+                    messageIsValid = true;
+                }
+                else if (alreadyProcessed && messageStatus === 'sent') {
                     console.log(`⚠️ Message was already sent - this might be a duplicate workflow`);
                     messageIsValid = false;
                 }
-                else if (messageStatus && messageStatus !== 'pending' && messageStatus !== 'sent') {
+                else if (messageStatus && messageStatus !== 'pending' && messageStatus !== 'sent' && messageStatus !== 'accepted') {
                     console.log(`⚠️ Message has unexpected status: ${messageStatus}`);
                     messageIsValid = false;
                 }
@@ -1064,9 +1072,9 @@ async function updateMessageStatusToSentActivity(request) {
                 error: 'Message already processed'
             };
         }
-        if (currentStatus && currentStatus !== 'pending' && currentStatus !== 'sent') {
+        if (currentStatus && currentStatus !== 'pending' && currentStatus !== 'sent' && currentStatus !== 'accepted') {
             console.log(`⚠️ Message ${messageId} has unexpected status: ${currentStatus}`);
-            console.log(`   - Expected: 'pending' or 'sent'`);
+            console.log(`   - Expected: 'pending', 'sent', or 'accepted'`);
             console.log(`   - Proceeding with update anyway`);
         }
         // Prepare updated custom_data, preserving existing fields
@@ -1075,6 +1083,7 @@ async function updateMessageStatusToSentActivity(request) {
         const updatedCustomData = {
             ...currentCustomData,
             status: targetStatus,
+            sequence_stage: request.sequence_stage || currentCustomData.sequence_stage,
             delivery: {
                 channel: request.delivery_channel,
                 success: request.delivery_success,
@@ -2250,9 +2259,35 @@ async function cleanupFailedFollowUpActivity(request) {
                 }
             }
         }
-        // Step 5: Reset lead status to 'new' if no other conversations exist
-        if (!cleanupSummary.other_conversations_exist) {
-            console.log(`🔄 Resetting lead ${request.lead_id} status to 'new' (no other conversations exist)...`);
+        // Step 5: Check if lead has any remaining messages across all conversations
+        // messages table has conversation_id, not site_id - must filter via conversations table
+        console.log(`🔍 Checking if lead has any remaining messages...`);
+        const { data: leadConversations, error: convError } = await supabaseServiceRole
+            .from('conversations')
+            .select('id')
+            .eq('lead_id', request.lead_id)
+            .eq('site_id', request.site_id);
+        if (convError) {
+            console.error(`❌ Error querying lead conversations:`, convError);
+        }
+        const conversationIds = leadConversations?.map((c) => c.id) ?? [];
+        let messagesCount = 0;
+        if (conversationIds.length > 0) {
+            const { count: totalMessagesCount, error: messagesCountError } = await supabaseServiceRole
+                .from('messages')
+                .select('*', { count: 'exact', head: true })
+                .in('conversation_id', conversationIds);
+            if (messagesCountError) {
+                console.error(`❌ Error counting lead messages:`, messagesCountError);
+            }
+            messagesCount = totalMessagesCount ?? 0;
+        }
+        console.log(`📊 Total messages for lead ${request.lead_id}: ${messagesCount}`);
+        // Step 5.1: Reset lead status to 'new' if no messages exist (regardless of conversations)
+        // This ensures that if the message wasn't sent and there are no more messages, the lead goes back to 'new'
+        if (messagesCount === 0) {
+            const resetReason = 'no messages exist for this lead (message not sent and no other messages)';
+            console.log(`🔄 Resetting lead ${request.lead_id} status to 'new' (${resetReason})...`);
             const { data: leadData, error: resetError } = await supabaseServiceRole
                 .from('leads')
                 .update({
@@ -2283,7 +2318,7 @@ async function cleanupFailedFollowUpActivity(request) {
             }
         }
         else {
-            console.log(`⚠️ Keeping lead status unchanged (${cleanupSummary.conversations_found} total conversations exist)`);
+            console.log(`⚠️ Keeping lead status unchanged (${messagesCount} messages still exist for this lead)`);
         }
         // Step 6: Log cleanup summary
         console.log(`🎉 Cleanup completed for failed follow-up!`);
@@ -2665,6 +2700,166 @@ async function invalidateReferredLeads(request) {
             success: false,
             invalidated_leads: invalidatedLeads,
             errors: [...errors, errorMessage]
+        };
+    }
+}
+/**
+ * Activity to count pending messages for a specific site
+ * Used to throttle follow-up workflow queue when too many messages are pending
+ */
+async function countPendingMessagesActivity(request) {
+    console.log(`🔍 Counting pending messages for site: ${request.site_id}`);
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot count pending messages');
+            return {
+                success: false,
+                error: 'Database not available'
+            };
+        }
+        console.log('✅ Database connection confirmed, counting pending messages...');
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // First, get all conversation IDs for this site
+        const { data: conversations, error: convError } = await supabaseServiceRole
+            .from('conversations')
+            .select('id')
+            .eq('site_id', request.site_id);
+        if (convError) {
+            console.error(`❌ Error querying conversations:`, convError);
+            return {
+                success: false,
+                error: `Failed to query conversations: ${convError.message}`
+            };
+        }
+        if (!conversations || conversations.length === 0) {
+            console.log(`✅ No conversations found for site ${request.site_id} - no pending messages`);
+            return {
+                success: true,
+                count: 0
+            };
+        }
+        const conversationIds = conversations.map(c => c.id);
+        // Count messages with pending status for conversations in this site
+        const { count, error: queryError } = await supabaseServiceRole
+            .from('messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('role', 'assistant') // Only assistant messages
+            .eq('custom_data->>status', 'pending') // Status is pending
+            .in('conversation_id', conversationIds); // Filter by site conversations
+        if (queryError) {
+            console.error(`❌ Error counting pending messages:`, queryError);
+            return {
+                success: false,
+                error: `Failed to count pending messages: ${queryError.message}`
+            };
+        }
+        const pendingCount = count || 0;
+        console.log(`✅ Found ${pendingCount} pending messages for site ${request.site_id}`);
+        console.log(`📊 Conversations checked: ${conversationIds.length}, Pending messages: ${pendingCount}`);
+        return {
+            success: true,
+            count: pendingCount
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception counting pending messages:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}
+/**
+ * Activity to check the status of a specific message
+ * Used to poll message status in leadFollowUpWorkflow
+ */
+async function checkMessageStatusActivity(request) {
+    console.log(`🔍 Checking message status for message: ${request.message_id}`);
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot check message status');
+            return {
+                success: false,
+                error: 'Database not available'
+            };
+        }
+        console.log('✅ Database connection confirmed, checking message status...');
+        // Import supabase service role client (bypasses RLS)
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        // Query the specific message
+        const { data: message, error: queryError } = await supabaseServiceRole
+            .from('messages')
+            .select('id, conversation_id, custom_data')
+            .eq('id', request.message_id)
+            .single();
+        if (queryError) {
+            if (queryError.code === 'PGRST116') {
+                // Message not found
+                console.log(`⚠️  Message ${request.message_id} not found`);
+                return {
+                    success: true,
+                    message_exists: false,
+                    status: undefined
+                };
+            }
+            console.error(`❌ Error querying message:`, queryError);
+            return {
+                success: false,
+                error: `Failed to query message: ${queryError.message}`
+            };
+        }
+        if (!message) {
+            console.log(`⚠️  Message ${request.message_id} not found`);
+            return {
+                success: true,
+                message_exists: false,
+                status: undefined
+            };
+        }
+        // Verify site_id matches (security check) - get site_id from conversation
+        const { data: conversation, error: convError } = await supabaseServiceRole
+            .from('conversations')
+            .select('site_id')
+            .eq('id', message.conversation_id)
+            .single();
+        if (convError) {
+            console.error(`❌ Error querying conversation:`, convError);
+            return {
+                success: false,
+                error: `Failed to query conversation: ${convError.message}`
+            };
+        }
+        if (conversation && conversation.site_id !== request.site_id) {
+            console.error(`❌ Message site_id mismatch: expected ${request.site_id}, got ${conversation.site_id}`);
+            return {
+                success: false,
+                error: 'Message site_id mismatch'
+            };
+        }
+        const customData = message.custom_data || {};
+        const status = customData.status;
+        console.log(`✅ Message ${request.message_id} status: ${status || 'undefined'}`);
+        console.log(`📊 Message exists: true, Status: ${status || 'undefined'}`);
+        return {
+            success: true,
+            status: status,
+            message_exists: true
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception checking message status:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
         };
     }
 }

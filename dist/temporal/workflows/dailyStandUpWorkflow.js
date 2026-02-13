@@ -32,6 +32,13 @@ async function dailyStandUpWorkflow(options) {
     if (!site_id) {
         throw new Error('No site ID provided');
     }
+    const searchAttributes = {
+        site_id: [site_id],
+    };
+    if (options.userId) {
+        searchAttributes.user_id = [options.userId];
+    }
+    (0, workflow_1.upsertSearchAttributes)(searchAttributes);
     const workflowId = `daily-standup-${site_id}-${Date.now()}`;
     const startTime = Date.now();
     // Extract scheduleId - prioritize parent schedule ID from dailyOperations

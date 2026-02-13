@@ -18,6 +18,13 @@ async function leadGenerationDomainSearchWorkflow(options) {
     let processed = 0;
     let foundMatches = 0;
     const leadsCreated = [];
+    const searchAttributes = {
+        site_id: [site_id],
+    };
+    if (userId) {
+        searchAttributes.user_id = [userId];
+    }
+    (0, workflow_1.upsertSearchAttributes)(searchAttributes);
     // Get deterministic timestamp from workflow start time
     const deterministicTimestamp = (0, workflow_1.workflowInfo)().startTime;
     await logWorkflowExecutionActivity({

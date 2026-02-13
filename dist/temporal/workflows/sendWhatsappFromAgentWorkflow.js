@@ -22,6 +22,16 @@ async function sendWhatsappFromAgent(params) {
         if (!params.phone_number || !params.message || !params.site_id) {
             throw new Error('Missing required WhatsApp parameters: phone_number, message and site_id are all required');
         }
+        const searchAttributes = {
+            site_id: [params.site_id],
+        };
+        if (params.agent_id) {
+            searchAttributes.user_id = [params.agent_id];
+        }
+        if (params.lead_id) {
+            searchAttributes.lead_id = [params.lead_id];
+        }
+        (0, workflow_1.upsertSearchAttributes)(searchAttributes);
         // If we have a message_id, ensure the message still exists and fetch the latest content
         let currentMessageContent = params.message;
         if (params.message_id) {

@@ -804,6 +804,13 @@ async function analyzeSiteWorkflow(options) {
     if (!site_id) {
         throw new Error('No site ID provided');
     }
+    const searchAttributes = {
+        site_id: [site_id],
+    };
+    if (options.userId) {
+        searchAttributes.user_id = [options.userId];
+    }
+    (0, workflow_1.upsertSearchAttributes)(searchAttributes);
     // Get workflow information from Temporal to extract schedule ID
     const workflowInfo_real = (0, workflow_1.workflowInfo)();
     const realWorkflowId = workflowInfo_real.workflowId;

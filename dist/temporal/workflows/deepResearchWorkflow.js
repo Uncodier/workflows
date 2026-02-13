@@ -151,6 +151,18 @@ async function deepResearchWorkflow(options) {
     if (!research_topic) {
         throw new Error('No research topic provided');
     }
+    const searchAttributes = {
+        site_id: [site_id],
+    };
+    if (options.userId) {
+        searchAttributes.user_id = [options.userId];
+    }
+    // Try to find lead_id in additionalData
+    const leadId = options.additionalData?.lead_id || options.additionalData?.leadId || options.additionalData?.leadInfo?.id;
+    if (leadId) {
+        searchAttributes.lead_id = [leadId];
+    }
+    (0, workflow_1.upsertSearchAttributes)(searchAttributes);
     // Get REAL workflow information from Temporal
     const workflowInfo_real = (0, workflow_1.workflowInfo)();
     const realWorkflowId = workflowInfo_real.workflowId;

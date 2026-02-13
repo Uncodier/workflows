@@ -25,6 +25,7 @@ async function leadAttentionWorkflow(params) {
         if (!params.lead_id) {
             throw new Error('Missing required parameter: lead_id is required');
         }
+        (0, workflow_1.upsertSearchAttributes)({ lead_id: [params.lead_id] });
         console.log('🔍 WORKFLOW: Checking lead attention notification requirements:', {
             lead_id: params.lead_id,
             user_message: params.user_message ? 'included' : 'not provided',

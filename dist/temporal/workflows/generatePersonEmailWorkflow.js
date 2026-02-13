@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generatePersonEmailWorkflow = generatePersonEmailWorkflow;
 const workflow_1 = require("@temporalio/workflow");
+const personRoleUtils_1 = require("../utils/personRoleUtils");
 const validateEmailWorkflow_1 = require("./validateEmailWorkflow");
 // Configure activity options
 const { leadContactGenerationActivity, logWorkflowExecutionActivity, } = (0, workflow_1.proxyActivities)({
@@ -38,7 +39,7 @@ function getDomainFromUrl(input) {
  * 4. Returns the first valid email found
  */
 async function generatePersonEmailWorkflow(options) {
-    const { person_id, external_person_id, full_name, company_name, company_domain, company_website, role_title, site_id, userId, person_raw_result, existing_emails } = options;
+    const { person_id, external_person_id, external_role_id, full_name, company_name, company_domain, company_website, role_title, site_id, userId, person_raw_result, existing_emails } = options;
     const workflowId = `generate-person-email-${person_id || external_person_id || full_name?.replace(/[^a-zA-Z0-9]/g, '-') || 'unknown'}-${site_id}`;
     const startTime = Date.now();
     console.log(`🔍 Starting generate person email workflow for ${full_name}`);
@@ -109,10 +110,12 @@ async function generatePersonEmailWorkflow(options) {
         // First, try to get domain from person_raw_result (roles organization domain)
         if (person_raw_result) {
             try {
-                // Check roles for organization domain (most reliable source)
+                // Check roles for organization domain (match by company_name or external_role_id)
                 if (person_raw_result.roles && Array.isArray(person_raw_result.roles)) {
-                    // Get current role (is_current: true) or first role
-                    const currentRole = person_raw_result.roles.find((r) => r.is_current === true) || person_raw_result.roles[0];
+                    const currentRole = (0, personRoleUtils_1.selectRoleForEnrichment)(person_raw_result.roles, {
+                        company_name: company_name ?? undefined,
+                        external_role_id: external_role_id ?? undefined,
+                    }) ?? person_raw_result.roles[0];
                     if (currentRole?.organization?.domain) {
                         domain = getDomainFromUrl(currentRole.organization.domain);
                         console.log(`📋 Using domain from person_raw_result.roles[].organization.domain: ${domain}`);

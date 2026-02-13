@@ -67,6 +67,8 @@ __exportStar(require("./validateEmailActivities"), exports);
 __exportStar(require("./webhookActivities"), exports);
 __exportStar(require("./finderActivities"), exports);
 __exportStar(require("./activityControlActivities"), exports);
+__exportStar(require("./messageActivities"), exports);
+__exportStar(require("./icypeasActivities"), exports);
 // Bundle all activities for the worker
 const supabaseActivities = __importStar(require("./supabaseActivities"));
 const apiActivities = __importStar(require("./apiActivities"));
@@ -97,6 +99,8 @@ const validateEmailActivities = __importStar(require("./validateEmailActivities"
 const webhookActivities = __importStar(require("./webhookActivities"));
 const finderActivities = __importStar(require("./finderActivities"));
 const activityControlActivities = __importStar(require("./activityControlActivities"));
+const messageActivities = __importStar(require("./messageActivities"));
+const icypeasActivities = __importStar(require("./icypeasActivities"));
 exports.activities = {
     ...supabaseActivities,
     ...apiActivities,
@@ -127,6 +131,8 @@ exports.activities = {
     ...webhookActivities,
     ...finderActivities,
     ...activityControlActivities,
+    ...messageActivities,
+    ...icypeasActivities,
 };
 var workflowSchedulingActivities_1 = require("./workflowSchedulingActivities");
 Object.defineProperty(exports, "executeDailyStandUpWorkflowsActivity", { enumerable: true, get: function () { return workflowSchedulingActivities_1.executeDailyStandUpWorkflowsActivity; } });

@@ -35,34 +35,53 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getQualificationLeadsActivity = getQualificationLeadsActivity;
 const supabaseService_1 = require("../services/supabaseService");
+const STAGE_ORDER = ['reminder', 'provide_value', 'breakup'];
 /**
- * Fetch leads for follow-up where OUR last message (assistant) is older than N days,
- * regardless of recent user replies. This allows follow-up even if the user replied recently,
- * as long as we haven't sent a follow-up in the configured window.
+ * Derives a flat leads array from leadsByStage for backward compatibility.
+ * Callers expecting only `leads` receive the correct structure regardless of workflow early-exit.
+ */
+function buildLeadsFromStages(leadsByStage, limit) {
+    const combined = STAGE_ORDER.flatMap((stage) => leadsByStage[stage] ?? []);
+    return combined.slice(0, limit);
+}
+/**
+ * Fetch leads for follow-up sequence stages:
+ * 1. Reminder (Day N): daysWithoutReply since last assistant message
+ * 2. Value (Day 7): 4-6 days since last "reminder" message
+ * 3. Break-up (Day 14): 7+ days since last "provide_value" message
  *
- * Excludes leads with status in ['new', 'converted', 'canceled', 'cancelled', 'lost'].
- * Prevents spam by excluding leads that have received assistant messages within the threshold period.
- *
- * Strategy (conservative, multi-step for correctness):
- *  - Fetch candidate leads for the site by allowed statuses (ordered by updated_at DESC)
- *  - For each candidate, check if there are ANY assistant messages within the threshold period
- *  - Skip leads that have recent assistant messages (within last N days)
- *  - Include the lead only if the latest assistant message is older than thresholdDate AND no recent messages exist
+ * Also handles resumption: if last assistant message > max(7, daysWithoutReply) days and no stage metadata,
+ * it's treated as "reminder" (resumed) to start the sequence.
  */
 async function getQualificationLeadsActivity(params) {
     const siteId = params.site_id;
     const daysWithoutReply = typeof params.daysWithoutReply === 'number' ? params.daysWithoutReply : 7;
-    const limit = typeof params.limit === 'number' ? params.limit : 30;
+    const maxPerStage = typeof params.maxLeadsPerStage === 'number' ? params.maxLeadsPerStage : 10;
+    const legacyLimit = typeof params.limit === 'number' ? params.limit : 30;
+    // Use the provided daysWithoutReply for the threshold
     const threshold = new Date(Date.now() - daysWithoutReply * 24 * 60 * 60 * 1000);
     const thresholdIso = threshold.toISOString();
     const errors = [];
+    const leadsByStage = {
+        reminder: [],
+        provide_value: [],
+        breakup: []
+    };
+    const stats = {
+        reminder: 0,
+        provide_value: 0,
+        breakup: 0,
+        resumed: 0
+    };
     try {
         const supabaseService = (0, supabaseService_1.getSupabaseService)();
         const isConnected = await supabaseService.getConnectionStatus();
         if (!isConnected) {
+            const emptyByStage = { reminder: [], provide_value: [], breakup: [] };
             return {
                 success: false,
-                leads: [],
+                leads: buildLeadsFromStages(emptyByStage, legacyLimit),
+                leadsByStage: emptyByStage,
                 totalChecked: 0,
                 considered: 0,
                 excludedByAssignee: 0,
@@ -72,23 +91,20 @@ async function getQualificationLeadsActivity(params) {
         }
         // Use service-role client for server-side filtering
         const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
-        // Step 1: Fetch candidate leads by status for this site
-        // Exclude: new, converted, canceled/cancelled, lost
+        // Step 1: Fetch candidate leads for this site
         const { data: candidateLeads, error: leadsError } = await supabaseServiceRole
             .from('leads')
             .select('id, name, email, phone, status, site_id, assignee_id')
             .eq('site_id', siteId)
-            .neq('status', 'new')
-            .neq('status', 'converted')
-            .neq('status', 'canceled')
-            .neq('status', 'cancelled')
-            .neq('status', 'lost')
+            .in('status', ['contacted', 'qualified'])
             .order('updated_at', { ascending: false })
-            .limit(500); // cap to avoid excessive N+1 queries
+            .limit(500);
         if (leadsError) {
+            const emptyByStage = { reminder: [], provide_value: [], breakup: [] };
             return {
                 success: false,
-                leads: [],
+                leads: buildLeadsFromStages(emptyByStage, legacyLimit),
+                leadsByStage: emptyByStage,
                 totalChecked: 0,
                 considered: 0,
                 excludedByAssignee: 0,
@@ -96,139 +112,135 @@ async function getQualificationLeadsActivity(params) {
                 errors: [leadsError.message]
             };
         }
-        const results = [];
         let totalChecked = 0;
         let excludedByAssignee = 0;
-        // Step 2: For each candidate, find latest ASSISTANT (our) message across their conversations
         for (const lead of candidateLeads || []) {
-            if (results.length >= limit)
-                break;
             totalChecked++;
-            // Skip leads that have an assignee_id
             if (lead.assignee_id) {
-                console.log(`⏭️ Skipping lead ${lead.id} - has assignee_id (${lead.assignee_id})`);
                 excludedByAssignee++;
                 continue;
             }
-            // Find conversations for the lead (most recent first)
-            const { data: conversations, error: convError } = await supabaseServiceRole
-                .from('conversations')
-                .select('id')
+            // Fetch message history for this lead to determine stage
+            const { data: messages, error: msgError } = await supabaseServiceRole
+                .from('messages')
+                .select('id, created_at, role, custom_data, conversations!inner(site_id)')
                 .eq('lead_id', lead.id)
-                .eq('site_id', siteId)
+                .eq('conversations.site_id', siteId)
                 .order('created_at', { ascending: false })
-                .limit(5);
-            if (convError) {
-                errors.push(`Failed to fetch conversations for lead ${lead.id}: ${convError.message}`);
+                .limit(1);
+            if (msgError) {
+                errors.push(`Failed to fetch messages for lead ${lead.id}: ${msgError.message}`);
                 continue;
             }
-            if (!conversations || conversations.length === 0) {
-                // No conversations found; attempt fallback by lead_id below
+            if (!messages || messages.length === 0)
+                continue;
+            const lastMsg = messages[0];
+            // If last message is from user, sequence resets/waits
+            if (lastMsg.role === 'user') {
+                continue;
             }
-            // For a small set of latest conversations, find the latest ASSISTANT message
-            let latestAssistantMessageIso = null;
-            let hasRecentMessages = false;
-            for (const conv of conversations || []) {
-                // Check if there are ANY assistant messages within the threshold period
-                const { data: recentMessages, error: recentError } = await supabaseServiceRole
-                    .from('messages')
-                    .select('id, created_at')
-                    .eq('conversation_id', conv.id)
-                    .eq('role', 'assistant')
-                    .gte('created_at', thresholdIso) // Messages newer than threshold
-                    .limit(1);
-                if (recentError) {
-                    errors.push(`Failed to fetch recent assistant messages for conversation ${conv.id}: ${recentError.message}`);
-                    continue;
+            const lastMsgDate = new Date(lastMsg.created_at);
+            const daysSinceLastMsg = (Date.now() - lastMsgDate.getTime()) / (1000 * 60 * 60 * 24);
+            const customData = lastMsg.custom_data || {};
+            const currentStage = customData.sequence_stage;
+            let assignedStage = null;
+            let reason = '';
+            // Stage Detection Logic
+            if (!currentStage) {
+                // Resumption or Initial Reminder
+                if (daysSinceLastMsg > Math.max(7, daysWithoutReply)) {
+                    assignedStage = 'reminder';
+                    reason = 'resumed_from_legacy_flow';
                 }
-                if (recentMessages && recentMessages.length > 0) {
-                    hasRecentMessages = true;
-                    console.log(`⏭️ Lead ${lead.id} has recent assistant message within last ${daysWithoutReply} days - skipping`);
-                    break; // No need to check other conversations
+                else if (daysSinceLastMsg >= daysWithoutReply) {
+                    assignedStage = 'reminder';
+                    reason = `initial_reminder_${daysWithoutReply}_days`;
                 }
-                // Also get the latest message for historical reference
-                const { data: assistantMsg, error: msgError } = await supabaseServiceRole
-                    .from('messages')
-                    .select('id, created_at')
-                    .eq('conversation_id', conv.id)
-                    .eq('role', 'assistant')
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-                if (msgError) {
-                    errors.push(`Failed to fetch last assistant message for conversation ${conv.id}: ${msgError.message}`);
-                    continue;
+            }
+            else if (currentStage === 'reminder') {
+                if (daysSinceLastMsg >= 4) {
+                    assignedStage = 'provide_value';
+                    reason = 'value_stage_4_days_after_reminder';
                 }
-                if (assistantMsg && assistantMsg.created_at) {
-                    if (!latestAssistantMessageIso || assistantMsg.created_at > latestAssistantMessageIso) {
-                        latestAssistantMessageIso = assistantMsg.created_at;
+            }
+            else if (currentStage === 'provide_value') {
+                if (daysSinceLastMsg >= 7) {
+                    assignedStage = 'breakup';
+                    reason = 'breakup_stage_7_days_after_value';
+                }
+            }
+            else if (currentStage === 'breakup') {
+                // If they reached the breakup stage and haven't replied in 7 days
+                if (daysSinceLastMsg >= 7) {
+                    if (lead.status === 'contacted') {
+                        const { error: updateError } = await supabaseServiceRole
+                            .from('leads')
+                            .update({ status: 'cold' })
+                            .eq('id', lead.id);
+                        if (updateError) {
+                            errors.push(`Failed to mark lead ${lead.id} as cold: ${updateError.message}`);
+                        }
+                        else {
+                            console.log(`❄️ Lead ${lead.id} marked as 'cold' after breakup stage timeout`);
+                        }
+                    }
+                    else {
+                        // For other statuses (like 'qualified'), mark the sequence as completed in message metadata
+                        // to avoid them being orphaned/processed repeatedly in this loop.
+                        const { error: updateMsgError } = await supabaseServiceRole
+                            .from('messages')
+                            .update({
+                            custom_data: {
+                                ...customData,
+                                sequence_stage: 'completed'
+                            }
+                        })
+                            .eq('id', lastMsg.id);
+                        if (updateMsgError) {
+                            errors.push(`Failed to mark sequence as completed for lead ${lead.id}: ${updateMsgError.message}`);
+                        }
+                        else {
+                            console.log(`🏁 Sequence marked as 'completed' for lead ${lead.id} (status: ${lead.status})`);
+                        }
                     }
                 }
             }
-            // Fallback: If no assistant message found via conversations, try by lead_id
-            if (!latestAssistantMessageIso && !hasRecentMessages) {
-                // Check for recent messages by lead_id as well
-                const { data: recentMessagesByLead, error: recentByLeadError } = await supabaseServiceRole
-                    .from('messages')
-                    .select('id, created_at')
-                    .eq('lead_id', lead.id)
-                    .eq('role', 'assistant')
-                    .gte('created_at', thresholdIso) // Messages newer than threshold
-                    .limit(1);
-                if (recentByLeadError) {
-                    errors.push(`Failed to fetch recent assistant messages by lead ${lead.id}: ${recentByLeadError.message}`);
+            if (assignedStage && leadsByStage[assignedStage].length < maxPerStage) {
+                leadsByStage[assignedStage].push({
+                    ...lead,
+                    sequence_stage: assignedStage,
+                    sequence_reason: reason
+                });
+                // Use mutually exclusive stats to ensure the sum equals the total leads
+                if (reason === 'resumed_from_legacy_flow') {
+                    stats.resumed++;
                 }
-                if (recentMessagesByLead && recentMessagesByLead.length > 0) {
-                    hasRecentMessages = true;
-                    console.log(`⏭️ Lead ${lead.id} has recent assistant message within last ${daysWithoutReply} days (fallback check) - skipping`);
+                else {
+                    stats[assignedStage]++;
                 }
-                // Also get the latest message for historical reference
-                const { data: assistantMsgByLead, error: byLeadError } = await supabaseServiceRole
-                    .from('messages')
-                    .select('id, created_at')
-                    .eq('lead_id', lead.id)
-                    .eq('role', 'assistant')
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-                if (byLeadError) {
-                    errors.push(`Failed to fetch assistant message by lead ${lead.id}: ${byLeadError.message}`);
-                }
-                if (assistantMsgByLead && assistantMsgByLead.created_at) {
-                    latestAssistantMessageIso = assistantMsgByLead.created_at;
-                }
-            }
-            // Skip if there are recent assistant messages (within last 7 days)
-            if (hasRecentMessages) {
-                console.log(`⏭️ Skipping lead ${lead.id} - has assistant message within last ${daysWithoutReply} days`);
-                continue;
-            }
-            // Must have at least one assistant message historically
-            if (!latestAssistantMessageIso)
-                continue;
-            // Log decision context for auditing
-            console.log(`Qualification check lead=${lead.id} lastAssistant=${latestAssistantMessageIso} threshold=${thresholdIso}`);
-            // Only include if there's at least one old message AND no recent messages
-            if (latestAssistantMessageIso && latestAssistantMessageIso < thresholdIso) {
-                results.push(lead);
             }
         }
-        console.log(`📊 Qualification leads summary: ${results.length} qualified, ${excludedByAssignee} excluded by assignee, ${totalChecked} total checked`);
+        const combinedLeads = buildLeadsFromStages(leadsByStage, legacyLimit);
+        console.log(`📊 Qualification summary: ${combinedLeads.length} leads across stages:`, stats);
         return {
             success: true,
-            leads: results,
+            leads: combinedLeads,
+            leadsByStage,
             totalChecked,
             considered: candidateLeads?.length || 0,
             excludedByAssignee,
             thresholdDate: thresholdIso,
+            stats,
             errors: errors.length ? errors : undefined
         };
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const emptyByStage = { reminder: [], provide_value: [], breakup: [] };
         return {
             success: false,
-            leads: [],
+            leads: buildLeadsFromStages(emptyByStage, legacyLimit),
+            leadsByStage: emptyByStage,
             totalChecked: 0,
             considered: 0,
             excludedByAssignee: 0,

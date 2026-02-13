@@ -1,5 +1,6 @@
 import { apiService } from '../services/apiService';
 import { getSupabaseService } from '../services';
+import { selectRoleForEnrichment } from '../utils/personRoleUtils';
 
 // Finder API: person role search
 export async function callPersonRoleSearchActivity(options: {
@@ -216,6 +217,7 @@ export async function callPersonContactsLookupDetailsActivity(options: {
   person_id: string | number; // Required: external person_id from Finder API
   site_id?: string; // Optional: site_id for lead creation
   userId?: string; // Optional: user_id for lead creation
+  company_name?: string; // Optional: target company to match role (e.g. from lead context)
 }): Promise<{
   success: boolean;
   person?: any;
@@ -246,8 +248,10 @@ export async function callPersonContactsLookupDetailsActivity(options: {
 
     console.log(`✅ Received person details data for person_id: ${personData.id}`);
 
-    // Extract current role (is_current: true)
-    const currentRole = personData.roles?.find((r: any) => r.is_current === true) || personData.roles?.[0];
+    // Extract current role: match by company_name from context, or most recent start_date among is_current
+    const currentRole = selectRoleForEnrichment(personData.roles ?? [], {
+      company_name: options.company_name ?? undefined,
+    }) ?? personData.roles?.[0];
     const currentOrganization = currentRole?.organization;
 
     // Extract person data
@@ -968,6 +972,7 @@ export async function upsertLeadForPersonActivity(options: {
   notes?: string;
   userId?: string;
   company_id?: string;
+  segment_id?: string;
   person_emails?: string[]; // Optional: pass person emails to avoid DB query
 }): Promise<{
   success: boolean;
@@ -1053,6 +1058,11 @@ export async function upsertLeadForPersonActivity(options: {
     // Add company_id if provided
     if (options.company_id) {
       leadData.company_id = options.company_id;
+    }
+
+    // Add segment_id if provided
+    if (options.segment_id) {
+      leadData.segment_id = options.segment_id;
     }
 
     // Append notes if provided

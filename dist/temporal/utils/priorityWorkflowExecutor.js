@@ -13,6 +13,7 @@ exports.executeBackgroundWorkflow = executeBackgroundWorkflow;
 exports.shouldExpediteWorkflow = shouldExpediteWorkflow;
 const client_1 = require("../client");
 const taskQueues_1 = require("../config/taskQueues");
+const searchAttributes_1 = require("./searchAttributes");
 /**
  * Execute a workflow with automatic priority-based task queue assignment
  */
@@ -28,17 +29,32 @@ async function executeWorkflowWithPriority(workflowType, args, options = {}) {
             `${workflowType}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         // Default timeout based on priority
         const workflowRunTimeout = options.workflowRunTimeout || getDefaultTimeout(taskQueue);
+        // Auto-extract search attributes from first argument if it's an object
+        let searchAttributes = {};
+        if (options.autoExtractSearchAttributes !== false && args[0] && typeof args[0] === 'object') {
+            const extracted = (0, searchAttributes_1.extractSearchAttributesFromInput)(args[0]);
+            searchAttributes = extracted;
+        }
+        // Merge with manually provided search attributes (manual takes precedence)
+        if (options.searchAttributes) {
+            searchAttributes = (0, searchAttributes_1.mergeSearchAttributes)(searchAttributes, options.searchAttributes);
+        }
         console.log(`🚀 Starting ${workflowType} with priority configuration:`);
         console.log(`   - Task Queue: ${taskQueue}`);
         console.log(`   - Workflow ID: ${workflowId}`);
         console.log(`   - Timeout: ${workflowRunTimeout}`);
         console.log(`   - Priority: ${options.priority || 'auto-assigned'}`);
+        if (Object.keys(searchAttributes).length > 0) {
+            console.log(`   - Search Attributes:`, searchAttributes);
+        }
         // Start workflow with priority-based configuration
         const handle = await client.workflow.start(workflowType, {
             args,
             workflowId,
             taskQueue,
             workflowRunTimeout,
+            // Only add searchAttributes if we have any
+            ...(Object.keys(searchAttributes).length > 0 && { searchAttributes })
         });
         console.log(`✅ Workflow started successfully: ${handle.workflowId}`);
         return {

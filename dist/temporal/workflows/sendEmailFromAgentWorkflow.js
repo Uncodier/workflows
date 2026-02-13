@@ -20,6 +20,16 @@ async function sendEmailFromAgent(params) {
         if (!params.email || !params.subject || !params.message || !params.site_id) {
             throw new Error('Missing required email parameters: email, subject, message and site_id are all required');
         }
+        const searchAttributes = {
+            site_id: [params.site_id],
+        };
+        if (params.agent_id) {
+            searchAttributes.user_id = [params.agent_id];
+        }
+        if (params.lead_id) {
+            searchAttributes.lead_id = [params.lead_id];
+        }
+        (0, workflow_1.upsertSearchAttributes)(searchAttributes);
         console.log('📤 Sending email via agent API:', {
             recipient: params.email,
             from: params.from || 'not-provided',

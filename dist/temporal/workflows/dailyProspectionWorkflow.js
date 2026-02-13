@@ -10,7 +10,7 @@ const { validateCommunicationChannelsActivity, getProspectionLeadsActivity, upda
     },
 });
 // Import general activities
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getSettingsActivity, startLeadFollowUpWorkflowActivity, validateAndCleanStuckCronStatusActivity, validateWorkflowConfigActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getSettingsActivity, startLeadFollowUpWorkflowActivity, validateAndCleanStuckCronStatusActivity, validateWorkflowConfigActivity, countPendingMessagesActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes',
     retry: {
         maximumAttempts: 3,
@@ -260,10 +260,17 @@ async function searchLeadsWithPagination(options, maxPages, minLeadsRequired, ch
  * @param options - Configuration options for daily prospection
  */
 async function dailyProspectionWorkflow(options) {
-    const { site_id, hoursThreshold = 48, maxLeads = 30, updateStatus = false, maxPages = 10, minLeadsRequired = 30 } = options;
+    const { site_id, hoursThreshold = 48, maxLeads = 100, updateStatus = false, maxPages = 10, minLeadsRequired = 30 } = options;
     if (!site_id) {
         throw new Error('No site ID provided');
     }
+    const searchAttributes = {
+        site_id: [site_id],
+    };
+    if (options.userId) {
+        searchAttributes.user_id = [options.userId];
+    }
+    (0, workflow_1.upsertSearchAttributes)(searchAttributes);
     // Get REAL workflow information from Temporal
     const workflowInfo_real = (0, workflow_1.workflowInfo)();
     const realWorkflowId = workflowInfo_real.workflowId;
@@ -747,6 +754,60 @@ async function dailyProspectionWorkflow(options) {
         };
         // Step 7: Start follow-up workflows for leads not assigned to humans
         console.log(`🔄 Step 7: Starting follow-up workflows for unassigned leads...`);
+        // Step 7.1: Check pending messages count before queuing new follow-ups
+        console.log(`🔍 Step 7.1: Checking pending messages count for queue throttling...`);
+        const pendingMessagesCheck = await countPendingMessagesActivity({
+            site_id: site_id
+        });
+        if (!pendingMessagesCheck.success) {
+            const errorMsg = `Failed to check pending messages count: ${pendingMessagesCheck.error}`;
+            console.error(`❌ ${errorMsg}`);
+            errors.push(errorMsg);
+            // Continue with follow-up workflows despite error (don't block the workflow)
+            console.log(`⚠️ Continuing with follow-up workflows despite pending messages check failure`);
+        }
+        else {
+            const pendingCount = pendingMessagesCheck.count || 0;
+            console.log(`📊 Pending messages count: ${pendingCount}`);
+            if (pendingCount >= 100) {
+                const throttleMsg = `Queue throttling: ${pendingCount} pending messages (>= 100) - skipping follow-up workflow queue`;
+                console.log(`⏸️ ${throttleMsg}`);
+                errors.push(throttleMsg);
+                // Update result to indicate queue was throttled
+                result.followUpWorkflowsStarted = 0;
+                result.followUpResults = [];
+                result.unassignedLeads = [];
+                console.log(`🎉 Daily prospection workflow completed (queue throttled)!`);
+                console.log(`📊 Summary: Daily prospection for site ${siteName} completed in ${executionTime}`);
+                console.log(`   - Site: ${siteName} (${siteUrl})`);
+                console.log(`   - Leads found: ${leadsFound}`);
+                console.log(`   - Leads after channel filtering: ${leadsFiltered} (${leadsFound - leadsFiltered} filtered out)`);
+                console.log(`   - Leads processed: ${leadsProcessed}`);
+                console.log(`   - Queue throttled: ${pendingCount} pending messages (>= 100)`);
+                console.log(`   - Follow-up workflows skipped due to queue throttling`);
+                // Update cron status to indicate successful completion
+                await saveCronStatusActivity({
+                    siteId: site_id,
+                    workflowId: realWorkflowId,
+                    scheduleId: realScheduleId,
+                    activityName: 'dailyProspectionWorkflow',
+                    status: 'COMPLETED',
+                    lastRun: new Date().toISOString()
+                });
+                // Log successful completion
+                await logWorkflowExecutionActivity({
+                    workflowId: realWorkflowId,
+                    workflowType: 'dailyProspectionWorkflow',
+                    status: 'COMPLETED',
+                    input: options,
+                    output: result,
+                });
+                return result;
+            }
+            else {
+                console.log(`✅ Pending messages count (${pendingCount}) is below threshold (100) - proceeding with follow-up workflows`);
+            }
+        }
         // Identify leads that were NOT assigned to humans
         const assignedLeadIds = assignedLeads.map((lead) => lead.id || lead.lead_id);
         const unassignedLeads = leadsToProcess.filter((lead) => !assignedLeadIds.includes(lead.id));
@@ -765,6 +826,7 @@ async function dailyProspectionWorkflow(options) {
                         lead_id: lead.id,
                         site_id: site_id,
                         userId: options.userId || site.user_id,
+                        researchEnabled: options.researchEnabled ?? false,
                         additionalData: {
                             triggeredBy: 'dailyProspectionWorkflow',
                             reason: 'lead_not_assigned_to_human',

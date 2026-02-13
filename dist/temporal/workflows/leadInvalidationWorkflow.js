@@ -42,6 +42,14 @@ async function leadInvalidationWorkflow(options) {
     if (!site_id) {
         throw new Error('No site ID provided');
     }
+    const searchAttributes = {
+        site_id: [site_id],
+        lead_id: [lead_id],
+    };
+    if (options.userId) {
+        searchAttributes.user_id = [options.userId];
+    }
+    (0, workflow_1.upsertSearchAttributes)(searchAttributes);
     const workflowId = `lead-invalidation-${lead_id}-${Date.now()}`;
     const startTime = Date.now();
     console.log(`🚫 Starting lead invalidation workflow for lead ${lead_id}`);
@@ -392,16 +400,35 @@ async function leadInvalidationWorkflow(options) {
                         lead_id: lead_id,
                         site_id: originalSiteId,
                         userId: options.userId,
+                        researchEnabled: options.researchEnabled ?? false,
                         additionalData: {
                             source: 'lead_invalidation_recovery',
                             previous_failed_contact: options.telephone || options.email,
                             invalidation_reason: reason
                         }
                     };
-                    await (0, workflow_1.startChild)(leadFollowUpWorkflow_1.leadFollowUpWorkflow, {
-                        args: [followUpOptions],
-                        workflowId: `lead-follow-up-recovery-${lead_id}-${Date.now()}`
-                    });
+                    // Use versioning to handle non-deterministic changes in child workflow options
+                    // This allows in-flight workflows to replay correctly with old behavior
+                    // while new workflows use the updated code path with ABANDON policy
+                    const shouldUseAbandonPolicy = (0, workflow_1.patched)('start-followup-child-recovery-v1');
+                    // Deprecate to encourage cleanup after migration period (30-60 days)
+                    (0, workflow_1.deprecatePatch)('start-followup-child-recovery-v1');
+                    if (shouldUseAbandonPolicy) {
+                        // NEW PATH: Start child workflow with ABANDON policy to prevent cascading cancellation
+                        await (0, workflow_1.startChild)(leadFollowUpWorkflow_1.leadFollowUpWorkflow, {
+                            args: [followUpOptions],
+                            workflowId: `lead-follow-up-recovery-${lead_id}-${Date.now()}`,
+                            parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON
+                        });
+                    }
+                    else {
+                        // OLD PATH: Start child workflow without ABANDON policy (original behavior)
+                        // This ensures deterministic replay for workflows started before the patch
+                        await (0, workflow_1.startChild)(leadFollowUpWorkflow_1.leadFollowUpWorkflow, {
+                            args: [followUpOptions],
+                            workflowId: `lead-follow-up-recovery-${lead_id}-${Date.now()}`
+                        });
+                    }
                     console.log(`✅ Lead follow-up workflow started for lead ${lead_id} with valid phone number`);
                     console.log(`📞 Will attempt follow-up via WhatsApp to: ${updatedLead.phone}`);
                     // Don't wait for the result, just start it and continue

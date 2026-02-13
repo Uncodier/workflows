@@ -39,6 +39,16 @@ async function scheduleCustomerSupportMessagesWorkflow(params) {
         agentId,
         origin // Pasar el origen a los workflows hijos
     };
+    if (site_id) {
+        const searchAttributes = {
+            site_id: [site_id],
+        };
+        const uid = user_id || agentId;
+        if (uid) {
+            searchAttributes.user_id = [uid];
+        }
+        (0, workflow_1.upsertSearchAttributes)(searchAttributes);
+    }
     const results = [];
     let scheduled = 0;
     let skipped = 0;

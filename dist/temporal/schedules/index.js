@@ -33,6 +33,18 @@ exports.defaultSchedules = [
         pauseOnFailure: false,
         catchupWindow: '2h', // 2 hour catchup window
         paused: false
+    },
+    {
+        id: 'send-approved-messages-schedule',
+        workflowType: 'sendApprovedMessagesWorkflow',
+        intervalMinutes: 60, // Every 60 minutes (1 hour)
+        args: [],
+        description: 'Check for and send approved messages every hour',
+        startAt: new Date(), // Start immediately
+        jitterMs: 60000, // 1 minute jitter
+        pauseOnFailure: false,
+        catchupWindow: '1h',
+        paused: false
     }
 ];
 // Connection timeout wrapper

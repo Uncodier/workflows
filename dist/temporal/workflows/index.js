@@ -42,6 +42,7 @@ const buildContentWorkflow_1 = require("./buildContentWorkflow");
 const leadFollowUpWorkflow_1 = require("./leadFollowUpWorkflow");
 const leadQualificationWorkflow_1 = require("./leadQualificationWorkflow");
 const leadResearchWorkflow_1 = require("./leadResearchWorkflow");
+const leadCompanyResearchWorkflow_1 = require("./leadCompanyResearchWorkflow");
 const buildSegmentsICPWorkflow_1 = require("./buildSegmentsICPWorkflow");
 const humanInterventionWorkflow_1 = require("./humanInterventionWorkflow");
 const deepResearchWorkflow_1 = require("./deepResearchWorkflow");
@@ -63,6 +64,7 @@ const idealClientProfilePageSearchWorkflow_1 = require("./idealClientProfilePage
 const enrichLeadWorkflow_1 = require("./enrichLeadWorkflow");
 const generatePersonEmailWorkflow_1 = require("./generatePersonEmailWorkflow");
 const leadGenerationDomainSearchWorkflow_1 = require("./leadGenerationDomainSearchWorkflow");
+const sendApprovedMessagesWorkflow_1 = require("./sendApprovedMessagesWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -86,6 +88,7 @@ __exportStar(require("./buildContentWorkflow"), exports);
 __exportStar(require("./leadFollowUpWorkflow"), exports);
 __exportStar(require("./leadQualificationWorkflow"), exports);
 __exportStar(require("./leadResearchWorkflow"), exports);
+__exportStar(require("./leadCompanyResearchWorkflow"), exports);
 __exportStar(require("./buildSegmentsICPWorkflow"), exports);
 __exportStar(require("./humanInterventionWorkflow"), exports);
 __exportStar(require("./deepResearchWorkflow"), exports);
@@ -105,6 +108,7 @@ __exportStar(require("./idealClientProfilePageSearchWorkflow"), exports);
 __exportStar(require("./enrichLeadWorkflow"), exports);
 __exportStar(require("./generatePersonEmailWorkflow"), exports);
 __exportStar(require("./leadGenerationDomainSearchWorkflow"), exports);
+__exportStar(require("./sendApprovedMessagesWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -129,6 +133,7 @@ exports.workflows = {
     leadFollowUpWorkflow: leadFollowUpWorkflow_1.leadFollowUpWorkflow,
     leadQualificationWorkflow: leadQualificationWorkflow_1.leadQualificationWorkflow,
     leadResearchWorkflow: leadResearchWorkflow_1.leadResearchWorkflow,
+    leadCompanyResearchWorkflow: leadCompanyResearchWorkflow_1.leadCompanyResearchWorkflow,
     buildSegmentsICPWorkflow: buildSegmentsICPWorkflow_1.buildSegmentsICPWorkflow,
     buildSingleSegmentICPWorkflow: buildSegmentsICPWorkflow_1.buildSingleSegmentICPWorkflow,
     humanInterventionWorkflow: humanInterventionWorkflow_1.humanInterventionWorkflow,
@@ -152,6 +157,7 @@ exports.workflows = {
     enrichLeadWorkflow: enrichLeadWorkflow_1.enrichLeadWorkflow,
     generatePersonEmailWorkflow: generatePersonEmailWorkflow_1.generatePersonEmailWorkflow,
     leadGenerationDomainSearchWorkflow: leadGenerationDomainSearchWorkflow_1.leadGenerationDomainSearchWorkflow,
+    sendApprovedMessagesWorkflow: sendApprovedMessagesWorkflow_1.sendApprovedMessagesWorkflow,
     // Alias for backward compatibility
     whatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
     // ✅ Aliases for agent workflows with different naming conventions
@@ -182,6 +188,7 @@ exports.workflowNames = {
     leadFollowUpWorkflow: 'leadFollowUpWorkflow',
     leadQualificationWorkflow: 'leadQualificationWorkflow',
     leadResearchWorkflow: 'leadResearchWorkflow',
+    leadCompanyResearchWorkflow: 'leadCompanyResearchWorkflow',
     buildSegmentsICPWorkflow: 'buildSegmentsICPWorkflow',
     buildSingleSegmentICPWorkflow: 'buildSingleSegmentICPWorkflow',
     humanInterventionWorkflow: 'humanInterventionWorkflow',
@@ -205,6 +212,7 @@ exports.workflowNames = {
     enrichLeadWorkflow: 'enrichLeadWorkflow',
     generatePersonEmailWorkflow: 'generatePersonEmailWorkflow',
     leadGenerationDomainSearchWorkflow: 'leadGenerationDomainSearchWorkflow',
+    sendApprovedMessagesWorkflow: 'sendApprovedMessagesWorkflow',
     // Alias for backward compatibility
     whatsappMessageWorkflow: 'whatsappMessageWorkflow',
     // ✅ Aliases for agent workflows with different naming conventions

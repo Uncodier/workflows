@@ -22,6 +22,15 @@ const customerSupportWorkflow_1 = require("./customerSupportWorkflow");
  */
 async function answerWhatsappMessageWorkflow(messageData, options) {
     const workflowId = `whatsapp-message-${messageData.messageId || Date.now()}`;
+    if (messageData.siteId) {
+        const searchAttributes = {
+            site_id: [messageData.siteId],
+        };
+        if (messageData.userId) {
+            searchAttributes.user_id = [messageData.userId];
+        }
+        (0, workflow_1.upsertSearchAttributes)(searchAttributes);
+    }
     console.log('📱 Starting WhatsApp message workflow...');
     console.log(`🆔 Workflow ID: ${workflowId}`);
     console.log(`📞 From: ${messageData.senderName || messageData.phoneNumber}`);

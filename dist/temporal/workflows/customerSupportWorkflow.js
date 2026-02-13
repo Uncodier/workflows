@@ -75,6 +75,20 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
     // Get workflow ID for status tracking
     const workflowId = messageData?.workflowId || `customer-support-${Date.now()}`;
     const siteId = messageData?.site_id || messageData?.siteId;
+    if (siteId) {
+        const searchAttributes = {
+            site_id: [siteId],
+        };
+        if (effectiveBaseParams.agentId) {
+            searchAttributes.user_id = [effectiveBaseParams.agentId];
+        }
+        // Try to find lead_id in messageData or any
+        const leadId = messageData?.lead_id || messageData?.leadId;
+        if (leadId) {
+            searchAttributes.lead_id = [leadId];
+        }
+        (0, workflow_1.upsertSearchAttributes)(searchAttributes);
+    }
     try {
         // ✅ NEW: If messageData has website_chat origin, process as-is without transformation
         if (effectiveBaseParams.origin === 'website_chat' && 'message' in messageData) {
@@ -113,14 +127,15 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
                         user_message: userMessage,
                         system_message: systemMessage
                     });
-                    if (startResult.success) {
+                    // Check if workflow started successfully (but don't block on failure)
+                    if (startResult.success && startResult.workflowId) {
                         leadAttentionWorkflowId = startResult.workflowId;
                         console.log(`✅ Independent leadAttentionWorkflow started: ${leadAttentionWorkflowId}`);
                         console.log(`🚀 Workflow will run independently and check assignee_id`);
                     }
                     else {
-                        console.error('❌ Failed to start independent leadAttentionWorkflow:', startResult.error);
-                        throw new Error(`Lead attention workflow failed to start: ${startResult.error}`);
+                        console.error(`⚠️ Failed to start leadAttentionWorkflow: ${startResult.error || 'Unknown error'}`);
+                        console.log(`📋 Lead notification will not be sent, but continuing with customer support workflow`);
                     }
                 }
                 else {
@@ -129,8 +144,9 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
                 }
             }
             catch (leadAttentionError) {
-                console.error('❌ Lead attention workflow failed to start - failing entire workflow:', leadAttentionError);
-                throw leadAttentionError; // Re-throw to fail the entire workflow
+                console.error('❌ Lead attention workflow failed to start (non-blocking):', leadAttentionError);
+                console.log('⚠️ Continuing customer support workflow - lead notification is a secondary operation');
+                // Don't throw - this is a non-critical operation that shouldn't fail the main workflow
             }
             // 🎯 Start agent supervisor workflow as child (fire-and-forget, high priority)
             try {
@@ -368,14 +384,15 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
                         user_message: userMessage,
                         system_message: systemMessage
                     });
-                    if (startResult.success) {
+                    // Check if workflow started successfully (but don't block on failure)
+                    if (startResult.success && startResult.workflowId) {
                         leadAttentionWorkflowId = startResult.workflowId;
                         console.log(`✅ Independent leadAttentionWorkflow started: ${leadAttentionWorkflowId}`);
                         console.log(`🚀 Workflow will run independently and check assignee_id`);
                     }
                     else {
-                        console.error('❌ Failed to start independent leadAttentionWorkflow:', startResult.error);
-                        throw new Error(`Lead attention workflow failed to start: ${startResult.error}`);
+                        console.error(`⚠️ Failed to start leadAttentionWorkflow: ${startResult.error || 'Unknown error'}`);
+                        console.log(`📋 Lead notification will not be sent, but continuing with customer support workflow`);
                     }
                 }
                 else {
@@ -384,8 +401,9 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
                 }
             }
             catch (leadAttentionError) {
-                console.error('❌ Lead attention workflow failed to start - failing entire workflow:', leadAttentionError);
-                throw leadAttentionError; // Re-throw to fail the entire workflow
+                console.error('❌ Lead attention workflow failed to start (non-blocking):', leadAttentionError);
+                console.log('⚠️ Continuing customer support workflow - lead notification is a secondary operation');
+                // Don't throw - this is a non-critical operation that shouldn't fail the main workflow
             }
             // 🎯 Start agent supervisor workflow as child (fire-and-forget, high priority)
             try {

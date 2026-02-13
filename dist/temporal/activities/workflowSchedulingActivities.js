@@ -57,6 +57,7 @@ const services_1 = require("../services");
 const cronActivities_1 = require("./cronActivities");
 const supabaseActivities_1 = require("./supabaseActivities");
 const supabaseService_1 = require("../services/supabaseService");
+const searchAttributes_1 = require("../utils/searchAttributes");
 /**
  * Helper function to check if a workflow should be scheduled for a site
  * based on the settings.activities configuration
@@ -132,6 +133,8 @@ async function scheduleEmailSyncWorkflowActivity(site, options = {}) {
                 batchSize: 50,
                 analysisLimit: 15 // Analyze up to 15 emails
             }];
+        // Extract search attributes from workflow arguments
+        const searchAttributes = (0, searchAttributes_1.extractSearchAttributesFromInput)(workflowArgs[0]);
         // Create immediate workflow execution (ASAP scheduling)
         console.log(`⚡ Starting immediate workflow execution for ${site.name}`);
         const handle = await client.workflow.start('syncEmailsWorkflow', {
@@ -139,6 +142,7 @@ async function scheduleEmailSyncWorkflowActivity(site, options = {}) {
             workflowId,
             taskQueue: config_1.temporalConfig.taskQueue,
             workflowRunTimeout: '1 hour', // Email sync timeout
+            searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
         });
         console.log(`✅ Successfully started workflow for ${site.name}`);
         console.log(`   - Workflow Handle: ${handle.workflowId}`);
@@ -390,6 +394,8 @@ async function executeBuildCampaignsWorkflowActivity(siteId, options = {}) {
                 agentId: options.agentId,
                 additionalCampaignData: options.additionalCampaignData || {}
             }];
+        // Extract search attributes from workflow arguments
+        const searchAttributes = (0, searchAttributes_1.extractSearchAttributesFromInput)(workflowArgs[0]);
         // Start immediate workflow execution
         console.log(`⚡ Starting build campaigns workflow for site: ${siteId}`);
         const handle = await client.workflow.start('buildCampaignsWorkflow', {
@@ -397,6 +403,7 @@ async function executeBuildCampaignsWorkflowActivity(siteId, options = {}) {
             workflowId,
             taskQueue: config_1.temporalConfig.taskQueue,
             workflowRunTimeout: '30 minutes',
+            searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
         });
         console.log(`✅ Successfully started build campaigns workflow for site: ${siteId}`);
         console.log(`   - Workflow Handle: ${handle.workflowId}`);
@@ -479,6 +486,8 @@ async function executeBuildSegmentsWorkflowActivity(siteId, options = {}) {
                 aiProvider: options.aiProvider,
                 aiModel: options.aiModel
             }];
+        // Extract search attributes from workflow arguments
+        const searchAttributes = (0, searchAttributes_1.extractSearchAttributesFromInput)(workflowArgs[0]);
         // Start immediate workflow execution
         console.log(`⚡ Starting build segments workflow for site: ${siteId}`);
         const handle = await client.workflow.start('buildSegmentsWorkflow', {
@@ -486,6 +495,7 @@ async function executeBuildSegmentsWorkflowActivity(siteId, options = {}) {
             workflowId,
             taskQueue: config_1.temporalConfig.taskQueue,
             workflowRunTimeout: '1 hour',
+            searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
         });
         console.log(`✅ Successfully started build segments workflow for site: ${siteId}`);
         console.log(`   - Workflow Handle: ${handle.workflowId}`);
@@ -585,6 +595,8 @@ async function executeBuildContentWorkflowActivity(siteId, options = {}) {
                 includeMetadata: options.includeMetadata,
                 sortBy: options.sortBy
             }];
+        // Extract search attributes from workflow arguments
+        const searchAttributes = (0, searchAttributes_1.extractSearchAttributesFromInput)(workflowArgs[0]);
         // Start immediate workflow execution
         console.log(`⚡ Starting build content workflow for site: ${siteId}`);
         const handle = await client.workflow.start('buildContentWorkflow', {
@@ -592,6 +604,7 @@ async function executeBuildContentWorkflowActivity(siteId, options = {}) {
             workflowId,
             taskQueue: config_1.temporalConfig.taskQueue,
             workflowRunTimeout: '45 minutes',
+            searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
         });
         console.log(`✅ Successfully started build content workflow for site: ${siteId}`);
         console.log(`   - Workflow Handle: ${handle.workflowId}`);
@@ -838,25 +851,29 @@ async function executeDailyStandUpWorkflow(site, executionOptions) {
         console.log(`🚀 Executing Daily Stand Up workflow for ${site.name}`);
         console.log(`   Schedule type: ${executionOptions.scheduleType}`);
         console.log(`   Execute reason: ${executionOptions.executeReason}`);
+        const workflowArgs = [{
+                site_id: site.id,
+                userId: site.user_id,
+                additionalData: {
+                    scheduledBy: executionOptions.scheduledBy,
+                    executeReason: executionOptions.executeReason,
+                    scheduleType: executionOptions.scheduleType,
+                    scheduleTime: executionOptions.scheduleType === 'business-hours' ? 'business-hours-based' : 'immediate',
+                    executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+                    timezone: 'UTC',
+                    executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
+                    businessHoursAnalysis: executionOptions.businessHoursAnalysis,
+                    parentScheduleId: executionOptions.parentScheduleId,
+                    dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
+                }
+            }];
+        // Extract search attributes from workflow arguments
+        const searchAttributes = (0, searchAttributes_1.extractSearchAttributesFromInput)(workflowArgs[0]);
         const handle = await client.workflow.start('dailyStandUpWorkflow', {
-            args: [{
-                    site_id: site.id,
-                    userId: site.user_id,
-                    additionalData: {
-                        scheduledBy: executionOptions.scheduledBy,
-                        executeReason: executionOptions.executeReason,
-                        scheduleType: executionOptions.scheduleType,
-                        scheduleTime: executionOptions.scheduleType === 'business-hours' ? 'business-hours-based' : 'immediate',
-                        executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-                        timezone: 'UTC',
-                        executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
-                        businessHoursAnalysis: executionOptions.businessHoursAnalysis,
-                        parentScheduleId: executionOptions.parentScheduleId,
-                        dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
-                    }
-                }],
+            args: workflowArgs,
             taskQueue: config_1.temporalConfig.taskQueue,
             workflowId: workflowId,
+            searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
         });
         console.log(`✅ Daily Stand Up workflow started for ${site.name}`);
         console.log(`   Workflow ID: ${handle.workflowId}`);
@@ -2036,7 +2053,7 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
  */
 async function executeDailyProspectionWorkflowsActivity(options = {}) {
     console.log('🎯 Starting Daily Prospection workflow execution...');
-    const { businessHoursAnalysis, hoursThreshold = 48, maxLeads = 30 } = options;
+    const { businessHoursAnalysis, hoursThreshold = 48, maxLeads = 100 } = options;
     if (businessHoursAnalysis) {
         console.log('📋 BUSINESS HOURS FILTERING ENABLED:');
         console.log(`   - Sites with business_hours: ${businessHoursAnalysis.sitesWithBusinessHours}`);
@@ -2240,31 +2257,35 @@ async function executeDailyProspectionWorkflow(site, executionOptions) {
         console.log(`   Execute reason: ${executionOptions.executeReason}`);
         console.log(`   Hours threshold: ${executionOptions.hoursThreshold || 48} hours`);
         console.log(`   Max leads: ${executionOptions.maxLeads || 50}`);
+        const workflowArgs = [{
+                site_id: site.id,
+                userId: site.user_id,
+                hoursThreshold: executionOptions.hoursThreshold || 48,
+                maxLeads: executionOptions.maxLeads || 50,
+                minLeadsRequired: 30,
+                updateStatus: false,
+                additionalData: {
+                    scheduledBy: executionOptions.scheduledBy,
+                    executeReason: executionOptions.executeReason,
+                    scheduleType: executionOptions.scheduleType,
+                    scheduleTime: executionOptions.scheduleType === 'business-hours' ? 'business-hours-based' : 'immediate',
+                    executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+                    timezone: 'UTC',
+                    executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
+                    businessHoursAnalysis: executionOptions.businessHoursAnalysis,
+                    triggeredBy: 'activityPrioritizationEngine',
+                    followsAfter: 'dailyStandUpWorkflow',
+                    parentScheduleId: executionOptions.parentScheduleId,
+                    dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
+                }
+            }];
+        // Extract search attributes from workflow arguments
+        const searchAttributes = (0, searchAttributes_1.extractSearchAttributesFromInput)(workflowArgs[0]);
         const handle = await client.workflow.start('dailyProspectionWorkflow', {
-            args: [{
-                    site_id: site.id,
-                    userId: site.user_id,
-                    hoursThreshold: executionOptions.hoursThreshold || 48,
-                    maxLeads: executionOptions.maxLeads || 30,
-                    minLeadsRequired: 30,
-                    updateStatus: false,
-                    additionalData: {
-                        scheduledBy: executionOptions.scheduledBy,
-                        executeReason: executionOptions.executeReason,
-                        scheduleType: executionOptions.scheduleType,
-                        scheduleTime: executionOptions.scheduleType === 'business-hours' ? 'business-hours-based' : 'immediate',
-                        executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-                        timezone: 'UTC',
-                        executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
-                        businessHoursAnalysis: executionOptions.businessHoursAnalysis,
-                        triggeredBy: 'activityPrioritizationEngine',
-                        followsAfter: 'dailyStandUpWorkflow',
-                        parentScheduleId: executionOptions.parentScheduleId,
-                        dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
-                    }
-                }],
+            args: workflowArgs,
             taskQueue: config_1.temporalConfig.taskQueue,
             workflowId: workflowId,
+            searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
         });
         console.log(`✅ Daily Prospection workflow started for ${site.name}`);
         console.log(`   Workflow ID: ${handle.workflowId}`);
@@ -2285,7 +2306,7 @@ async function executeDailyProspectionWorkflow(site, executionOptions) {
  * EXECUTES 2 HOURS AFTER DAILY STANDUP to process leads after standup and lead generation
  */
 async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis, options = {}) {
-    const { timezone = 'America/Mexico_City', hoursThreshold = 48, maxLeads = 30 } = options;
+    const { timezone = 'America/Mexico_City', hoursThreshold = 48, maxLeads = 100 } = options;
     console.log(`🎯 Scheduling individual Daily Prospection workflows using TIMERS`);
     console.log(`   - Default timezone: ${timezone}`);
     console.log(`   - Sites with business_hours: ${businessHoursAnalysis.openSites?.length || 0}`);
@@ -2521,7 +2542,7 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
  * Uses business_hours timezone when available; otherwise falls back to provided timezone
  */
 async function scheduleLeadQualificationActivity(businessHoursAnalysis, options = {}) {
-    const { timezone = 'America/Mexico_City', daysWithoutReply = 7, maxLeads = 30 } = options;
+    const { timezone = 'America/Mexico_City', daysWithoutReply = 7, maxLeads = 100 } = options;
     console.log(`📆 Scheduling Lead Qualification (Tue/Wed/Thu at 09:00)`);
     console.log(`   - Default timezone: ${timezone}`);
     console.log(`   - Days without reply: ${daysWithoutReply}`);

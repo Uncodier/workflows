@@ -18,8 +18,18 @@ const { logWorkflowExecutionActivity, saveCronStatusActivity, validateAndCleanSt
 async function syncEmailsWorkflow(options) {
     // Handle both camelCase and snake_case parameter formats
     const userId = options.userId || options.user_id;
+    if (!userId) {
+        throw new Error('User ID is required for syncEmailsWorkflow');
+    }
     const siteId = options.siteId || options.site_id || userId;
     const workflowId = `sync-emails-${userId}`;
+    const searchAttributes = {
+        user_id: [userId],
+    };
+    if (siteId) {
+        searchAttributes.site_id = [siteId];
+    }
+    (0, workflow_1.upsertSearchAttributes)(searchAttributes);
     console.log(`📧 Starting email sync workflow for user ${userId} (${options.provider})`);
     console.log(`📋 Options:`, JSON.stringify(options, null, 2));
     // STEP 0: Validate workflow configuration
