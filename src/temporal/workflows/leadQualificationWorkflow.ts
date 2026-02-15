@@ -7,7 +7,7 @@ export interface LeadQualificationOptions {
   userId?: string;
   daysWithoutReply?: number; // legacy, kept for compatibility
   maxLeads?: number; // legacy, total limit
-  maxLeadsPerStage?: number; // default 10
+  maxLeadsPerStage?: number; // default 30
   researchEnabled?: boolean;
   additionalData?: any;
 }
@@ -150,7 +150,7 @@ export async function leadQualificationWorkflow(
 
     const daysWithoutReply = typeof options.daysWithoutReply === 'number' ? options.daysWithoutReply : 7;
     const maxLeads = typeof options.maxLeads === 'number' ? options.maxLeads : 100;
-    const maxLeadsPerStage = typeof options.maxLeadsPerStage === 'number' ? options.maxLeadsPerStage : 10;
+    const maxLeadsPerStage = typeof options.maxLeadsPerStage === 'number' ? options.maxLeadsPerStage : 30;
 
     const qualification = await getQualificationLeadsActivity({
       site_id,

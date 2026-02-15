@@ -18,7 +18,7 @@ export interface GetQualificationLeadsParams {
   site_id: string;
   daysWithoutReply?: number; // legacy, default 7
   limit?: number; // legacy, default 30
-  maxLeadsPerStage?: number; // default 10
+  maxLeadsPerStage?: number; // default 30
 }
 
 export interface GetQualificationLeadsResult {
@@ -53,7 +53,7 @@ export async function getQualificationLeadsActivity(
 ): Promise<GetQualificationLeadsResult> {
   const siteId = params.site_id;
   const daysWithoutReply = typeof params.daysWithoutReply === 'number' ? params.daysWithoutReply : 7;
-  const maxPerStage = typeof params.maxLeadsPerStage === 'number' ? params.maxLeadsPerStage : 10;
+  const maxPerStage = typeof params.maxLeadsPerStage === 'number' ? params.maxLeadsPerStage : 30;
   const legacyLimit = typeof params.limit === 'number' ? params.limit : 30;
   
   // Use the provided daysWithoutReply for the threshold

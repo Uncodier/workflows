@@ -554,12 +554,21 @@ export async function startLeadFollowUpWorkflowActivity(request: StartLeadFollow
     };
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`❌ Exception starting independent leadFollowUpWorkflow for lead ${request.lead_id}:`, errorMessage);
+    // Extract full error details - SDK wraps gRPC errors with "Failed to start Workflow", hiding the real cause
+    const err = error as Error & { cause?: Error & { code?: number; details?: string } };
+    const cause = err.cause;
+    const causeMessage = cause?.message ?? '';
+    const causeDetails = cause?.details ?? '';
+    const grpcCode = cause?.code;
+    const fullError = causeMessage || causeDetails || (error instanceof Error ? error.message : String(error));
+    console.error(`❌ Exception starting independent leadFollowUpWorkflow for lead ${request.lead_id}:`, fullError);
+    if (cause) {
+      console.error('   gRPC cause:', { code: grpcCode, details: causeDetails || causeMessage });
+    }
     
     return {
       success: false,
-      error: errorMessage
+      error: fullError
     };
   }
 }
