@@ -270,6 +270,7 @@ export async function callPersonContactsLookupDetailsActivity(options: {
       end_date: currentRole?.end_date || null,
       is_current: currentRole?.is_current || false,
       location: personLocation,
+      linkedin_profile: linkedinUrl,
       emails: null, // Will be enriched later
       phones: null, // Will be enriched later
       raw_result: personData,
@@ -368,6 +369,7 @@ export async function callPersonContactsLookupDetailsActivity(options: {
         personal_email: undefined, // Will be enriched later
         userId: options.userId,
         company_id: currentCompanyId, // Associate lead with current company
+        linkedin_url: linkedinUrl || undefined,
       });
 
       if (leadResult.success) {
@@ -833,6 +835,7 @@ export async function upsertPersonActivity(person: {
   end_date?: string | null;
   is_current?: boolean | null;
   location?: string | null;
+  linkedin_profile?: string | null;
   emails?: any | null;
   phones?: any | null;
   raw_result: any;
@@ -867,6 +870,7 @@ export async function upsertPersonActivity(person: {
       end_date: person.end_date ?? null,
       is_current: person.is_current ?? null,
       location: person.location ?? null,
+      linkedin_profile: person.linkedin_profile ?? null,
       emails: person.emails ?? null,
       phones: person.phones ?? null,
       raw_result: person.raw_result,
@@ -974,6 +978,7 @@ export async function upsertLeadForPersonActivity(options: {
   company_id?: string;
   segment_id?: string;
   person_emails?: string[]; // Optional: pass person emails to avoid DB query
+  linkedin_url?: string; // LinkedIn profile URL from Person API
 }): Promise<{
   success: boolean;
   lead?: any;
@@ -1054,6 +1059,14 @@ export async function upsertLeadForPersonActivity(options: {
       personal_email: options.personal_email || null,
       updated_at: new Date().toISOString(),
     };
+
+    // Add social_networks.linkedin if provided (merge with existing to preserve other platforms)
+    if (options.linkedin_url) {
+      const existingSocial = existingLead?.social_networks && typeof existingLead.social_networks === 'object'
+        ? existingLead.social_networks
+        : {};
+      leadData.social_networks = { ...existingSocial, linkedin: options.linkedin_url };
+    }
 
     // Add company_id if provided
     if (options.company_id) {

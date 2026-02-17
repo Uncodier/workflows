@@ -600,6 +600,11 @@ export async function enrichLeadWorkflow(
       if (!personPhones.includes(phone)) personPhones.push(phone);
     });
 
+    // Resolve LinkedIn URL: options > raw_result > person.linkedin_profile
+    const linkedinUrlForUpdate = linkedinProfileToUse
+      || person.linkedin_profile
+      || null;
+
     // Update person IMMEDIATELY with enriched data
     const personUpdate = await upsertPersonActivity({
       external_person_id: person.external_person_id,
@@ -612,6 +617,7 @@ export async function enrichLeadWorkflow(
       end_date: person.end_date,
       is_current: person.is_current,
       location: person.location,
+      linkedin_profile: linkedinUrlForUpdate,
       emails: personEmails.length > 0 ? personEmails : null,
       phones: personPhones.length > 0 ? personPhones : null,
       raw_result: person.raw_result,
@@ -682,6 +688,7 @@ export async function enrichLeadWorkflow(
         company_id: leadCompanyId,
         segment_id: segment_id || undefined,
         person_emails: personEmails, // Pass updated emails to avoid DB query
+        linkedin_url: linkedinUrlForUpdate || undefined,
       } as any); // Type assertion needed because Activities type is auto-generated
 
     if (!leadUpdate.success) {
