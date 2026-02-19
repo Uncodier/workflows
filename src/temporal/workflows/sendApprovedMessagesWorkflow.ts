@@ -162,11 +162,69 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     } catch (error) {
         console.error(`❌ Failed to send message ${msg.message_id}:`, error);
         failedCount++;
-        
-        // Cleanup? or just leave it for retry?
-        // Maybe update status to failed?
-        // Or if it's 'accepted' and failed, we might want to flag it.
-        // For now, logging error.
+
+        // Only mark as failed and run cleanup when the send itself failed.
+        // If the error occurred after a successful send (e.g. during status/timestamp/conversation updates),
+        // do not overwrite delivery status or delete the message.
+        if (!sent) {
+          const failureReason = error instanceof Error ? error.message : String(error);
+
+          try {
+            const recipient = channel === 'email' ? msg.lead_email : msg.lead_phone;
+            const delivery_details: Record<string, unknown> = {
+              status: 'failed',
+              error: failureReason,
+              timestamp: new Date().toISOString(),
+            };
+            if (recipient != null && recipient !== '') {
+              delivery_details.recipient = recipient;
+            }
+            if (channel === 'email') {
+              const subject = msg.custom_data?.title || msg.custom_data?.subject || 'Follow-up';
+              if (subject) delivery_details.subject = subject;
+            } else if (msg.lead_phone != null && msg.lead_phone !== '') {
+              delivery_details.phone_number = msg.lead_phone;
+            }
+
+            await updateMessageStatusToSentActivity({
+              message_id: messageId,
+              conversation_id: msg.conversation_id,
+              lead_id: msg.lead_id,
+              site_id: msg.site_id,
+              delivery_channel: channel,
+              delivery_success: false,
+              delivery_details,
+            });
+          } catch (updateErr) {
+            console.error(`⚠️ Failed to update message status to failed:`, updateErr);
+          }
+
+          try {
+            const cleanupPayload = {
+              lead_id: msg.lead_id,
+              site_id: msg.site_id,
+              conversation_id: msg.conversation_id,
+              message_id: messageId,
+              failure_reason: failureReason,
+              delivery_channel: channel,
+            };
+            if (channel === 'email' && msg.lead_email != null && msg.lead_email !== '') {
+              Object.assign(cleanupPayload, { email: msg.lead_email });
+            } else if (channel !== 'email' && msg.lead_phone != null && msg.lead_phone !== '') {
+              Object.assign(cleanupPayload, { phone_number: msg.lead_phone });
+            }
+            const cleanupResult = await cleanupFailedFollowUpActivity(cleanupPayload);
+            if (cleanupResult.success) {
+              console.log(`🧹 Cleanup completed for failed message ${messageId}:`, cleanupResult.cleanup_summary ?? { conversation_deleted: cleanupResult.conversation_deleted, message_deleted: cleanupResult.message_deleted });
+            } else {
+              console.warn(`⚠️ Cleanup failed for message ${messageId}:`, cleanupResult.error);
+            }
+          } catch (cleanupErr) {
+            console.error(`❌ Cleanup activity failed for message ${messageId}:`, cleanupErr);
+          }
+        } else {
+          console.error(`⚠️ Message ${messageId} was sent successfully but a post-send update failed; delivery status not changed.`, error);
+        }
     }
   }
 

@@ -17,6 +17,7 @@
     "test-build-segments": "npx tsx src/scripts/test-build-segments-icp.ts",
     "test-execute-tool": "npx tsx src/scripts/test-execute-tool-workflow.ts",
     "test-send-newsletter": "npx tsx src/scripts/test-send-newsletter-workflow.ts",
+    "test-send-approved-messages": "npx tsx src/scripts/test-send-approved-messages.ts",
     "test-site-setup": "npx tsx src/scripts/test-site-setup-workflow.ts",
     "test-analyze-site": "npx tsx src/scripts/test-analyze-site-workflow.ts",
     "test-whatsapp": "npx tsx src/scripts/test-whatsapp-workflow.ts",

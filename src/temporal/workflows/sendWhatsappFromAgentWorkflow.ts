@@ -1,17 +1,22 @@
-import { proxyActivities, upsertSearchAttributes } from '@temporalio/workflow';
+import { proxyActivities, sleep, upsertSearchAttributes } from '@temporalio/workflow';
 import type * as activities from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 
 // Configure activity options using centralized timeouts
-const { 
+const {
   sendWhatsAppFromAgentActivity,
   createTemplateActivity,
-  sendTemplateActivity,
   updateMessageStatusToSentActivity,
   fetchRecordByTableAndIdActivity
 } = proxyActivities<typeof activities>({
-  startToCloseTimeout: ACTIVITY_TIMEOUTS.WHATSAPP_OPERATIONS, // ✅ Using centralized config (2 minutes)
-  retry: RETRY_POLICIES.NETWORK, // ✅ Using appropriate retry policy for WhatsApp operations
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.WHATSAPP_OPERATIONS,
+  retry: RETRY_POLICIES.NETWORK,
+});
+
+// sendTemplate: no built-in retries; workflow waits 1min then retries at 30min, 1h, 6h backoff
+const { sendTemplateActivity } = proxyActivities<typeof activities>({
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.WHATSAPP_OPERATIONS,
+  retry: { maximumAttempts: 1 },
 });
 
 /**
@@ -135,14 +140,36 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
           template_id: templateResult.template_id
         });
 
-        // Step 4: Send template with all required parameters
-        const sendTemplateResult = await sendTemplateActivity({
+        // Step 4: Send template; first attempt after 1min, then retries at 30min, 1h, 6h
+        const sendTemplateParams = {
           template_id: templateResult.template_id,
           phone_number: params.phone_number,
           site_id: params.site_id,
-          message_id: whatsappResult.messageId, // Para tracking - messageId from workflow interface
-          original_message: messageForTemplate      // Para logging
-        });
+          message_id: whatsappResult.messageId,
+          original_message: messageForTemplate
+        };
+        await sleep('1m'); // First attempt always waits at least 1 minute
+        const backoffDelays: (string | number)[] = ['30m', '1h', '6h'];
+        let sendTemplateResult: Awaited<ReturnType<typeof sendTemplateActivity>> | null = null;
+        let lastSendError: unknown = null;
+
+        for (let attempt = 0; attempt <= backoffDelays.length; attempt++) {
+          try {
+            sendTemplateResult = await sendTemplateActivity(sendTemplateParams);
+            lastSendError = null;
+            break;
+          } catch (err) {
+            lastSendError = err;
+            if (attempt < backoffDelays.length) {
+              console.warn(`⚠️ sendTemplate attempt ${attempt + 1} failed, retrying after ${backoffDelays[attempt]}...`, err instanceof Error ? err.message : String(err));
+              await sleep(backoffDelays[attempt]);
+            }
+          }
+        }
+
+        if (lastSendError !== null || sendTemplateResult === null) {
+          throw lastSendError ?? new Error('sendTemplate failed after 4 attempts');
+        }
 
         const endTime = new Date();
         const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
