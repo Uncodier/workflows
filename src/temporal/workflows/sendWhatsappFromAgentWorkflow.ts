@@ -1,4 +1,5 @@
 import { proxyActivities, sleep, upsertSearchAttributes } from '@temporalio/workflow';
+import type { Duration } from '@temporalio/common';
 import type * as activities from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 
@@ -149,7 +150,7 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
           original_message: messageForTemplate
         };
         await sleep('1m'); // First attempt always waits at least 1 minute
-        const backoffDelays: (string | number)[] = ['30m', '1h', '6h'];
+        const backoffDelays: Duration[] = ['30m', '1h', '6h'];
         let sendTemplateResult: Awaited<ReturnType<typeof sendTemplateActivity>> | null = null;
         let lastSendError: unknown = null;
 
