@@ -564,8 +564,25 @@ export async function enrichLeadWorkflow(
     const additionalPhones = phoneNumbers.slice(1).map((p: any) => typeof p === 'string' ? p : p.phone_number);
     const additionalPersonalEmails = personalEmails.slice(1).map((e: any) => typeof e === 'string' ? e : e.email);
 
-    // Build notes with additional contacts
+    // Build notes with additional contacts and descriptions (person/org from API when available)
     const notesParts: string[] = [];
+    const personDescription =
+      (person.raw_result && typeof (person.raw_result as any).person_description === 'string' && (person.raw_result as any).person_description.trim() !== '')
+        ? (person.raw_result as any).person_description.trim()
+        : (person.raw_result && typeof (person.raw_result as any).description === 'string' && (person.raw_result as any).description.trim() !== '')
+          ? (person.raw_result as any).description.trim()
+          : null;
+    if (personDescription) {
+      notesParts.push(`Person description: ${personDescription}`);
+    }
+    const orgDescription =
+      selectedRole?.organization &&
+      typeof ((selectedRole.organization as any).organization_description ?? (selectedRole.organization as any).description) === 'string'
+      ? String(((selectedRole.organization as any).organization_description ?? (selectedRole.organization as any).description)).trim()
+      : null;
+    if (orgDescription && orgDescription !== '') {
+      notesParts.push(`Organization description: ${orgDescription}`);
+    }
     if (additionalWorkEmails.length > 0) {
       notesParts.push(`Additional work emails: ${additionalWorkEmails.join(', ')}`);
     }
