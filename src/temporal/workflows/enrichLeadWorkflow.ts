@@ -175,8 +175,46 @@ export async function enrichLeadWorkflow(
       console.log(`🔄 Person created from details - will enrich contact information`);
       console.log(`🚩 Flag set: personCreatedFromDetails = true (will force work emails call)`);
     } else {
-    person = personCheck.existingPerson;
-    console.log(`✅ Found person: ${person.id} (${person.full_name || 'Unknown'})`);
+      person = personCheck.existingPerson;
+      // Reinforce mining for leads created before today: if person was created before today,
+      // treat as non-existent and re-mine via details API, then upsert at the end.
+      const personCreatedAtMs = person.created_at ? new Date(person.created_at).getTime() : 0;
+      const now = new Date();
+      const startOfTodayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0);
+      const isPersonOlderThanToday = personCreatedAtMs > 0 && personCreatedAtMs < startOfTodayUtc;
+
+      if (isPersonOlderThanToday && person_id) {
+        console.log(`🔄 Person created before today (${person.created_at}), re-mining via details API and upsert...`);
+        const detailsResult = await callPersonContactsLookupDetailsActivity({
+          person_id: person_id,
+          site_id: site_id,
+          userId: userId,
+          company_name: optionsCompanyName ?? undefined,
+        });
+
+        if (!detailsResult.success) {
+          const errorMsg = `Failed to re-mine person from details API: ${detailsResult.error}`;
+          console.error(`❌ ${errorMsg}`);
+          errors.push(errorMsg);
+          throw new Error(errorMsg);
+        }
+
+        if (!detailsResult.person) {
+          const errorMsg = 'Details API succeeded but no person returned for re-mining';
+          console.error(`❌ ${errorMsg}`);
+          errors.push(errorMsg);
+          throw new Error(errorMsg);
+        }
+
+        person = detailsResult.person;
+        detailsResultData = detailsResult;
+        personCreatedFromDetails = true;
+        person.emails = null;
+        person.phones = null;
+        console.log(`✅ Person re-mined from details API: ${person.id} (${person.full_name || 'Unknown'})`);
+      } else {
+        console.log(`✅ Found person: ${person.id} (${person.full_name || 'Unknown'})`);
+      }
     }
 
     // Check what data the person already has

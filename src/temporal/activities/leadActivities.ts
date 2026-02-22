@@ -28,6 +28,8 @@ export interface Lead {
   site_id: string;
   created_at: string;
   updated_at: string;
+  person_id?: string | null;
+  person_created_at?: string;
   [key: string]: any;
 }
 
@@ -167,6 +169,24 @@ export async function getLeadActivity(leadId: string): Promise<GetLeadResult> {
       updated_at: leadData.updated_at,
       ...leadData
     };
+
+    // Fetch person created_at when lead has person_id (for revalidation: person mined long ago may have stale data)
+    const personId = leadData.person_id && typeof leadData.person_id === 'string' ? leadData.person_id : null;
+    if (personId) {
+      try {
+        const { supabaseServiceRole } = await import('../../lib/supabase/client');
+        const { data: personRow, error: personError } = await supabaseServiceRole
+          .from('persons')
+          .select('created_at')
+          .eq('id', personId)
+          .single();
+        if (!personError && personRow?.created_at) {
+          lead.person_created_at = personRow.created_at;
+        }
+      } catch {
+        // Non-fatal: lead is still returned, revalidation may run based on lead date only
+      }
+    }
 
     console.log(`✅ Retrieved lead information for ${lead.name || lead.email}: ${lead.company}`);
     
@@ -3666,6 +3686,7 @@ export interface LeadEmailRevalidationRequest {
     website?: string | null;
     person_id?: string | null;
     created_at?: string;
+    person_created_at?: string;
   };
 }
 

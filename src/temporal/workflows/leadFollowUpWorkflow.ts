@@ -1,5 +1,5 @@
 import { proxyActivities, patched, deprecatePatch, upsertSearchAttributes } from '@temporalio/workflow';
-import type { Activities } from '../activities';
+import type { Activities, LeadEmailRevalidationRequest } from '../activities';
 import { performEarlyValidation } from './leadFollowUp/validation';
 import { performResearch } from './leadFollowUp/research';
 import type { LeadFollowUpOptions, LeadFollowUpResult } from './leadFollowUp/types';
@@ -206,34 +206,43 @@ export async function leadFollowUpWorkflow(
         return result;
       }
 
-      // Lead email revalidation (before generating copy): if site has email and lead will send by email
-      // and lead was created before today, call data enrichment; if email changes, update lead, person and all related leads.
+      // Lead email revalidation (before generating copy): if site has email and lead will send by email,
+      // and (lead was created before today OR person was created before today), call data enrichment;
+      // if email changes, update lead, person and all related leads. Person mined long ago may have erroneous data.
       const leadEmail = leadInfo.email;
       const willSendByEmail = Boolean(leadEmail && !emailInvalidatedInEarlyValidation && channelsValidation.hasEmailChannel);
-      if (willSendByEmail && leadInfo.created_at) {
-        const startOfToday = new Date();
-        startOfToday.setUTCHours(0, 0, 0, 0);
-        const leadCreatedAt = new Date(leadInfo.created_at);
-        if (leadCreatedAt < startOfToday) {
-          console.log(`📧 Lead created before today and sending by email - running lead email revalidation (before copy)...`);
-          const revalidationResult = await leadEmailRevalidationActivity({
-            lead_id,
-            site_id,
-            leadInfo: {
-              email: leadInfo.email,
-              company: leadInfo.company,
-              company_name: leadInfo.company_name,
-              website: leadInfo.website,
-              person_id: leadInfo.person_id,
-              created_at: leadInfo.created_at,
-            },
-          });
-          if (!revalidationResult.success) {
-            console.warn(`⚠️ Lead email revalidation failed (continuing): ${revalidationResult.error}`);
-            errors.push(`Lead email revalidation failed: ${revalidationResult.error}`);
-          } else if (revalidationResult.emailChanged && revalidationResult.newEmail) {
-            console.log(`📧 Lead email updated via revalidation to ${revalidationResult.newEmail}`);
-          }
+      const startOfToday = new Date();
+      startOfToday.setUTCHours(0, 0, 0, 0);
+      const leadCreatedBeforeToday = leadInfo.created_at
+        ? new Date(leadInfo.created_at) < startOfToday
+        : false;
+      const personCreatedBeforeToday = leadInfo.person_created_at
+        ? new Date(leadInfo.person_created_at) < startOfToday
+        : false;
+      const shouldRevalidate = willSendByEmail && (leadCreatedBeforeToday || personCreatedBeforeToday);
+      if (shouldRevalidate) {
+        console.log(
+          `📧 Running lead email revalidation (before copy) - lead created before today: ${leadCreatedBeforeToday}, person created before today: ${personCreatedBeforeToday}`
+        );
+        const revalidationLeadInfo: LeadEmailRevalidationRequest['leadInfo'] = {
+          email: leadInfo.email,
+          company: leadInfo.company,
+          company_name: leadInfo.company_name,
+          website: leadInfo.website,
+          person_id: leadInfo.person_id,
+          created_at: leadInfo.created_at,
+          person_created_at: leadInfo.person_created_at,
+        };
+        const revalidationResult = await leadEmailRevalidationActivity({
+          lead_id,
+          site_id,
+          leadInfo: revalidationLeadInfo,
+        });
+        if (!revalidationResult.success) {
+          console.warn(`⚠️ Lead email revalidation failed (continuing): ${revalidationResult.error}`);
+          errors.push(`Lead email revalidation failed: ${revalidationResult.error}`);
+        } else if (revalidationResult.emailChanged && revalidationResult.newEmail) {
+          console.log(`📧 Lead email updated via revalidation to ${revalidationResult.newEmail}`);
         }
       }
     } else {
