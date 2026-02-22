@@ -23,6 +23,8 @@ export interface ScheduleSpec {
   paused?: boolean;
   cron?: string; // Alternative to intervalMinutes
   timezone?: string;
+  /** Overlap policy: SKIP = do not start if previous run still active; ALLOW = start every tick (each run works its own batch) */
+  overlap?: 'SKIP' | 'ALLOW';
 }
 
 // Central schedule that manages all other workflows
@@ -56,12 +58,13 @@ export const defaultSchedules: ScheduleSpec[] = [
     workflowType: 'sendApprovedMessagesWorkflow',
     intervalMinutes: 60, // Every 60 minutes (1 hour)
     args: [],
-    description: 'Check for and send approved messages every hour',
+    description: 'Check for and send approved messages every hour; each run processes its own batch (overlap allowed)',
     startAt: new Date(), // Start immediately
     jitterMs: 60000, // 1 minute jitter
     pauseOnFailure: false,
     catchupWindow: '1h',
-    paused: false
+    paused: false,
+    overlap: 'ALLOW' as const, // Each hour starts a new run even if previous is still waiting on WhatsApp
   }
 ];
 
@@ -239,7 +242,7 @@ export async function createSchedule(spec: ScheduleSpec) {
       spec: scheduleSpec,
       policies: {
         catchupWindow: spec.catchupWindow || '1h',
-        overlap: ScheduleOverlapPolicy.SKIP,
+        overlap: spec.overlap === 'ALLOW' ? ScheduleOverlapPolicy.ALLOW : ScheduleOverlapPolicy.SKIP,
         pauseOnFailure: spec.pauseOnFailure !== undefined ? spec.pauseOnFailure : false,
       },
       state: {

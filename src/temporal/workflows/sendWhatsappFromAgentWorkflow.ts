@@ -8,7 +8,11 @@ const {
   sendWhatsAppFromAgentActivity,
   createTemplateActivity,
   updateMessageStatusToSentActivity,
-  fetchRecordByTableAndIdActivity
+  fetchRecordByTableAndIdActivity,
+  updateMessageTimestampActivity,
+  updateConversationStatusAfterFollowUpActivity,
+  updateTaskStatusToCompletedActivity,
+  cleanupFailedFollowUpActivity,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.WHATSAPP_OPERATIONS,
   retry: RETRY_POLICIES.NETWORK,
@@ -31,8 +35,12 @@ export interface SendWhatsAppFromAgentParams {
   agent_id?: string;
   conversation_id?: string;
   lead_id?: string;
-  message_id?: string; // ID del mensaje en la base de datos para actualizar custom_data
+  message_id?: string;
   responseWindowEnabled?: boolean;
+  /** When true, this run is from sendApprovedMessagesWorkflow; child performs conversation/task updates and cleanup on failure */
+  fromApprovedWorkflow?: boolean;
+  /** custom_data from the approved message (for updateConversationStatusAfterFollowUpActivity) */
+  approvedWorkflowCustomData?: Record<string, unknown>;
 }
 
 /**
@@ -212,6 +220,33 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
             } else {
               console.log('⚠️ Failed to update message custom_data:', updateResult.error);
             }
+            if (params.fromApprovedWorkflow && params.message_id && params.conversation_id && params.lead_id) {
+              await updateMessageTimestampActivity({
+                message_id: params.message_id,
+                conversation_id: params.conversation_id,
+                lead_id: params.lead_id,
+                site_id: params.site_id,
+                delivery_timestamp: new Date().toISOString(),
+                delivery_channel: 'whatsapp',
+              });
+              await updateConversationStatusAfterFollowUpActivity({
+                conversation_id: params.conversation_id,
+                lead_id: params.lead_id,
+                site_id: params.site_id,
+                response_data: params.approvedWorkflowCustomData ?? {},
+                additional_data: {
+                  message_ids: [params.message_id],
+                  conversation_ids: [params.conversation_id],
+                },
+              });
+              await updateTaskStatusToCompletedActivity({
+                lead_id: params.lead_id,
+                site_id: params.site_id,
+                stage: 'awareness',
+                status: 'completed',
+                notes: 'Task completed after successful whatsapp message delivery via sendApprovedMessagesWorkflow',
+              });
+            }
           } catch (updateError) {
             console.log('⚠️ Error updating message custom_data:', updateError instanceof Error ? updateError.message : String(updateError));
             // No fallar el workflow por error de actualización
@@ -255,6 +290,18 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
               }
             });
             console.log('📊 Message status updated to failed for template error');
+            if (params.fromApprovedWorkflow && params.message_id && params.conversation_id && params.lead_id) {
+              const failureReason = templateError instanceof Error ? templateError.message : String(templateError);
+              await cleanupFailedFollowUpActivity({
+                lead_id: params.lead_id,
+                site_id: params.site_id,
+                conversation_id: params.conversation_id,
+                message_id: params.message_id,
+                failure_reason: failureReason,
+                delivery_channel: 'whatsapp',
+                phone_number: params.phone_number,
+              });
+            }
           } catch (updateError) {
             console.error('❌ Failed to update message status:', updateError);
           }
@@ -307,6 +354,33 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
           } else {
             console.log('⚠️ Failed to update message custom_data:', updateResult.error);
           }
+          if (params.fromApprovedWorkflow && params.message_id && params.conversation_id && params.lead_id) {
+            await updateMessageTimestampActivity({
+              message_id: params.message_id,
+              conversation_id: params.conversation_id,
+              lead_id: params.lead_id,
+              site_id: params.site_id,
+              delivery_timestamp: new Date().toISOString(),
+              delivery_channel: 'whatsapp',
+            });
+            await updateConversationStatusAfterFollowUpActivity({
+              conversation_id: params.conversation_id,
+              lead_id: params.lead_id,
+              site_id: params.site_id,
+              response_data: params.approvedWorkflowCustomData ?? {},
+              additional_data: {
+                message_ids: [params.message_id],
+                conversation_ids: [params.conversation_id],
+              },
+            });
+            await updateTaskStatusToCompletedActivity({
+              lead_id: params.lead_id,
+              site_id: params.site_id,
+              stage: 'awareness',
+              status: 'completed',
+              notes: 'Task completed after successful whatsapp message delivery via sendApprovedMessagesWorkflow',
+            });
+          }
         } catch (updateError) {
           console.log('⚠️ Error updating message custom_data:', updateError instanceof Error ? updateError.message : String(updateError));
           // No fallar el workflow por error de actualización
@@ -357,6 +431,18 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
           }
         });
         console.log('📊 Message status updated to failed for workflow error');
+        if (params.fromApprovedWorkflow && params.message_id && params.conversation_id && params.lead_id) {
+          const failureReason = error instanceof Error ? error.message : String(error);
+          await cleanupFailedFollowUpActivity({
+            lead_id: params.lead_id,
+            site_id: params.site_id,
+            conversation_id: params.conversation_id,
+            message_id: params.message_id,
+            failure_reason: failureReason,
+            delivery_channel: 'whatsapp',
+            phone_number: params.phone_number,
+          });
+        }
       } catch (updateError) {
         console.error('❌ Failed to update message status for workflow error:', updateError);
       }

@@ -4,6 +4,8 @@ import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 
 const {
   getApprovedMessagesActivity,
+  markMessageAsSendingActivity,
+  resetStuckSendingMessagesActivity,
   sendEmailFromAgentActivity,
   updateMessageStatusToSentActivity,
   updateMessageTimestampActivity,
@@ -19,7 +21,15 @@ const {
 
 export async function sendApprovedMessagesWorkflow(): Promise<any> {
   console.log('🚀 Starting sendApprovedMessagesWorkflow...');
-  
+
+  const resetResult = await resetStuckSendingMessagesActivity();
+  if (resetResult.resetCount > 0) {
+    console.log(`🔄 Recovered ${resetResult.resetCount} message(s) stuck in sending (will be retried).`);
+  }
+  if (resetResult.error) {
+    console.warn('⚠️ resetStuckSendingMessages failed (non-fatal):', resetResult.error);
+  }
+
   const messages = await getApprovedMessagesActivity();
   
   if (!messages || messages.length === 0) {
@@ -61,7 +71,16 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         if (!msg.lead_phone) {
           throw new Error('No phone number for lead');
         }
-        console.log(`📱 Sending WhatsApp to ${msg.lead_phone}...`);
+        console.log(`📱 Dispatching WhatsApp to ${msg.lead_phone} (child runs in background)...`);
+        const markResult = await markMessageAsSendingActivity({
+          message_id: msg.message_id,
+          conversation_id: msg.conversation_id,
+          site_id: msg.site_id,
+        });
+        if (!markResult.success) {
+          console.error(`❌ Cannot dispatch WhatsApp: mark as sending failed for message ${msg.message_id}: ${markResult.error ?? 'unknown'}`);
+          return false; // Message stays in 'accepted'; next hourly run will retry without duplicate send
+        }
         let cleanPhone = msg.lead_phone.replace(/[^\d+]/g, '');
         if (cleanPhone.startsWith('+')) {
           cleanPhone = '+' + cleanPhone.slice(1).replace(/\+/g, '');
@@ -69,7 +88,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
           cleanPhone = cleanPhone.replace(/\+/g, '');
         }
         const whatsappWorkflowId = `send-whatsapp-approved-${msg.message_id}-${Date.now()}`;
-        const whatsappHandle = await startChild(sendWhatsappFromAgent, {
+        await startChild(sendWhatsappFromAgent, {
           workflowId: whatsappWorkflowId,
           args: [{
             phone_number: cleanPhone,
@@ -81,16 +100,18 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
             conversation_id: msg.conversation_id,
             message_id: msg.message_id,
             responseWindowEnabled: false,
+            fromApprovedWorkflow: true,
+            approvedWorkflowCustomData: msg.custom_data ?? undefined,
           }],
-          parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_TERMINATE,
+          parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
         });
-        const whatsappResult = await whatsappHandle.result();
+        // Do not await child result: each hourly run processes its batch and exits; child updates DB on success/failure
         sent = true;
-        sentMessageId = whatsappResult.messageId;
-        console.log(`✅ WhatsApp sent successfully.`);
+        console.log(`✅ WhatsApp child started (workflowId: ${whatsappWorkflowId}).`);
+        return true;
       }
 
-      if (sent) {
+      if (sent && channel === 'email') {
         await updateMessageStatusToSentActivity({
           message_id: messageId,
           conversation_id: msg.conversation_id,

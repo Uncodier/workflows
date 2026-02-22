@@ -123,3 +123,132 @@ export async function getApprovedMessagesActivity(): Promise<any[]> {
 
   return enhancedMessages;
 }
+
+/**
+ * Atomically claim a message by marking it as 'sending' only if it is still 'accepted'.
+ * Prevents duplicate sends when schedule overlap is ALLOW: only one concurrent workflow
+ * can win the claim; others get success: false and must skip starting the child.
+ */
+export async function markMessageAsSendingActivity(request: {
+  message_id: string;
+  conversation_id: string;
+  site_id: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const { message_id, conversation_id, site_id } = request;
+  console.log(`📝 Claiming message ${message_id} as sending (site: ${site_id})...`);
+
+  const supabaseService = getSupabaseService();
+  const isConnected = await supabaseService.getConnectionStatus();
+  if (!isConnected) {
+    return { success: false, error: 'Database not available' };
+  }
+
+  const { supabaseServiceRole } = await import('../../lib/supabase/client');
+
+  // Fetch current custom_data so we can merge and set status; we need it for the update payload.
+  const { data: row, error: fetchErr } = await supabaseServiceRole
+    .from('messages')
+    .select('id, custom_data')
+    .eq('id', message_id)
+    .eq('conversation_id', conversation_id)
+    .eq('custom_data->>status', 'accepted')
+    .single();
+
+  if (fetchErr || !row) {
+    const err = fetchErr?.message ?? 'Message not found or already claimed';
+    console.log(`⏭️ markMessageAsSending skip (no row or not accepted): ${message_id}`);
+    return { success: false, error: err };
+  }
+
+  const customData = (row.custom_data as Record<string, unknown>) || {};
+  const updated = { ...customData, status: 'sending' as string };
+
+  // Atomic conditional update: only update if still accepted (handles race with other workflows).
+  const { data: updatedRows, error: updateErr } = await supabaseServiceRole
+    .from('messages')
+    .update({ custom_data: updated, updated_at: new Date().toISOString() })
+    .eq('id', message_id)
+    .eq('conversation_id', conversation_id)
+    .eq('custom_data->>status', 'accepted')
+    .select('id');
+
+  if (updateErr) {
+    console.error(`❌ markMessageAsSending update failed:`, updateErr);
+    return { success: false, error: updateErr.message };
+  }
+
+  if (!updatedRows || updatedRows.length === 0) {
+    console.log(`⏭️ Message ${message_id} already claimed by another workflow`);
+    return { success: false, error: 'Message already claimed' };
+  }
+
+  console.log(`✅ Message ${message_id} marked as sending`);
+  return { success: true };
+}
+
+/**
+ * Minutes after which a message in 'sending' is considered stuck (child crashed before updating).
+ * Must be longer than sendWhatsappFromAgentWorkflow template retry backoffs (1m + 30m + 1h + 6h = 451m)
+ * so we never reset a message whose child is still running (e.g. waiting for template delivery retry).
+ */
+const STUCK_SENDING_THRESHOLD_MINUTES = 500;
+
+/**
+ * Reset messages stuck in 'sending' back to 'accepted' so they are picked up again by the next run.
+ * Called at the start of sendApprovedMessagesWorkflow to recover from child workflow crashes.
+ */
+export async function resetStuckSendingMessagesActivity(): Promise<{ resetCount: number; error?: string }> {
+  console.log('🔄 Checking for messages stuck in sending...');
+  const supabaseService = getSupabaseService();
+  const isConnected = await supabaseService.getConnectionStatus();
+  if (!isConnected) {
+    return { resetCount: 0, error: 'Database not available' };
+  }
+
+  const { supabaseServiceRole } = await import('../../lib/supabase/client');
+  const cutoff = new Date(Date.now() - STUCK_SENDING_THRESHOLD_MINUTES * 60 * 1000);
+  const cutoffIso = cutoff.toISOString();
+
+  const { data: stuck, error: fetchErr } = await supabaseServiceRole
+    .from('messages')
+    .select('id, conversation_id, custom_data')
+    .eq('custom_data->>status', 'sending')
+    .lt('updated_at', cutoffIso)
+    .limit(500);
+
+  if (fetchErr) {
+    console.error('❌ resetStuckSendingMessages fetch failed:', fetchErr);
+    return { resetCount: 0, error: fetchErr.message };
+  }
+
+  if (!stuck || stuck.length === 0) {
+    return { resetCount: 0 };
+  }
+
+  let resetCount = 0;
+  for (const row of stuck) {
+    const customData = (row.custom_data as Record<string, unknown>) || {};
+    const updated = { ...customData, status: 'accepted' as string };
+    // Only update if still 'sending' (atomic): avoids overwriting 'sent' if child completed between fetch and update
+    const { data: updatedRows, error: updateErr } = await supabaseServiceRole
+      .from('messages')
+      .update({ custom_data: updated, updated_at: new Date().toISOString() })
+      .eq('id', row.id)
+      .eq('conversation_id', row.conversation_id)
+      .eq('custom_data->>status', 'sending')
+      .select('id');
+
+    if (updateErr) {
+      console.error(`❌ resetStuckSendingMessages update failed for ${row.id}:`, updateErr);
+      continue;
+    }
+    if (updatedRows && updatedRows.length > 0) {
+      resetCount++;
+    }
+  }
+
+  if (resetCount > 0) {
+    console.log(`✅ Reset ${resetCount} stuck sending message(s) to accepted (older than ${STUCK_SENDING_THRESHOLD_MINUTES} min).`);
+  }
+  return { resetCount };
+}
