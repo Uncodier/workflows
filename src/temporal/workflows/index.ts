@@ -50,6 +50,7 @@ import { enrichLeadWorkflow } from './enrichLeadWorkflow';
 import { generatePersonEmailWorkflow } from './generatePersonEmailWorkflow';
 import { leadGenerationDomainSearchWorkflow } from './leadGenerationDomainSearchWorkflow';
 import { sendApprovedMessagesWorkflow } from './sendApprovedMessagesWorkflow';
+import { dailyCreditRenewalWorkflow } from './dailyCreditRenewalWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -95,6 +96,7 @@ export * from './enrichLeadWorkflow';
 export * from './generatePersonEmailWorkflow';
 export * from './leadGenerationDomainSearchWorkflow';
 export * from './sendApprovedMessagesWorkflow';
+export * from './dailyCreditRenewalWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -145,6 +147,7 @@ export const workflows = {
   generatePersonEmailWorkflow,
   leadGenerationDomainSearchWorkflow,
   sendApprovedMessagesWorkflow,
+  dailyCreditRenewalWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
   // ✅ Aliases for agent workflows with different naming conventions
@@ -201,6 +204,7 @@ export const workflowNames = {
   generatePersonEmailWorkflow: 'generatePersonEmailWorkflow',
   leadGenerationDomainSearchWorkflow: 'leadGenerationDomainSearchWorkflow',
   sendApprovedMessagesWorkflow: 'sendApprovedMessagesWorkflow',
+  dailyCreditRenewalWorkflow: 'dailyCreditRenewalWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',
   // ✅ Aliases for agent workflows with different naming conventions

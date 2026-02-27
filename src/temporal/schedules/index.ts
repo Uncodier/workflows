@@ -7,6 +7,7 @@ type WorkflowArgs = {
   syncEmailsWorkflow: [];
   syncEmailsScheduleWorkflow: [];
   sendApprovedMessagesWorkflow: [];
+  dailyCreditRenewalWorkflow: [];
 };
 
 export interface ScheduleSpec {
@@ -65,6 +66,18 @@ export const defaultSchedules: ScheduleSpec[] = [
     catchupWindow: '1h',
     paused: false,
     overlap: 'ALLOW' as const, // Each hour starts a new run even if previous is still waiting on WhatsApp
+  },
+  {
+    id: 'daily-credit-renewal',
+    workflowType: 'dailyCreditRenewalWorkflow',
+    intervalMinutes: 24 * 60, // Every 24 hours
+    args: [],
+    description: 'Daily workflow to renew site credits based on billing cycle',
+    startAt: new Date(),
+    jitterMs: 60000,
+    pauseOnFailure: false,
+    catchupWindow: '12h',
+    paused: false
   }
 ];
 

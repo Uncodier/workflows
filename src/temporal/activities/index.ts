@@ -30,6 +30,7 @@ export * from './finderActivities';
 export * from './activityControlActivities';
 export * from './messageActivities';
 export * from './icypeasActivities';
+export * from './billingActivities';
 
 // Bundle all activities for the worker
 import * as supabaseActivities from './supabaseActivities';
@@ -63,6 +64,7 @@ import * as finderActivities from './finderActivities';
 import * as activityControlActivities from './activityControlActivities';
 import * as messageActivities from './messageActivities';
 import * as icypeasActivities from './icypeasActivities';
+import * as billingActivities from './billingActivities';
 
 export const activities = {
   ...supabaseActivities,
@@ -96,6 +98,7 @@ export const activities = {
   ...activityControlActivities,
   ...messageActivities,
   ...icypeasActivities,
+  ...billingActivities,
 };
 
 export type Activities = typeof activities; 
@@ -120,3 +123,8 @@ export {
   deleteResourceActivity,
   checkSiteAnalysisActivity
 } from './supabaseActivities'; 
+
+export {
+  fetchSitesDueForCreditRenewalActivity,
+  renewSiteCreditsActivity
+} from './billingActivities'; 
