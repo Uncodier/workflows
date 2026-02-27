@@ -7,14 +7,15 @@ export async function fetchSitesDueForCreditRenewalActivity(): Promise<any[]> {
   const billings = await supabaseService.fetchActiveBillings();
   
   const today = new Date();
-  const todayDay = today.getDate();
-  const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const todayDay = today.getUTCDate();
+  // Get the last day of the current UTC month
+  const lastDayOfMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0)).getUTCDate();
   
   const dueSites = billings.filter(billing => {
     if (!billing.subscription_start_date) return false;
     
     const startDate = new Date(billing.subscription_start_date);
-    const startDay = startDate.getDate();
+    const startDay = startDate.getUTCDate();
     
     // Check if today is the renewal day
     // 1. Exact match: today is the same day of month as start date
