@@ -16,6 +16,7 @@ import * as CompaniesImpl from './supabase-impl/companies';
 import * as AgentsImpl from './supabase-impl/agents';
 import * as SegmentsImpl from './supabase-impl/segments';
 import * as BillingImpl from './supabase-impl/billing';
+import * as PaymentsImpl from './supabase-impl/payments';
 
 export type { DatabaseConfig };
 
@@ -249,6 +250,21 @@ export class SupabaseService {
   async updateSiteCredits(siteId: string, credits: number): Promise<void> {
     await this.ensureConnection();
     return BillingImpl.updateSiteCredits(this.client, siteId, credits);
+  }
+
+  async fetchSitesWithoutBilling(): Promise<string[]> {
+    await this.ensureConnection();
+    return BillingImpl.fetchSitesWithoutBilling(this.client);
+  }
+
+  async createBillingRecord(billingData: any): Promise<any> {
+    await this.ensureConnection();
+    return BillingImpl.createBillingRecord(this.client, billingData);
+  }
+
+  async createPaymentRecord(paymentData: any): Promise<any> {
+    await this.ensureConnection();
+    return PaymentsImpl.createPaymentRecord(this.client, paymentData);
   }
 }
 

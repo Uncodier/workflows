@@ -126,5 +126,7 @@ export {
 
 export {
   fetchSitesDueForCreditRenewalActivity,
-  renewSiteCreditsActivity
+  renewSiteCreditsActivity,
+  fetchSitesNeedingInitializationActivity,
+  initializeSiteCreditsActivity
 } from './billingActivities'; 

@@ -15,12 +15,20 @@ export async function fetchSitesDueForCreditRenewalActivity(): Promise<any[]> {
     if (!billing.subscription_start_date) return false;
     
     const startDate = new Date(billing.subscription_start_date);
+
+    // Exclude records created today — they were just initialized and should not be renewed yet.
+    const startedToday =
+      startDate.getUTCFullYear() === today.getUTCFullYear() &&
+      startDate.getUTCMonth() === today.getUTCMonth() &&
+      startDate.getUTCDate() === today.getUTCDate();
+
+    if (startedToday) return false;
+
     const startDay = startDate.getUTCDate();
     
-    // Check if today is the renewal day
-    // 1. Exact match: today is the same day of month as start date
-    // 2. End of month handling: if start day is 31st, and today is 30th (and it's the last day of month), renew.
-    
+    // Check if today is the renewal day:
+    // 1. Exact match: today is the same day of month as start date.
+    // 2. End-of-month catch-up: start day is 31st but current month ends on the 30th (or earlier).
     const isExactMatch = todayDay === startDay;
     const isEndOfMonthCatchup = todayDay === lastDayOfMonth && startDay > lastDayOfMonth;
     
@@ -69,6 +77,43 @@ export async function renewSiteCreditsActivity(
     return { success: true, newCredits, oldCredits: currentCredits };
   } catch (error) {
     console.error(`❌ Failed to update credits for site ${siteId}:`, error);
+    throw error;
+  }
+}
+
+export async function fetchSitesNeedingInitializationActivity(): Promise<string[]> {
+  console.log('🔍 Checking for sites needing billing initialization...');
+  const supabaseService = getSupabaseService();
+  return await supabaseService.fetchSitesWithoutBilling();
+}
+
+export async function initializeSiteCreditsActivity(siteId: string): Promise<void> {
+  console.log(`✨ Initializing credits for site ${siteId}...`);
+  const supabaseService = getSupabaseService();
+  
+  try {
+    // 1. Create Billing Record
+    await supabaseService.createBillingRecord({
+      site_id: siteId,
+      plan: 'free',
+      credits_available: 30,
+      status: 'active'
+    });
+
+    // 2. Record 0 Payment
+    await supabaseService.createPaymentRecord({
+      site_id: siteId,
+      amount: 0,
+      credits: 30,
+      payment_method: 'initial_credit',
+      status: 'completed',
+      transaction_type: 'credit',
+      details: { note: 'Initial signup credits' }
+    });
+
+    console.log(`✅ Site ${siteId} initialized with 30 credits.`);
+  } catch (error) {
+    console.error(`❌ Failed to initialize credits for site ${siteId}:`, error);
     throw error;
   }
 }
