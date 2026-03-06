@@ -62,7 +62,7 @@ export async function validateCommunicationChannelsActivity(
       console.log(`📋 Processing channels as array with ${channels.length} configurations`);
       
       emailConfig = channels.find((channel: any) => 
-        channel.type === 'email' && channel.enabled === true && (channel.status === 'active' || channel.status === 'synced')
+        channel.type === 'email' && channel.enabled === true && (channel.status === 'active' || channel.status === 'synced') && !!(channel.email || channel.aliases)
       );
       
       const agentConfig = channels.find((channel: any) => 
@@ -76,7 +76,7 @@ export async function validateCommunicationChannelsActivity(
       
       whatsappConfig = channels.find((channel: any) => 
         (channel.type === 'whatsapp' || channel.type === 'agent_whatsapp') && 
-        (channel.enabled !== false) && channel.status === 'active'
+        (channel.enabled !== false) && channel.status === 'active' && !!(channel.phone_number || channel.existingNumber || channel.number || channel.phone)
       );
       
       hasEmailChannel = !!emailConfig || !!agentConfig || !!agentMailConfig;
@@ -94,8 +94,11 @@ export async function validateCommunicationChannelsActivity(
         // Set config regardless of enabled status so callers can inspect aliases
         emailConfig = channels.email;
         // Email accepts "active" or "synced" status
-        isEmailActive = channels.email.enabled === true && (channels.email.status === 'active' || channels.email.status === 'synced');
-        console.log(`   - Email enabled: ${isEmailActive}`, channels.email);
+        const hasEmailData = !!(channels.email.email || channels.email.aliases);
+        isEmailActive = channels.email.enabled === true && 
+                        (channels.email.status === 'active' || channels.email.status === 'synced') &&
+                        hasEmailData;
+        console.log(`   - Email enabled: ${isEmailActive} (hasEmailData: ${hasEmailData})`, channels.email);
         // Detect aliases: accept string, array or truthy value
         const aliasesValue = channels.email.aliases;
         if (typeof aliasesValue === 'string') {
@@ -157,12 +160,15 @@ export async function validateCommunicationChannelsActivity(
         console.log(`🔍 DEBUG: whatsappChannel.status =`, whatsappChannel.status);
         console.log(`🔍 DEBUG: status check =`, whatsappChannel.status === 'active');
         
-        hasWhatsappChannel = (whatsappChannel.enabled !== false) && whatsappChannel.status === 'active';
+        const whatsappNumber = whatsappChannel.phone_number || whatsappChannel.existingNumber || whatsappChannel.number || whatsappChannel.phone;
+        const hasWhatsappData = !!whatsappNumber;
+        
+        hasWhatsappChannel = (whatsappChannel.enabled !== false) && whatsappChannel.status === 'active' && hasWhatsappData;
         if (hasWhatsappChannel) {
           whatsappConfig = whatsappChannel;
         }
         console.log(`🔍 DEBUG: hasWhatsappChannel =`, hasWhatsappChannel);
-        console.log(`   - WhatsApp/Agent WhatsApp enabled: ${hasWhatsappChannel}`, whatsappChannel);
+        console.log(`   - WhatsApp/Agent WhatsApp enabled: ${hasWhatsappChannel} (hasWhatsappData: ${hasWhatsappData})`, whatsappChannel);
       } else {
         console.log(`   - WhatsApp/Agent WhatsApp NOT FOUND in channels object`);
       }

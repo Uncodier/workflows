@@ -39,11 +39,24 @@ exports.defaultSchedules = [
         workflowType: 'sendApprovedMessagesWorkflow',
         intervalMinutes: 60, // Every 60 minutes (1 hour)
         args: [],
-        description: 'Check for and send approved messages every hour',
+        description: 'Check for and send approved messages every hour; each run processes its own batch (overlap allowed)',
         startAt: new Date(), // Start immediately
         jitterMs: 60000, // 1 minute jitter
         pauseOnFailure: false,
         catchupWindow: '1h',
+        paused: false,
+        overlap: 'ALLOW', // Each hour starts a new run even if previous is still waiting on WhatsApp
+    },
+    {
+        id: 'daily-credit-renewal',
+        workflowType: 'dailyCreditRenewalWorkflow',
+        intervalMinutes: 24 * 60, // Every 24 hours
+        args: [],
+        description: 'Daily workflow to renew site credits based on billing cycle',
+        startAt: new Date(),
+        jitterMs: 60000,
+        pauseOnFailure: false,
+        catchupWindow: '12h',
         paused: false
     }
 ];
@@ -195,7 +208,7 @@ async function createSchedule(spec) {
             spec: scheduleSpec,
             policies: {
                 catchupWindow: spec.catchupWindow || '1h',
-                overlap: ScheduleOverlapPolicy.SKIP,
+                overlap: spec.overlap === 'ALLOW' ? ScheduleOverlapPolicy.ALLOW : ScheduleOverlapPolicy.SKIP,
                 pauseOnFailure: spec.pauseOnFailure !== undefined ? spec.pauseOnFailure : false,
             },
             state: {

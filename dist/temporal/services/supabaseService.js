@@ -49,6 +49,8 @@ const LeadsImpl = __importStar(require("./supabase-impl/leads"));
 const CompaniesImpl = __importStar(require("./supabase-impl/companies"));
 const AgentsImpl = __importStar(require("./supabase-impl/agents"));
 const SegmentsImpl = __importStar(require("./supabase-impl/segments"));
+const BillingImpl = __importStar(require("./supabase-impl/billing"));
+const PaymentsImpl = __importStar(require("./supabase-impl/payments"));
 class SupabaseService {
     client;
     isConnected = false;
@@ -223,6 +225,31 @@ class SupabaseService {
     async fetchSegments(siteId) {
         await this.ensureConnection();
         return SegmentsImpl.fetchSegments(this.client, siteId);
+    }
+    // --- BILLING ---
+    async fetchActiveBillings() {
+        await this.ensureConnection();
+        return BillingImpl.fetchActiveBillings(this.client);
+    }
+    async fetchBillingForSite(siteId) {
+        await this.ensureConnection();
+        return BillingImpl.fetchBillingForSite(this.client, siteId);
+    }
+    async updateSiteCredits(siteId, credits) {
+        await this.ensureConnection();
+        return BillingImpl.updateSiteCredits(this.client, siteId, credits);
+    }
+    async fetchSitesWithoutBilling() {
+        await this.ensureConnection();
+        return BillingImpl.fetchSitesWithoutBilling(this.client);
+    }
+    async createBillingRecord(billingData) {
+        await this.ensureConnection();
+        return BillingImpl.createBillingRecord(this.client, billingData);
+    }
+    async createPaymentRecord(paymentData) {
+        await this.ensureConnection();
+        return PaymentsImpl.createPaymentRecord(this.client, paymentData);
     }
 }
 exports.SupabaseService = SupabaseService;

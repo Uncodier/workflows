@@ -113,7 +113,42 @@ async function enrichLeadWorkflow(options) {
         }
         else {
             person = personCheck.existingPerson;
-            console.log(`✅ Found person: ${person.id} (${person.full_name || 'Unknown'})`);
+            // Reinforce mining for leads created before today: if person was created before today,
+            // treat as non-existent and re-mine via details API, then upsert at the end.
+            const personCreatedAtMs = person.created_at ? new Date(person.created_at).getTime() : 0;
+            const now = new Date();
+            const startOfTodayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0);
+            const isPersonOlderThanToday = personCreatedAtMs > 0 && personCreatedAtMs < startOfTodayUtc;
+            if (isPersonOlderThanToday && person_id) {
+                console.log(`🔄 Person created before today (${person.created_at}), re-mining via details API and upsert...`);
+                const detailsResult = await callPersonContactsLookupDetailsActivity({
+                    person_id: person_id,
+                    site_id: site_id,
+                    userId: userId,
+                    company_name: optionsCompanyName ?? undefined,
+                });
+                if (!detailsResult.success) {
+                    const errorMsg = `Failed to re-mine person from details API: ${detailsResult.error}`;
+                    console.error(`❌ ${errorMsg}`);
+                    errors.push(errorMsg);
+                    throw new Error(errorMsg);
+                }
+                if (!detailsResult.person) {
+                    const errorMsg = 'Details API succeeded but no person returned for re-mining';
+                    console.error(`❌ ${errorMsg}`);
+                    errors.push(errorMsg);
+                    throw new Error(errorMsg);
+                }
+                person = detailsResult.person;
+                detailsResultData = detailsResult;
+                personCreatedFromDetails = true;
+                person.emails = null;
+                person.phones = null;
+                console.log(`✅ Person re-mined from details API: ${person.id} (${person.full_name || 'Unknown'})`);
+            }
+            else {
+                console.log(`✅ Found person: ${person.id} (${person.full_name || 'Unknown'})`);
+            }
         }
         // Check what data the person already has
         const existingPersonEmails = person.emails || [];
@@ -472,8 +507,23 @@ async function enrichLeadWorkflow(options) {
         const additionalWorkEmails = workEmails.slice(1).map((e) => typeof e === 'string' ? e : e.email);
         const additionalPhones = phoneNumbers.slice(1).map((p) => typeof p === 'string' ? p : p.phone_number);
         const additionalPersonalEmails = personalEmails.slice(1).map((e) => typeof e === 'string' ? e : e.email);
-        // Build notes with additional contacts
+        // Build notes with additional contacts and descriptions (person/org from API when available)
         const notesParts = [];
+        const personDescription = (person.raw_result && typeof person.raw_result.person_description === 'string' && person.raw_result.person_description.trim() !== '')
+            ? person.raw_result.person_description.trim()
+            : (person.raw_result && typeof person.raw_result.description === 'string' && person.raw_result.description.trim() !== '')
+                ? person.raw_result.description.trim()
+                : null;
+        if (personDescription) {
+            notesParts.push(`Person description: ${personDescription}`);
+        }
+        const orgDescription = selectedRole?.organization &&
+            typeof (selectedRole.organization.organization_description ?? selectedRole.organization.description) === 'string'
+            ? String((selectedRole.organization.organization_description ?? selectedRole.organization.description)).trim()
+            : null;
+        if (orgDescription && orgDescription !== '') {
+            notesParts.push(`Organization description: ${orgDescription}`);
+        }
         if (additionalWorkEmails.length > 0) {
             notesParts.push(`Additional work emails: ${additionalWorkEmails.join(', ')}`);
         }
@@ -509,6 +559,10 @@ async function enrichLeadWorkflow(options) {
             if (!personPhones.includes(phone))
                 personPhones.push(phone);
         });
+        // Resolve LinkedIn URL: options > raw_result > person.linkedin_profile
+        const linkedinUrlForUpdate = linkedinProfileToUse
+            || person.linkedin_profile
+            || null;
         // Update person IMMEDIATELY with enriched data
         const personUpdate = await upsertPersonActivity({
             external_person_id: person.external_person_id,
@@ -521,6 +575,7 @@ async function enrichLeadWorkflow(options) {
             end_date: person.end_date,
             is_current: person.is_current,
             location: person.location,
+            linkedin_profile: linkedinUrlForUpdate,
             emails: personEmails.length > 0 ? personEmails : null,
             phones: personPhones.length > 0 ? personPhones : null,
             raw_result: person.raw_result,
@@ -585,6 +640,7 @@ async function enrichLeadWorkflow(options) {
                 company_id: leadCompanyId,
                 segment_id: segment_id || undefined,
                 person_emails: personEmails, // Pass updated emails to avoid DB query
+                linkedin_url: linkedinUrlForUpdate || undefined,
             }); // Type assertion needed because Activities type is auto-generated
             if (!leadUpdate.success) {
                 const errorMsg = `Failed to update/create lead: ${leadUpdate.error}`;

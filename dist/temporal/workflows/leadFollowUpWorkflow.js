@@ -20,7 +20,7 @@ const validation_1 = require("./leadFollowUp/validation");
 const research_1 = require("./leadFollowUp/research");
 __exportStar(require("./leadFollowUp/types"), exports);
 // Define the activity interface and options
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, validateContactInformation, validateCommunicationChannelsActivity, invalidateEmailOnlyActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, validateContactInformation, validateCommunicationChannelsActivity, invalidateEmailOnlyActivity, leadEmailRevalidationActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
     retry: {
         maximumAttempts: 3,
@@ -141,9 +141,123 @@ async function leadFollowUpWorkflow(options) {
                 workflowId,
                 errors
             });
+            // Before generating copy: ensure site has at least one channel; if none, end follow-up.
+            const channelsValidation = await validateCommunicationChannelsActivity({ site_id });
+            const hasAnyChannel = channelsValidation.success &&
+                (channelsValidation.hasEmailChannel || channelsValidation.hasWhatsappChannel);
+            if (!hasAnyChannel) {
+                console.log(`🚫 No communication channel configured for site - ending lead follow-up`);
+                const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+                const result = {
+                    success: true,
+                    leadId: lead_id,
+                    siteId: site_id,
+                    siteName,
+                    siteUrl,
+                    followUpActions: [],
+                    nextSteps: [],
+                    data: null,
+                    messageSent: undefined,
+                    errors: [...errors, 'No communication channel (email or WhatsApp) configured for site'],
+                    executionTime,
+                    completedAt: new Date().toISOString()
+                };
+                await saveCronStatusActivity({
+                    siteId: site_id,
+                    workflowId,
+                    scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+                    activityName: 'leadFollowUpWorkflow',
+                    status: 'COMPLETED',
+                    lastRun: new Date().toISOString()
+                });
+                await logWorkflowExecutionActivity({
+                    workflowId,
+                    workflowType: 'leadFollowUpWorkflow',
+                    status: 'COMPLETED',
+                    input: options,
+                    output: result,
+                });
+                return result;
+            }
+            // Lead email revalidation (before generating copy): if site has email and lead will send by email,
+            // and (lead was created before today OR person was created before today), call data enrichment;
+            // if email changes, update lead, person and all related leads. Person mined long ago may have erroneous data.
+            const leadEmail = leadInfo.email;
+            const willSendByEmail = Boolean(leadEmail && !emailInvalidatedInEarlyValidation && channelsValidation.hasEmailChannel);
+            const startOfToday = new Date();
+            startOfToday.setUTCHours(0, 0, 0, 0);
+            const leadCreatedBeforeToday = leadInfo.created_at
+                ? new Date(leadInfo.created_at) < startOfToday
+                : false;
+            const personCreatedBeforeToday = leadInfo.person_created_at
+                ? new Date(leadInfo.person_created_at) < startOfToday
+                : false;
+            const shouldRevalidate = willSendByEmail && (leadCreatedBeforeToday || personCreatedBeforeToday);
+            if (shouldRevalidate) {
+                console.log(`📧 Running lead email revalidation (before copy) - lead created before today: ${leadCreatedBeforeToday}, person created before today: ${personCreatedBeforeToday}`);
+                const revalidationLeadInfo = {
+                    email: leadInfo.email,
+                    company: leadInfo.company,
+                    company_name: leadInfo.company_name,
+                    website: leadInfo.website,
+                    person_id: leadInfo.person_id,
+                    created_at: leadInfo.created_at,
+                    person_created_at: leadInfo.person_created_at,
+                };
+                const revalidationResult = await leadEmailRevalidationActivity({
+                    lead_id,
+                    site_id,
+                    leadInfo: revalidationLeadInfo,
+                });
+                if (!revalidationResult.success) {
+                    console.warn(`⚠️ Lead email revalidation failed (continuing): ${revalidationResult.error}`);
+                    errors.push(`Lead email revalidation failed: ${revalidationResult.error}`);
+                }
+                else if (revalidationResult.emailChanged && revalidationResult.newEmail) {
+                    console.log(`📧 Lead email updated via revalidation to ${revalidationResult.newEmail}`);
+                }
+            }
         }
         else {
             console.log(`⚠️ Running legacy path (v0) - skipping lead info check and research due to workflow versioning`);
+            // Legacy path: still check channels before calling agent; if none, end follow-up.
+            const channelsValidationLegacy = await validateCommunicationChannelsActivity({ site_id });
+            const hasAnyChannelLegacy = channelsValidationLegacy.success &&
+                (channelsValidationLegacy.hasEmailChannel || channelsValidationLegacy.hasWhatsappChannel);
+            if (!hasAnyChannelLegacy) {
+                console.log(`🚫 No communication channel configured for site - ending lead follow-up (legacy path)`);
+                const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+                const result = {
+                    success: true,
+                    leadId: lead_id,
+                    siteId: site_id,
+                    siteName,
+                    siteUrl,
+                    followUpActions: [],
+                    nextSteps: [],
+                    data: null,
+                    messageSent: undefined,
+                    errors: [...errors, 'No communication channel (email or WhatsApp) configured for site'],
+                    executionTime,
+                    completedAt: new Date().toISOString()
+                };
+                await saveCronStatusActivity({
+                    siteId: site_id,
+                    workflowId,
+                    scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+                    activityName: 'leadFollowUpWorkflow',
+                    status: 'COMPLETED',
+                    lastRun: new Date().toISOString()
+                });
+                await logWorkflowExecutionActivity({
+                    workflowId,
+                    workflowType: 'leadFollowUpWorkflow',
+                    status: 'COMPLETED',
+                    input: options,
+                    output: result,
+                });
+                return result;
+            }
         }
         console.log(`📞 Step 3: Executing lead follow-up for lead ${lead_id}...`);
         // Prepare lead follow-up request

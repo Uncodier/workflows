@@ -243,6 +243,7 @@ async function callPersonContactsLookupDetailsActivity(options) {
             end_date: currentRole?.end_date || null,
             is_current: currentRole?.is_current || false,
             location: personLocation,
+            linkedin_profile: linkedinUrl,
             emails: null, // Will be enriched later
             phones: null, // Will be enriched later
             raw_result: personData,
@@ -323,6 +324,7 @@ async function callPersonContactsLookupDetailsActivity(options) {
                 personal_email: undefined, // Will be enriched later
                 userId: options.userId,
                 company_id: currentCompanyId, // Associate lead with current company
+                linkedin_url: linkedinUrl || undefined,
             });
             if (leadResult.success) {
                 lead = leadResult.lead;
@@ -737,6 +739,7 @@ async function upsertPersonActivity(person) {
             end_date: person.end_date ?? null,
             is_current: person.is_current ?? null,
             location: person.location ?? null,
+            linkedin_profile: person.linkedin_profile ?? null,
             emails: person.emails ?? null,
             phones: person.phones ?? null,
             raw_result: person.raw_result,
@@ -893,6 +896,13 @@ async function upsertLeadForPersonActivity(options) {
             personal_email: options.personal_email || null,
             updated_at: new Date().toISOString(),
         };
+        // Add social_networks.linkedin if provided (merge with existing to preserve other platforms)
+        if (options.linkedin_url) {
+            const existingSocial = existingLead?.social_networks && typeof existingLead.social_networks === 'object'
+                ? existingLead.social_networks
+                : {};
+            leadData.social_networks = { ...existingSocial, linkedin: options.linkedin_url };
+        }
         // Add company_id if provided
         if (options.company_id) {
             leadData.company_id = options.company_id;

@@ -48,6 +48,20 @@ export async function updateSiteCredits(
   console.log(`✅ Successfully updated credits for site ${siteId}`);
 }
 
+export async function fetchBillingForSite(client: SupabaseClient, siteId: string): Promise<any> {
+  const { data, error } = await client
+    .from('billing')
+    .select('*')
+    .eq('site_id', siteId)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`❌ Error fetching billing for site ${siteId}:`, error);
+    throw new Error(`Failed to fetch billing: ${error.message}`);
+  }
+  return data;
+}
+
 export async function fetchSitesWithoutBilling(client: SupabaseClient): Promise<string[]> {
   console.log('🔍 Fetching sites needing billing initialization...');
 

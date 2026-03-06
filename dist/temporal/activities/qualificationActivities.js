@@ -56,7 +56,7 @@ function buildLeadsFromStages(leadsByStage, limit) {
 async function getQualificationLeadsActivity(params) {
     const siteId = params.site_id;
     const daysWithoutReply = typeof params.daysWithoutReply === 'number' ? params.daysWithoutReply : 7;
-    const maxPerStage = typeof params.maxLeadsPerStage === 'number' ? params.maxLeadsPerStage : 10;
+    const maxPerStage = typeof params.maxLeadsPerStage === 'number' ? params.maxLeadsPerStage : 30;
     const legacyLimit = typeof params.limit === 'number' ? params.limit : 30;
     // Use the provided daysWithoutReply for the threshold
     const threshold = new Date(Date.now() - daysWithoutReply * 24 * 60 * 60 * 1000);

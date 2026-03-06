@@ -247,6 +247,11 @@ export class SupabaseService {
     return BillingImpl.fetchActiveBillings(this.client);
   }
 
+  async fetchBillingForSite(siteId: string): Promise<any> {
+    await this.ensureConnection();
+    return BillingImpl.fetchBillingForSite(this.client, siteId);
+  }
+
   async updateSiteCredits(siteId: string, credits: number): Promise<void> {
     await this.ensureConnection();
     return BillingImpl.updateSiteCredits(this.client, siteId, credits);

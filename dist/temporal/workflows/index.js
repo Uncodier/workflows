@@ -65,6 +65,7 @@ const enrichLeadWorkflow_1 = require("./enrichLeadWorkflow");
 const generatePersonEmailWorkflow_1 = require("./generatePersonEmailWorkflow");
 const leadGenerationDomainSearchWorkflow_1 = require("./leadGenerationDomainSearchWorkflow");
 const sendApprovedMessagesWorkflow_1 = require("./sendApprovedMessagesWorkflow");
+const dailyCreditRenewalWorkflow_1 = require("./dailyCreditRenewalWorkflow");
 // Export workflows individually
 __exportStar(require("./dataProcessingWorkflow"), exports);
 __exportStar(require("./cronWorkflow"), exports);
@@ -109,6 +110,7 @@ __exportStar(require("./enrichLeadWorkflow"), exports);
 __exportStar(require("./generatePersonEmailWorkflow"), exports);
 __exportStar(require("./leadGenerationDomainSearchWorkflow"), exports);
 __exportStar(require("./sendApprovedMessagesWorkflow"), exports);
+__exportStar(require("./dailyCreditRenewalWorkflow"), exports);
 // Also export as a bundle for the client
 exports.workflows = {
     dataProcessingWorkflow: dataProcessingWorkflow_1.dataProcessingWorkflow,
@@ -158,6 +160,7 @@ exports.workflows = {
     generatePersonEmailWorkflow: generatePersonEmailWorkflow_1.generatePersonEmailWorkflow,
     leadGenerationDomainSearchWorkflow: leadGenerationDomainSearchWorkflow_1.leadGenerationDomainSearchWorkflow,
     sendApprovedMessagesWorkflow: sendApprovedMessagesWorkflow_1.sendApprovedMessagesWorkflow,
+    dailyCreditRenewalWorkflow: dailyCreditRenewalWorkflow_1.dailyCreditRenewalWorkflow,
     // Alias for backward compatibility
     whatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
     // ✅ Aliases for agent workflows with different naming conventions
@@ -213,6 +216,7 @@ exports.workflowNames = {
     generatePersonEmailWorkflow: 'generatePersonEmailWorkflow',
     leadGenerationDomainSearchWorkflow: 'leadGenerationDomainSearchWorkflow',
     sendApprovedMessagesWorkflow: 'sendApprovedMessagesWorkflow',
+    dailyCreditRenewalWorkflow: 'dailyCreditRenewalWorkflow',
     // Alias for backward compatibility
     whatsappMessageWorkflow: 'whatsappMessageWorkflow',
     // ✅ Aliases for agent workflows with different naming conventions

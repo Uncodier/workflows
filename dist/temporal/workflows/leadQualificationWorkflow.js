@@ -97,7 +97,7 @@ async function leadQualificationWorkflow(options) {
         }
         const daysWithoutReply = typeof options.daysWithoutReply === 'number' ? options.daysWithoutReply : 7;
         const maxLeads = typeof options.maxLeads === 'number' ? options.maxLeads : 100;
-        const maxLeadsPerStage = typeof options.maxLeadsPerStage === 'number' ? options.maxLeadsPerStage : 10;
+        const maxLeadsPerStage = typeof options.maxLeadsPerStage === 'number' ? options.maxLeadsPerStage : 30;
         const qualification = await getQualificationLeadsActivity({
             site_id,
             daysWithoutReply,

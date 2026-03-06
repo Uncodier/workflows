@@ -66,6 +66,7 @@ exports.updateLeadEmailVerificationActivity = updateLeadEmailVerificationActivit
 exports.invalidateReferredLeads = invalidateReferredLeads;
 exports.countPendingMessagesActivity = countPendingMessagesActivity;
 exports.checkMessageStatusActivity = checkMessageStatusActivity;
+exports.leadEmailRevalidationActivity = leadEmailRevalidationActivity;
 const apiService_1 = require("../services/apiService");
 const supabaseService_1 = require("../services/supabaseService");
 const client_1 = require("../client");
@@ -183,6 +184,24 @@ async function getLeadActivity(leadId) {
             updated_at: leadData.updated_at,
             ...leadData
         };
+        // Fetch person created_at when lead has person_id (for revalidation: person mined long ago may have stale data)
+        const personId = leadData.person_id && typeof leadData.person_id === 'string' ? leadData.person_id : null;
+        if (personId) {
+            try {
+                const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+                const { data: personRow, error: personError } = await supabaseServiceRole
+                    .from('persons')
+                    .select('created_at')
+                    .eq('id', personId)
+                    .single();
+                if (!personError && personRow?.created_at) {
+                    lead.person_created_at = personRow.created_at;
+                }
+            }
+            catch {
+                // Non-fatal: lead is still returned, revalidation may run based on lead date only
+            }
+        }
         console.log(`✅ Retrieved lead information for ${lead.name || lead.email}: ${lead.company}`);
         return {
             success: true,
@@ -335,9 +354,9 @@ async function leadAttentionActivity(request) {
  */
 async function startLeadAttentionWorkflowActivity(request) {
     console.log(`🚀 Starting independent leadAttentionWorkflow for lead: ${request.lead_id}`);
+    // Add timestamp to workflowId to prevent collisions when multiple messages arrive for same lead
+    const workflowId = `lead-attention-${request.lead_id}-${Date.now()}`;
     try {
-        // Add timestamp to workflowId to prevent collisions when multiple messages arrive for same lead
-        const workflowId = `lead-attention-${request.lead_id}-${Date.now()}`;
         // Get Temporal client directly (same pattern used throughout the codebase)
         const client = await (0, client_1.getTemporalClient)();
         const workflowArgs = { lead_id: request.lead_id, user_message: request.user_message, system_message: request.system_message };
@@ -370,12 +389,11 @@ async function startLeadAttentionWorkflowActivity(request) {
         // duplicates, retries, or Temporal server-side duplicate processing. leadAttentionWorkflow is
         // idempotent (checks for existing notifications before sending), so treat as success.
         if (errorMessage.includes('Workflow execution already started')) {
-            const logicalWorkflowId = `lead-attention-${request.lead_id}`;
             console.log(`⚠️ Workflow already started for lead ${request.lead_id} (idempotent - existing run will handle it)`);
-            console.log(`📋 Workflow ID pattern: ${logicalWorkflowId}-*`);
+            console.log(`📋 Workflow ID: ${workflowId}`);
             return {
                 success: true,
-                workflowId: logicalWorkflowId
+                workflowId: workflowId
             };
         }
         // Log error for debugging - other errors are real failures
@@ -429,11 +447,20 @@ async function startLeadFollowUpWorkflowActivity(request) {
         };
     }
     catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`❌ Exception starting independent leadFollowUpWorkflow for lead ${request.lead_id}:`, errorMessage);
+        // Extract full error details - SDK wraps gRPC errors with "Failed to start Workflow", hiding the real cause
+        const err = error;
+        const cause = err.cause;
+        const causeMessage = cause?.message ?? '';
+        const causeDetails = cause?.details ?? '';
+        const grpcCode = cause?.code;
+        const fullError = causeMessage || causeDetails || (error instanceof Error ? error.message : String(error));
+        console.error(`❌ Exception starting independent leadFollowUpWorkflow for lead ${request.lead_id}:`, fullError);
+        if (cause) {
+            console.error('   gRPC cause:', { code: grpcCode, details: causeDetails || causeMessage });
+        }
         return {
             success: false,
-            error: errorMessage
+            error: fullError
         };
     }
 }
@@ -2288,12 +2315,24 @@ async function cleanupFailedFollowUpActivity(request) {
         if (messagesCount === 0) {
             const resetReason = 'no messages exist for this lead (message not sent and no other messages)';
             console.log(`🔄 Resetting lead ${request.lead_id} status to 'new' (${resetReason})...`);
+            // Fetch current lead data to preserve custom_data
+            const { data: currentLead, error: fetchError } = await supabaseServiceRole
+                .from('leads')
+                .select('custom_data')
+                .eq('id', request.lead_id)
+                .eq('site_id', request.site_id)
+                .single();
+            if (fetchError) {
+                console.error(`❌ Error fetching current lead data:`, fetchError);
+            }
+            const existingCustomData = typeof currentLead?.custom_data === 'object' ? currentLead.custom_data : {};
             const { data: leadData, error: resetError } = await supabaseServiceRole
                 .from('leads')
                 .update({
                 status: 'new',
                 updated_at: new Date().toISOString(),
                 custom_data: {
+                    ...existingCustomData,
                     cleanup_performed: true,
                     cleanup_reason: request.failure_reason,
                     cleanup_timestamp: new Date().toISOString(),
@@ -2861,5 +2900,137 @@ async function checkMessageStatusActivity(request) {
             success: false,
             error: errorMessage
         };
+    }
+}
+/**
+ * Extract domain from email (part after @) or from a website URL.
+ */
+function extractDomainForEnrichment(leadInfo) {
+    if (leadInfo.email && typeof leadInfo.email === 'string' && leadInfo.email.includes('@')) {
+        const domain = leadInfo.email.trim().split('@')[1];
+        if (domain && domain.length > 0)
+            return domain;
+    }
+    const website = leadInfo.website
+        || (typeof leadInfo.company === 'object' && leadInfo.company !== null && leadInfo.company.website);
+    if (website && typeof website === 'string') {
+        try {
+            const url = website.startsWith('http') ? website : `https://${website}`;
+            const hostname = new URL(url).hostname;
+            if (hostname && hostname !== '')
+                return hostname;
+        }
+        catch {
+            // ignore invalid URL
+        }
+    }
+    return null;
+}
+/**
+ * Lead email revalidation: calls data enrichment when domain exists (from email or company).
+ * If enrichment returns a different email, updates lead, person, and all leads for that person.
+ */
+async function leadEmailRevalidationActivity(request) {
+    const { lead_id, site_id, leadInfo } = request;
+    console.log(`📧 Lead email revalidation for lead ${lead_id}`);
+    try {
+        const domain = extractDomainForEnrichment(leadInfo);
+        if (!domain) {
+            console.log(`📧 No domain from email or company - skipping data enrichment`);
+            return { success: true, emailChanged: false };
+        }
+        const currentEmail = (leadInfo.email && typeof leadInfo.email === 'string')
+            ? leadInfo.email.trim().toLowerCase()
+            : '';
+        const response = await apiService_1.apiService.post('/api/agents/sales/dataEnrichment', {
+            domain,
+            email: leadInfo.email || undefined,
+            company_name: leadInfo.company_name
+                || (typeof leadInfo.company === 'object' && leadInfo.company !== null && leadInfo.company.name)
+                || undefined,
+        });
+        const enrichedEmail = response?.data?.email && typeof response.data.email === 'string'
+            ? response.data.email.trim()
+            : null;
+        if (!enrichedEmail || enrichedEmail.toLowerCase() === currentEmail) {
+            console.log(`📧 Enrichment did not change email - proceeding as normal`);
+            return { success: true, emailChanged: false };
+        }
+        const personId = leadInfo.person_id && typeof leadInfo.person_id === 'string' ? leadInfo.person_id : null;
+        // When we have a person_id, fetch and validate the person first so we never update the lead
+        // without being able to update the person (avoids inconsistent state).
+        if (personId) {
+            const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+            const { data: personRow, error: personError } = await supabaseServiceRole
+                .from('persons')
+                .select('emails')
+                .eq('id', personId)
+                .single();
+            if (personError || personRow == null) {
+                const reason = personError?.code === 'PGRST116'
+                    ? 'Person not found'
+                    : personError?.message ?? 'Failed to fetch person';
+                console.error(`📧 Lead email revalidation aborted: ${reason} (person_id: ${personId})`);
+                return {
+                    success: false,
+                    error: `Cannot revalidate: ${reason}. Lead was not updated to avoid inconsistent state.`,
+                };
+            }
+            const existingEmails = Array.isArray(personRow.emails) ? personRow.emails : [];
+            const merged = existingEmails.some((e) => (e || '').toLowerCase() === enrichedEmail.toLowerCase())
+                ? existingEmails
+                : [enrichedEmail, ...existingEmails.filter((e) => (e || '').toLowerCase() !== currentEmail)];
+            console.log(`📧 Enrichment returned new email - updating person first, then lead and all related leads`);
+            // Update person first so we never modify the lead without a consistent person record.
+            const { error: personUpdateError } = await supabaseServiceRole
+                .from('persons')
+                .update({ emails: merged, updated_at: new Date().toISOString() })
+                .eq('id', personId);
+            if (personUpdateError) {
+                console.error(`❌ Lead email revalidation: person update failed (lead not modified)`, personUpdateError);
+                return {
+                    success: false,
+                    error: `Person record update failed: ${personUpdateError.message}. Lead was not updated to avoid inconsistent state.`,
+                };
+            }
+            await updateLeadActivity({
+                lead_id,
+                updateData: { email: enrichedEmail },
+                safeUpdate: false,
+            });
+            const { data: leadsForPerson, error: leadsError } = await supabaseServiceRole
+                .from('leads')
+                .select('id')
+                .eq('person_id', personId);
+            if (leadsError) {
+                console.warn(`⚠️ Lead email revalidation: could not fetch other leads for person (lead and person were updated):`, leadsError.message);
+            }
+            else if (leadsForPerson && leadsForPerson.length > 0) {
+                for (const row of leadsForPerson) {
+                    if (row.id === lead_id)
+                        continue;
+                    await updateLeadActivity({
+                        lead_id: row.id,
+                        updateData: { email: enrichedEmail },
+                        safeUpdate: false,
+                    });
+                }
+            }
+        }
+        else {
+            console.log(`📧 Enrichment returned new email - updating lead (no person_id)`);
+            await updateLeadActivity({
+                lead_id,
+                updateData: { email: enrichedEmail },
+                safeUpdate: false,
+            });
+        }
+        console.log(`✅ Lead email revalidation completed - email updated to ${enrichedEmail}`);
+        return { success: true, emailChanged: true, newEmail: enrichedEmail };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Lead email revalidation failed:`, errorMessage);
+        return { success: false, error: errorMessage };
     }
 }

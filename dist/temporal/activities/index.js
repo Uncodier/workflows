@@ -36,7 +36,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.checkSiteAnalysisActivity = exports.deleteResourceActivity = exports.updateResourceActivity = exports.createResourceActivity = exports.storeWorkflowResultActivity = exports.fetchConfigurationActivity = exports.trackApiCallActivity = exports.logWorkflowExecutionActivity = exports.executeDailyProspectionWorkflowsActivity = exports.scheduleIndividualDailyProspectionActivity = exports.scheduleIndividualLeadGenerationActivity = exports.scheduleIndividualSiteAnalysisActivity = exports.scheduleIndividualDailyStandUpsActivity = exports.scheduleDailyOperationsWorkflowActivity = exports.executeDailyStandUpWorkflowsActivity = exports.activities = void 0;
+exports.initializeSiteCreditsActivity = exports.fetchSitesNeedingInitializationActivity = exports.renewSiteCreditsActivity = exports.fetchSitesDueForCreditRenewalActivity = exports.checkSiteAnalysisActivity = exports.deleteResourceActivity = exports.updateResourceActivity = exports.createResourceActivity = exports.storeWorkflowResultActivity = exports.fetchConfigurationActivity = exports.trackApiCallActivity = exports.logWorkflowExecutionActivity = exports.executeDailyProspectionWorkflowsActivity = exports.scheduleIndividualDailyProspectionActivity = exports.scheduleIndividualLeadGenerationActivity = exports.scheduleIndividualSiteAnalysisActivity = exports.scheduleIndividualDailyStandUpsActivity = exports.scheduleDailyOperationsWorkflowActivity = exports.executeDailyStandUpWorkflowsActivity = exports.activities = void 0;
 // Export all activities
 __exportStar(require("./supabaseActivities"), exports);
 __exportStar(require("./apiActivities"), exports);
@@ -69,6 +69,7 @@ __exportStar(require("./finderActivities"), exports);
 __exportStar(require("./activityControlActivities"), exports);
 __exportStar(require("./messageActivities"), exports);
 __exportStar(require("./icypeasActivities"), exports);
+__exportStar(require("./billingActivities"), exports);
 // Bundle all activities for the worker
 const supabaseActivities = __importStar(require("./supabaseActivities"));
 const apiActivities = __importStar(require("./apiActivities"));
@@ -101,6 +102,7 @@ const finderActivities = __importStar(require("./finderActivities"));
 const activityControlActivities = __importStar(require("./activityControlActivities"));
 const messageActivities = __importStar(require("./messageActivities"));
 const icypeasActivities = __importStar(require("./icypeasActivities"));
+const billingActivities = __importStar(require("./billingActivities"));
 exports.activities = {
     ...supabaseActivities,
     ...apiActivities,
@@ -133,6 +135,7 @@ exports.activities = {
     ...activityControlActivities,
     ...messageActivities,
     ...icypeasActivities,
+    ...billingActivities,
 };
 var workflowSchedulingActivities_1 = require("./workflowSchedulingActivities");
 Object.defineProperty(exports, "executeDailyStandUpWorkflowsActivity", { enumerable: true, get: function () { return workflowSchedulingActivities_1.executeDailyStandUpWorkflowsActivity; } });
@@ -151,3 +154,8 @@ Object.defineProperty(exports, "createResourceActivity", { enumerable: true, get
 Object.defineProperty(exports, "updateResourceActivity", { enumerable: true, get: function () { return supabaseActivities_1.updateResourceActivity; } });
 Object.defineProperty(exports, "deleteResourceActivity", { enumerable: true, get: function () { return supabaseActivities_1.deleteResourceActivity; } });
 Object.defineProperty(exports, "checkSiteAnalysisActivity", { enumerable: true, get: function () { return supabaseActivities_1.checkSiteAnalysisActivity; } });
+var billingActivities_1 = require("./billingActivities");
+Object.defineProperty(exports, "fetchSitesDueForCreditRenewalActivity", { enumerable: true, get: function () { return billingActivities_1.fetchSitesDueForCreditRenewalActivity; } });
+Object.defineProperty(exports, "renewSiteCreditsActivity", { enumerable: true, get: function () { return billingActivities_1.renewSiteCreditsActivity; } });
+Object.defineProperty(exports, "fetchSitesNeedingInitializationActivity", { enumerable: true, get: function () { return billingActivities_1.fetchSitesNeedingInitializationActivity; } });
+Object.defineProperty(exports, "initializeSiteCreditsActivity", { enumerable: true, get: function () { return billingActivities_1.initializeSiteCreditsActivity; } });

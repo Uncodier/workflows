@@ -92,26 +92,50 @@ export async function initializeSiteCreditsActivity(siteId: string): Promise<voi
   const supabaseService = getSupabaseService();
   
   try {
-    // 1. Create Billing Record
-    await supabaseService.createBillingRecord({
-      site_id: siteId,
-      plan: 'free',
-      credits_available: 30,
-      status: 'active'
-    });
+    // 1. Fetch existing billing record if any
+    let existingBilling = null;
+    existingBilling = await supabaseService.fetchBillingForSite(siteId);
 
-    // 2. Record 0 Payment
+    const plan = existingBilling?.plan || 'free';
+    const normalizedPlan = plan.toLowerCase();
+
+    // Calculate initial credits based on real plan
+    let initialCredits = 30; // Default for free/unknown
+    if (normalizedPlan === 'startup') initialCredits = 100;
+    else if (normalizedPlan === 'enterprise') initialCredits = 1000;
+    else if (normalizedPlan === 'commission') initialCredits = 20;
+
+    if (!existingBilling) {
+      // Create new billing record
+      await supabaseService.createBillingRecord({
+        site_id: siteId,
+        plan: 'free', // A truly new site starts free
+        credits_available: initialCredits,
+        status: 'active'
+      });
+      console.log(`✅ Created billing record for site ${siteId} with ${initialCredits} credits.`);
+    } else {
+      // User already has a billing record (e.g., from Stripe payment) but missing initial credits.
+      // This is the fallback emergency assignment.
+      const currentCredits = existingBilling.credits_available || 0;
+      const newCredits = currentCredits + initialCredits;
+      
+      await supabaseService.updateSiteCredits(siteId, newCredits);
+      console.log(`✅ Added ${initialCredits} emergency initial credits to existing billing for site ${siteId}. Balance: ${currentCredits} -> ${newCredits}`);
+    }
+
+    // 2. Record Payment
     await supabaseService.createPaymentRecord({
       site_id: siteId,
       amount: 0,
-      credits: 30,
+      credits: initialCredits,
       payment_method: 'initial_credit',
       status: 'completed',
       transaction_type: 'credit',
-      details: { note: 'Initial signup credits' }
+      details: { note: 'Initial signup credits (fallback or new)' }
     });
 
-    console.log(`✅ Site ${siteId} initialized with 30 credits.`);
+    console.log(`✅ Site ${siteId} initialized with ${initialCredits} credits.`);
   } catch (error) {
     console.error(`❌ Failed to initialize credits for site ${siteId}:`, error);
     throw error;
