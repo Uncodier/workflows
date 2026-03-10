@@ -117,11 +117,27 @@ export async function createBillingRecord(
 ): Promise<any> {
   console.log(`Creating billing record for site ${billingData.site_id}`);
 
-  // Upsert so that a retry after a partial failure (billing created, payment not yet)
-  // does not throw a duplicate key error — the existing record is left unchanged.
+  // First, check if a billing record already exists to avoid duplicates
+  // since site_id does not have a unique constraint, we cannot use upsert with onConflict.
+  const { data: existingData, error: fetchError } = await client
+    .from('billing')
+    .select()
+    .eq('site_id', billingData.site_id)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error(`❌ Error fetching existing billing record for site ${billingData.site_id}:`, fetchError);
+    throw new Error(`Failed to fetch existing billing record: ${fetchError.message}`);
+  }
+
+  if (existingData) {
+    console.log(`ℹ️ Billing record already exists for site ${billingData.site_id}, returning existing record...`);
+    return existingData;
+  }
+
   let { data, error } = await client
     .from('billing')
-    .upsert(
+    .insert(
       {
         site_id: billingData.site_id,
         plan: billingData.plan || 'free',
@@ -131,8 +147,7 @@ export async function createBillingRecord(
         subscription_start_date: new Date().toISOString(),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
-      },
-      { onConflict: 'site_id', ignoreDuplicates: true }
+      }
     )
     .select()
     .maybeSingle();
@@ -142,23 +157,6 @@ export async function createBillingRecord(
     throw new Error(`Failed to create billing record: ${error.message}`);
   }
 
-  // If data is null, it means the record already exists (ignoreDuplicates: true),
-  // so we fetch the existing record to return it.
-  if (!data) {
-    console.log(`ℹ️ Billing record already exists for site ${billingData.site_id}, fetching existing record...`);
-    const { data: existingData, error: fetchError } = await client
-      .from('billing')
-      .select()
-      .eq('site_id', billingData.site_id)
-      .single();
-
-    if (fetchError) {
-      console.error(`❌ Error fetching existing billing record for site ${billingData.site_id}:`, fetchError);
-      throw new Error(`Failed to fetch existing billing record: ${fetchError.message}`);
-    }
-    data = existingData;
-  }
-
-  console.log(`✅ Successfully created/retrieved billing record for site ${billingData.site_id}`);
+  console.log(`✅ Successfully created billing record for site ${billingData.site_id}`);
   return data;
 }
