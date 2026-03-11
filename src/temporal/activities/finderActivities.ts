@@ -20,7 +20,7 @@ export async function callPersonRoleSearchActivity(options: {
   hasMore?: boolean;
   error?: string;
 }> {
-  const { role_query_id, query, page, page_size = 10 } = options;
+  const { role_query_id, query, page, page_size = 10, site_id } = options;
 
   try {
     // Use query data if provided, otherwise fall back to role_query_id
@@ -28,10 +28,12 @@ export async function callPersonRoleSearchActivity(options: {
       ...query, // Spread the query parameters directly into the body
       page,
       page_size,
+      site_id,
     } : {
       role_query_id,
       page,
       page_size,
+      site_id,
     };
 
     // Log the request body for debugging
@@ -86,6 +88,7 @@ export async function callPersonWorkEmailsActivity(options: {
   company_name?: string;
   person_id?: string;
   linkedin_profile?: string;
+  site_id?: string;
 }): Promise<{
   success: boolean;
   data?: any;
@@ -98,6 +101,7 @@ export async function callPersonWorkEmailsActivity(options: {
 }> {
   try {
     const requestBody: any = {};
+    if (options.site_id) requestBody.site_id = options.site_id;
     if (options.person_id) {
       requestBody.person_id = options.person_id;
     } else if (options.linkedin_profile) {
@@ -133,6 +137,7 @@ export async function callPersonContactsLookupPhoneNumbersActivity(options: {
   external_person_id?: string | number;
   full_name?: string;
   company_name?: string;
+  site_id?: string;
 }): Promise<{
   success: boolean;
   data?: any;
@@ -143,6 +148,7 @@ export async function callPersonContactsLookupPhoneNumbersActivity(options: {
 }> {
   try {
     const requestBody: any = {};
+    if (options.site_id) requestBody.site_id = options.site_id;
     if (options.person_id) {
       requestBody.person_id = options.person_id;
     } else if (options.linkedin_profile) {
@@ -175,6 +181,7 @@ export async function callPersonContactsLookupPersonalEmailsActivity(options: {
   external_person_id?: string | number;
   full_name?: string;
   company_name?: string;
+  site_id?: string;
 }): Promise<{
   success: boolean;
   data?: any;
@@ -187,6 +194,7 @@ export async function callPersonContactsLookupPersonalEmailsActivity(options: {
 }> {
   try {
     const requestBody: any = {};
+    if (options.site_id) requestBody.site_id = options.site_id;
     if (options.person_id) {
       requestBody.person_id = options.person_id;
     } else if (options.linkedin_profile) {
@@ -233,7 +241,8 @@ export async function callPersonContactsLookupDetailsActivity(options: {
     }
 
     // Call API endpoint
-    const requestBody = { person_id: options.person_id };
+    const requestBody: any = { person_id: options.person_id };
+    if (options.site_id) requestBody.site_id = options.site_id;
     console.log(`📞 Calling person_contacts_lookup/details with person_id: ${options.person_id}`);
 
     const response = await apiService.post('/api/finder/person_contacts_lookup/details', requestBody);
@@ -618,6 +627,7 @@ export async function checkExistingPersonActivity(options: {
   external_role_id?: string | number;
   full_name?: string;
   company_name?: string;
+  site_id?: string;
 }): Promise<{
   success: boolean;
   hasExistingPerson: boolean;
@@ -672,6 +682,7 @@ export async function checkExistingPersonActivity(options: {
 export async function checkPersonByLinkedInActivity(options: {
   linkedin_profile?: string;
   person_id?: string;
+  site_id?: string;
 }): Promise<{
   success: boolean;
   hasExistingPerson: boolean;

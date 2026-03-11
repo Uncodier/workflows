@@ -114,6 +114,7 @@ export async function enrichLeadWorkflow(
     const personCheck = await checkPersonByLinkedInActivity({
       linkedin_profile,
       person_id,
+      site_id,
     });
 
     if (!personCheck.success) {
@@ -385,7 +386,7 @@ export async function enrichLeadWorkflow(
     let hasResult = false;
 
     // Prepare API request parameters
-    const apiParams: any = {};
+    const apiParams: any = { site_id };
     if (person.external_person_id) {
       apiParams.person_id = person.external_person_id;
     }
