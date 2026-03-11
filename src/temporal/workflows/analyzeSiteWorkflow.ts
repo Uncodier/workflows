@@ -11,6 +11,7 @@ const {
   updateSettingsActivity,
   uxAnalysisActivity,
   sendProjectAnalysisNotificationActivity,
+  storeWorkflowResultActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -1303,6 +1304,22 @@ export async function analyzeSiteWorkflow(
       executionTime,
       completedAt: new Date().toISOString()
     };
+    
+    // Store workflow result including the analysis to be queried later
+    try {
+      await storeWorkflowResultActivity({
+        workflowId,
+        result: result,
+        metadata: {
+          type: 'site_analysis',
+          siteId: site_id,
+          url: siteUrl,
+          userId: options.userId || site.user_id
+        }
+      });
+    } catch (e) {
+      console.warn('⚠️ Could not store workflow analysis result:', e);
+    }
 
     console.log(`🎉 Company and project research workflow completed successfully!`);
     console.log(`📊 Summary: Company research for ${siteName} completed in ${executionTime}`);

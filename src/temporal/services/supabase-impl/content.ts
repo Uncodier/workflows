@@ -41,15 +41,44 @@ export async function hasSiteAnalysis(client: SupabaseClient, siteId: string): P
       record.status === 'completed' || record.status === null // null is also considered completed
     );
     
-    const hasAnalysis = completedAnalysis.length > 0;
-    const lastAnalysis = hasAnalysis ? completedAnalysis[0] : null; // First one is most recent due to ordering
+    let hasAnalysis = completedAnalysis.length > 0;
+    let lastAnalysis = hasAnalysis ? completedAnalysis[0] : null; // First one is most recent due to ordering
+    let count = completedAnalysis.length;
+
+    // Fallback: Check if the site was analyzed by looking at the settings table
+    // If 'about' and 'industry' are populated and not just the default placeholders, the site has been analyzed.
+    if (!hasAnalysis) {
+      console.log(`🔍 Checking settings table as fallback for site: ${siteId}`);
+      const { data: settingsData, error: settingsError } = await client
+        .from('settings')
+        .select('about, industry')
+        .eq('site_id', siteId)
+        .single();
+        
+      if (!settingsError && settingsData) {
+        // Checking if we have valid about/industry that are not the default descriptions
+        const hasValidAbout = settingsData.about && 
+                              settingsData.about.trim() !== '' && 
+                              !settingsData.about.includes('A comprehensive description');
+        const hasValidIndustry = settingsData.industry && 
+                                 settingsData.industry.trim() !== '' && 
+                                 !settingsData.industry.includes('The specific industry sector');
+                                 
+        if (hasValidAbout || hasValidIndustry) {
+          console.log(`✅ Site ${siteId} has populated settings (about/industry), considering it analyzed.`);
+          hasAnalysis = true;
+          count = 1;
+          lastAnalysis = { created_at: new Date().toISOString(), status: 'completed', source: 'settings_fallback' };
+        }
+      }
+    }
     
-    console.log(`📊 Site ${siteId} analysis status: ${hasAnalysis ? 'HAS ANALYSIS' : 'NO ANALYSIS'} (${completedAnalysis.length} completed records)`);
+    console.log(`📊 Site ${siteId} analysis status: ${hasAnalysis ? 'HAS ANALYSIS' : 'NO ANALYSIS'} (${count} completed records)`);
     
     return {
       hasAnalysis,
       lastAnalysis,
-      count: completedAnalysis.length
+      count
     };
   } catch (error) {
     console.error(`❌ Error checking site analysis for ${siteId}:`, error);

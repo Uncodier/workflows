@@ -9,7 +9,7 @@ const {
   logWorkflowExecutionActivity,
   // storeWorkflowResultActivity,
   // fetchConfigurationActivity,
-  trackApiCallActivity
+  // trackApiCallActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '1 minute',
 });
@@ -47,13 +47,13 @@ export async function scheduledApiPollingWorkflow(
     const duration = Date.now() - startTime;
     
     if (options.storeMetrics) {
-      await trackApiCallActivity({
-        endpoint: options.endpoint || 'default',
-        method: options.method || 'GET',
-        statusCode: 200,
-        duration,
-        workflowId,
-      });
+      // await trackApiCallActivity({
+      //   endpoint: options.endpoint || 'default',
+      //   method: options.method || 'GET',
+      //   statusCode: 200,
+      //   duration,
+      //   workflowId,
+      // });
     }
     
     // Log workflow execution completion
