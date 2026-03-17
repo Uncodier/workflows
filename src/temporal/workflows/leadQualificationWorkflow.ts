@@ -1,4 +1,4 @@
-import { proxyActivities, upsertSearchAttributes } from '@temporalio/workflow';
+import { proxyActivities, upsertSearchAttributes, workflowInfo } from '@temporalio/workflow';
 
 import type { Activities } from '../activities';
 
@@ -214,6 +214,7 @@ export async function leadQualificationWorkflow(
           userId: options.userId,
           message_status: 'accepted',
           researchEnabled: options.researchEnabled ?? false,
+          workflowId: `lead-follow-up-${lead.id}-${site_id}-${workflowInfo().runId}`,
           additionalData: {
             triggeredBy: 'leadQualificationWorkflow',
             reason: sequence_reason || 'stale_replied_lead_no_response_in_period',

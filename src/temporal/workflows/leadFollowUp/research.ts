@@ -1,4 +1,4 @@
-import { startChild, ParentClosePolicy } from '@temporalio/workflow';
+import { startChild, ParentClosePolicy, workflowInfo } from '@temporalio/workflow';
 import { leadResearchWorkflow, type LeadResearchOptions, type LeadResearchResult } from '../leadResearchWorkflow';
 import { leadCompanyResearchWorkflow, type LeadCompanyResearchOptions, type LeadCompanyResearchResult } from '../leadCompanyResearchWorkflow';
 import { shouldExecuteLeadResearch, shouldExecuteCompanyResearch, extractWebsite } from './utils';
@@ -43,7 +43,7 @@ export async function performResearch({
       
       const leadResearchHandle = await startChild(leadResearchWorkflow, {
         args: [leadResearchOptions],
-        workflowId: `lead-research-followup-${lead_id}-${site_id}-${Date.now()}`,
+        workflowId: `lead-research-followup-${lead_id}-${site_id}-${workflowInfo().runId}`,
       });
       
       const leadResearchResult: LeadResearchResult = await leadResearchHandle.result();
@@ -94,7 +94,7 @@ export async function performResearch({
       
       const companyResearchHandle = await startChild(leadCompanyResearchWorkflow, {
         args: [companyResearchOptions],
-        workflowId: `lead-company-research-${lead_id}-${Date.now()}`,
+        workflowId: `lead-company-research-${lead_id}-${workflowInfo().runId}`,
         parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON
       });
       

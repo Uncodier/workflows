@@ -516,6 +516,7 @@ export interface StartLeadFollowUpWorkflowRequest {
   message_status?: string;
   researchEnabled?: boolean;
   additionalData?: any;
+  workflowId?: string;
 }
 
 export interface StartLeadFollowUpWorkflowResult {
@@ -532,7 +533,7 @@ export async function startLeadFollowUpWorkflowActivity(request: StartLeadFollow
   console.log(`🚀 Starting independent leadFollowUpWorkflow for lead: ${request.lead_id}`);
   
   try {
-    const workflowId = `lead-follow-up-${request.lead_id}-${request.site_id}-${Date.now()}`;
+    const workflowId = request.workflowId || `lead-follow-up-${request.lead_id}-${request.site_id}-${Date.now()}`;
     
     // Get Temporal client directly (same pattern used throughout the codebase)
     const client = await getTemporalClient();

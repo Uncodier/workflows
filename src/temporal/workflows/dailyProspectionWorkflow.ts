@@ -1077,6 +1077,7 @@ export async function dailyProspectionWorkflow(
             site_id: site_id,
             userId: options.userId || site.user_id,
             researchEnabled: options.researchEnabled ?? false,
+            workflowId: `lead-follow-up-${lead.id}-${site_id}-${workflowInfo().runId}`,
             additionalData: {
               triggeredBy: 'dailyProspectionWorkflow',
               reason: 'lead_not_assigned_to_human',

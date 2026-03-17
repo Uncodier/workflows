@@ -1,4 +1,4 @@
-import { proxyActivities, patched, deprecatePatch, upsertSearchAttributes } from '@temporalio/workflow';
+import { proxyActivities, patched, deprecatePatch, upsertSearchAttributes, workflowInfo } from '@temporalio/workflow';
 import type { Activities, LeadEmailRevalidationRequest } from '../activities';
 import { performEarlyValidation } from './leadFollowUp/validation';
 import { performResearch } from './leadFollowUp/research';
@@ -55,7 +55,7 @@ export async function leadFollowUpWorkflow(
   }
   upsertSearchAttributes(searchAttributes);
 
-  const workflowId = `lead-follow-up-${lead_id}-${site_id}`;
+  const workflowId = workflowInfo().workflowId;
   const startTime = Date.now();
   
   console.log(`📞 Starting lead follow-up workflow for lead ${lead_id} on site ${site_id}`);

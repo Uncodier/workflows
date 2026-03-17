@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, patched, deprecatePatch, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
+import { proxyActivities, startChild, patched, deprecatePatch, ParentClosePolicy, upsertSearchAttributes, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { leadFollowUpWorkflow, type LeadFollowUpOptions } from './leadFollowUpWorkflow';
 
@@ -498,7 +498,7 @@ export async function leadInvalidationWorkflow(
             // NEW PATH: Start child workflow with ABANDON policy to prevent cascading cancellation
             await startChild(leadFollowUpWorkflow, {
               args: [followUpOptions],
-              workflowId: `lead-follow-up-recovery-${lead_id}-${Date.now()}`,
+              workflowId: `lead-follow-up-recovery-${lead_id}-${workflowInfo().runId}`,
               parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON
             });
           } else {
@@ -506,7 +506,7 @@ export async function leadInvalidationWorkflow(
             // This ensures deterministic replay for workflows started before the patch
             await startChild(leadFollowUpWorkflow, {
               args: [followUpOptions],
-              workflowId: `lead-follow-up-recovery-${lead_id}-${Date.now()}`
+              workflowId: `lead-follow-up-recovery-${lead_id}-${workflowInfo().runId}`
             });
           }
           
