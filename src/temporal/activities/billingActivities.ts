@@ -107,12 +107,18 @@ export async function initializeSiteCreditsActivity(siteId: string): Promise<voi
 
     if (!existingBilling) {
       // Create new billing record
-      await supabaseService.createBillingRecord({
+      const billingRecord = await supabaseService.createBillingRecord({
         site_id: siteId,
         plan: 'free', // A truly new site starts free
         credits_available: initialCredits,
         status: 'active'
       });
+      
+      if (!billingRecord) {
+        console.log(`⚠️ Billing record creation skipped for site ${siteId} (likely deleted).`);
+        return;
+      }
+      
       console.log(`✅ Created billing record for site ${siteId} with ${initialCredits} credits.`);
     } else {
       // User already has a billing record (e.g., from Stripe payment) but missing initial credits.
@@ -125,7 +131,7 @@ export async function initializeSiteCreditsActivity(siteId: string): Promise<voi
     }
 
     // 2. Record Payment
-    await supabaseService.createPaymentRecord({
+    const paymentRecord = await supabaseService.createPaymentRecord({
       site_id: siteId,
       amount: 0,
       credits: initialCredits,
@@ -134,6 +140,11 @@ export async function initializeSiteCreditsActivity(siteId: string): Promise<voi
       transaction_type: 'credit',
       details: { note: 'Initial signup credits (fallback or new)' }
     });
+
+    if (!paymentRecord) {
+      console.log(`⚠️ Payment record creation skipped for site ${siteId} (likely deleted).`);
+      return;
+    }
 
     console.log(`✅ Site ${siteId} initialized with ${initialCredits} credits.`);
   } catch (error) {

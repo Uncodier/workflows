@@ -49,6 +49,10 @@ export async function createPaymentRecord(
     .single();
 
   if (error) {
+    if (error.code === '23503' && error.message?.includes('payments_site_id_fkey')) {
+      console.log(`⚠️ Site ${paymentData.site_id} no longer exists. Skipping payment record creation.`);
+      return null;
+    }
     console.error(`❌ Error creating payment record for site ${paymentData.site_id}:`, error);
     throw new Error(`Failed to create payment record: ${error.message}`);
   }

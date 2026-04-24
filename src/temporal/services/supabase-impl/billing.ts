@@ -153,6 +153,10 @@ export async function createBillingRecord(
     .maybeSingle();
 
   if (error) {
+    if (error.code === '23503' && error.message?.includes('billing_site_id_fkey')) {
+      console.log(`⚠️ Site ${billingData.site_id} no longer exists. Skipping billing record creation.`);
+      return null;
+    }
     console.error(`❌ Error creating billing record for site ${billingData.site_id}:`, error);
     throw new Error(`Failed to create billing record: ${error.message}`);
   }
