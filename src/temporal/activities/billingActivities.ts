@@ -12,9 +12,12 @@ export async function fetchSitesDueForCreditRenewalActivity(): Promise<any[]> {
   const lastDayOfMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0)).getUTCDate();
   
   const dueSites = billings.filter(billing => {
-    if (!billing.subscription_start_date) return false;
+    // Si no tiene subscription_start_date, usamos created_at como fallback
+    const dateToUse = billing.subscription_start_date || billing.created_at;
     
-    const startDate = new Date(billing.subscription_start_date);
+    if (!dateToUse) return false;
+    
+    const startDate = new Date(dateToUse);
 
     // Exclude records created today — they were just initialized and should not be renewed yet.
     const startedToday =
