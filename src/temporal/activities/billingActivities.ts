@@ -11,11 +11,13 @@ export async function fetchSitesDueForCreditRenewalActivity(): Promise<any[]> {
   // Get the last day of the current UTC month
   const lastDayOfMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0)).getUTCDate();
   
-  const dueSites = billings.filter(billing => {
+  const dueSites = [];
+
+  for (const billing of billings) {
     // Si no tiene subscription_start_date, usamos created_at como fallback
     const dateToUse = billing.subscription_start_date || billing.created_at;
     
-    if (!dateToUse) return false;
+    if (!dateToUse) continue;
     
     const startDate = new Date(dateToUse);
 
@@ -25,7 +27,7 @@ export async function fetchSitesDueForCreditRenewalActivity(): Promise<any[]> {
       startDate.getUTCMonth() === today.getUTCMonth() &&
       startDate.getUTCDate() === today.getUTCDate();
 
-    if (startedToday) return false;
+    if (startedToday) continue;
 
     const startDay = startDate.getUTCDate();
     
@@ -35,8 +37,39 @@ export async function fetchSitesDueForCreditRenewalActivity(): Promise<any[]> {
     const isExactMatch = todayDay === startDay;
     const isEndOfMonthCatchup = todayDay === lastDayOfMonth && startDay > lastDayOfMonth;
     
-    return isExactMatch || isEndOfMonthCatchup;
-  });
+    let isDue = isExactMatch || isEndOfMonthCatchup;
+
+    // Check last payment to see if it missed a renewal or if it's already renewed
+    const lastPayment = await supabaseService.fetchLastCreditRenewalPayment(billing.site_id, billing.stripe_subscription_id);
+    
+    if (lastPayment) {
+      const lastPaymentDate = new Date(lastPayment.created_at);
+      const daysSinceLastPayment = (today.getTime() - lastPaymentDate.getTime()) / (1000 * 60 * 60 * 24);
+      
+      if (isDue) {
+        // If it's the exact day, but we already paid recently (e.g. within the last 20 days), skip it.
+        if (daysSinceLastPayment < 20) {
+          isDue = false;
+        }
+      } else {
+        // If it's NOT the exact day, but it's been >= 31 days since the last renewal, it's overdue.
+        if (daysSinceLastPayment >= 31) {
+          isDue = true;
+        }
+      }
+    } else {
+      // No last payment found.
+      // If it's been more than 31 days since start date, it's overdue.
+      const daysSinceStart = (today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceStart >= 31 && !isDue) {
+        isDue = true;
+      }
+    }
+
+    if (isDue) {
+      dueSites.push(billing);
+    }
+  }
   
   console.log(`✅ Found ${dueSites.length} sites due for credit renewal today`);
   return dueSites;
@@ -45,7 +78,8 @@ export async function fetchSitesDueForCreditRenewalActivity(): Promise<any[]> {
 export async function renewSiteCreditsActivity(
   siteId: string, 
   plan: string, 
-  currentCredits: number
+  currentCredits: number,
+  stripeSubscriptionId?: string
 ): Promise<{ success: boolean; newCredits: number; oldCredits: number }> {
   console.log(`🔄 Renewing credits for site ${siteId} (Plan: ${plan}, Current: ${currentCredits})`);
   
@@ -76,6 +110,46 @@ export async function renewSiteCreditsActivity(
   
   try {
     await supabaseService.updateSiteCredits(siteId, newCredits);
+    
+    // Create a payment record for the renewal (empty invoice)
+    const addedCredits = newCredits - currentCredits > 0 ? newCredits - currentCredits : 0;
+    
+    // Check if there's a recent stripe payment we should link to instead of creating a new one
+    let shouldCreateNewPayment = true;
+    if (stripeSubscriptionId) {
+      const lastPayment = await supabaseService.fetchLastCreditRenewalPayment(siteId, stripeSubscriptionId);
+      if (lastPayment) {
+        const lastPaymentDate = new Date(lastPayment.created_at);
+        const today = new Date();
+        const daysSinceLastPayment = (today.getTime() - lastPaymentDate.getTime()) / (1000 * 60 * 60 * 24);
+        
+        // If there's a stripe payment from the last 5 days, just update it with the credits
+        // instead of creating a new empty invoice
+        if (daysSinceLastPayment <= 5 && lastPayment.payment_method !== 'credit_renewal') {
+          shouldCreateNewPayment = false;
+          // We could update the existing payment here if needed, but since credits are tracked
+          // in the billing table, just linking it conceptually is fine.
+          console.log(`🔗 Linked credit renewal to recent Stripe payment ${lastPayment.id}`);
+        }
+      }
+    }
+
+    if (shouldCreateNewPayment) {
+      await supabaseService.createPaymentRecord({
+        site_id: siteId,
+        amount: 0,
+        credits: addedCredits,
+        payment_method: 'credit_renewal',
+        status: 'completed',
+        transaction_type: 'credit',
+        details: { 
+          note: 'Monthly credit renewal',
+          plan: normalizedPlan,
+          stripe_subscription_id: stripeSubscriptionId || null
+        }
+      });
+    }
+
     console.log(`✅ Credits updated for site ${siteId}: ${currentCredits} -> ${newCredits}`);
     return { success: true, newCredits, oldCredits: currentCredits };
   } catch (error) {

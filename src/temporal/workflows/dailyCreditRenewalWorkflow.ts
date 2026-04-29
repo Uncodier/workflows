@@ -45,7 +45,7 @@ export async function dailyCreditRenewalWorkflow(): Promise<{ processed: number;
     
     for (const site of sitesDue) {
       try {
-        await renewSiteCreditsActivity(site.site_id, site.plan, site.credits_available);
+        await renewSiteCreditsActivity(site.site_id, site.plan, site.credits_available, site.stripe_subscription_id);
         processed++;
       } catch (err) {
         console.error(`Failed to renew credits for site ${site.site_id}:`, err);
