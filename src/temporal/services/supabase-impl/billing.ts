@@ -13,7 +13,8 @@ export async function fetchActiveBillings(client: SupabaseClient): Promise<any[]
       credits_used,
       subscription_start_date,
       created_at,
-      status
+      status,
+      stripe_subscription_id
     `)
     .eq('status', 'active');
 

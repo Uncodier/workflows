@@ -61,28 +61,11 @@ export async function createPaymentRecord(
   return data;
 }
 
+/** Last monthly credit renewal record only (Stripe charges must not affect due-date logic). */
 export async function fetchLastCreditRenewalPayment(
   client: SupabaseClient,
-  siteId: string,
-  stripeSubscriptionId?: string
+  siteId: string
 ): Promise<any> {
-  // First, check if there's a recent payment from Stripe for this subscription
-  if (stripeSubscriptionId) {
-    const { data: stripeData, error: stripeError } = await client
-      .from('payments')
-      .select('*')
-      .eq('site_id', siteId)
-      .contains('details', { stripe_subscription_id: stripeSubscriptionId })
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-      
-    if (!stripeError && stripeData) {
-      return stripeData;
-    }
-  }
-
-  // Fallback to checking for the manual credit_renewal payment
   const { data, error } = await client
     .from('payments')
     .select('*')
@@ -95,6 +78,29 @@ export async function fetchLastCreditRenewalPayment(
   if (error) {
     console.error(`❌ Error fetching last credit renewal payment for site ${siteId}:`, error);
     throw new Error(`Failed to fetch last credit renewal payment: ${error.message}`);
+  }
+
+  return data;
+}
+
+/** Most recent Stripe subscription payment (used only to avoid duplicate renewal invoices). */
+export async function fetchLastStripeSubscriptionPayment(
+  client: SupabaseClient,
+  siteId: string,
+  stripeSubscriptionId: string
+): Promise<any> {
+  const { data, error } = await client
+    .from('payments')
+    .select('*')
+    .eq('site_id', siteId)
+    .contains('details', { stripe_subscription_id: stripeSubscriptionId })
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`❌ Error fetching last Stripe payment for site ${siteId}:`, error);
+    throw new Error(`Failed to fetch last Stripe payment: ${error.message}`);
   }
 
   return data;

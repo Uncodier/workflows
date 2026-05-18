@@ -272,9 +272,21 @@ export class SupabaseService {
     return PaymentsImpl.createPaymentRecord(this.client, paymentData);
   }
 
-  async fetchLastCreditRenewalPayment(siteId: string, stripeSubscriptionId?: string): Promise<any> {
+  async fetchLastCreditRenewalPayment(siteId: string): Promise<any> {
     await this.ensureConnection();
-    return PaymentsImpl.fetchLastCreditRenewalPayment(this.client, siteId, stripeSubscriptionId);
+    return PaymentsImpl.fetchLastCreditRenewalPayment(this.client, siteId);
+  }
+
+  async fetchLastStripeSubscriptionPayment(
+    siteId: string,
+    stripeSubscriptionId: string
+  ): Promise<any> {
+    await this.ensureConnection();
+    return PaymentsImpl.fetchLastStripeSubscriptionPayment(
+      this.client,
+      siteId,
+      stripeSubscriptionId
+    );
   }
 }
 
