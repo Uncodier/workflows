@@ -5,11 +5,13 @@ const nextConfig: NextConfig = {
   // Narrow ESLint scope and optionally bypass during builds to avoid hangs
   eslint: {
     ignoreDuringBuilds: true,
-    dirs: ["src"],
   },
   typescript: {
     // Do not ignore type errors; we want them to fail the build once unstuck
     ignoreBuildErrors: false,
+  },
+  turbopack: {
+    // Empty config allows turbopack to run with default settings
   },
 };
 

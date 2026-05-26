@@ -543,16 +543,15 @@ async function leadGenerationWorkflow(options) {
             site_id: site_id,
             userId: options.userId || site.user_id
         });
-        // DEBUG: Force maxVenues to 1 for debugging purposes
-        let maxVenues = 1; // Forced to 1 for debugging
-        console.log(`🐛 DEBUG: Forcing maxVenues to 1 for debugging (API returned: ${maxVenuesResult.success && maxVenuesResult.maxVenues ? maxVenuesResult.maxVenues : 'N/A'})`);
-        // Original logic (commented for debugging):
-        // if (maxVenuesResult.success && maxVenuesResult.maxVenues) {
-        //   maxVenues = maxVenuesResult.maxVenues;
-        //   console.log(`✅ Venue limits determined: ${maxVenues} venues (Plan: ${maxVenuesResult.plan}, Channels: ${maxVenuesResult.hasChannels ? 'Yes' : 'No'})`);
-        // } else {
-        //   console.log(`⚠️ Failed to determine venue limits, using default: ${maxVenues} venues. Error: ${maxVenuesResult.error}`);
-        // }
+        let maxVenues = 1;
+        // Original logic restored:
+        if (maxVenuesResult.success && maxVenuesResult.maxVenues) {
+            maxVenues = maxVenuesResult.maxVenues;
+            console.log(`✅ Venue limits determined: ${maxVenues} venues (Plan: ${maxVenuesResult.plan}, Channels: ${maxVenuesResult.hasChannels ? 'Yes' : 'No'})`);
+        }
+        else {
+            console.log(`⚠️ Failed to determine venue limits, using default: ${maxVenues} venues. Error: ${maxVenuesResult.error}`);
+        }
         // Call region venues API with multiple search terms strategy
         try {
             console.log(`🌍 Using geographic location: ${targetCity || 'No city'}, ${targetRegion || 'No region'}, ${targetCountry || 'No country'}`);
@@ -624,12 +623,11 @@ async function leadGenerationWorkflow(options) {
                     if (companiesCreateResult.success) {
                         companiesCreated = companiesCreateResult.companies || [];
                         console.log(`✅ Companies created successfully - ${companiesCreated.length} companies`);
-                        // DEBUG: Limit to only 1 company for debugging
-                        const companiesToProcess = companiesCreated.slice(0, 1);
-                        console.log(`🐛 DEBUG: Limiting iteration to 1 company for debugging (total companies: ${companiesCreated.length})`);
+                        // Use all created companies instead of limiting to 1
+                        const companiesToProcess = companiesCreated;
                         // Step 4: For each company, generate leads
                         if (companiesToProcess.length > 0) {
-                            console.log(`👥 Step 4: Processing ${companiesToProcess.length} company(ies) for lead generation (DEBUG: limited to 1)...`);
+                            console.log(`👥 Step 4: Processing ${companiesToProcess.length} company(ies) for lead generation...`);
                             for (let i = 0; i < companiesToProcess.length; i++) {
                                 const company = companiesToProcess[i];
                                 console.log(`🏢 Processing company ${i + 1}/${companiesToProcess.length}: ${company.name}`);

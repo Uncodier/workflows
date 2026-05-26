@@ -5,10 +5,11 @@ exports.cronWorkflow = cronWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const { fetchDataActivity, createResourceActivity, updateResourceActivity, 
 // deleteResourceActivity,
-logWorkflowExecutionActivity, 
+logWorkflowExecutionActivity,
 // storeWorkflowResultActivity,
 // fetchConfigurationActivity,
-trackApiCallActivity } = (0, workflow_1.proxyActivities)({
+// trackApiCallActivity
+ } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '1 minute',
 });
 /**
@@ -31,13 +32,13 @@ async function scheduledApiPollingWorkflow(options = {}) {
         const data = await fetchDataActivity(options.endpoint || 'default');
         const duration = Date.now() - startTime;
         if (options.storeMetrics) {
-            await trackApiCallActivity({
-                endpoint: options.endpoint || 'default',
-                method: options.method || 'GET',
-                statusCode: 200,
-                duration,
-                workflowId,
-            });
+            // await trackApiCallActivity({
+            //   endpoint: options.endpoint || 'default',
+            //   method: options.method || 'GET',
+            //   statusCode: 200,
+            //   duration,
+            //   workflowId,
+            // });
         }
         // Log workflow execution completion
         await logWorkflowExecutionActivity({

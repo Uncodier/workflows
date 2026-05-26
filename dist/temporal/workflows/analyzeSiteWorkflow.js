@@ -4,7 +4,7 @@ exports.analyzeSiteWorkflow = analyzeSiteWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const deepResearchWorkflow_1 = require("./deepResearchWorkflow");
 // Define the activity interface with common activities
-const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getSettingsActivity, updateSettingsActivity, uxAnalysisActivity, sendProjectAnalysisNotificationActivity, } = (0, workflow_1.proxyActivities)({
+const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getSettingsActivity, updateSettingsActivity, uxAnalysisActivity, sendProjectAnalysisNotificationActivity, storeWorkflowResultActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '5 minutes',
     retry: {
         maximumAttempts: 3,
@@ -1138,6 +1138,22 @@ async function analyzeSiteWorkflow(options) {
             executionTime,
             completedAt: new Date().toISOString()
         };
+        // Store workflow result including the analysis to be queried later
+        try {
+            await storeWorkflowResultActivity({
+                workflowId,
+                result: result,
+                metadata: {
+                    type: 'site_analysis',
+                    siteId: site_id,
+                    url: siteUrl,
+                    userId: options.userId || site.user_id
+                }
+            });
+        }
+        catch (e) {
+            console.warn('⚠️ Could not store workflow analysis result:', e);
+        }
         console.log(`🎉 Company and project research workflow completed successfully!`);
         console.log(`📊 Summary: Company research for ${siteName} completed in ${executionTime}`);
         console.log(`   - Site: ${siteName} (${siteUrl})`);

@@ -51,7 +51,7 @@ async function leadFollowUpWorkflow(options) {
         searchAttributes.user_id = [options.userId];
     }
     (0, workflow_1.upsertSearchAttributes)(searchAttributes);
-    const workflowId = `lead-follow-up-${lead_id}-${site_id}`;
+    const workflowId = (0, workflow_1.workflowInfo)().workflowId;
     const startTime = Date.now();
     console.log(`📞 Starting lead follow-up workflow for lead ${lead_id} on site ${site_id}`);
     console.log(`📋 Workflow version: v0.3.0 - Decoupled message sending`);

@@ -58,6 +58,7 @@ async function enrichLeadWorkflow(options) {
         const personCheck = await checkPersonByLinkedInActivity({
             linkedin_profile,
             person_id,
+            site_id,
         });
         if (!personCheck.success) {
             const errorMsg = `Failed to check person: ${personCheck.error}`;
@@ -304,7 +305,7 @@ async function enrichLeadWorkflow(options) {
         // Cascading state
         let hasResult = false;
         // Prepare API request parameters
-        const apiParams = {};
+        const apiParams = { site_id };
         if (person.external_person_id) {
             apiParams.person_id = person.external_person_id;
         }

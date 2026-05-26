@@ -417,7 +417,7 @@ async function leadInvalidationWorkflow(options) {
                         // NEW PATH: Start child workflow with ABANDON policy to prevent cascading cancellation
                         await (0, workflow_1.startChild)(leadFollowUpWorkflow_1.leadFollowUpWorkflow, {
                             args: [followUpOptions],
-                            workflowId: `lead-follow-up-recovery-${lead_id}-${Date.now()}`,
+                            workflowId: `lead-follow-up-recovery-${lead_id}-${(0, workflow_1.workflowInfo)().runId}`,
                             parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON
                         });
                     }
@@ -426,7 +426,7 @@ async function leadInvalidationWorkflow(options) {
                         // This ensures deterministic replay for workflows started before the patch
                         await (0, workflow_1.startChild)(leadFollowUpWorkflow_1.leadFollowUpWorkflow, {
                             args: [followUpOptions],
-                            workflowId: `lead-follow-up-recovery-${lead_id}-${Date.now()}`
+                            workflowId: `lead-follow-up-recovery-${lead_id}-${(0, workflow_1.workflowInfo)().runId}`
                         });
                     }
                     console.log(`✅ Lead follow-up workflow started for lead ${lead_id} with valid phone number`);

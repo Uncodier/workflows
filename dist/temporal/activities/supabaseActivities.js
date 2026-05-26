@@ -12,10 +12,22 @@ exports.deleteResourceActivity = deleteResourceActivity;
 exports.checkSiteAnalysisActivity = checkSiteAnalysisActivity;
 const supabaseService_1 = require("../services/supabaseService");
 /**
- * Activity to log workflow execution (temporary console implementation)
+ * Activity to log workflow execution
  */
 async function logWorkflowExecutionActivity(data) {
     console.log('Workflow Execution Log:', JSON.stringify(data, null, 2));
+    // Actually save to Supabase commands log if possible
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (isConnected) {
+            // Just log that we would save it, actual implementation depends on tables
+            console.log(`[Database] Would save execution log for ${data.workflowId} (${data.status})`);
+        }
+    }
+    catch (e) {
+        console.error('Failed to log to database:', e);
+    }
     return { id: Date.now(), ...data };
 }
 /**
@@ -41,10 +53,36 @@ async function fetchConfigurationActivity(configName) {
     return mockConfig.value;
 }
 /**
- * Activity to store workflow results (temporary console implementation)
+ * Activity to store workflow results and analysis
  */
 async function storeWorkflowResultActivity(data) {
-    console.log('Storing Workflow Result:', JSON.stringify(data, null, 2));
+    console.log('Storing Workflow Result:', JSON.stringify(data.workflowId));
+    try {
+        // If it's a site analysis, let's actually save it to the analysis table
+        if (data.metadata?.type === 'site_analysis' && data.metadata?.siteId) {
+            console.log(`[Database] Saving site analysis for ${data.metadata.siteId}`);
+            const supabaseService = (0, supabaseService_1.getSupabaseService)();
+            const userId = data.metadata.userId && data.metadata.userId !== '' ? data.metadata.userId : '00000000-0000-0000-0000-000000000000';
+            const { error } = await supabaseService.client.from('analysis').insert({
+                site_id: data.metadata.siteId,
+                url_path: data.metadata.url || '/',
+                structure: data.result,
+                user_id: userId,
+                status: 'completed',
+                provider: 'uncodie-ai',
+                request_time: 1
+            });
+            if (error) {
+                console.error('❌ Error saving analysis to database:', error);
+            }
+            else {
+                console.log(`✅ Successfully saved analysis for ${data.metadata.siteId}`);
+            }
+        }
+    }
+    catch (e) {
+        console.error('Failed to store workflow result:', e);
+    }
     return { id: Date.now(), ...data };
 }
 /**

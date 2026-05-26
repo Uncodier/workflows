@@ -210,6 +210,7 @@ async function leadGenerationDomainSearchWorkflow(options) {
                 external_person_id,
                 full_name: full_name || undefined,
                 company_name: company_name || undefined,
+                site_id: site_id,
             });
             if (lookup.success && lookup.emails && lookup.emails.length > 0) {
                 for (const email of lookup.emails) {

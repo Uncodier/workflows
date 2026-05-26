@@ -67,21 +67,29 @@ const searchAttributes_1 = require("../utils/searchAttributes");
  * @returns true if workflow should be scheduled, false otherwise
  */
 function shouldScheduleWorkflow(site, activityKey) {
-    // If settings.activities doesn't exist, schedule as always (backward compatibility)
+    // Define activities that are opt-in (require explicit 'active' status to run)
+    const optInActivities = ['supervise_conversations', 'assign_leads_to_team', 'local_lead_generation', 'icp_lead_generation'];
+    const isOptIn = optInActivities.includes(activityKey);
+    // If settings.activities doesn't exist, handle based on opt-in status
     if (!site.settings || !site.settings.activities) {
-        return true;
+        return !isOptIn; // Schedule by default if not opt-in
     }
     const activityConfig = site.settings.activities[activityKey];
-    // If the activity doesn't exist in settings.activities, schedule by default
+    // If the activity doesn't exist in settings.activities, handle based on opt-in status
     if (!activityConfig) {
+        return !isOptIn; // Schedule by default if not opt-in
+    }
+    // If the activity status is explicitly 'active', schedule it
+    if (activityConfig.status === 'active') {
         return true;
     }
     // If the activity status is 'inactive', do NOT schedule
     if (activityConfig.status === 'inactive') {
         return false;
     }
-    // Otherwise (status is 'default' or any other value), schedule normally
-    return true;
+    // For 'default' or any other status:
+    // Opt-in activities default to inactive, others default to active
+    return !isOptIn;
 }
 /**
  * Schedule a single email sync workflow for a specific site
@@ -1656,8 +1664,10 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                     site.settings.activities = options.activitiesMap[site.id];
                 }
                 // Check if this workflow should be scheduled based on settings.activities
-                if (!shouldScheduleWorkflow(site, 'icp_lead_generation')) {
-                    console.log(`   ⏭️ SKIPPING - 'icp_lead_generation' is inactive in site settings`);
+                const runLocalLeadGen = shouldScheduleWorkflow(site, 'local_lead_generation');
+                const runIcpLeadGen = shouldScheduleWorkflow(site, 'icp_lead_generation');
+                if (!runLocalLeadGen && !runIcpLeadGen) {
+                    console.log(`   ⏭️ SKIPPING - Both 'local_lead_generation' and 'icp_lead_generation' are inactive in site settings`);
                     continue;
                 }
                 // Check if this site has business_hours
@@ -1730,172 +1740,182 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                     const delayHours = delayMs / (1000 * 60 * 60);
                     console.log(`   ⏰ Will execute in ${delayHours.toFixed(2)} hours`);
                 }
-                // Create unique workflow ID for this site's lead generation
-                const uniqueHash = Math.random().toString(36).substring(2, 15);
-                const workflowId = `lead-generation-timer-${site.id}-${finalLocalDateStr}-${leadGenScheduledTime.replace(':', '')}-${uniqueHash}`;
-                console.log(`   - Workflow ID: ${workflowId}`);
-                console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
-                // Prepare workflow arguments for leadGenerationWorkflow
-                const workflowArgs = [{
-                        site_id: site.id,
-                        userId: site.user_id,
-                        create: true, // Actually create leads (not just validation)
-                        additionalData: {
-                            scheduledBy: 'activityPrioritizationEngine-leadGeneration',
-                            executeReason: `post-standup-lead-generation-${businessHoursSource}-${leadGenScheduledTime}`,
-                            scheduleType: `lead-generation-${businessHoursSource}`,
-                            scheduleTime: `${leadGenScheduledTime} ${siteTimezone}`,
-                            executionDay: finalLocalDateStr,
-                            timezone: siteTimezone,
-                            executionMode: 'timer-delayed-lead-generation',
-                            businessHours: businessHours || {
-                                open: scheduledTime,
-                                close: '18:00',
-                                enabled: true,
+                if (runLocalLeadGen) {
+                    // Create unique workflow ID for this site's lead generation
+                    const uniqueHash = Math.random().toString(36).substring(2, 15);
+                    const workflowId = `lead-generation-timer-${site.id}-${finalLocalDateStr}-${leadGenScheduledTime.replace(':', '')}-${uniqueHash}`;
+                    console.log(`   - Workflow ID: ${workflowId}`);
+                    console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
+                    // Prepare workflow arguments for leadGenerationWorkflow
+                    const workflowArgs = [{
+                            site_id: site.id,
+                            userId: site.user_id,
+                            create: true, // Actually create leads (not just validation)
+                            additionalData: {
+                                scheduledBy: 'activityPrioritizationEngine-leadGeneration',
+                                executeReason: `post-standup-lead-generation-${businessHoursSource}-${leadGenScheduledTime}`,
+                                scheduleType: `lead-generation-${businessHoursSource}`,
+                                scheduleTime: `${leadGenScheduledTime} ${siteTimezone}`,
+                                executionDay: finalLocalDateStr,
                                 timezone: siteTimezone,
-                                source: businessHoursSource
-                            },
-                            siteName: site.name || `Site ${site.id.substring(0, 8)}`,
-                            fallbackUsed: !businessHours,
-                            delayMs,
-                            targetTimeUTC: finalTargetUTC.toISOString(),
-                            leadGenerationType: 'post-standup-lead-generation',
-                            originalDailyStandupTime: scheduledTime,
-                            leadGenExecutesOneHourLater: true,
-                            executesAfterDailyStandup: true,
-                            parentScheduleId: options.parentScheduleId,
-                            dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
-                        }
-                    }];
-                // Start the DELAYED workflow and capture the actual handle returned by Temporal
-                const leadGenHandle = await client.workflow.start('delayedExecutionWorkflow', {
-                    args: [{
-                            delayMs: Math.max(delayMs, 0), // Ensure non-negative delay
-                            targetWorkflow: 'leadGenerationWorkflow',
-                            targetArgs: workflowArgs,
-                            siteName: site.name || 'Site',
-                            scheduledTime: `${leadGenScheduledTime} ${siteTimezone}`,
-                            executionType: 'timer-based-lead-generation'
-                        }],
-                    taskQueue: config_1.temporalConfig.taskQueue,
-                    workflowId: workflowId,
-                    workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
-                });
-                // Get the actual workflow ID from Temporal
-                const actualLeadGenWorkflowId = leadGenHandle.workflowId;
-                console.log(`✅ Successfully scheduled Lead Generation with TIMER for ${site.name || 'Site'}`);
-                console.log(`   - Will execute at: ${leadGenScheduledTime} ${siteTimezone} on ${finalLocalDateStr} (1h after daily standup)`);
-                console.log(`   - Daily standup time: ${scheduledTime} ${siteTimezone}`);
-                console.log(`   - Business hours source: ${businessHoursSource}`);
-                console.log(`   - Temporal Workflow ID: ${actualLeadGenWorkflowId}`);
-                console.log(`   - Using TIMER approach for one-time lead generation`);
-                console.log(`   - 🔥 EXECUTES 1 HOUR AFTER DAILY STANDUP`);
-                // Update cron status to reflect the scheduled workflow using actual Temporal IDs
-                const cronUpdate = {
-                    siteId: site.id,
-                    workflowId: actualLeadGenWorkflowId, // Use actual Temporal workflow ID
-                    scheduleId: workflowId, // Use original generated workflowId as scheduleId for timers
-                    activityName: 'leadGenerationWorkflow',
-                    status: 'SCHEDULED',
-                    nextRun: finalTargetUTC.toISOString(),
-                };
-                await (0, cronActivities_1.saveCronStatusActivity)(cronUpdate);
-                results.push({
-                    workflowId: actualLeadGenWorkflowId, // Use actual Temporal workflow ID
-                    scheduleId: workflowId,
-                    success: true
-                });
-                scheduled++;
+                                executionMode: 'timer-delayed-lead-generation',
+                                businessHours: businessHours || {
+                                    open: scheduledTime,
+                                    close: '18:00',
+                                    enabled: true,
+                                    timezone: siteTimezone,
+                                    source: businessHoursSource
+                                },
+                                siteName: site.name || `Site ${site.id.substring(0, 8)}`,
+                                fallbackUsed: !businessHours,
+                                delayMs,
+                                targetTimeUTC: finalTargetUTC.toISOString(),
+                                leadGenerationType: 'post-standup-lead-generation',
+                                originalDailyStandupTime: scheduledTime,
+                                leadGenExecutesOneHourLater: true,
+                                executesAfterDailyStandup: true,
+                                parentScheduleId: options.parentScheduleId,
+                                dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
+                            }
+                        }];
+                    // Start the DELAYED workflow and capture the actual handle returned by Temporal
+                    const leadGenHandle = await client.workflow.start('delayedExecutionWorkflow', {
+                        args: [{
+                                delayMs: Math.max(delayMs, 0), // Ensure non-negative delay
+                                targetWorkflow: 'leadGenerationWorkflow',
+                                targetArgs: workflowArgs,
+                                siteName: site.name || 'Site',
+                                scheduledTime: `${leadGenScheduledTime} ${siteTimezone}`,
+                                executionType: 'timer-based-lead-generation'
+                            }],
+                        taskQueue: config_1.temporalConfig.taskQueue,
+                        workflowId: workflowId,
+                        workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+                    });
+                    // Get the actual workflow ID from Temporal
+                    const actualLeadGenWorkflowId = leadGenHandle.workflowId;
+                    console.log(`✅ Successfully scheduled Lead Generation with TIMER for ${site.name || 'Site'}`);
+                    console.log(`   - Will execute at: ${leadGenScheduledTime} ${siteTimezone} on ${finalLocalDateStr} (1h after daily standup)`);
+                    console.log(`   - Daily standup time: ${scheduledTime} ${siteTimezone}`);
+                    console.log(`   - Business hours source: ${businessHoursSource}`);
+                    console.log(`   - Temporal Workflow ID: ${actualLeadGenWorkflowId}`);
+                    console.log(`   - Using TIMER approach for one-time lead generation`);
+                    console.log(`   - 🔥 EXECUTES 1 HOUR AFTER DAILY STANDUP`);
+                    // Update cron status to reflect the scheduled workflow using actual Temporal IDs
+                    const cronUpdate = {
+                        siteId: site.id,
+                        workflowId: actualLeadGenWorkflowId, // Use actual Temporal workflow ID
+                        scheduleId: workflowId, // Use original generated workflowId as scheduleId for timers
+                        activityName: 'leadGenerationWorkflow',
+                        status: 'SCHEDULED',
+                        nextRun: finalTargetUTC.toISOString(),
+                    };
+                    await (0, cronActivities_1.saveCronStatusActivity)(cronUpdate);
+                    results.push({
+                        workflowId: actualLeadGenWorkflowId, // Use actual Temporal workflow ID
+                        scheduleId: workflowId,
+                        success: true
+                    });
+                    scheduled++;
+                }
+                else {
+                    console.log(`   ⏭️ SKIPPING - 'local_lead_generation' is inactive`);
+                }
                 // ===================================================================
                 // NEW: Schedule idealClientProfileMiningWorkflow SAME DAY (30m after Lead Gen)
                 // ===================================================================
-                // Calculate ICP mining time (30 minutes after lead generation)
-                let icpHour = leadGenHour;
-                let icpMinute = minutes + 30;
-                if (icpMinute >= 60) {
-                    icpHour = icpHour + 1;
-                    icpMinute = icpMinute - 60;
-                }
-                if (icpHour >= 24) {
-                    icpHour = icpHour - 24; // Wrap to next day if needed
-                }
-                const icpScheduledTime = `${icpHour.toString().padStart(2, '0')}:${icpMinute.toString().padStart(2, '0')}`;
-                // Create target time for ICP mining in site's timezone
-                const icpTargetLocal = new Date(finalTargetLocal);
-                icpTargetLocal.setUTCHours(icpHour, icpMinute, 0, 0);
-                // If ICP time is earlier than lead gen time after minute adjustment, it wrapped to next day
-                if (icpHour < leadGenHour || (icpHour === leadGenHour && icpMinute < minutes)) {
-                    icpTargetLocal.setUTCDate(icpTargetLocal.getUTCDate() + 1);
-                }
-                const icpTargetUTC = new Date(icpTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
-                const icpDelayMs = icpTargetUTC.getTime() - now.getTime();
-                // Create unique workflow ID for ICP mining
-                const icpUniqueHash = Math.random().toString(36).substring(2, 15);
-                const icpWorkflowId = `icp-mining-timer-${site.id}-${finalLocalDateStr}-${icpScheduledTime.replace(':', '')}-${icpUniqueHash}`;
-                console.log(`\n🎯 Scheduling ICP Mining workflow (30m after Lead Generation):`);
-                console.log(`   - ICP mining time: ${icpScheduledTime} ${siteTimezone}`);
-                console.log(`   - Target time UTC: ${icpTargetUTC.toISOString()}`);
-                console.log(`   - Delay: ${icpDelayMs}ms (${(icpDelayMs / 1000 / 60).toFixed(1)} minutes)`);
-                console.log(`   - Workflow ID: ${icpWorkflowId}`);
-                // Prepare workflow arguments for idealClientProfileMiningWorkflow
-                const icpWorkflowArgs = [{
-                        site_id: site.id,
-                        userId: site.user_id,
-                        // Allow batch mode: will pick first pending icp_mining for the site
-                        additionalData: {
-                            scheduledBy: 'activityPrioritizationEngine-icpMining',
-                            executeReason: `post-leadgeneration-icp-mining-${businessHoursSource}-${icpScheduledTime}`,
-                            scheduleType: `icp-mining-${businessHoursSource}`,
-                            scheduleTime: `${icpScheduledTime} ${siteTimezone}`,
-                            executionDay: finalLocalDateStr,
-                            timezone: siteTimezone,
-                            executionMode: 'timer-delayed-icp-mining',
-                            businessHours: businessHours || {
-                                open: scheduledTime,
-                                close: '18:00',
-                                enabled: true,
+                if (runIcpLeadGen) {
+                    // Calculate ICP mining time (30 minutes after lead generation)
+                    let icpHour = leadGenHour;
+                    let icpMinute = minutes + 30;
+                    if (icpMinute >= 60) {
+                        icpHour = icpHour + 1;
+                        icpMinute = icpMinute - 60;
+                    }
+                    if (icpHour >= 24) {
+                        icpHour = icpHour - 24; // Wrap to next day if needed
+                    }
+                    const icpScheduledTime = `${icpHour.toString().padStart(2, '0')}:${icpMinute.toString().padStart(2, '0')}`;
+                    // Create target time for ICP mining in site's timezone
+                    const icpTargetLocal = new Date(finalTargetLocal);
+                    icpTargetLocal.setUTCHours(icpHour, icpMinute, 0, 0);
+                    // If ICP time is earlier than lead gen time after minute adjustment, it wrapped to next day
+                    if (icpHour < leadGenHour || (icpHour === leadGenHour && icpMinute < minutes)) {
+                        icpTargetLocal.setUTCDate(icpTargetLocal.getUTCDate() + 1);
+                    }
+                    const icpTargetUTC = new Date(icpTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
+                    const icpDelayMs = icpTargetUTC.getTime() - now.getTime();
+                    // Create unique workflow ID for ICP mining
+                    const icpUniqueHash = Math.random().toString(36).substring(2, 15);
+                    const icpWorkflowId = `icp-mining-timer-${site.id}-${finalLocalDateStr}-${icpScheduledTime.replace(':', '')}-${icpUniqueHash}`;
+                    console.log(`\n🎯 Scheduling ICP Mining workflow (30m after Lead Generation):`);
+                    console.log(`   - ICP mining time: ${icpScheduledTime} ${siteTimezone}`);
+                    console.log(`   - Target time UTC: ${icpTargetUTC.toISOString()}`);
+                    console.log(`   - Delay: ${icpDelayMs}ms (${(icpDelayMs / 1000 / 60).toFixed(1)} minutes)`);
+                    console.log(`   - Workflow ID: ${icpWorkflowId}`);
+                    // Prepare workflow arguments for idealClientProfileMiningWorkflow
+                    const icpWorkflowArgs = [{
+                            site_id: site.id,
+                            userId: site.user_id,
+                            // Allow batch mode: will pick first pending icp_mining for the site
+                            additionalData: {
+                                scheduledBy: 'activityPrioritizationEngine-icpMining',
+                                executeReason: `post-leadgeneration-icp-mining-${businessHoursSource}-${icpScheduledTime}`,
+                                scheduleType: `icp-mining-${businessHoursSource}`,
+                                scheduleTime: `${icpScheduledTime} ${siteTimezone}`,
+                                executionDay: finalLocalDateStr,
                                 timezone: siteTimezone,
-                                source: businessHoursSource
-                            },
-                            siteName: site.name || `Site ${site.id.substring(0, 8)}`,
-                            fallbackUsed: !businessHours,
-                            delayMs: icpDelayMs,
-                            targetTimeUTC: icpTargetUTC.toISOString(),
-                            leadGenTime: leadGenScheduledTime,
-                            executesSameDayAsLeadGeneration: true,
-                            parentScheduleId: options.parentScheduleId,
-                            dailyOperationsScheduleId: options.parentScheduleId
-                        }
-                    }];
-                // Start the DELAYED workflow for ICP mining
-                await client.workflow.start('delayedExecutionWorkflow', {
-                    args: [{
-                            delayMs: Math.max(icpDelayMs, 0),
-                            targetWorkflow: 'idealClientProfileMiningWorkflow',
-                            targetArgs: icpWorkflowArgs,
-                            siteName: site.name || 'Site',
-                            scheduledTime: `${icpScheduledTime} ${siteTimezone}`,
-                            executionType: 'timer-based-icp-mining'
-                        }],
-                    taskQueue: config_1.temporalConfig.taskQueue,
-                    workflowId: icpWorkflowId,
-                    workflowRunTimeout: '48h',
-                });
-                // Save cron status entry for ICP mining
-                const icpCronUpdate = {
-                    siteId: site.id,
-                    workflowId: icpWorkflowId,
-                    scheduleId: icpWorkflowId,
-                    activityName: 'idealClientProfileMiningWorkflow',
-                    status: 'SCHEDULED',
-                    nextRun: icpTargetUTC.toISOString(),
-                };
-                await (0, cronActivities_1.saveCronStatusActivity)(icpCronUpdate);
-                results.push({
-                    workflowId: icpWorkflowId,
-                    scheduleId: icpWorkflowId,
-                    success: true
-                });
+                                executionMode: 'timer-delayed-icp-mining',
+                                businessHours: businessHours || {
+                                    open: scheduledTime,
+                                    close: '18:00',
+                                    enabled: true,
+                                    timezone: siteTimezone,
+                                    source: businessHoursSource
+                                },
+                                siteName: site.name || `Site ${site.id.substring(0, 8)}`,
+                                fallbackUsed: !businessHours,
+                                delayMs: icpDelayMs,
+                                targetTimeUTC: icpTargetUTC.toISOString(),
+                                leadGenTime: leadGenScheduledTime,
+                                executesSameDayAsLeadGeneration: true,
+                                parentScheduleId: options.parentScheduleId,
+                                dailyOperationsScheduleId: options.parentScheduleId
+                            }
+                        }];
+                    // Start the DELAYED workflow for ICP mining
+                    await client.workflow.start('delayedExecutionWorkflow', {
+                        args: [{
+                                delayMs: Math.max(icpDelayMs, 0),
+                                targetWorkflow: 'idealClientProfileMiningWorkflow',
+                                targetArgs: icpWorkflowArgs,
+                                siteName: site.name || 'Site',
+                                scheduledTime: `${icpScheduledTime} ${siteTimezone}`,
+                                executionType: 'timer-based-icp-mining'
+                            }],
+                        taskQueue: config_1.temporalConfig.taskQueue,
+                        workflowId: icpWorkflowId,
+                        workflowRunTimeout: '48h',
+                    });
+                    // Save cron status entry for ICP mining
+                    const icpCronUpdate = {
+                        siteId: site.id,
+                        workflowId: icpWorkflowId,
+                        scheduleId: icpWorkflowId,
+                        activityName: 'idealClientProfileMiningWorkflow',
+                        status: 'SCHEDULED',
+                        nextRun: icpTargetUTC.toISOString(),
+                    };
+                    await (0, cronActivities_1.saveCronStatusActivity)(icpCronUpdate);
+                    results.push({
+                        workflowId: icpWorkflowId,
+                        scheduleId: icpWorkflowId,
+                        success: true
+                    });
+                }
+                else {
+                    console.log(`   ⏭️ SKIPPING - 'icp_lead_generation' is inactive`);
+                }
                 // ===================================================================
                 // NEW: Schedule dailyStrategicAccountsWorkflow 2 hours after Lead Gen
                 // ===================================================================

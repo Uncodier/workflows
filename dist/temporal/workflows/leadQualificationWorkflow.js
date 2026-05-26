@@ -150,6 +150,7 @@ async function leadQualificationWorkflow(options) {
                     userId: options.userId,
                     message_status: 'accepted',
                     researchEnabled: options.researchEnabled ?? false,
+                    workflowId: `lead-follow-up-${lead.id}-${site_id}-${(0, workflow_1.workflowInfo)().runId}`,
                     additionalData: {
                         triggeredBy: 'leadQualificationWorkflow',
                         reason: sequence_reason || 'stale_replied_lead_no_response_in_period',

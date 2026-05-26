@@ -251,6 +251,14 @@ class SupabaseService {
         await this.ensureConnection();
         return PaymentsImpl.createPaymentRecord(this.client, paymentData);
     }
+    async fetchLastCreditRenewalPayment(siteId) {
+        await this.ensureConnection();
+        return PaymentsImpl.fetchLastCreditRenewalPayment(this.client, siteId);
+    }
+    async fetchLastStripeSubscriptionPayment(siteId, stripeSubscriptionId) {
+        await this.ensureConnection();
+        return PaymentsImpl.fetchLastStripeSubscriptionPayment(this.client, siteId, stripeSubscriptionId);
+    }
 }
 exports.SupabaseService = SupabaseService;
 // Singleton instance

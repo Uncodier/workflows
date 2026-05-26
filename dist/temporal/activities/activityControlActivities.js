@@ -11,7 +11,7 @@ const client_1 = require("../../lib/supabase/client");
 async function validateWorkflowConfigActivity(siteId, activityKey) {
     console.log(`🔐 Validating workflow configuration for site ${siteId}, activity: ${activityKey}`);
     // Define opt-in activities that require explicit activation
-    const optInActivities = ['supervise_conversations', 'assign_leads_to_team'];
+    const optInActivities = ['supervise_conversations', 'assign_leads_to_team', 'local_lead_generation', 'icp_lead_generation'];
     try {
         // Fetch activities configuration for the site
         const activitiesMap = await fetchActivitiesMapActivity([siteId]);
