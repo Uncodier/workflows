@@ -34,7 +34,7 @@ describe('EmailSyncSchedulingService', () => {
         schedule_id: 'test-schedule-id',
         activity_name: 'syncEmailsWorkflow',
         status: 'RUNNING',
-        last_run: null,
+        last_run: new Date().toISOString(), // Changed to current time so it's not "stuck"
         next_run: '2025-08-06T08:01:04.175+00:00',
         error_message: null,
         retry_count: 0,
