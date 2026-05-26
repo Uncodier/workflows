@@ -18,7 +18,7 @@ export async function validateWorkflowConfigActivity(
   console.log(`🔐 Validating workflow configuration for site ${siteId}, activity: ${activityKey}`);
   
   // Define opt-in activities that require explicit activation
-  const optInActivities = ['supervise_conversations', 'assign_leads_to_team'];
+  const optInActivities = ['supervise_conversations', 'assign_leads_to_team', 'local_lead_generation', 'icp_lead_generation'];
   
   try {
     // Fetch activities configuration for the site
