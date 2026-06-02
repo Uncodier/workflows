@@ -44,13 +44,21 @@ interface WorkerVersioningConfig {
 const serverUrl = process.env.TEMPORAL_SERVER_URL || 'localhost:7233';
 const isLocalhost = serverUrl.includes('localhost') || serverUrl.includes('127.0.0.1');
 
+// SAFEGUARD: Detect expired or stale API Key from Render cache issues
+let activeApiKey = process.env.TEMPORAL_API_KEY;
+if (activeApiKey && activeApiKey.endsWith('cVD1LO_8QFj3RW8aVe6p7lg')) {
+  console.warn('⚠️ WARNING: Detected stale/expired API Key injected by Render cache.');
+  // Fallback to a secondary variable if provided, otherwise the connection will fail but cleanly
+  activeApiKey = process.env.TEMPORAL_API_KEY_NEW || activeApiKey;
+}
+
 const temporalConfig: TemporalConfig = {
   serverUrl,
   namespace: process.env.TEMPORAL_NAMESPACE || 'default',
   taskQueue: process.env.WORKFLOW_TASK_QUEUE || 'default',
   // Only use TLS and API key for remote servers, not localhost
-  apiKey: isLocalhost ? undefined : process.env.TEMPORAL_API_KEY,
-  tls: isLocalhost ? false : (process.env.TEMPORAL_TLS === 'true' || !!process.env.TEMPORAL_API_KEY),
+  apiKey: isLocalhost ? undefined : activeApiKey,
+  tls: isLocalhost ? false : (process.env.TEMPORAL_TLS === 'true' || !!activeApiKey),
 };
 
 const supabaseConfig: SupabaseConfig = {
