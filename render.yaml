@@ -10,39 +10,21 @@ services:
       - key: NODE_ENV
         value: production
       - key: TEMPORAL_SERVER_URL
-        fromService:
-          type: envVarGroup
-          name: temporal-config
-          envVarKey: TEMPORAL_SERVER_URL
+        sync: false
       - key: TEMPORAL_NAMESPACE
-        fromService:
-          type: envVarGroup
-          name: temporal-config
-          envVarKey: TEMPORAL_NAMESPACE
+        sync: false
       - key: TEMPORAL_API_KEY
-        fromService:
-          type: envVarGroup
-          name: temporal-config
-          envVarKey: TEMPORAL_API_KEY
+        sync: false
       - key: TEMPORAL_TLS
         value: "true"
       - key: WORKFLOW_TASK_QUEUE
         value: "default"
       - key: SUPABASE_URL
-        fromService:
-          type: envVarGroup
-          name: database-config
-          envVarKey: SUPABASE_URL
+        sync: false
       - key: SUPABASE_ANON_KEY
-        fromService:
-          type: envVarGroup
-          name: database-config
-          envVarKey: SUPABASE_ANON_KEY
+        sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
-        fromService:
-          type: envVarGroup
-          name: database-config
-          envVarKey: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
 
   # Worker Service - Temporal Worker (Always Running)
   - type: worker
@@ -55,20 +37,11 @@ services:
       - key: NODE_ENV
         value: production
       - key: TEMPORAL_SERVER_URL
-        fromService:
-          type: envVarGroup
-          name: temporal-config
-          envVarKey: TEMPORAL_SERVER_URL
+        sync: false
       - key: TEMPORAL_NAMESPACE
-        fromService:
-          type: envVarGroup
-          name: temporal-config
-          envVarKey: TEMPORAL_NAMESPACE
+        sync: false
       - key: TEMPORAL_API_KEY
-        fromService:
-          type: envVarGroup
-          name: temporal-config
-          envVarKey: TEMPORAL_API_KEY
+        sync: false
       - key: TEMPORAL_TLS
         value: "true"
       - key: WORKFLOW_TASK_QUEUE
@@ -89,37 +62,8 @@ services:
       # - key: TEMPORAL_WORKER_VERSIONING_BEHAVIOR
       #   value: "UNSPECIFIED"
       - key: SUPABASE_URL
-        fromService:
-          type: envVarGroup
-          name: database-config
-          envVarKey: SUPABASE_URL
+        sync: false
       - key: SUPABASE_ANON_KEY
-        fromService:
-          type: envVarGroup
-          name: database-config
-          envVarKey: SUPABASE_ANON_KEY
+        sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
-        fromService:
-          type: envVarGroup
-          name: database-config
-          envVarKey: SUPABASE_SERVICE_ROLE_KEY
-
-# Environment Variable Groups (Configure in Render Dashboard)
-envVarGroups:
-  - name: temporal-config
-    envVars:
-      - key: TEMPORAL_SERVER_URL
-        # Set this in Render Dashboard
-      - key: TEMPORAL_NAMESPACE  
-        # Set this in Render Dashboard
-      - key: TEMPORAL_API_KEY
-        # Set this in Render Dashboard (encrypted)
-        
-  - name: database-config
-    envVars:
-      - key: SUPABASE_URL
-        # Set this in Render Dashboard
-      - key: SUPABASE_ANON_KEY
-        # Set this in Render Dashboard (encrypted)
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        # Set this in Render Dashboard (encrypted) - Can bypass RLS 
+        sync: false
