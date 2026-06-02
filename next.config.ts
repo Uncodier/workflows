@@ -1,5 +1,4 @@
 import type { NextConfig } from "next";
-import path from "path";
 
 const nextConfig: NextConfig = {
   // Server build (not static export). Standalone disabled to avoid pages-manifest requirement.
@@ -11,10 +10,7 @@ const nextConfig: NextConfig = {
     // Do not ignore type errors; we want them to fail the build once unstuck
     ignoreBuildErrors: false,
   },
-  turbopack: {
-    // Explicitly define the workspace root for Render environment
-    root: path.join(__dirname),
-  },
+  // Disable Turbopack completely for production builds to avoid root inference bugs
 };
 
 export default nextConfig;
