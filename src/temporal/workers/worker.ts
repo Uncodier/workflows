@@ -60,11 +60,18 @@ export async function startWorker() {
       };
     }
 
-    if (temporalConfig.apiKey) {
+    // SAFEGUARD RE-APPLIED HERE TO ENSURE IT ALWAYS CATCHES RENDER'S CACHE ISSUE
+    let finalApiKey = temporalConfig.apiKey;
+    if (finalApiKey && finalApiKey.endsWith('cVD1LO_8QFj3RW8aVe6p7lg')) {
+      console.warn('⚠️ WARNING (Worker): Detected stale/expired API Key injected by Render cache.');
+      finalApiKey = process.env.TEMPORAL_API_KEY_NEW || finalApiKey;
+    }
+
+    if (finalApiKey) {
       connectionOptions.metadata = {
         'temporal-namespace': temporalConfig.namespace,
       };
-      connectionOptions.apiKey = temporalConfig.apiKey;
+      connectionOptions.apiKey = finalApiKey;
     }
 
     console.log('🔗 Connecting to Temporal server...');
