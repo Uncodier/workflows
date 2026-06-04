@@ -355,6 +355,14 @@ export async function leadFollowUpWorkflow(
     if (response) {
       console.log(`📝 Step 4: Saving lead follow-up logs to database...`);
       
+      // Inject sequence_stage into messages if provided in additionalData
+      if (options.additionalData?.sequence_stage && response.messages && Array.isArray(response.messages)) {
+        for (const msg of response.messages) {
+          msg.custom_data = msg.custom_data || {};
+          msg.custom_data.sequence_stage = options.additionalData.sequence_stage;
+        }
+      }
+
       const saveLogsResult = await saveLeadFollowUpLogsActivity({
         siteId: site_id,
         leadId: lead_id,

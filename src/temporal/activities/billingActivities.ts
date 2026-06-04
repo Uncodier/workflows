@@ -133,7 +133,7 @@ export async function renewSiteCreditsActivity(
   try {
     await supabaseService.updateSiteCredits(siteId, newCredits);
 
-    const addedCredits = newCredits - currentCredits > 0 ? newCredits - currentCredits : 0;
+    const addedCredits = Math.round(newCredits - currentCredits > 0 ? newCredits - currentCredits : 0);
 
     let shouldCreateNewPayment = true;
     if (stripeSubscriptionId) {
