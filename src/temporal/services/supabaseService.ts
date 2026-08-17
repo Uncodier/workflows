@@ -84,6 +84,10 @@ export class SupabaseService {
     return this.isConnected;
   }
 
+  public getClient(): SupabaseClient {
+    return this.client;
+  }
+
   public async getConnectionStatus(): Promise<boolean> {
     return await this.testConnection();
   }

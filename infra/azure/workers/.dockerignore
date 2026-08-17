@@ -1,0 +1,14 @@
+node_modules
+.git
+.next
+dist
+infra/azure/config.env
+infra/azure/.deploy-outputs.env
+*.pem
+.env*
+tests
+docs
+examples
+coverage
+*.md
+.cursor

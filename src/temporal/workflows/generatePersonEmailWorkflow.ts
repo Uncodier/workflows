@@ -118,13 +118,30 @@ export async function generatePersonEmailWorkflow(
         if (!email || email.trim() === '') continue;
         
         console.log(`📧 Validating existing email: ${email}`);
-        const validationResult = await executeChild(validateEmailWorkflow, {
-          workflowId: `validate-email-${email.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
-          args: [{
-            email,
-            aggressiveMode: false,
-          }],
-        });
+        
+        let validationResult;
+        try {
+          validationResult = await executeChild(validateEmailWorkflow, {
+            workflowId: `validate-email-${email.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
+            workflowExecutionTimeout: '5 minutes',
+            args: [{
+              email,
+              aggressiveMode: false,
+            }],
+          });
+        } catch (error: any) {
+          console.error(`❌ Validation workflow failed or timed out for ${email}:`, error);
+          validationResult = {
+            success: false,
+            error: {
+              message: error.message || 'Validation workflow error'
+            },
+            data: {
+               isValid: false,
+               deliverable: false
+            }
+          };
+        }
 
         if (validationResult.success && validationResult.data?.isValid && validationResult.data?.deliverable) {
           console.log(`✅ Existing email is valid: ${email}`);
@@ -331,13 +348,31 @@ export async function generatePersonEmailWorkflow(
       if (!email || email.trim() === '') continue;
 
       console.log(`📧 Validating generated email: ${email}`);
-      const validationResult = await executeChild(validateEmailWorkflow, {
-        workflowId: `validate-email-${email.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
-        args: [{
-          email,
-          aggressiveMode: false,
-        }],
-      });
+      
+      let validationResult;
+      try {
+        validationResult = await executeChild(validateEmailWorkflow, {
+          workflowId: `validate-email-${email.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
+          workflowExecutionTimeout: '5 minutes',
+          args: [{
+            email,
+            aggressiveMode: false,
+          }],
+        });
+      } catch (error: any) {
+        console.error(`❌ Validation workflow failed or timed out for ${email}:`, error);
+        // Map error to a failed validation result so we can try the next email
+        validationResult = {
+          success: false,
+          error: {
+            message: error.message || 'Validation workflow error'
+          },
+          data: {
+             isValid: false,
+             deliverable: false
+          }
+        };
+      }
 
       if (validationResult.success && validationResult.data?.isValid && validationResult.data?.deliverable) {
         console.log(`✅ Valid email found: ${email}`);

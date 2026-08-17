@@ -4,6 +4,7 @@ exports.validateEmailWorkflow = validateEmailWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const { testSMTPConnectivityActivity, validateEmail } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '10 minutes',
+    scheduleToCloseTimeout: '15 minutes',
     retry: {
         initialInterval: '1 second',
         maximumInterval: '30 seconds',

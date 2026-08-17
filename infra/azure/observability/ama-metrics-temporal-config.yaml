@@ -1,0 +1,40 @@
+# Custom scrape targets for Azure Monitor managed Prometheus (ama-metrics).
+# Applied as a ConfigMap that ama-metrics can merge when present in kube-system.
+# See: https://learn.microsoft.com/azure/azure-monitor/containers/prometheus-metrics-scrape-configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ama-metrics-prometheus-config
+  namespace: kube-system
+  labels:
+    app: ama-metrics
+data:
+  prometheus-config: |
+    scrape_configs:
+      - job_name: temporal-server
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - temporal
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod

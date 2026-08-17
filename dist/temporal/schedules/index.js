@@ -58,6 +58,30 @@ exports.defaultSchedules = [
         pauseOnFailure: false,
         catchupWindow: '12h',
         paused: false
+    },
+    {
+        id: 'process-reservations-schedule',
+        workflowType: 'processReservationsWorkflow',
+        intervalMinutes: 15, // Every 15 minutes
+        args: [],
+        description: 'Periodically check and process upcoming reservation notifications',
+        startAt: new Date(),
+        jitterMs: 15000,
+        pauseOnFailure: false,
+        catchupWindow: '1h',
+        paused: false
+    },
+    {
+        id: 'process-subscriptions-schedule',
+        workflowType: 'processSubscriptionsWorkflow',
+        intervalMinutes: 24 * 60, // Every 24 hours
+        args: [],
+        description: 'Daily workflow to process subscription renewals',
+        startAt: new Date(),
+        jitterMs: 60000,
+        pauseOnFailure: false,
+        catchupWindow: '12h',
+        paused: false
     }
 ];
 // Connection timeout wrapper

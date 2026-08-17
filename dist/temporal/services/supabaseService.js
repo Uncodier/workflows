@@ -108,6 +108,9 @@ class SupabaseService {
         this.connectionTested = true;
         return this.isConnected;
     }
+    getClient() {
+        return this.client;
+    }
     async getConnectionStatus() {
         return await this.testConnection();
     }

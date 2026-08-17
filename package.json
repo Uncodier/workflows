@@ -48,7 +48,8 @@
     "compare:provider": "npx tsx src/scripts/compare-provider-results.ts",
     "render:start": "node api/worker.js",
     "render:init": "npx tsx src/scripts/initialize-render.ts",
-    "render:startup:compiled": "node dist/scripts/render-startup.js"
+    "render:startup:compiled": "node dist/scripts/render-startup.js",
+    "azure:startup:compiled": "node dist/scripts/azure-worker-startup.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",
@@ -56,6 +57,7 @@
     "@temporalio/client": "^1.11.8",
     "@temporalio/worker": "^1.11.8",
     "@temporalio/workflow": "^1.11.8",
+    "axios": "^1.19.0",
     "dotenv": "^16.5.0",
     "next": "^15.5.6",
     "react": "^19.0.0",

@@ -1,0 +1,53 @@
+# Deploy Temporal workers (default + critical) to Azure App Service from Git.
+# Secrets required:
+#   AZURE_CREDENTIALS          — service principal JSON for azure/login
+#   AZURE_RESOURCE_GROUP       — resource group name
+#   AZURE_WORKER_DEFAULT_APP   — App Service name for default queue
+#   AZURE_WORKER_CRITICAL_APP  — App Service name for critical queue
+
+name: Deploy Azure Temporal Workers
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy-workers:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - app_secret: AZURE_WORKER_DEFAULT_APP
+            queue: default
+          - app_secret: AZURE_WORKER_CRITICAL_APP
+            queue: critical-priority
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets[matrix.app_secret] }}
+          package: .
+
+      - name: Ensure queue + startup
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            APP="${{ secrets[matrix.app_secret] }}"
+            RG="${{ secrets.AZURE_RESOURCE_GROUP }}"
+            az webapp config appsettings set -g "$RG" -n "$APP" --settings \
+              WORKFLOW_TASK_QUEUE="${{ matrix.queue }}" \
+              NODE_ENV=production \
+              TEMPORAL_TLS=false \
+              SCM_DO_BUILD_DURING_DEPLOYMENT=true
+            az webapp config set -g "$RG" -n "$APP" \
+              --always-on true \
+              --startup-file "npm run azure:startup:compiled"
+            az webapp restart -g "$RG" -n "$APP"

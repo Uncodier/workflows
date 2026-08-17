@@ -31,6 +31,8 @@ export * from './activityControlActivities';
 export * from './messageActivities';
 export * from './icypeasActivities';
 export * from './billingActivities';
+export * from './reservationActivities';
+export * from './subscriptionActivities';
 
 // Bundle all activities for the worker
 import * as supabaseActivities from './supabaseActivities';
@@ -65,6 +67,8 @@ import * as activityControlActivities from './activityControlActivities';
 import * as messageActivities from './messageActivities';
 import * as icypeasActivities from './icypeasActivities';
 import * as billingActivities from './billingActivities';
+import * as reservationActivities from './reservationActivities';
+import * as subscriptionActivities from './subscriptionActivities';
 
 export const activities = {
   ...supabaseActivities,
@@ -99,6 +103,8 @@ export const activities = {
   ...messageActivities,
   ...icypeasActivities,
   ...billingActivities,
+  ...reservationActivities,
+  ...subscriptionActivities
 };
 
 export type Activities = typeof activities; 

@@ -1,0 +1,18 @@
+tcp:
+  7233: "temporal/temporal-grpc-gateway:7233"
+
+controller:
+  replicaCount: 2
+  service:
+    type: LoadBalancer
+    externalTrafficPolicy: Local
+  config:
+    ssl-redirect: "false"
+    allow-snippet-annotations: "false"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi

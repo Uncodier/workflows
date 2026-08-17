@@ -6,6 +6,7 @@ const {
   validateEmail
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: '10 minutes',
+  scheduleToCloseTimeout: '15 minutes',
   retry: {
     initialInterval: '1 second',
     maximumInterval: '30 seconds',

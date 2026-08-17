@@ -53,3 +53,5 @@ export * from './generatePersonEmailWorkflow';
 export * from './leadGenerationDomainSearchWorkflow';
 export * from './sendApprovedMessagesWorkflow';
 export * from './dailyCreditRenewalWorkflow';
+export * from './processReservationsWorkflow';
+export * from './processSubscriptionsWorkflow';

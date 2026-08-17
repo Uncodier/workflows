@@ -1,0 +1,41 @@
+# Declarative description of Azure App Service workers (mirror of render.yaml).
+# Provisioned by Bicep (modules/workers.bicep) + scripts/04-deploy-workers.sh.
+#
+# Queues match src/temporal/config/taskQueues.ts:
+#   default            -> WORKFLOW_TASK_QUEUE=default
+#   critical-priority  -> WORKFLOW_TASK_QUEUE=critical-priority
+
+workers:
+  - name: temporal-worker-default
+    taskQueue: default
+    runtime: node:20
+    buildCommand: npm run build:all
+    startCommand: npm run azure:startup:compiled
+    alwaysOn: true
+    vnetIntegration: true
+    appSettings:
+      NODE_ENV: production
+      TEMPORAL_TLS: "false"
+      TEMPORAL_NAMESPACE: default
+      WORKFLOW_TASK_QUEUE: default
+      TEMPORAL_WORKER_USE_VERSIONING: "true"
+      TEMPORAL_WORKER_DEPLOYMENT_NAME: workflows_worker
+      # Set by 05-wire-network.sh after Temporal internal LB is ready:
+      # TEMPORAL_SERVER_URL: <internal-ip>:7233
+      # APPLICATIONINSIGHTS_CONNECTION_STRING: from Bicep
+      # SUPABASE_*: from config.env / Key Vault
+
+  - name: temporal-worker-critical
+    taskQueue: critical-priority
+    runtime: node:20
+    buildCommand: npm run build:all
+    startCommand: npm run azure:startup:compiled
+    alwaysOn: true
+    vnetIntegration: true
+    appSettings:
+      NODE_ENV: production
+      TEMPORAL_TLS: "false"
+      TEMPORAL_NAMESPACE: default
+      WORKFLOW_TASK_QUEUE: critical-priority
+      TEMPORAL_WORKER_USE_VERSIONING: "true"
+      TEMPORAL_WORKER_DEPLOYMENT_NAME: workflows_worker

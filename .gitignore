@@ -34,6 +34,12 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Azure Temporal deploy secrets / generated outputs
+infra/azure/config.env
+infra/azure/.deploy-outputs.env
+infra/azure/.last-deployment.json
+infra/azure/helm/temporal-values.generated.yaml
+
 # vercel
 .vercel
 

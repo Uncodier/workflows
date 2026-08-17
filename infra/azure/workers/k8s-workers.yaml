@@ -1,0 +1,299 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: temporal-workers
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: worker-env
+  namespace: temporal-workers
+type: Opaque
+stringData:
+  TEMPORAL_SERVER_URL: "temporal-frontend.temporal.svc.cluster.local:7233"
+  TEMPORAL_NAMESPACE: "default"
+  TEMPORAL_TLS: "false"
+  NODE_ENV: "production"
+  # Filled by deploy script (placeholders replaced or patched)
+  API_BASE_URL: "__API_BASE_URL__"
+  API_KEY: "__API_KEY__"
+  SUPABASE_URL: "__SUPABASE_URL__"
+  SUPABASE_KEY: "__SUPABASE_ANON_KEY__"
+  SUPABASE_ANON_KEY: "__SUPABASE_ANON_KEY__"
+  SUPABASE_SERVICE_ROLE_KEY: "__SUPABASE_SERVICE_ROLE_KEY__"
+  REOON_API_KEY: "__REOON_API_KEY__"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker-default
+  namespace: temporal-workers
+  labels:
+    app: temporal-worker
+    queue: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: temporal-worker
+      queue: default
+  template:
+    metadata:
+      labels:
+        app: temporal-worker
+        queue: default
+    spec:
+      containers:
+        - name: worker
+          image: __WORKER_IMAGE__
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: worker-env
+          env:
+            - name: WORKFLOW_TASK_QUEUE
+              value: default
+            - name: PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+              name: health
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker-critical
+  namespace: temporal-workers
+  labels:
+    app: temporal-worker
+    queue: critical
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: temporal-worker
+      queue: critical
+  template:
+    metadata:
+      labels:
+        app: temporal-worker
+        queue: critical
+    spec:
+      containers:
+        - name: worker
+          image: __WORKER_IMAGE__
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: worker-env
+          env:
+            - name: WORKFLOW_TASK_QUEUE
+              value: critical-priority
+            - name: PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+              name: health
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker-high
+  namespace: temporal-workers
+  labels:
+    app: temporal-worker
+    queue: high
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: temporal-worker
+      queue: high
+  template:
+    metadata:
+      labels:
+        app: temporal-worker
+        queue: high
+    spec:
+      containers:
+        - name: worker
+          image: __WORKER_IMAGE__
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: worker-env
+          env:
+            - name: WORKFLOW_TASK_QUEUE
+              value: high
+            - name: PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+              name: health
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker-low
+  namespace: temporal-workers
+  labels:
+    app: temporal-worker
+    queue: low
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-worker
+      queue: low
+  template:
+    metadata:
+      labels:
+        app: temporal-worker
+        queue: low
+    spec:
+      containers:
+        - name: worker
+          image: __WORKER_IMAGE__
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: worker-env
+          env:
+            - name: WORKFLOW_TASK_QUEUE
+              value: low-priority
+            - name: PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+              name: health
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker-background
+  namespace: temporal-workers
+  labels:
+    app: temporal-worker
+    queue: background
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-worker
+      queue: background
+  template:
+    metadata:
+      labels:
+        app: temporal-worker
+        queue: background
+    spec:
+      containers:
+        - name: worker
+          image: __WORKER_IMAGE__
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: worker-env
+          env:
+            - name: WORKFLOW_TASK_QUEUE
+              value: background-priority
+            - name: PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+              name: health
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
