@@ -69,6 +69,7 @@ import * as icypeasActivities from './icypeasActivities';
 import * as billingActivities from './billingActivities';
 import * as reservationActivities from './reservationActivities';
 import * as subscriptionActivities from './subscriptionActivities';
+import * as taskActivities from './taskActivities';
 
 export const activities = {
   ...supabaseActivities,
@@ -104,7 +105,8 @@ export const activities = {
   ...icypeasActivities,
   ...billingActivities,
   ...reservationActivities,
-  ...subscriptionActivities
+  ...subscriptionActivities,
+  ...taskActivities
 };
 
 export type Activities = typeof activities; 

@@ -10,6 +10,7 @@ type WorkflowArgs = {
   dailyCreditRenewalWorkflow: [];
   processReservationsWorkflow: [];
   processSubscriptionsWorkflow: [];
+  processTasksWorkflow: [];
 };
 
 export interface ScheduleSpec {
@@ -103,6 +104,18 @@ export const defaultSchedules: ScheduleSpec[] = [
     jitterMs: 60000,
     pauseOnFailure: false,
     catchupWindow: '12h',
+    paused: false
+  },
+  {
+    id: 'process-tasks-schedule',
+    workflowType: 'processTasksWorkflow',
+    intervalMinutes: 15, // Every 15 minutes
+    args: [],
+    description: 'Polls for upcoming tasks to send reminders',
+    startAt: new Date(),
+    jitterMs: 15000,
+    pauseOnFailure: false,
+    catchupWindow: '1h',
     paused: false
   }
 ];

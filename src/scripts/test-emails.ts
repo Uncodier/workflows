@@ -1,6 +1,8 @@
 import { apiService } from '../temporal/services/apiService';
 import * as dotenv from 'dotenv';
 import { resolve } from 'path';
+import { translateAndFormatTaskNotificationActivity } from '../temporal/activities/taskActivities';
+import { Task } from '../temporal/services/supabase-impl/tasks';
 
 // Asegurarse de que las variables de entorno se carguen correctamente
 dotenv.config({ path: resolve(process.cwd(), '.env') });
@@ -11,89 +13,58 @@ async function sendTestEmails() {
 
   console.log(`Enviando correos de prueba a: ${email}...`);
 
-  // 1. Reservation 24h
-  const res24 = `
-# Recordatorio de Reservación
+  // Testing the specific Task 49f5a167-f140-40b8-a037-737d6590306e
+  const realTask: Task = {
+    id: "49f5a167-f140-40b8-a037-737d6590306e",
+    site_id: "9be0a6a2-5567-41bf-ad06-cb4014f0faf2",
+    title: "Revisión de módulo de licitaciones",
+    description: "{\"notes\":\"\",\"_calendar_context\":{\"origin\":\"reservations_modal\",\"catalog_item_id\":\"45d41ebf-682f-430a-8022-9b2f1cdffeb7\",\"catalog_item_name\":\"30 minute meeting\",\"duration\":\"30 min\",\"end_time\":\"2026-08-18T23:00:00.000Z\",\"location\":null}}",
+    type: "meeting",
+    status: "pending",
+    stage: "consideration",
+    scheduled_date: "2026-08-18 22:30:00+00",
+    assignee: "541396e1-a904-4a81-8cbf-0ca4e3b8b2b4",
+    lead_id: "4b495e86-75f7-4e18-b4e8-28b36e78127e",
+    metadata: {
+      "_calendar_context": {
+        "origin": "reservations_modal",
+        "duration": "30 min",
+        "end_time": "2026-08-18T23:00:00.000Z",
+        "location": "https://meet.google.com/sbh-esgz-wiv",
+        "catalog_item_id": "45d41ebf-682f-430a-8022-9b2f1cdffeb7",
+        "catalog_item_name": "30 minute meeting"
+      }
+    }
+  };
 
-Hola Sergio,
+  const { subject, message } = await translateAndFormatTaskNotificationActivity({
+    task: realTask,
+    member: { email: 'sergio@uncodie.com', name: 'Sergio Prado', role: 'assignee' },
+    timeWindowHours: 24
+  });
 
-Este es un recordatorio de que tienes una reservación programada próximamente.
-
-**Detalles de la reserva:**
-- **Fecha:** lunes, 17 de agosto de 2026
-- **Horario:** 14:00 a 15:00 (Zona Horaria: America/Mexico_City)
-- **Servicio:** Consultoría Estratégica
-- **Ubicación:** Reunión en línea (Digital Meet Room)
-- **Notas:** Por favor llega 10 minutos antes.
-
-Por favor, ponte en contacto si necesitas realizar algún cambio.
-
-¡Gracias!
-  `.trim();
-
-  console.log('Enviando recordatorio de 24 horas...');
-  await apiService.post('/api/notifications/reservationReminder', {
+  console.log('Enviando recordatorio de tarea con ID real...');
+  await apiService.post('/api/notifications/taskReminder', {
     email: email,
-    subject: 'Recordatorio: Tu reservación es mañana',
-    message: res24,
-    site_id: 'd74096c4-14e6-471b-8c68-e059af438bc2',
+    subject: subject,
+    message: message,
+    site_id: '9be0a6a2-5567-41bf-ad06-cb4014f0faf2',
     locale: 'es'
   });
 
-  // 2. Reservation 1h
-  const res1 = `
-# Recordatorio de Reservación
-
-Hola Sergio,
-
-Este es un recordatorio de que tienes una reservación programada próximamente.
-
-**Detalles de la reserva:**
-- **Fecha:** domingo, 16 de agosto de 2026
-- **Horario:** 18:00 a 19:00 (Zona Horaria: America/Mexico_City)
-- **Servicio:** Sesión Presencial de Revisión
-- **Ubicación:** Oficina Central - Av. Principal 123, Ciudad
-- **Notas:** Traer laptop.
-
-Por favor, ponte en contacto si necesitas realizar algún cambio.
-
-¡Gracias!
-  `.trim();
-
-  console.log('Enviando recordatorio de 1 hora...');
-  await apiService.post('/api/notifications/reservationReminder', {
-    email: email,
-    subject: 'Recordatorio: Tu reservación es en 1 hora',
-    message: res1,
-    site_id: 'd74096c4-14e6-471b-8c68-e059af438bc2',
-    locale: 'es'
+  const { subject: leadSubject, message: leadMessage } = await translateAndFormatTaskNotificationActivity({
+    task: realTask,
+    member: { email: 'gerencia@transarielsur.com', name: 'Mauricio Aranza', role: 'lead' },
+    timeWindowHours: 24
   });
 
-  // 3. Subscription Renewal
-  const sub = `
-# Recibo de Suscripción
-
-Hola Sergio,
-
-Tu suscripción ha sido renovada exitosamente.
-
-**Detalles de la transacción:**
-- **Fecha:** 16/8/2026
-- **Monto Total:** $49.99 USD
-- **Número de Orden:** test-sale-id-12345
-- **Próximo Cobro:** 16/9/2026
-
-[Ver Detalles de la Orden de Compra (SO)](https://makinari.com/so/ya5q-RfUeU2tA98P0rne6nQmi1LEJk8q)
-
-Gracias por tu preferencia. Si tienes alguna duda, responde a este correo.
-  `.trim();
-
-  console.log('Enviando recibo de suscripción...');
-  await apiService.post('/api/notifications/subscriptionRenewal', {
+  // Sending the lead version to Sergio as well to see how it looks
+  console.log('Enviando recordatorio de tarea para el Lead con ID real...');
+  await apiService.post('/api/notifications/taskReminder', {
     email: email,
-    subject: 'Recibo de Renovación de Suscripción',
-    message: sub,
-    site_id: 'd74096c4-14e6-471b-8c68-e059af438bc2',
+    subject: leadSubject,
+    message: leadMessage,
+    site_id: '9be0a6a2-5567-41bf-ad06-cb4014f0faf2',
     locale: 'es'
   });
 
