@@ -1,4 +1,5 @@
 import { apiService } from '../services/apiService';
+import { validateEmail } from './validateEmailActivities';
 
 /**
  * Activity to fetch data from the API
@@ -146,10 +147,10 @@ export async function validateContactInformation(request: {
   console.log(`📧 [${callId}] Called from leadId: ${leadId}`);
   
   try {
-    const response = await apiService.post('/api/agents/tools/validateEmail', { email });
+    const response = await validateEmail({ email });
     
     if (!response.success) {
-      console.error(`❌ Email validation API call failed: ${response.error?.message}`);
+      console.error(`❌ Email validation failed: ${response.error?.message}`);
       return {
         success: false,
         isValid: false,
@@ -160,10 +161,6 @@ export async function validateContactInformation(request: {
       };
     }
     
-    // Handle possible nested API response structures
-    // Expected variants:
-    // A) { success: true, data: { email, isValid, deliverable, ... } }
-    // B) { success: true, data: { success: true, data: { email, isValid, deliverable, ... } }, temporal?: {...} }
     let emailData: any = response.data;
     if (emailData && typeof emailData === 'object' && 'data' in emailData) {
       emailData = (emailData as any).data;

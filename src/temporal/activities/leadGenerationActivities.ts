@@ -9,6 +9,7 @@
 
 import { logger } from '../../lib/logger';
 import { apiService } from '../services/apiService';
+import { validateEmail } from './validateEmailActivities';
 import { getSupabaseService } from '../services/supabaseService';
 
 export interface LeadGenerationApiResult {
@@ -1330,9 +1331,7 @@ export async function validateAndGenerateEmployeeContactsActivity(
               console.log(`📧 Validating generated email: ${generatedEmail}`);
               
               // Call email validation API directly
-              const validationResponse = await apiService.post('/api/agents/tools/validateEmail', { 
-                email: generatedEmail 
-              });
+              const validationResponse = await validateEmail({ email: generatedEmail });
 
               // Normalize possible nested response payloads
               // Variants:
@@ -1390,9 +1389,7 @@ export async function validateAndGenerateEmployeeContactsActivity(
         
         try {
           // Call email validation API directly
-          const validationResponse = await apiService.post('/api/agents/tools/validateEmail', { 
-            email: email 
-          });
+          const validationResponse = await validateEmail({ email: email });
 
           // Normalize possible nested response payloads
           let emailData: any = validationResponse.data;
@@ -1487,9 +1484,7 @@ export async function validateAndGenerateEmployeeContactsActivity(
                   for (const fallbackEmail of fallbackEmails) {
                     console.log(`📧 Validating fallback email: ${fallbackEmail}`);
                     
-                    const fallbackValidationResponse = await apiService.post('/api/agents/tools/validateEmail', { 
-                      email: fallbackEmail 
-                    });
+                    const fallbackValidationResponse = await validateEmail({ email: fallbackEmail });
 
                     // Normalize possible nested response payloads
                     let emailData: any = fallbackValidationResponse.data;

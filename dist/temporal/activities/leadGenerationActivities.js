@@ -60,6 +60,7 @@ exports.notifyNewLeadsActivity = notifyNewLeadsActivity;
 exports.determineMaxVenuesActivity = determineMaxVenuesActivity;
 const logger_1 = require("../../lib/logger");
 const apiService_1 = require("../services/apiService");
+const validateEmailActivities_1 = require("./validateEmailActivities");
 const supabaseService_1 = require("../services/supabaseService");
 /**
  * Activity to call the region search API
@@ -1071,9 +1072,7 @@ async function validateAndGenerateEmployeeContactsActivity(options) {
                         for (const generatedEmail of generatedEmails) {
                             console.log(`📧 Validating generated email: ${generatedEmail}`);
                             // Call email validation API directly
-                            const validationResponse = await apiService_1.apiService.post('/api/agents/tools/validateEmail', {
-                                email: generatedEmail
-                            });
+                            const validationResponse = await (0, validateEmailActivities_1.validateEmail)({ email: generatedEmail });
                             // Normalize possible nested response payloads
                             // Variants:
                             // A) { success: true, data: { email, isValid, deliverable, ... } }
@@ -1128,9 +1127,7 @@ async function validateAndGenerateEmployeeContactsActivity(options) {
                 console.log(`📧 Validating existing email for ${employeeData.name}: ${email}`);
                 try {
                     // Call email validation API directly
-                    const validationResponse = await apiService_1.apiService.post('/api/agents/tools/validateEmail', {
-                        email: email
-                    });
+                    const validationResponse = await (0, validateEmailActivities_1.validateEmail)({ email: email });
                     // Normalize possible nested response payloads
                     let emailData = validationResponse.data;
                     if (emailData && typeof emailData === 'object' && 'data' in emailData) {
@@ -1216,9 +1213,7 @@ async function validateAndGenerateEmployeeContactsActivity(options) {
                                     // Validate each generated email
                                     for (const fallbackEmail of fallbackEmails) {
                                         console.log(`📧 Validating fallback email: ${fallbackEmail}`);
-                                        const fallbackValidationResponse = await apiService_1.apiService.post('/api/agents/tools/validateEmail', {
-                                            email: fallbackEmail
-                                        });
+                                        const fallbackValidationResponse = await (0, validateEmailActivities_1.validateEmail)({ email: fallbackEmail });
                                         // Normalize possible nested response payloads
                                         let emailData = fallbackValidationResponse.data;
                                         if (emailData && typeof emailData === 'object' && 'data' in emailData) {
