@@ -23,6 +23,30 @@ Solo los workflows listados en este archivo deben guardar registros en la tabla 
 - **Frecuencia**: Cada 60 minutos (1 hora)
 - **Descripción**: Programa workflows de sincronización de emails para todos los sitios
 
+#### `dailyCreditRenewalWorkflow`
+- **Schedule ID**: `daily-credit-renewal`
+- **Frecuencia**: Cada 24 horas
+- **Descripción**: Workflow diario para renovar los créditos de los sitios de acuerdo a su ciclo de facturación.
+- **Guarda cron_status**: No (es una operación directa sin estado por sitio en cron_status).
+
+#### `processReservationsWorkflow`
+- **Schedule ID**: `process-reservations-schedule`
+- **Frecuencia**: Cada 15 minutos
+- **Descripción**: Revisa periódicamente las reservaciones próximas y envía notificaciones.
+- **Guarda cron_status**: No.
+
+#### `processSubscriptionsWorkflow`
+- **Schedule ID**: `process-subscriptions-schedule`
+- **Frecuencia**: Cada 24 horas
+- **Descripción**: Revisa y procesa renovaciones de suscripciones (generación de orders, emails).
+- **Guarda cron_status**: No.
+
+#### `processTasksWorkflow`
+- **Schedule ID**: `process-tasks-schedule`
+- **Frecuencia**: Cada 15 minutos
+- **Descripción**: Revisa tareas próximas para enviar recordatorios (24h y 1h antes).
+- **Guarda cron_status**: No.
+
 ### 2. Child Workflows Ejecutados por Cron (Indirectamente)
 
 #### `activityPrioritizationEngineWorkflow`
@@ -82,12 +106,6 @@ const CRON_SCHEDULED_WORKFLOWS = [
 
 Todos los demás workflows del sistema, incluyendo:
 
-**Workflows de Orquestación (no guardan cron_status):**
-- `scheduleActivitiesWorkflow` (schedule principal - solo orquesta)
-- `syncEmailsScheduleWorkflow` (schedule principal - solo orquesta)
-- `activityPrioritizationEngineWorkflow` (motor de decisión - solo orquesta)
-- `dailyOperationsWorkflow` (monitoreo - solo orquesta)
-
 **Workflows Ejecutados Manualmente:**
 - `buildCampaignsWorkflow`
 - `deepResearchWorkflow`  
@@ -97,6 +115,16 @@ Todos los demás workflows del sistema, incluyendo:
 - Workflows de análisis (`buildSegmentsWorkflow`, etc.)
 - Workflows de contenido (`buildContentWorkflow`, `sendNewsletterWorkflow`, etc.)
 - Workflows de soporte (`customerSupportMessageWorkflow`, etc.)
+
+**Workflows de Orquestación y Crons Nativos (no guardan cron_status):**
+- `scheduleActivitiesWorkflow` (schedule principal - solo orquesta)
+- `syncEmailsScheduleWorkflow` (schedule principal - solo orquesta)
+- `activityPrioritizationEngineWorkflow` (motor de decisión - solo orquesta)
+- `dailyOperationsWorkflow` (monitoreo - solo orquesta)
+- `dailyCreditRenewalWorkflow`
+- `processReservationsWorkflow`
+- `processSubscriptionsWorkflow`
+- `processTasksWorkflow`
 
 ## Cómo Mantener Este Archivo
 
