@@ -107,6 +107,7 @@ const icypeasActivities = __importStar(require("./icypeasActivities"));
 const billingActivities = __importStar(require("./billingActivities"));
 const reservationActivities = __importStar(require("./reservationActivities"));
 const subscriptionActivities = __importStar(require("./subscriptionActivities"));
+const taskActivities = __importStar(require("./taskActivities"));
 exports.activities = {
     ...supabaseActivities,
     ...apiActivities,
@@ -141,7 +142,8 @@ exports.activities = {
     ...icypeasActivities,
     ...billingActivities,
     ...reservationActivities,
-    ...subscriptionActivities
+    ...subscriptionActivities,
+    ...taskActivities
 };
 var workflowSchedulingActivities_1 = require("./workflowSchedulingActivities");
 Object.defineProperty(exports, "executeDailyStandUpWorkflowsActivity", { enumerable: true, get: function () { return workflowSchedulingActivities_1.executeDailyStandUpWorkflowsActivity; } });
