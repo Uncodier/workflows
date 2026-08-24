@@ -25,8 +25,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Build Project (Next.js + Temporal Worker)
+        run: npm run build:all
+
       - name: Azure Login
-        uses: azure/login@v2
+        uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
@@ -46,7 +55,7 @@ jobs:
               WORKFLOW_TASK_QUEUE="${{ matrix.queue }}" \
               NODE_ENV=production \
               TEMPORAL_TLS=false \
-              SCM_DO_BUILD_DURING_DEPLOYMENT=true
+              SCM_DO_BUILD_DURING_DEPLOYMENT=false
             az webapp config set -g "$RG" -n "$APP" \
               --always-on true \
               --startup-file "npm run azure:startup:compiled"
