@@ -25,26 +25,29 @@ export async function getTaskMembersActivity(task: Task): Promise<TaskMember[]> 
 
   // Get lead
   if (task.lead_id) {
-    const { data: lead } = await supabase.from('leads').select('email, first_name, name, language, timezone').eq('id', task.lead_id).maybeSingle();
+    const { data: lead, error: leadError } = await supabase.from('leads').select('email, name, language').eq('id', task.lead_id).maybeSingle();
+    if (leadError) console.error(`Error fetching lead for task ${task.id}:`, leadError);
     if (lead?.email) {
       members.push({ 
         email: lead.email, 
-        name: lead.first_name || lead.name || 'Customer', 
+        name: lead.name || 'Customer', 
         role: 'lead',
-        lang: lead.language,
-        tz: lead.timezone
+        lang: lead.language
       });
     }
   }
 
   // Get assignee
   if (task.assignee) {
-    const { data: profile } = await supabase.from('profiles').select('email, full_name').eq('id', task.assignee).maybeSingle();
+    const { data: profile, error: profileError } = await supabase.from('profiles').select('email, name, language, timezone').eq('id', task.assignee).maybeSingle();
+    if (profileError) console.error(`Error fetching profile for task ${task.id}:`, profileError);
     if (profile?.email) {
       members.push({ 
         email: profile.email, 
-        name: profile.full_name || 'Team Member', 
-        role: 'assignee' 
+        name: profile.name || 'Team Member', 
+        role: 'assignee',
+        lang: profile.language,
+        tz: profile.timezone
       });
     }
   }
@@ -162,3 +165,36 @@ export async function sendTaskNotificationActivity(params: SendTaskNotificationP
     throw new Error(`Failed to send task notification: ${response.error?.message}`);
   }
 }
+
+export interface CreateTaskCommentParams {
+  task_id: string;
+  content: string;
+  user_id?: string;
+  is_private?: boolean;
+}
+
+export async function createTaskCommentActivity(params: CreateTaskCommentParams): Promise<void> {
+  const supabase = getSupabaseService().getClient();
+  
+  console.log(`📝 Creating timeline comment for task ${params.task_id}`);
+  
+  const commentData: any = {
+    task_id: params.task_id,
+    content: params.content,
+    is_private: params.is_private ?? false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  if (params.user_id) {
+    commentData.user_id = params.user_id;
+  }
+
+  const { error } = await supabase.from('task_comments').insert([commentData]);
+
+  if (error) {
+    console.error(`❌ Failed to create task comment:`, error);
+    throw new Error(`Failed to create task comment: ${error.message}`);
+  }
+}
+

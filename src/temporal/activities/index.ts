@@ -33,6 +33,7 @@ export * from './icypeasActivities';
 export * from './billingActivities';
 export * from './reservationActivities';
 export * from './subscriptionActivities';
+export * from './taskActivities';
 
 // Bundle all activities for the worker
 import * as supabaseActivities from './supabaseActivities';

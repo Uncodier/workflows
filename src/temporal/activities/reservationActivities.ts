@@ -24,22 +24,22 @@ export async function getReservationMembersActivity(reservation: Reservation): P
   const members: ReservationMember[] = [];
 
   if (reservation.lead_id) {
-    const { data: lead } = await supabase.from('leads').select('email, first_name, language, timezone').eq('id', reservation.lead_id).maybeSingle();
+    const { data: lead } = await supabase.from('leads').select('email, name, language').eq('id', reservation.lead_id).maybeSingle();
     if (lead?.email) {
       members.push({ 
         email: lead.email, 
-        name: lead.first_name || 'Customer', 
+        name: lead.name || 'Customer', 
         role: 'lead',
         lang: lead.language,
-        tz: lead.timezone
+        tz: 'America/Mexico_City'
       });
     }
   }
 
   if (reservation.buyer_user_id) {
-    const { data: profile } = await supabase.from('profiles').select('email, full_name').eq('id', reservation.buyer_user_id).maybeSingle();
+    const { data: profile } = await supabase.from('profiles').select('email, name').eq('id', reservation.buyer_user_id).maybeSingle();
     if (profile?.email) {
-      members.push({ email: profile.email, name: profile.full_name || 'Buyer', role: 'buyer' });
+      members.push({ email: profile.email, name: profile.name || 'Buyer', role: 'buyer' });
     }
   }
 

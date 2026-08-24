@@ -5,7 +5,8 @@ const {
   fetchUpcomingTasksActivity,
   getTaskMembersActivity,
   translateAndFormatTaskNotificationActivity,
-  sendTaskNotificationActivity
+  sendTaskNotificationActivity,
+  createTaskCommentActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5m',
   retry: {
@@ -41,6 +42,14 @@ export async function processTasksWorkflow(): Promise<{ processed: number; error
               message,
               site_id: task.site_id,
               lang: member.lang
+            });
+
+            // Add comment to task timeline
+            await createTaskCommentActivity({
+              task_id: task.id,
+              content: `📧 Recordatorio enviado: ${subject}`,
+              user_id: task.assignee || undefined,
+              is_private: true
             });
           }
           totalProcessed++;

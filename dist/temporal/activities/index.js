@@ -72,6 +72,7 @@ __exportStar(require("./icypeasActivities"), exports);
 __exportStar(require("./billingActivities"), exports);
 __exportStar(require("./reservationActivities"), exports);
 __exportStar(require("./subscriptionActivities"), exports);
+__exportStar(require("./taskActivities"), exports);
 // Bundle all activities for the worker
 const supabaseActivities = __importStar(require("./supabaseActivities"));
 const apiActivities = __importStar(require("./apiActivities"));

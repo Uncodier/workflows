@@ -86,16 +86,16 @@ export async function notifySubscriptionRenewalActivity(params: NotifySubscripti
   let userLang = 'es-MX';
 
   if (sub.buyer_user_id) {
-    const { data: profile } = await supabase.from('profiles').select('email, full_name').eq('id', sub.buyer_user_id).maybeSingle();
+    const { data: profile } = await supabase.from('profiles').select('email, name').eq('id', sub.buyer_user_id).maybeSingle();
     if (profile?.email) {
       userEmail = profile.email;
-      if (profile.full_name) userName = profile.full_name;
+      if (profile.name) userName = profile.name;
     }
   } else if (sub.lead_id) {
-    const { data: lead } = await supabase.from('leads').select('email, first_name, language').eq('id', sub.lead_id).maybeSingle();
+    const { data: lead } = await supabase.from('leads').select('email, name, language').eq('id', sub.lead_id).maybeSingle();
     if (lead?.email) {
       userEmail = lead.email;
-      if (lead.first_name) userName = lead.first_name;
+      if (lead.name) userName = lead.name;
       if (lead.language) userLang = lead.language;
     }
   }
