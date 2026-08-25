@@ -1,5 +1,5 @@
-# Declarative description of Azure App Service workers (mirror of render.yaml).
-# Provisioned by Bicep (modules/workers.bicep) + scripts/04-deploy-workers.sh.
+# Legacy App Service worker inventory. Production workers run on AKS
+# (k8s-workers.yaml + 07-deploy-workers-aks.sh / GitHub Actions).
 #
 # Queues match src/temporal/config/taskQueues.ts:
 #   default            -> WORKFLOW_TASK_QUEUE=default

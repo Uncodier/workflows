@@ -70,7 +70,7 @@ sed \
 
 log "Applying worker deployments..."
 kubectl apply -f "${MANIFEST}"
-for deploy in temporal-worker-default temporal-worker-critical temporal-worker-high temporal-worker-low temporal-worker-background; do
+for deploy in temporal-worker-default temporal-worker-critical temporal-worker-high temporal-worker-low temporal-worker-background temporal-worker-validation; do
   kubectl -n temporal-workers rollout status "deploy/${deploy}" --timeout=5m
 done
 
@@ -78,5 +78,5 @@ log "Workers:"
 kubectl -n temporal-workers get pods -o wide
 save_output WORKER_IMAGE "${WORKER_IMAGE}"
 save_output ACR_NAME "${ACR_NAME}"
-log "AKS workers deployed (queues: default, critical-priority, high, low-priority, background-priority)."
+log "AKS workers deployed (queues: default, critical-priority, high, low-priority, background-priority, validation)."
 log "Temporal address inside cluster: temporal-frontend.temporal.svc.cluster.local:7233"

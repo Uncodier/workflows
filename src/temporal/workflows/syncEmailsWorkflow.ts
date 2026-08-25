@@ -1,6 +1,7 @@
 import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { scheduleCustomerSupportMessagesWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
+import { isEmailAuthFailure } from '../utils/emailAuthErrors';
 
 // Define the activity interface and options
 const { 
@@ -346,18 +347,38 @@ export async function syncEmailsWorkflow(
       console.log(`🔄 Continuing workflow despite analysis exception...`);
     }
 
-    // Step 6: Sync Sent Emails (CRITICAL - workflow will fail if this fails)
+    // Step 6: Sync Sent Emails (auth/IMAP failures are skipped, not fatal)
     console.log(`📨 Step 6: Syncing sent emails to update lead status...`);
-    
+
     const syncSentEmailsRequest = {
       site_id: siteId,
       limit: 20, // Sync last 20 sent emails
       since_date: validation.since.toISOString()
     };
 
-    const syncSentResponse = await syncSentEmailsActivity(syncSentEmailsRequest);
-    console.log(`✅ Sent emails sync completed successfully`);
-    console.log(`📊 Sync results:`, JSON.stringify(syncSentResponse.data, null, 2));
+    try {
+      const syncSentResponse = await syncSentEmailsActivity(syncSentEmailsRequest);
+      if (!syncSentResponse.success) {
+        const syncError = syncSentResponse.error || 'Unknown sent-email sync error';
+        if (isEmailAuthFailure(syncError)) {
+          console.warn(`⚠️ Sent emails sync skipped (invalid IMAP/credentials): ${syncError}`);
+          result.errors.push(`Sent emails sync skipped: ${syncError}`);
+        } else {
+          throw new Error(`Sent emails sync failed: ${syncError}`);
+        }
+      } else {
+        console.log(`✅ Sent emails sync completed successfully`);
+        console.log(`📊 Sync results:`, JSON.stringify(syncSentResponse.data, null, 2));
+      }
+    } catch (syncSentError) {
+      const syncErrorMessage = syncSentError instanceof Error ? syncSentError.message : String(syncSentError);
+      if (isEmailAuthFailure(syncErrorMessage)) {
+        console.warn(`⚠️ Sent emails sync skipped (invalid IMAP/credentials): ${syncErrorMessage}`);
+        result.errors.push(`Sent emails sync skipped: ${syncErrorMessage}`);
+      } else {
+        throw syncSentError;
+      }
+    }
 
     // Step 7: Check Email Delivery Status
     console.log(`📋 Step 7: Checking email delivery status...`);

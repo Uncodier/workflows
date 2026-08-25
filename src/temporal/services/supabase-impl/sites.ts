@@ -15,6 +15,22 @@ export async function fetchSites(client: SupabaseClient): Promise<any[]> {
   return data || [];
 }
 
+export async function fetchSiteById(client: SupabaseClient, siteId: string): Promise<any | null> {
+  console.log(`🔍 Fetching site ${siteId} from Supabase...`);
+  const { data, error } = await client
+    .from('sites')
+    .select('id, name, url, description, user_id, created_at, updated_at')
+    .eq('id', siteId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('❌ Error fetching site by id:', error);
+    throw new Error(`Failed to fetch site: ${error.message}`);
+  }
+
+  return data;
+}
+
 export async function fetchSitesWithEmailEnabled(client: SupabaseClient): Promise<any[]> {
   console.log('🔍 Fetching sites with email sync enabled...');
   

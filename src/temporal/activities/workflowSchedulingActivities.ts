@@ -13,6 +13,7 @@ import {
 import { logWorkflowExecutionActivity, checkSiteAnalysisActivity } from './supabaseActivities';
 import { getSupabaseService } from '../services/supabaseService';
 import { extractSearchAttributesFromInput } from '../utils/searchAttributes';
+import { computeDelayedWorkflowRunTimeout } from '../utils/delayedExecutionTimeout';
 
 export interface ScheduleWorkflowResult {
   workflowId: string;
@@ -1434,7 +1435,7 @@ export async function scheduleIndividualDailyStandUpsActivity(
             }],
             taskQueue: temporalConfig.taskQueue,
             workflowId: dateSpecificId,
-            workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+            workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
           });
 
           // Get the actual workflow ID from Temporal
@@ -1804,7 +1805,7 @@ export async function scheduleIndividualSiteAnalysisActivity(
           }],
           taskQueue: temporalConfig.taskQueue,
           workflowId: workflowId,
-          workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+          workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
         });
 
         console.log(`✅ Successfully scheduled Site Analysis with TIMER for ${site.name || 'Site'}`);
@@ -2140,7 +2141,7 @@ export async function scheduleIndividualLeadGenerationActivity(
             }],
             taskQueue: temporalConfig.taskQueue,
             workflowId: workflowId,
-            workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+            workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
           });
 
           // Get the actual workflow ID from Temporal
@@ -2260,7 +2261,7 @@ export async function scheduleIndividualLeadGenerationActivity(
             }],
             taskQueue: temporalConfig.taskQueue,
             workflowId: icpWorkflowId,
-            workflowRunTimeout: '48h',
+            workflowRunTimeout: computeDelayedWorkflowRunTimeout(icpDelayMs),
           });
 
           // Save cron status entry for ICP mining
@@ -2365,7 +2366,7 @@ export async function scheduleIndividualLeadGenerationActivity(
             }],
             taskQueue: temporalConfig.taskQueue,
             workflowId: strategicWorkflowId,
-            workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+            workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
           });
 
           console.log(`✅ Successfully scheduled Daily Strategic Accounts with TIMER for ${site.name || 'Site'}`);
@@ -3004,7 +3005,7 @@ export async function scheduleIndividualDailyProspectionActivity(
           }],
           taskQueue: temporalConfig.taskQueue,
           workflowId: workflowId,
-          workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+          workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
         });
 
         console.log(`✅ Successfully scheduled Daily Prospection with TIMER for ${site.name || 'Site'}`);
@@ -3222,7 +3223,7 @@ export async function scheduleLeadQualificationActivity(
           }],
           taskQueue: temporalConfig.taskQueue,
           workflowId,
-          workflowRunTimeout: '48h',
+          workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
         });
 
         console.log(`✅ Scheduled Lead Qualification via TIMER for ${site.name || site.id}`);

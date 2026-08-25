@@ -109,6 +109,11 @@ export class SupabaseService {
     return SitesImpl.fetchSites(this.client);
   }
 
+  async fetchSiteById(siteId: string): Promise<any | null> {
+    await this.ensureConnection();
+    return SitesImpl.fetchSiteById(this.client, siteId);
+  }
+
   async fetchSitesWithEmailEnabled(): Promise<any[]> {
     await this.ensureConnection();
     return SitesImpl.fetchSitesWithEmailEnabled(this.client);

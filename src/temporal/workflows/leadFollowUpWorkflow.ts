@@ -18,7 +18,7 @@ const {
   invalidateEmailOnlyActivity,
   leadEmailRevalidationActivity,
 } = proxyActivities<Activities>({
-  startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
+  startToCloseTimeout: '10 minutes',
   retry: {
     maximumAttempts: 3,
   },

@@ -58,7 +58,7 @@ chmod +x infra/azure/scripts/*.sh
 2. Port-forward UI: `kubectl -n temporal port-forward svc/temporal-web 8080:8080`
 3. Confirm workers have `TEMPORAL_SERVER_URL=<internal-ip>:7233`
 4. Confirm search attributes exist (script `06` or UI query `site_id = "test"`)
-5. Push to `main` to deploy workers via GitHub Actions (configure secrets listed in the workflow)
+5. Push to `main` to deploy AKS workers via GitHub Actions (ACR build + `kubectl set image`). Configure `AZURE_CREDENTIALS` and `AZURE_RESOURCE_GROUP`.
 
 ## Search attributes
 

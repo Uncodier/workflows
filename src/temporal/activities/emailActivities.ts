@@ -1,4 +1,5 @@
 import { apiService } from '../services/apiService';
+import { isEmailAuthFailure } from '../utils/emailAuthErrors';
 
 /**
  * Email Activity interfaces
@@ -124,8 +125,15 @@ export async function syncSentEmailsActivity(params: SyncSentEmailsParams): Prom
     });
 
     if (!response.success) {
+      const errorMessage = response.error?.message || 'Unknown error';
       console.error('❌ Sent emails sync failed:', response.error);
-      throw new Error(`Failed to sync sent emails: ${response.error?.message || 'Unknown error'}`);
+      if (isEmailAuthFailure(errorMessage) || isEmailAuthFailure(response.error?.code)) {
+        return {
+          success: false,
+          error: errorMessage
+        };
+      }
+      throw new Error(`Failed to sync sent emails: ${errorMessage}`);
     }
 
     console.log('✅ Sent emails sync completed successfully');
@@ -139,7 +147,12 @@ export async function syncSentEmailsActivity(params: SyncSentEmailsParams): Prom
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error('❌ Sent emails sync failed:', errorMessage);
-    
+    if (isEmailAuthFailure(errorMessage)) {
+      return {
+        success: false,
+        error: errorMessage
+      };
+    }
     throw new Error(`Sent emails sync failed: ${errorMessage}`);
   }
 }

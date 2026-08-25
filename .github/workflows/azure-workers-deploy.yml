@@ -1,9 +1,7 @@
-# Deploy Temporal workers (default + critical) to Azure App Service from Git.
-# Secrets required:
-#   AZURE_CREDENTIALS          — service principal JSON for azure/login
-#   AZURE_RESOURCE_GROUP       — resource group name
-#   AZURE_WORKER_DEFAULT_APP   — App Service name for default queue
-#   AZURE_WORKER_CRITICAL_APP  — App Service name for critical queue
+# Deploy Temporal workers to AKS (production path).
+# App Service workers are not used. Secrets required:
+#   AZURE_CREDENTIALS     — service principal JSON for azure/login
+#   AZURE_RESOURCE_GROUP  — resource group (rg-temporal-prod)
 
 name: Deploy Azure Temporal Workers
 
@@ -12,51 +10,55 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  AKS_NAME: uncodie-tmp-aks
+  ACR_NAME: uncodietmpacr
+
 jobs:
-  deploy-workers:
+  deploy-aks-workers:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - app_secret: AZURE_WORKER_DEFAULT_APP
-            queue: default
-          - app_secret: AZURE_WORKER_CRITICAL_APP
-            queue: critical-priority
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Build Project (Next.js + Temporal Worker)
-        run: npm run build:all
 
       - name: Azure Login
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy to App Service
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ secrets[matrix.app_secret] }}
-          package: .
+      - name: Build worker image in ACR
+        run: |
+          az acr build \
+            -r "${ACR_NAME}" \
+            -t "temporal-worker:${GITHUB_SHA}" \
+            -t "temporal-worker:latest" \
+            -f infra/azure/workers/Dockerfile \
+            .
 
-      - name: Ensure queue + startup
-        uses: azure/CLI@v2
-        with:
-          inlineScript: |
-            APP="${{ secrets[matrix.app_secret] }}"
-            RG="${{ secrets.AZURE_RESOURCE_GROUP }}"
-            az webapp config appsettings set -g "$RG" -n "$APP" --settings \
-              WORKFLOW_TASK_QUEUE="${{ matrix.queue }}" \
-              NODE_ENV=production \
-              TEMPORAL_TLS=false \
-              SCM_DO_BUILD_DURING_DEPLOYMENT=false
-            az webapp config set -g "$RG" -n "$APP" \
-              --always-on true \
-              --startup-file "npm run azure:startup:compiled"
-            az webapp restart -g "$RG" -n "$APP"
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            -g "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            -n "${AKS_NAME}" \
+            --overwrite-existing
+
+      - name: Roll out worker deployments
+        run: |
+          LOGIN_SERVER="$(az acr show -n "${ACR_NAME}" --query loginServer -o tsv)"
+          IMAGE="${LOGIN_SERVER}/temporal-worker:${GITHUB_SHA}"
+          echo "Deploying ${IMAGE}"
+
+          if ! kubectl -n temporal-workers get deploy temporal-worker-validation >/dev/null 2>&1; then
+            kubectl -n temporal-workers get deploy temporal-worker-default -o yaml \
+              | sed \
+                -e 's/temporal-worker-default/temporal-worker-validation/g' \
+                -e 's/queue: default/queue: validation/g' \
+                -e 's/value: default/value: validation/g' \
+              | kubectl apply -f -
+          fi
+
+          for deploy in temporal-worker-default temporal-worker-critical temporal-worker-high temporal-worker-low temporal-worker-background temporal-worker-validation; do
+            kubectl -n temporal-workers set image "deploy/${deploy}" "worker=${IMAGE}"
+            kubectl -n temporal-workers rollout status "deploy/${deploy}" --timeout=5m
+          done
+
+          kubectl -n temporal-workers get pods -o wide
