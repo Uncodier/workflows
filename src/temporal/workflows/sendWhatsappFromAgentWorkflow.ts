@@ -119,44 +119,68 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
       lead_id: params.lead_id || 'not-provided'
     });
 
-    // Step 1: Send WhatsApp using the agent API
-    whatsappResult = await sendWhatsAppFromAgentActivity({
-      phone_number: params.phone_number,
-      message: currentMessageContent,
-      site_id: params.site_id,
-      from: params.from,
-      agent_id: params.agent_id,
-      conversation_id: params.conversation_id,
-      lead_id: params.lead_id,
-      responseWindowEnabled: params.responseWindowEnabled
-    });
+    const existingTemplateSid = params.approvedWorkflowCustomData?.template_sid as string | undefined;
+    const existingContentVariables = params.approvedWorkflowCustomData?.content_variables as Record<string, string> | undefined;
+
+    if (existingTemplateSid) {
+      console.log('📄 Pre-created template found - bypassing standard send...', { template_sid: existingTemplateSid });
+      whatsappResult = {
+        success: true,
+        messageId: params.message_id || 'unknown',
+        recipient: params.phone_number,
+        timestamp: new Date().toISOString(),
+        template_required: true
+      };
+    } else {
+      // Step 1: Send WhatsApp using the agent API
+      whatsappResult = await sendWhatsAppFromAgentActivity({
+        phone_number: params.phone_number,
+        message: currentMessageContent,
+        site_id: params.site_id,
+        from: params.from,
+        agent_id: params.agent_id,
+        conversation_id: params.conversation_id,
+        lead_id: params.lead_id,
+        responseWindowEnabled: params.responseWindowEnabled
+      });
+    }
 
     // Step 2: Check if template is required (no response window)
     if (whatsappResult.template_required) {
-      console.log('📄 Template required - no response window available. Creating template...');
+      console.log('📄 Template required - handling template flow...');
       
       try {
         const messageForTemplate = currentMessageContent;
-        // Step 3: Create template using the message_id and required parameters
-        const templateResult = await createTemplateActivity({
-          message_id: whatsappResult.messageId, // messageId from workflow interface maps to API's message_id
-          phone_number: params.phone_number,
-          message: messageForTemplate,
-          site_id: params.site_id
-        });
+        let finalTemplateId = existingTemplateSid;
 
-        console.log('✅ Template created successfully:', {
-          template_id: templateResult.template_id
-        });
+        if (!finalTemplateId) {
+          // Step 3: Create template using the message_id and required parameters
+          const templateResult = await createTemplateActivity({
+            message_id: whatsappResult.messageId, // messageId from workflow interface maps to API's message_id
+            phone_number: params.phone_number,
+            message: messageForTemplate,
+            site_id: params.site_id
+          });
+
+          console.log('✅ Template created successfully:', {
+            template_id: templateResult.template_id
+          });
+          finalTemplateId = templateResult.template_id;
+        }
 
         // Step 4: Send template; first attempt after 1min, then retries at 30min, 1h, 6h
-        const sendTemplateParams = {
-          template_id: templateResult.template_id,
+        const sendTemplateParams: any = {
+          template_id: finalTemplateId,
           phone_number: params.phone_number,
           site_id: params.site_id,
-          message_id: whatsappResult.messageId,
+          message_id: params.message_id || whatsappResult.messageId,
           original_message: messageForTemplate
         };
+
+        if (existingContentVariables) {
+          sendTemplateParams.content_variables = existingContentVariables;
+        }
+
         await sleep('1m'); // First attempt always waits at least 1 minute
         const backoffDelays: Duration[] = ['30m', '1h', '6h'];
         let sendTemplateResult: Awaited<ReturnType<typeof sendTemplateActivity>> | null = null;

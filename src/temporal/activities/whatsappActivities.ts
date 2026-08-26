@@ -324,6 +324,7 @@ export interface SendTemplateParams {
   site_id: string;
   message_id?: string;       // Para tracking
   original_message?: string; // Para logging
+  content_variables?: Record<string, string>; // Variables para el template
 }
 
 /**
@@ -353,7 +354,8 @@ export async function sendTemplateActivity(params: SendTemplateParams): Promise<
       phone_number: params.phone_number,
       site_id: params.site_id,
       message_id: params.message_id,
-      original_message: params.original_message
+      original_message: params.original_message,
+      content_variables: params.content_variables
     });
 
     if (!response.success) {
