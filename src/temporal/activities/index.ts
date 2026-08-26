@@ -15,6 +15,7 @@ export * from './siteSetupActivities';
 export * from './executeToolActivities';
 export * from './campaignActivities';
 export * from './leadActivities';
+export * from './updateMessageStatusActivity';
 export * from './interventionActivities';
 export * from './dataAnalystActivities';
 export * from './cmoActivities';
@@ -52,6 +53,7 @@ import * as siteSetupActivities from './siteSetupActivities';
 import * as executeToolActivities from './executeToolActivities';
 import * as campaignActivities from './campaignActivities';
 import * as leadActivities from './leadActivities';
+import * as updateMessageStatusActivity from './updateMessageStatusActivity';
 import * as interventionActivities from './interventionActivities';
 import * as dataAnalystActivities from './dataAnalystActivities';
 import * as cmoActivities from './cmoActivities';
@@ -89,6 +91,7 @@ export const activities = {
   ...executeToolActivities,
   ...campaignActivities,
   ...leadActivities,
+  ...updateMessageStatusActivity,
   ...interventionActivities,
   ...dataAnalystActivities,
   ...cmoActivities,
