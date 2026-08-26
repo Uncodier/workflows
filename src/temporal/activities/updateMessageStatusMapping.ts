@@ -31,6 +31,42 @@ export function shouldSkipDeliveryStatusUpdate(
   return false;
 }
 
+export type DeliveryMessageCandidate = {
+  id: string;
+  role?: string | null;
+  custom_data?: Record<string, any> | null;
+};
+
+function isUnsentAssistantMessage(message: DeliveryMessageCandidate): boolean {
+  if (message.role !== 'assistant') {
+    return false;
+  }
+
+  const customData = message.custom_data || {};
+  if (customData.status === 'sent') {
+    return false;
+  }
+  if (customData.delivery?.success === true) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Fallback when message_id is missing: only update if there is exactly one
+ * unsent assistant message. Never guess among several (parallel turns).
+ */
+export function selectUnsentAssistantForDeliveryUpdate(
+  messages: DeliveryMessageCandidate[]
+): string | undefined {
+  const candidates = messages.filter(isUnsentAssistantMessage);
+  if (candidates.length !== 1) {
+    return undefined;
+  }
+  return candidates[0].id;
+}
+
 function deliveryErrorMessage(details?: MessageDeliveryStatusRequest['delivery_details']): string | undefined {
   if (!details) return undefined;
   const raw = details.error ?? details.error_message;

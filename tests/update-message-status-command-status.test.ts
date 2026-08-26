@@ -1,5 +1,6 @@
 import {
   buildDeliveryStatusCustomData,
+  selectUnsentAssistantForDeliveryUpdate,
   shouldSkipDeliveryStatusUpdate,
 } from '../src/temporal/activities/updateMessageStatusMapping';
 
@@ -62,5 +63,53 @@ describe('updateMessageStatusToSentActivity custom_data mapping', () => {
         false
       )
     ).toBe(false);
+  });
+});
+
+describe('selectUnsentAssistantForDeliveryUpdate', () => {
+  it('selects the only unsent assistant', () => {
+    const selected = selectUnsentAssistantForDeliveryUpdate([
+      { id: 'user-1', role: 'user', custom_data: {} },
+      { id: 'asst-1', role: 'assistant', custom_data: {} },
+    ]);
+
+    expect(selected).toBe('asst-1');
+  });
+
+  it('returns none when two unsent assistants exist', () => {
+    const selected = selectUnsentAssistantForDeliveryUpdate([
+      { id: 'asst-new', role: 'assistant', custom_data: {} },
+      { id: 'asst-greeting', role: 'assistant', custom_data: {} },
+    ]);
+
+    expect(selected).toBeUndefined();
+  });
+
+  it('returns none for user-only rows', () => {
+    const selected = selectUnsentAssistantForDeliveryUpdate([
+      { id: 'user-1', role: 'user', custom_data: {} },
+      { id: 'user-2', role: 'user' },
+    ]);
+
+    expect(selected).toBeUndefined();
+  });
+
+  it('skips already sent assistants', () => {
+    expect(
+      selectUnsentAssistantForDeliveryUpdate([
+        { id: 'asst-sent', role: 'assistant', custom_data: { status: 'sent' } },
+      ])
+    ).toBeUndefined();
+
+    expect(
+      selectUnsentAssistantForDeliveryUpdate([
+        {
+          id: 'asst-delivered',
+          role: 'assistant',
+          custom_data: { delivery: { success: true } },
+        },
+        { id: 'asst-pending', role: 'assistant', custom_data: { status: 'pending' } },
+      ])
+    ).toBe('asst-pending');
   });
 });

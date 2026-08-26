@@ -1,6 +1,7 @@
 import { getSupabaseService } from '../services/supabaseService';
 import {
   buildDeliveryStatusCustomData,
+  selectUnsentAssistantForDeliveryUpdate,
   shouldSkipDeliveryStatusUpdate,
   type MessageDeliveryStatusRequest,
 } from './updateMessageStatusMapping';
@@ -40,68 +41,29 @@ export async function updateMessageStatusToSentActivity(request: MessageDelivery
     let messageId = request.message_id;
 
     if (!messageId && request.conversation_id) {
-      console.log(`🔍 No message ID provided, searching for recent message in conversation ${request.conversation_id}...`);
+      console.log(`🔍 No message ID provided, looking for a unique unsent assistant in conversation ${request.conversation_id}...`);
 
-      const { data: recentMessage, error: findError } = await supabaseServiceRole
+      const { data: assistantMessages, error: findError } = await supabaseServiceRole
         .from('messages')
-        .select('id, custom_data')
+        .select('id, role, custom_data')
         .eq('conversation_id', request.conversation_id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (findError && findError.code !== 'PGRST116') {
-        console.error(`❌ Error finding recent message:`, findError);
-        return {
-          success: false,
-          error: `Failed to find recent message: ${findError.message}`
-        };
-      }
-
-      if (recentMessage) {
-        messageId = recentMessage.id;
-        console.log(`✅ Found recent message in conversation: ${messageId}`);
-      }
-    }
-
-    if (!messageId) {
-      console.log(`🔍 No message ID from conversation, searching for pending messages for lead ${request.lead_id}...`);
-
-      const { data: pendingMessages, error: findPendingError } = await supabaseServiceRole
-        .from('messages')
-        .select('id, conversation_id, custom_data, created_at')
-        .eq('site_id', request.site_id)
         .eq('role', 'assistant')
         .order('created_at', { ascending: false })
-        .limit(10);
+        .limit(20);
 
-      if (findPendingError) {
-        console.error(`❌ Error finding pending messages:`, findPendingError);
+      if (findError) {
+        console.error(`❌ Error finding assistant messages:`, findError);
         return {
           success: false,
-          error: `Failed to find pending messages: ${findPendingError.message}`
+          error: `Failed to find assistant messages: ${findError.message}`
         };
       }
 
-      if (pendingMessages && pendingMessages.length > 0) {
-        for (const msg of pendingMessages) {
-          const customData = msg.custom_data || {};
-          const messageStatus = customData.status;
-
-          if (messageStatus === 'pending') {
-            const { data: conversation, error: convError } = await supabaseServiceRole
-              .from('conversations')
-              .select('lead_id')
-              .eq('id', msg.conversation_id)
-              .single();
-
-            if (!convError && conversation && conversation.lead_id === request.lead_id) {
-              messageId = msg.id;
-              console.log(`✅ Found pending message for lead ${request.lead_id}: ${messageId}`);
-              break;
-            }
-          }
-        }
+      messageId = selectUnsentAssistantForDeliveryUpdate(assistantMessages || []);
+      if (messageId) {
+        console.log(`✅ Found unique unsent assistant message: ${messageId}`);
+      } else {
+        console.log(`⚠️ No unique unsent assistant message in conversation ${request.conversation_id} - skipping delivery update`);
       }
     }
 
