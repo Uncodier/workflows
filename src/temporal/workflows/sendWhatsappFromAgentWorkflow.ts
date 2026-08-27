@@ -3,6 +3,7 @@ import type { Duration } from '@temporalio/common';
 import type * as activities from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { buildSendTemplateActivityParams } from './helpers/buildSendTemplateParams';
+import { shouldRetrySendTemplate } from './helpers/whatsappTemplateRejection';
 
 // Configure activity options using centralized timeouts
 const {
@@ -171,9 +172,11 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
             break;
           } catch (err) {
             lastSendError = err;
-            if (attempt < backoffDelays.length) {
+            if (attempt < backoffDelays.length && shouldRetrySendTemplate(err)) {
               console.warn(`⚠️ sendTemplate attempt ${attempt + 1} failed, retrying after ${backoffDelays[attempt]}...`, err instanceof Error ? err.message : String(err));
               await sleep(backoffDelays[attempt]);
+            } else {
+              break;
             }
           }
         }
@@ -292,7 +295,7 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
               }
             });
             console.log('📊 Message status updated to failed for template error');
-            if (params.fromApprovedWorkflow && params.message_id && params.conversation_id && params.lead_id) {
+            if (params.message_id && params.conversation_id && params.lead_id) {
               const failureReason = templateError instanceof Error ? templateError.message : String(templateError);
               await cleanupFailedFollowUpActivity({
                 lead_id: params.lead_id,
@@ -433,7 +436,7 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
           }
         });
         console.log('📊 Message status updated to failed for workflow error');
-        if (params.fromApprovedWorkflow && params.message_id && params.conversation_id && params.lead_id) {
+        if (params.message_id && params.conversation_id && params.lead_id) {
           const failureReason = error instanceof Error ? error.message : String(error);
           await cleanupFailedFollowUpActivity({
             lead_id: params.lead_id,

@@ -1,4 +1,9 @@
 import { apiService } from '../services/apiService';
+import { ApplicationFailure } from '@temporalio/common';
+import {
+  parseApiErrorTypeFromMessage,
+  TEMPLATE_REJECTED_ERROR_TYPE,
+} from '../workflows/helpers/whatsappTemplateRejection';
 
 /**
  * WhatsApp Activities
@@ -336,6 +341,23 @@ export interface SendTemplateResult {
   timestamp: string;
 }
 
+function sendTemplateActivityError(error: unknown): Error {
+  if (error instanceof ApplicationFailure) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  const errorType = parseApiErrorTypeFromMessage(message);
+  if (errorType === TEMPLATE_REJECTED_ERROR_TYPE || message.includes(TEMPLATE_REJECTED_ERROR_TYPE)) {
+    return ApplicationFailure.create({
+      message,
+      type: TEMPLATE_REJECTED_ERROR_TYPE,
+      nonRetryable: true,
+    });
+  }
+  if (message.startsWith('WhatsApp template sending failed:')) {
+    return error instanceof Error ? error : new Error(message);
+  }
+  return new Error(`WhatsApp template sending failed: ${message}`);
+}
+
 /**
  * Activity to send WhatsApp template
  */
@@ -364,7 +386,7 @@ export async function sendTemplateActivity(params: SendTemplateParams): Promise<
     const response = await apiService.post('/api/agents/whatsapp/sendTemplate', payload);
 
     if (!response.success) {
-      throw new Error(`Failed to send WhatsApp template: ${response.error?.message}`);
+      throw sendTemplateActivityError(`Failed to send WhatsApp template: ${response.error?.message}`);
     }
 
     console.log('✅ WhatsApp template sent successfully:', response.data);
@@ -377,7 +399,7 @@ export async function sendTemplateActivity(params: SendTemplateParams): Promise<
 
   } catch (error) {
     console.error('❌ WhatsApp template sending failed:', error);
-    throw new Error(`WhatsApp template sending failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw sendTemplateActivityError(error);
   }
 }
 
