@@ -324,7 +324,7 @@ export interface SendTemplateParams {
   site_id: string;
   message_id?: string;       // Para tracking
   original_message?: string; // Para logging
-  content_variables?: Record<string, string>; // Variables para el template
+  lead_id?: string;          // For API to resolve ContentVariables from placeholder_map
 }
 
 /**
@@ -345,18 +345,23 @@ export async function sendTemplateActivity(params: SendTemplateParams): Promise<
     phone_number: params.phone_number,
     site_id: params.site_id,
     message_id: params.message_id || 'not-provided',
-    original_message: params.original_message ? `${params.original_message.substring(0, 50)}...` : 'not-provided'
+    original_message: params.original_message ? `${params.original_message.substring(0, 50)}...` : 'not-provided',
+    lead_id: params.lead_id || 'not-provided'
   });
 
   try {
-    const response = await apiService.post('/api/agents/whatsapp/sendTemplate', {
+    const payload: Record<string, unknown> = {
       template_id: params.template_id,
       phone_number: params.phone_number,
       site_id: params.site_id,
       message_id: params.message_id,
-      original_message: params.original_message,
-      content_variables: params.content_variables
-    });
+      original_message: params.original_message
+    };
+    if (params.lead_id && isValidUUID(params.lead_id)) {
+      payload.lead_id = params.lead_id;
+    }
+
+    const response = await apiService.post('/api/agents/whatsapp/sendTemplate', payload);
 
     if (!response.success) {
       throw new Error(`Failed to send WhatsApp template: ${response.error?.message}`);
