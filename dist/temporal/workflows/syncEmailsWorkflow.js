@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.syncEmailsWorkflow = syncEmailsWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
+const emailAuthErrors_1 = require("../utils/emailAuthErrors");
 // Define the activity interface and options
 const { logWorkflowExecutionActivity, saveCronStatusActivity, validateAndCleanStuckCronStatusActivity, validateWorkflowConfigActivity, validateCommunicationChannelsActivity, analyzeEmailsLeadsReplyActivity, analyzeEmailsAliasReplyActivity, analyzeEmailsReplyActivity, syncSentEmailsActivity, deliveryStatusActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: '15 minutes', // ✅ FIXED: Increased timeout to 15 minutes to handle slow email API
@@ -259,16 +260,40 @@ async function syncEmailsWorkflow(options) {
             result.errors.push(`Email analysis exception: ${analysisErrorMessage}`);
             console.log(`🔄 Continuing workflow despite analysis exception...`);
         }
-        // Step 6: Sync Sent Emails (CRITICAL - workflow will fail if this fails)
+        // Step 6: Sync Sent Emails (auth/IMAP failures are skipped, not fatal)
         console.log(`📨 Step 6: Syncing sent emails to update lead status...`);
         const syncSentEmailsRequest = {
             site_id: siteId,
             limit: 20, // Sync last 20 sent emails
             since_date: validation.since.toISOString()
         };
-        const syncSentResponse = await syncSentEmailsActivity(syncSentEmailsRequest);
-        console.log(`✅ Sent emails sync completed successfully`);
-        console.log(`📊 Sync results:`, JSON.stringify(syncSentResponse.data, null, 2));
+        try {
+            const syncSentResponse = await syncSentEmailsActivity(syncSentEmailsRequest);
+            if (!syncSentResponse.success) {
+                const syncError = syncSentResponse.error || 'Unknown sent-email sync error';
+                if ((0, emailAuthErrors_1.isEmailAuthFailure)(syncError)) {
+                    console.warn(`⚠️ Sent emails sync skipped (invalid IMAP/credentials): ${syncError}`);
+                    result.errors.push(`Sent emails sync skipped: ${syncError}`);
+                }
+                else {
+                    throw new Error(`Sent emails sync failed: ${syncError}`);
+                }
+            }
+            else {
+                console.log(`✅ Sent emails sync completed successfully`);
+                console.log(`📊 Sync results:`, JSON.stringify(syncSentResponse.data, null, 2));
+            }
+        }
+        catch (syncSentError) {
+            const syncErrorMessage = syncSentError instanceof Error ? syncSentError.message : String(syncSentError);
+            if ((0, emailAuthErrors_1.isEmailAuthFailure)(syncErrorMessage)) {
+                console.warn(`⚠️ Sent emails sync skipped (invalid IMAP/credentials): ${syncErrorMessage}`);
+                result.errors.push(`Sent emails sync skipped: ${syncErrorMessage}`);
+            }
+            else {
+                throw syncSentError;
+            }
+        }
         // Step 7: Check Email Delivery Status
         console.log(`📋 Step 7: Checking email delivery status...`);
         try {

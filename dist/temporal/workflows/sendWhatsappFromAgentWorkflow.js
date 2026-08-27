@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendWhatsappFromAgent = sendWhatsappFromAgent;
 const workflow_1 = require("@temporalio/workflow");
 const timeouts_1 = require("../config/timeouts");
+const buildSendTemplateParams_1 = require("./helpers/buildSendTemplateParams");
+const whatsappTemplateRejection_1 = require("./helpers/whatsappTemplateRejection");
 // Configure activity options using centralized timeouts
 const { sendWhatsAppFromAgentActivity, createTemplateActivity, updateMessageStatusToSentActivity, fetchRecordByTableAndIdActivity, updateMessageTimestampActivity, updateConversationStatusAfterFollowUpActivity, updateTaskStatusToCompletedActivity, cleanupFailedFollowUpActivity, } = (0, workflow_1.proxyActivities)({
     startToCloseTimeout: timeouts_1.ACTIVITY_TIMEOUTS.WHATSAPP_OPERATIONS,
@@ -100,13 +102,14 @@ async function sendWhatsappFromAgent(params) {
                     template_id: templateResult.template_id
                 });
                 // Step 4: Send template; first attempt after 1min, then retries at 30min, 1h, 6h
-                const sendTemplateParams = {
+                const sendTemplateParams = (0, buildSendTemplateParams_1.buildSendTemplateActivityParams)({
                     template_id: templateResult.template_id,
                     phone_number: params.phone_number,
                     site_id: params.site_id,
                     message_id: whatsappResult.messageId,
-                    original_message: messageForTemplate
-                };
+                    original_message: messageForTemplate,
+                    lead_id: params.lead_id,
+                });
                 await (0, workflow_1.sleep)('1m'); // First attempt always waits at least 1 minute
                 const backoffDelays = ['30m', '1h', '6h'];
                 let sendTemplateResult = null;
@@ -119,9 +122,12 @@ async function sendWhatsappFromAgent(params) {
                     }
                     catch (err) {
                         lastSendError = err;
-                        if (attempt < backoffDelays.length) {
+                        if (attempt < backoffDelays.length && (0, whatsappTemplateRejection_1.shouldRetrySendTemplate)(err)) {
                             console.warn(`⚠️ sendTemplate attempt ${attempt + 1} failed, retrying after ${backoffDelays[attempt]}...`, err instanceof Error ? err.message : String(err));
                             await (0, workflow_1.sleep)(backoffDelays[attempt]);
+                        }
+                        else {
+                            break;
                         }
                     }
                 }
@@ -236,7 +242,7 @@ async function sendWhatsappFromAgent(params) {
                             }
                         });
                         console.log('📊 Message status updated to failed for template error');
-                        if (params.fromApprovedWorkflow && params.message_id && params.conversation_id && params.lead_id) {
+                        if (params.message_id && params.conversation_id && params.lead_id) {
                             const failureReason = templateError instanceof Error ? templateError.message : String(templateError);
                             await cleanupFailedFollowUpActivity({
                                 lead_id: params.lead_id,
@@ -375,7 +381,7 @@ async function sendWhatsappFromAgent(params) {
                     }
                 });
                 console.log('📊 Message status updated to failed for workflow error');
-                if (params.fromApprovedWorkflow && params.message_id && params.conversation_id && params.lead_id) {
+                if (params.message_id && params.conversation_id && params.lead_id) {
                     const failureReason = error instanceof Error ? error.message : String(error);
                     await cleanupFailedFollowUpActivity({
                         lead_id: params.lead_id,

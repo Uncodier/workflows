@@ -4,6 +4,7 @@ exports.sendEmailFromAgentActivity = sendEmailFromAgentActivity;
 exports.syncSentEmailsActivity = syncSentEmailsActivity;
 exports.deliveryStatusActivity = deliveryStatusActivity;
 const apiService_1 = require("../services/apiService");
+const emailAuthErrors_1 = require("../utils/emailAuthErrors");
 /**
  * Activity to send email via agent API
  */
@@ -69,8 +70,15 @@ async function syncSentEmailsActivity(params) {
             timeout: 900000 // 15 minutes timeout (900,000ms) to match workflow activity timeout
         });
         if (!response.success) {
+            const errorMessage = response.error?.message || 'Unknown error';
             console.error('❌ Sent emails sync failed:', response.error);
-            throw new Error(`Failed to sync sent emails: ${response.error?.message || 'Unknown error'}`);
+            if ((0, emailAuthErrors_1.isEmailAuthFailure)(errorMessage) || (0, emailAuthErrors_1.isEmailAuthFailure)(response.error?.code)) {
+                return {
+                    success: false,
+                    error: errorMessage
+                };
+            }
+            throw new Error(`Failed to sync sent emails: ${errorMessage}`);
         }
         console.log('✅ Sent emails sync completed successfully');
         console.log('📊 Sync response data:', JSON.stringify(response.data, null, 2));
@@ -82,6 +90,12 @@ async function syncSentEmailsActivity(params) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error('❌ Sent emails sync failed:', errorMessage);
+        if ((0, emailAuthErrors_1.isEmailAuthFailure)(errorMessage)) {
+            return {
+                success: false,
+                error: errorMessage
+            };
+        }
         throw new Error(`Sent emails sync failed: ${errorMessage}`);
     }
 }

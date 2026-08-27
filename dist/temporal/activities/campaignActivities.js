@@ -4,8 +4,8 @@
  * Activities for managing campaigns and segments
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getSiteActivity = void 0;
 exports.getSegmentsActivity = getSegmentsActivity;
-exports.getSiteActivity = getSiteActivity;
 exports.buildSegmentsActivity = buildSegmentsActivity;
 exports.createCampaignsActivity = createCampaignsActivity;
 exports.createCampaignRequirementsActivity = createCampaignRequirementsActivity;
@@ -19,6 +19,8 @@ exports.getSettingsActivity = getSettingsActivity;
 exports.updateSettingsActivity = updateSettingsActivity;
 const apiService_1 = require("../services/apiService");
 const supabaseService_1 = require("../services/supabaseService");
+var siteLookupActivities_1 = require("./siteLookupActivities");
+Object.defineProperty(exports, "getSiteActivity", { enumerable: true, get: function () { return siteLookupActivities_1.getSiteActivity; } });
 /**
  * Activity to get segments for a specific site
  */
@@ -62,57 +64,6 @@ async function getSegmentsActivity(siteId) {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`❌ Exception getting segments for site ${siteId}:`, errorMessage);
-        return {
-            success: false,
-            error: errorMessage
-        };
-    }
-}
-/**
- * Activity to get site information by site_id
- */
-async function getSiteActivity(siteId) {
-    console.log(`🏢 Getting site information for: ${siteId}`);
-    try {
-        const supabaseService = (0, supabaseService_1.getSupabaseService)();
-        console.log('🔍 Checking database connection...');
-        const isConnected = await supabaseService.getConnectionStatus();
-        if (!isConnected) {
-            console.log('⚠️  Database not available, cannot fetch site information');
-            return {
-                success: false,
-                error: 'Database not available'
-            };
-        }
-        console.log('✅ Database connection confirmed, fetching site...');
-        // Fetch all sites and find the specific one
-        const allSites = await supabaseService.fetchSites();
-        const siteData = allSites.find(site => site.id === siteId);
-        if (!siteData) {
-            console.error(`❌ Site ${siteId} not found`);
-            return {
-                success: false,
-                error: 'Site not found'
-            };
-        }
-        const site = {
-            id: siteData.id,
-            name: siteData.name || 'Unnamed Site',
-            url: siteData.url || '',
-            description: siteData.description || null,
-            user_id: siteData.user_id,
-            created_at: siteData.created_at,
-            updated_at: siteData.updated_at
-        };
-        console.log(`✅ Retrieved site information for ${site.name}: ${site.url}`);
-        return {
-            success: true,
-            site
-        };
-    }
-    catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`❌ Exception getting site ${siteId}:`, errorMessage);
         return {
             success: false,
             error: errorMessage

@@ -21,7 +21,7 @@ const research_1 = require("./leadFollowUp/research");
 __exportStar(require("./leadFollowUp/types"), exports);
 // Define the activity interface and options
 const { logWorkflowExecutionActivity, saveCronStatusActivity, getSiteActivity, getLeadActivity, leadFollowUpActivity, saveLeadFollowUpLogsActivity, validateContactInformation, validateCommunicationChannelsActivity, invalidateEmailOnlyActivity, leadEmailRevalidationActivity, } = (0, workflow_1.proxyActivities)({
-    startToCloseTimeout: '5 minutes', // Reasonable timeout for lead follow-up
+    startToCloseTimeout: '10 minutes',
     retry: {
         maximumAttempts: 3,
     },

@@ -58,6 +58,7 @@ const cronActivities_1 = require("./cronActivities");
 const supabaseActivities_1 = require("./supabaseActivities");
 const supabaseService_1 = require("../services/supabaseService");
 const searchAttributes_1 = require("../utils/searchAttributes");
+const delayedExecutionTimeout_1 = require("../utils/delayedExecutionTimeout");
 /**
  * Helper function to check if a workflow should be scheduled for a site
  * based on the settings.activities configuration
@@ -1198,7 +1199,7 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
                             }],
                         taskQueue: config_1.temporalConfig.taskQueue,
                         workflowId: dateSpecificId,
-                        workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+                        workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(delayMs),
                     });
                     // Get the actual workflow ID from Temporal
                     const actualWorkflowId = workflowHandle.workflowId;
@@ -1507,7 +1508,7 @@ async function scheduleIndividualSiteAnalysisActivity(businessHoursAnalysis, opt
                         }],
                     taskQueue: config_1.temporalConfig.taskQueue,
                     workflowId: workflowId,
-                    workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+                    workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(delayMs),
                 });
                 console.log(`✅ Successfully scheduled Site Analysis with TIMER for ${site.name || 'Site'}`);
                 console.log(`   - Will execute at: ${analysisScheduledTime} ${siteTimezone} on ${finalLocalDateStr} (1h before daily standup)`);
@@ -1790,7 +1791,7 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                             }],
                         taskQueue: config_1.temporalConfig.taskQueue,
                         workflowId: workflowId,
-                        workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+                        workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(delayMs),
                     });
                     // Get the actual workflow ID from Temporal
                     const actualLeadGenWorkflowId = leadGenHandle.workflowId;
@@ -1895,7 +1896,7 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                             }],
                         taskQueue: config_1.temporalConfig.taskQueue,
                         workflowId: icpWorkflowId,
-                        workflowRunTimeout: '48h',
+                        workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(icpDelayMs),
                     });
                     // Save cron status entry for ICP mining
                     const icpCronUpdate = {
@@ -1990,7 +1991,7 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                             }],
                         taskQueue: config_1.temporalConfig.taskQueue,
                         workflowId: strategicWorkflowId,
-                        workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+                        workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(delayMs),
                     });
                     console.log(`✅ Successfully scheduled Daily Strategic Accounts with TIMER for ${site.name || 'Site'}`);
                     console.log(`   - Will execute at: ${strategicScheduledTime} ${siteTimezone} on ${finalLocalDateStr} (2h after lead generation)`);
@@ -2507,7 +2508,7 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
                         }],
                     taskQueue: config_1.temporalConfig.taskQueue,
                     workflowId: workflowId,
-                    workflowRunTimeout: '48h', // Allow up to 48 hours for the delay
+                    workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(delayMs),
                 });
                 console.log(`✅ Successfully scheduled Daily Prospection with TIMER for ${site.name || 'Site'}`);
                 console.log(`   - Will execute at: ${prospectionScheduledTime} ${siteTimezone} on ${finalLocalDateStr}`);
@@ -2677,7 +2678,7 @@ async function scheduleLeadQualificationActivity(businessHoursAnalysis, options 
                         }],
                     taskQueue: config_1.temporalConfig.taskQueue,
                     workflowId,
-                    workflowRunTimeout: '48h',
+                    workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(delayMs),
                 });
                 console.log(`✅ Scheduled Lead Qualification via TIMER for ${site.name || site.id}`);
                 scheduled++;

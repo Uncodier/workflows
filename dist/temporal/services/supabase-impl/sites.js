@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.fetchSites = fetchSites;
+exports.fetchSiteById = fetchSiteById;
 exports.fetchSitesWithEmailEnabled = fetchSitesWithEmailEnabled;
 async function fetchSites(client) {
     console.log('🔍 Fetching sites from Supabase...');
@@ -13,6 +14,19 @@ async function fetchSites(client) {
     }
     console.log(`✅ Successfully fetched ${data?.length || 0} sites from database`);
     return data || [];
+}
+async function fetchSiteById(client, siteId) {
+    console.log(`🔍 Fetching site ${siteId} from Supabase...`);
+    const { data, error } = await client
+        .from('sites')
+        .select('id, name, url, description, user_id, created_at, updated_at')
+        .eq('id', siteId)
+        .maybeSingle();
+    if (error) {
+        console.error('❌ Error fetching site by id:', error);
+        throw new Error(`Failed to fetch site: ${error.message}`);
+    }
+    return data;
 }
 async function fetchSitesWithEmailEnabled(client) {
     console.log('🔍 Fetching sites with email sync enabled...');

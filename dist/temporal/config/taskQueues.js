@@ -19,7 +19,7 @@ exports.TASK_QUEUES = {
     LOW: 'low-priority',
     // Background tasks (cleanup, maintenance)
     BACKGROUND: 'background-priority',
-    // Email validation queue (dedicated for Render deployment)
+    // Email validation queue (dedicated AKS worker)
     EMAIL_VALIDATION: 'validation'
 };
 /**
@@ -124,7 +124,7 @@ exports.TASK_QUEUE_CONFIG = {
     [exports.TASK_QUEUES.EMAIL_VALIDATION]: {
         maxConcurrentActivityTaskExecutions: 20,
         maxConcurrentWorkflowTaskExecutions: 20,
-        description: 'Email validation workflows running on Render',
+        description: 'Email validation workflows running on Azure AKS',
         examples: ['SMTP email validation', 'Domain verification', 'Catchall detection']
     }
 };

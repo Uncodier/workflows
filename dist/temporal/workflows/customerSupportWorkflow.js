@@ -7,6 +7,7 @@ const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow
 const agentSupervisorWorkflow_1 = require("./agentSupervisorWorkflow");
 const timeouts_1 = require("../config/timeouts");
 const taskQueues_1 = require("../config/taskQueues");
+const buildWhatsAppSendParams_1 = require("./helpers/buildWhatsAppSendParams");
 /**
  * Helper function to map WhatsApp intents to EmailData intents
  * Currently not used but kept for future WhatsApp integration
@@ -286,37 +287,39 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
             let whatsappWorkflowId;
             let whatsappSent = false;
             try {
-                console.log('📱 Starting sendWhatsappFromAgent workflow - customer support was successful...');
-                whatsappWorkflowId = `send-whatsapp-agent-${whatsappData.messageId || Date.now()}`;
-                // Prepare WhatsApp parameters from customer support response
-                const whatsappParams = {
-                    phone_number: whatsappData.phoneNumber,
-                    message: response.data?.messages?.assistant?.content ||
-                        `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
-                    site_id: whatsappData.siteId,
-                    from: 'Customer Support',
-                    agent_id: effectiveBaseParams.agentId,
-                    conversation_id: whatsappData.conversationId,
-                    responseWindowEnabled: true,
-                    // ✅ REMOVED: lead_id - API can obtain it from phone number
-                };
-                // Start sendWhatsappFromAgent as child workflow
-                const whatsappHandle = await (0, workflow_1.startChild)(sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent, {
-                    workflowId: whatsappWorkflowId,
-                    args: [whatsappParams],
-                    parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+                const whatsappParams = (0, buildWhatsAppSendParams_1.buildWhatsAppSendParams)({
+                    csResponse: response.data,
+                    whatsappData,
+                    agentId: effectiveBaseParams.agentId,
                 });
-                console.log(`📨 Started sendWhatsappFromAgent workflow: ${whatsappWorkflowId}`);
-                console.log(`🚀 Parent close policy: ABANDON - WhatsApp workflow will continue independently`);
-                // Wait for WhatsApp workflow to complete
-                const whatsappResult = await whatsappHandle.result();
-                if (whatsappResult.success) {
-                    whatsappSent = true;
-                    console.log('✅ Follow-up WhatsApp sent successfully');
-                    console.log(`📨 Message ID: ${whatsappResult.messageId}`);
+                if (!whatsappParams) {
+                    console.log('⚠️ Skipping WhatsApp send - no assistant message content from customer support');
                 }
                 else {
-                    console.log('⚠️ Follow-up WhatsApp failed, but customer support was successful');
+                    console.log('📱 Starting sendWhatsappFromAgent workflow - customer support was successful...');
+                    console.log('📋 WhatsApp send params:', {
+                        message_id: whatsappParams.message_id || 'not-provided',
+                        conversation_id: whatsappParams.conversation_id || 'not-provided',
+                        lead_id: whatsappParams.lead_id || 'not-provided',
+                        messageLength: whatsappParams.message.length,
+                    });
+                    whatsappWorkflowId = `send-whatsapp-agent-${whatsappData.messageId || Date.now()}`;
+                    const whatsappHandle = await (0, workflow_1.startChild)(sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent, {
+                        workflowId: whatsappWorkflowId,
+                        args: [whatsappParams],
+                        parentClosePolicy: workflow_1.ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+                    });
+                    console.log(`📨 Started sendWhatsappFromAgent workflow: ${whatsappWorkflowId}`);
+                    console.log(`🚀 Parent close policy: ABANDON - WhatsApp workflow will continue independently`);
+                    const whatsappResult = await whatsappHandle.result();
+                    if (whatsappResult.success) {
+                        whatsappSent = true;
+                        console.log('✅ Follow-up WhatsApp sent successfully');
+                        console.log(`📨 Message ID: ${whatsappResult.messageId}`);
+                    }
+                    else {
+                        console.log('⚠️ Follow-up WhatsApp failed, but customer support was successful');
+                    }
                 }
             }
             catch (whatsappError) {

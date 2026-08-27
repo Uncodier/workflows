@@ -40,6 +40,8 @@ exports.createTemplateActivity = createTemplateActivity;
 exports.sendTemplateActivity = sendTemplateActivity;
 exports.updateMessageStatusActivity = updateMessageStatusActivity;
 const apiService_1 = require("../services/apiService");
+const common_1 = require("@temporalio/common");
+const whatsappTemplateRejection_1 = require("../workflows/helpers/whatsappTemplateRejection");
 /**
  * Analyze WhatsApp message using AI
  */
@@ -214,6 +216,23 @@ async function createTemplateActivity(params) {
         throw new Error(`WhatsApp template creation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
+function sendTemplateActivityError(error) {
+    if (error instanceof common_1.ApplicationFailure)
+        return error;
+    const message = error instanceof Error ? error.message : String(error);
+    const errorType = (0, whatsappTemplateRejection_1.parseApiErrorTypeFromMessage)(message);
+    if (errorType === whatsappTemplateRejection_1.TEMPLATE_REJECTED_ERROR_TYPE || message.includes(whatsappTemplateRejection_1.TEMPLATE_REJECTED_ERROR_TYPE)) {
+        return common_1.ApplicationFailure.create({
+            message,
+            type: whatsappTemplateRejection_1.TEMPLATE_REJECTED_ERROR_TYPE,
+            nonRetryable: true,
+        });
+    }
+    if (message.startsWith('WhatsApp template sending failed:')) {
+        return error instanceof Error ? error : new Error(message);
+    }
+    return new Error(`WhatsApp template sending failed: ${message}`);
+}
 /**
  * Activity to send WhatsApp template
  */
@@ -223,18 +242,23 @@ async function sendTemplateActivity(params) {
         phone_number: params.phone_number,
         site_id: params.site_id,
         message_id: params.message_id || 'not-provided',
-        original_message: params.original_message ? `${params.original_message.substring(0, 50)}...` : 'not-provided'
+        original_message: params.original_message ? `${params.original_message.substring(0, 50)}...` : 'not-provided',
+        lead_id: params.lead_id || 'not-provided'
     });
     try {
-        const response = await apiService_1.apiService.post('/api/agents/whatsapp/sendTemplate', {
+        const payload = {
             template_id: params.template_id,
             phone_number: params.phone_number,
             site_id: params.site_id,
             message_id: params.message_id,
             original_message: params.original_message
-        });
+        };
+        if (params.lead_id && isValidUUID(params.lead_id)) {
+            payload.lead_id = params.lead_id;
+        }
+        const response = await apiService_1.apiService.post('/api/agents/whatsapp/sendTemplate', payload);
         if (!response.success) {
-            throw new Error(`Failed to send WhatsApp template: ${response.error?.message}`);
+            throw sendTemplateActivityError(`Failed to send WhatsApp template: ${response.error?.message}`);
         }
         console.log('✅ WhatsApp template sent successfully:', response.data);
         return {
@@ -245,7 +269,7 @@ async function sendTemplateActivity(params) {
     }
     catch (error) {
         console.error('❌ WhatsApp template sending failed:', error);
-        throw new Error(`WhatsApp template sending failed: ${error instanceof Error ? error.message : String(error)}`);
+        throw sendTemplateActivityError(error);
     }
 }
 /**

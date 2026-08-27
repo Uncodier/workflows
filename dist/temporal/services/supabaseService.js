@@ -128,6 +128,10 @@ class SupabaseService {
         await this.ensureConnection();
         return SitesImpl.fetchSites(this.client);
     }
+    async fetchSiteById(siteId) {
+        await this.ensureConnection();
+        return SitesImpl.fetchSiteById(this.client, siteId);
+    }
     async fetchSitesWithEmailEnabled() {
         await this.ensureConnection();
         return SitesImpl.fetchSitesWithEmailEnabled(this.client);

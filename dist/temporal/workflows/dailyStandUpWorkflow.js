@@ -154,21 +154,32 @@ async function dailyStandUpWorkflow(options) {
             console.warn(`⚠️ ${warnMsg}`);
             errors.push(`Notification: ${warnMsg}`);
         }
-        console.log(`📧 Sending daily stand up notification...`);
-        await sendDailyStandUpNotificationActivity({
-            site_id: site_id,
-            subject: safeSubject,
-            message: safeMessage,
-            health: wrapUpResult.health
-        });
-        console.log(`✅ Daily stand up notification sent successfully`);
+        let notificationSent = false;
+        try {
+            console.log(`📧 Sending daily stand up notification...`);
+            await sendDailyStandUpNotificationActivity({
+                site_id: site_id,
+                subject: safeSubject,
+                message: safeMessage,
+                health: wrapUpResult.health
+            });
+            notificationSent = true;
+            console.log(`✅ Daily stand up notification sent successfully`);
+        }
+        catch (notificationError) {
+            const notificationErrorMessage = notificationError instanceof Error
+                ? notificationError.message
+                : String(notificationError);
+            console.error(`⚠️ Daily stand up notification failed after wrap-up succeeded: ${notificationErrorMessage}`);
+            errors.push(`Notification failed: ${notificationErrorMessage}`);
+        }
         executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         const result = {
             success: true,
             siteId: site_id,
             command_id: finalCommandId,
             finalSummary: wrapUpResult?.summary,
-            notificationSent: true,
+            notificationSent,
             data: { wrapUp: wrapUpResult },
             errors,
             executionTime,
