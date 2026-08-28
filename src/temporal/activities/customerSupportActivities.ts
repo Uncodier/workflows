@@ -59,6 +59,7 @@ export type AnalysisData = EmailData;
 
 export interface CustomerSupportMessageRequest {
   message: string;
+  systemContext?: string;
   visitor_id?: string;
   lead_id?: string;
   name?: string;
@@ -153,8 +154,6 @@ export async function sendCustomerSupportMessageActivity(
   // Using es-MX format as a helpful hint for Spanish queries, but still sending ISO as primary truth
   const timeContext = `\n\n[System Context for Agent: The current date and time is ${now.toISOString()} (UTC). Local time hint: ${now.toLocaleString('es-MX', { timeZone: 'America/Mexico_City', weekday: 'long' })}, ${now.toLocaleString('es-MX', { timeZone: 'America/Mexico_City' })} (America/Mexico_City). When scheduling or referencing days of the week, you MUST calculate relative to this exact date to avoid booking past dates or wrong weeks.]`;
   
-  message = message + timeContext;
-  
   const { agentId, origin, origin_message_id: baseParamsOriginMessageId } = baseParams;
   
   // Use origin_message_id from baseParams if not found in emailData
@@ -165,6 +164,7 @@ export async function sendCustomerSupportMessageActivity(
   // Build the message request payload con SOLO los parámetros requeridos por el API
   const messageRequest: CustomerSupportMessageRequest = {
     message: message,
+    systemContext: timeContext,
     site_id: site_id,
     userId: user_id,
     lead_notification: "none", // Para mejor trazabilidad - no duplicar notificaciones
