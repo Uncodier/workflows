@@ -64,6 +64,7 @@ function getTaskQueueForWorkflow(workflowType, priority) {
         case 'leadAttentionWorkflow':
         case 'sendEmailFromAgentWorkflow':
         case 'sendWhatsappFromAgentWorkflow':
+        case 'sendChannelMessageFromAgentWorkflow':
             return exports.TASK_QUEUES.HIGH;
         // Email validation workflow (dedicated queue)
         case 'validateEmailWorkflow':

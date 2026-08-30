@@ -4,6 +4,7 @@ exports.customerSupportMessageWorkflow = customerSupportMessageWorkflow;
 const workflow_1 = require("@temporalio/workflow");
 const emailCustomerSupportWorkflow_1 = require("./emailCustomerSupportWorkflow");
 const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow");
+const channelCustomerSupportWorkflow_1 = require("./channelCustomerSupportWorkflow");
 const agentSupervisorWorkflow_1 = require("./agentSupervisorWorkflow");
 const timeouts_1 = require("../config/timeouts");
 const taskQueues_1 = require("../config/taskQueues");
@@ -505,6 +506,12 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
                     leadAttentionWorkflowId
                 }
             };
+        }
+        else if (effectiveBaseParams.origin === 'telegram' ||
+            effectiveBaseParams.origin === 'messenger' ||
+            (messageData?.channel_delivery === true &&
+                (effectiveBaseParams.origin === 'whatsapp' || effectiveBaseParams.origin === 'email'))) {
+            return await (0, channelCustomerSupportWorkflow_1.channelCustomerSupportMessageWorkflow)(messageData, effectiveBaseParams);
         }
         else {
             console.log('📧 Detected email message - delegating to email workflow');

@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.workflowNames = exports.workflows = exports.sendEmailFromAgentWorkflow = exports.sendWhatsappFromAgentWorkflow = exports.whatsappMessageWorkflow = void 0;
+exports.workflowNames = exports.workflows = exports.sendChannelMessageFromAgent = exports.sendEmailFromAgentWorkflow = exports.sendWhatsappFromAgentWorkflow = exports.whatsappMessageWorkflow = void 0;
 const dataProcessingWorkflow_1 = require("./dataProcessingWorkflow");
 const cronWorkflow_1 = require("./cronWorkflow");
 const syncEmailsWorkflow_1 = require("./syncEmailsWorkflow");
@@ -26,8 +26,10 @@ const sendReportWorkflow_1 = require("./sendReportWorkflow");
 const scheduleCustomerSupportMessagesWorkflow_1 = require("./scheduleCustomerSupportMessagesWorkflow");
 const customerSupportWorkflow_1 = require("./customerSupportWorkflow");
 const emailCustomerSupportWorkflow_1 = require("./emailCustomerSupportWorkflow");
+const channelCustomerSupportWorkflow_1 = require("./channelCustomerSupportWorkflow");
 const sendEmailFromAgentWorkflow_1 = require("./sendEmailFromAgentWorkflow");
 const sendWhatsappFromAgentWorkflow_1 = require("./sendWhatsappFromAgentWorkflow");
+const sendChannelMessageFromAgentWorkflow_1 = require("./sendChannelMessageFromAgentWorkflow");
 const answerWhatsappMessageWorkflow_1 = require("./answerWhatsappMessageWorkflow");
 const leadAttentionWorkflow_1 = require("./leadAttentionWorkflow");
 // Export alias for backward compatibility
@@ -35,6 +37,7 @@ exports.whatsappMessageWorkflow = answerWhatsappMessageWorkflow_1.answerWhatsapp
 // ✅ Export aliases for agent workflows to support different naming conventions
 exports.sendWhatsappFromAgentWorkflow = sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent;
 exports.sendEmailFromAgentWorkflow = sendEmailFromAgentWorkflow_1.sendEmailFromAgent;
+exports.sendChannelMessageFromAgent = sendChannelMessageFromAgentWorkflow_1.sendChannelMessageFromAgentWorkflow;
 const siteSetupWorkflow_1 = require("./siteSetupWorkflow");
 const buildCampaignsWorkflow_1 = require("./buildCampaignsWorkflow");
 const buildSegmentsWorkflow_1 = require("./buildSegmentsWorkflow");
@@ -84,6 +87,8 @@ __exportStar(require("./startRobotWorkflow"), exports);
 __exportStar(require("./robotWorkflow"), exports);
 __exportStar(require("./promptRobotWorkflow"), exports);
 __exportStar(require("./sendWhatsappFromAgentWorkflow"), exports);
+__exportStar(require("./sendChannelMessageFromAgentWorkflow"), exports);
+__exportStar(require("./channelCustomerSupportWorkflow"), exports);
 __exportStar(require("./answerWhatsappMessageWorkflow"), exports);
 __exportStar(require("./siteSetupWorkflow"), exports);
 __exportStar(require("./buildCampaignsWorkflow"), exports);
@@ -130,8 +135,10 @@ exports.workflows = {
     scheduleCustomerSupportMessagesWorkflow: scheduleCustomerSupportMessagesWorkflow_1.scheduleCustomerSupportMessagesWorkflow,
     customerSupportMessageWorkflow: customerSupportWorkflow_1.customerSupportMessageWorkflow,
     emailCustomerSupportMessageWorkflow: emailCustomerSupportWorkflow_1.emailCustomerSupportMessageWorkflow,
+    channelCustomerSupportMessageWorkflow: channelCustomerSupportWorkflow_1.channelCustomerSupportMessageWorkflow,
     sendEmailFromAgent: sendEmailFromAgentWorkflow_1.sendEmailFromAgent,
     sendWhatsappFromAgent: sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent,
+    sendChannelMessageFromAgentWorkflow: sendChannelMessageFromAgentWorkflow_1.sendChannelMessageFromAgentWorkflow,
     answerWhatsappMessageWorkflow: answerWhatsappMessageWorkflow_1.answerWhatsappMessageWorkflow,
     processWhatsAppMessagesWorkflow: answerWhatsappMessageWorkflow_1.processWhatsAppMessagesWorkflow,
     siteSetupWorkflow: siteSetupWorkflow_1.siteSetupWorkflow,
@@ -175,6 +182,7 @@ exports.workflows = {
     // ✅ Aliases for agent workflows with different naming conventions
     sendWhatsappFromAgentWorkflow: sendWhatsappFromAgentWorkflow_1.sendWhatsappFromAgent,
     sendEmailFromAgentWorkflow: sendEmailFromAgentWorkflow_1.sendEmailFromAgent,
+    sendChannelMessageFromAgent: sendChannelMessageFromAgentWorkflow_1.sendChannelMessageFromAgentWorkflow,
 };
 // Workflow names for Temporal Client (strings)
 exports.workflowNames = {
@@ -189,8 +197,10 @@ exports.workflowNames = {
     scheduleCustomerSupportMessagesWorkflow: 'scheduleCustomerSupportMessagesWorkflow',
     customerSupportMessageWorkflow: 'customerSupportMessageWorkflow',
     emailCustomerSupportMessageWorkflow: 'emailCustomerSupportMessageWorkflow',
+    channelCustomerSupportMessageWorkflow: 'channelCustomerSupportMessageWorkflow',
     sendEmailFromAgent: 'sendEmailFromAgent',
     sendWhatsappFromAgent: 'sendWhatsappFromAgent',
+    sendChannelMessageFromAgentWorkflow: 'sendChannelMessageFromAgentWorkflow',
     answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
     processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
     siteSetupWorkflow: 'siteSetupWorkflow',
@@ -234,4 +244,5 @@ exports.workflowNames = {
     // ✅ Aliases for agent workflows with different naming conventions
     sendWhatsappFromAgentWorkflow: 'sendWhatsappFromAgentWorkflow',
     sendEmailFromAgentWorkflow: 'sendEmailFromAgentWorkflow',
+    sendChannelMessageFromAgent: 'sendChannelMessageFromAgentWorkflow',
 };

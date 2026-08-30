@@ -115,6 +115,9 @@ baseParams) {
         messageRequest.origin_message_id = origin_message_id;
         console.log(`📨 Using origin_message_id: ${origin_message_id}`);
     }
+    if (emailData.channel_delivery === true) {
+        messageRequest.channel_delivery = true;
+    }
     console.log('📤 Sending customer support message with payload:', {
         message: messageRequest.message?.substring(0, 50) + '...',
         hasName: !!messageRequest.name,
