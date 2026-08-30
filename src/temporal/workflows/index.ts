@@ -9,8 +9,10 @@ import { sendReportWorkflow } from './sendReportWorkflow';
 import { scheduleCustomerSupportMessagesWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
 import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
 import { emailCustomerSupportMessageWorkflow } from './emailCustomerSupportWorkflow';
+import { channelCustomerSupportMessageWorkflow } from './channelCustomerSupportWorkflow';
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
+import { sendChannelMessageFromAgentWorkflow } from './sendChannelMessageFromAgentWorkflow';
 import { answerWhatsappMessageWorkflow, processWhatsAppMessagesWorkflow } from './answerWhatsappMessageWorkflow';
 import { leadAttentionWorkflow } from './leadAttentionWorkflow';
 
@@ -20,6 +22,7 @@ export const whatsappMessageWorkflow = answerWhatsappMessageWorkflow;
 // ✅ Export aliases for agent workflows to support different naming conventions
 export const sendWhatsappFromAgentWorkflow = sendWhatsappFromAgent;
 export const sendEmailFromAgentWorkflow = sendEmailFromAgent;
+export const sendChannelMessageFromAgent = sendChannelMessageFromAgentWorkflow;
 import { siteSetupWorkflow } from './siteSetupWorkflow';
 import { buildCampaignsWorkflow } from './buildCampaignsWorkflow';
 import { buildSegmentsWorkflow } from './buildSegmentsWorkflow';
@@ -70,6 +73,8 @@ export * from './startRobotWorkflow';
 export * from './robotWorkflow';
 export * from './promptRobotWorkflow';
 export * from './sendWhatsappFromAgentWorkflow';
+export * from './sendChannelMessageFromAgentWorkflow';
+export * from './channelCustomerSupportWorkflow';
 export * from './answerWhatsappMessageWorkflow';
 export * from './siteSetupWorkflow';
 export * from './buildCampaignsWorkflow';
@@ -117,8 +122,10 @@ export const workflows = {
   scheduleCustomerSupportMessagesWorkflow,
   customerSupportMessageWorkflow,
   emailCustomerSupportMessageWorkflow,
+  channelCustomerSupportMessageWorkflow,
   sendEmailFromAgent,
   sendWhatsappFromAgent,
+  sendChannelMessageFromAgentWorkflow,
   answerWhatsappMessageWorkflow,
   processWhatsAppMessagesWorkflow,
   siteSetupWorkflow,
@@ -162,6 +169,7 @@ export const workflows = {
   // ✅ Aliases for agent workflows with different naming conventions
   sendWhatsappFromAgentWorkflow: sendWhatsappFromAgent,
   sendEmailFromAgentWorkflow: sendEmailFromAgent,
+  sendChannelMessageFromAgent: sendChannelMessageFromAgentWorkflow,
 };
 
 // Workflow names for Temporal Client (strings)
@@ -177,8 +185,10 @@ export const workflowNames = {
   scheduleCustomerSupportMessagesWorkflow: 'scheduleCustomerSupportMessagesWorkflow',
   customerSupportMessageWorkflow: 'customerSupportMessageWorkflow',
   emailCustomerSupportMessageWorkflow: 'emailCustomerSupportMessageWorkflow',
+  channelCustomerSupportMessageWorkflow: 'channelCustomerSupportMessageWorkflow',
   sendEmailFromAgent: 'sendEmailFromAgent',
   sendWhatsappFromAgent: 'sendWhatsappFromAgent',
+  sendChannelMessageFromAgentWorkflow: 'sendChannelMessageFromAgentWorkflow',
   answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
   processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
   siteSetupWorkflow: 'siteSetupWorkflow',
@@ -222,6 +232,7 @@ export const workflowNames = {
   // ✅ Aliases for agent workflows with different naming conventions
   sendWhatsappFromAgentWorkflow: 'sendWhatsappFromAgentWorkflow',
   sendEmailFromAgentWorkflow: 'sendEmailFromAgentWorkflow',
+  sendChannelMessageFromAgent: 'sendChannelMessageFromAgentWorkflow',
 };
 
 // Workflow types for type-safe execution

@@ -3,6 +3,7 @@ import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
 import { emailCustomerSupportMessageWorkflow } from './emailCustomerSupportWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
+import { channelCustomerSupportMessageWorkflow } from './channelCustomerSupportWorkflow';
 import { agentSupervisorWorkflow } from './agentSupervisorWorkflow';
 import type { WhatsAppMessageData } from '../activities/whatsappActivities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
@@ -585,6 +586,13 @@ export async function customerSupportMessageWorkflow(
         }
       };
       
+    } else if (
+      effectiveBaseParams.origin === 'telegram' ||
+      effectiveBaseParams.origin === 'messenger' ||
+      (messageData?.channel_delivery === true &&
+        (effectiveBaseParams.origin === 'whatsapp' || effectiveBaseParams.origin === 'email'))
+    ) {
+      return await channelCustomerSupportMessageWorkflow(messageData, effectiveBaseParams);
     } else {
       console.log('📧 Detected email message - delegating to email workflow');
       

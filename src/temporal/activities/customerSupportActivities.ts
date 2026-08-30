@@ -72,6 +72,7 @@ export interface CustomerSupportMessageRequest {
   lead_notification?: string;
   origin?: string; // Nuevo parámetro opcional: "whatsapp" | "email"
   origin_message_id?: string;
+  channel_delivery?: boolean;
 }
 
 export interface AgentSupervisorRequest {
@@ -218,6 +219,10 @@ export async function sendCustomerSupportMessageActivity(
   if (origin_message_id) {
     messageRequest.origin_message_id = origin_message_id;
     console.log(`📨 Using origin_message_id: ${origin_message_id}`);
+  }
+
+  if (emailData.channel_delivery === true) {
+    messageRequest.channel_delivery = true;
   }
 
   console.log('📤 Sending customer support message with payload:', {

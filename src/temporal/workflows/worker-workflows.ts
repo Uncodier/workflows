@@ -9,8 +9,10 @@ export * from './dailyOperationsWorkflow';
 export * from './sendReportWorkflow';
 export * from './scheduleCustomerSupportMessagesWorkflow';
 export * from './customerSupportWorkflow';
+export * from './channelCustomerSupportWorkflow';
 export * from './sendEmailFromAgentWorkflow';
 export * from './sendWhatsappFromAgentWorkflow';
+export * from './sendChannelMessageFromAgentWorkflow';
 export * from './answerWhatsappMessageWorkflow';
 // Export alias for backward compatibility  
 export { answerWhatsappMessageWorkflow as whatsappMessageWorkflow } from './answerWhatsappMessageWorkflow';
@@ -18,6 +20,7 @@ export { answerWhatsappMessageWorkflow as whatsappMessageWorkflow } from './answ
 // ✅ Export aliases for agent workflows to support different naming conventions
 export { sendWhatsappFromAgent as sendWhatsappFromAgentWorkflow } from './sendWhatsappFromAgentWorkflow';
 export { sendEmailFromAgent as sendEmailFromAgentWorkflow } from './sendEmailFromAgentWorkflow';
+export { sendChannelMessageFromAgentWorkflow as sendChannelMessageFromAgent } from './sendChannelMessageFromAgentWorkflow';
 
 export * from './siteSetupWorkflow';
 export * from './executeToolWorkflow';

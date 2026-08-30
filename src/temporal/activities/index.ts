@@ -35,6 +35,7 @@ export * from './billingActivities';
 export * from './reservationActivities';
 export * from './subscriptionActivities';
 export * from './taskActivities';
+export * from './channelActivities';
 
 // Bundle all activities for the worker
 import * as supabaseActivities from './supabaseActivities';
@@ -73,6 +74,7 @@ import * as billingActivities from './billingActivities';
 import * as reservationActivities from './reservationActivities';
 import * as subscriptionActivities from './subscriptionActivities';
 import * as taskActivities from './taskActivities';
+import * as channelActivities from './channelActivities';
 
 export const activities = {
   ...supabaseActivities,
@@ -110,7 +112,8 @@ export const activities = {
   ...billingActivities,
   ...reservationActivities,
   ...subscriptionActivities,
-  ...taskActivities
+  ...taskActivities,
+  ...channelActivities
 };
 
 export type Activities = typeof activities; 
