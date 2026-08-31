@@ -55,7 +55,10 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
     // If not found in baseParams, check messageData root level
     if (!origin && messageData && typeof messageData === 'object' && 'origin' in messageData) {
         origin = messageData.origin;
-        console.log(`🔍 Found origin in messageData root: ${origin}`);
+        console.log(`Found origin in messageData root: ${origin}`);
+    }
+    if (typeof origin === 'string') {
+        origin = origin.trim().toLowerCase();
     }
     if (!agentId && messageData && typeof messageData === 'object' && 'agentId' in messageData) {
         agentId = messageData.agentId;

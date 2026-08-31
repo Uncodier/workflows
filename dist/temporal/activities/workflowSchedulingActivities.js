@@ -59,6 +59,7 @@ const supabaseActivities_1 = require("./supabaseActivities");
 const supabaseService_1 = require("../services/supabaseService");
 const searchAttributes_1 = require("../utils/searchAttributes");
 const delayedExecutionTimeout_1 = require("../utils/delayedExecutionTimeout");
+const workflowIdHelper_1 = require("../utils/workflowIdHelper");
 /**
  * Helper function to check if a workflow should be scheduled for a site
  * based on the settings.activities configuration
@@ -854,7 +855,13 @@ async function executeDailyStandUpWorkflowsActivity(options = {}) {
  * Execute daily stand up workflow for a single site
  */
 async function executeDailyStandUpWorkflow(site, executionOptions) {
-    const workflowId = `daily-standup-${site.id}-${Date.now()}`;
+    const finalLocalDateStr = new Date().toISOString().split('T')[0];
+    const workflowId = (0, workflowIdHelper_1.generateDailyWorkflowId)({
+        workflowType: 'daily-standup',
+        siteId: site.id,
+        dateStr: finalLocalDateStr,
+        isTimer: false
+    });
     try {
         const client = await (0, client_1.getTemporalClient)();
         console.log(`🚀 Executing Daily Stand Up workflow for ${site.name}`);
@@ -882,6 +889,7 @@ async function executeDailyStandUpWorkflow(site, executionOptions) {
             args: workflowArgs,
             taskQueue: config_1.temporalConfig.taskQueue,
             workflowId: workflowId,
+            workflowIdReusePolicy: workflowIdHelper_1.DAILY_WORKFLOW_REUSE_POLICY,
             searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
         });
         console.log(`✅ Daily Stand Up workflow started for ${site.name}`);
@@ -1153,8 +1161,13 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
                     console.log(`   ⏰ Will execute in ${delayHours.toFixed(2)} hours`);
                 }
                 // Create unique workflow ID for this site with better uniqueness
-                const uniqueHash = Math.random().toString(36).substring(2, 15); // 13 character random string
-                const dateSpecificId = `daily-standup-timer-${site.id}-${finalLocalDateStr}-${scheduledTime.replace(':', '')}-${uniqueHash}`;
+                const dateSpecificId = (0, workflowIdHelper_1.generateDailyWorkflowId)({
+                    workflowType: 'daily-standup',
+                    siteId: site.id,
+                    dateStr: finalLocalDateStr,
+                    timeStr: scheduledTime,
+                    isTimer: true
+                });
                 console.log(`   - Workflow ID: ${dateSpecificId}`);
                 console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
                 // Prepare workflow arguments for dailyStandUpWorkflow
@@ -1199,6 +1212,7 @@ async function scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, op
                             }],
                         taskQueue: config_1.temporalConfig.taskQueue,
                         workflowId: dateSpecificId,
+                        workflowIdReusePolicy: workflowIdHelper_1.DAILY_WORKFLOW_REUSE_POLICY,
                         workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(delayMs),
                     });
                     // Get the actual workflow ID from Temporal
@@ -1463,7 +1477,13 @@ async function scheduleIndividualSiteAnalysisActivity(businessHoursAnalysis, opt
                     console.log(`   ⏰ Will execute in ${delayHours.toFixed(2)} hours`);
                 }
                 // Create unique workflow ID for this site analysis
-                const workflowId = `site-analysis-timer-${site.id}-${Date.now()}`;
+                const workflowId = (0, workflowIdHelper_1.generateDailyWorkflowId)({
+                    workflowType: 'site-analysis',
+                    siteId: site.id,
+                    dateStr: finalLocalDateStr,
+                    timeStr: analysisScheduledTime,
+                    isTimer: true
+                });
                 console.log(`   - Workflow ID: ${workflowId}`);
                 console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
                 // Prepare workflow arguments for analyzeSiteWorkflow
@@ -1508,6 +1528,7 @@ async function scheduleIndividualSiteAnalysisActivity(businessHoursAnalysis, opt
                         }],
                     taskQueue: config_1.temporalConfig.taskQueue,
                     workflowId: workflowId,
+                    workflowIdReusePolicy: workflowIdHelper_1.DAILY_WORKFLOW_REUSE_POLICY,
                     workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(delayMs),
                 });
                 console.log(`✅ Successfully scheduled Site Analysis with TIMER for ${site.name || 'Site'}`);
@@ -1743,8 +1764,13 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                 }
                 if (runLocalLeadGen) {
                     // Create unique workflow ID for this site's lead generation
-                    const uniqueHash = Math.random().toString(36).substring(2, 15);
-                    const workflowId = `lead-generation-timer-${site.id}-${finalLocalDateStr}-${leadGenScheduledTime.replace(':', '')}-${uniqueHash}`;
+                    const workflowId = (0, workflowIdHelper_1.generateDailyWorkflowId)({
+                        workflowType: 'lead-generation',
+                        siteId: site.id,
+                        dateStr: finalLocalDateStr,
+                        timeStr: leadGenScheduledTime,
+                        isTimer: true
+                    });
                     console.log(`   - Workflow ID: ${workflowId}`);
                     console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
                     // Prepare workflow arguments for leadGenerationWorkflow
@@ -1791,6 +1817,7 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                             }],
                         taskQueue: config_1.temporalConfig.taskQueue,
                         workflowId: workflowId,
+                        workflowIdReusePolicy: workflowIdHelper_1.DAILY_WORKFLOW_REUSE_POLICY,
                         workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(delayMs),
                     });
                     // Get the actual workflow ID from Temporal
@@ -1847,8 +1874,13 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                     const icpTargetUTC = new Date(icpTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
                     const icpDelayMs = icpTargetUTC.getTime() - now.getTime();
                     // Create unique workflow ID for ICP mining
-                    const icpUniqueHash = Math.random().toString(36).substring(2, 15);
-                    const icpWorkflowId = `icp-mining-timer-${site.id}-${finalLocalDateStr}-${icpScheduledTime.replace(':', '')}-${icpUniqueHash}`;
+                    const icpWorkflowId = (0, workflowIdHelper_1.generateDailyWorkflowId)({
+                        workflowType: 'icp-mining',
+                        siteId: site.id,
+                        dateStr: finalLocalDateStr,
+                        timeStr: icpScheduledTime,
+                        isTimer: true
+                    });
                     console.log(`\n🎯 Scheduling ICP Mining workflow (30m after Lead Generation):`);
                     console.log(`   - ICP mining time: ${icpScheduledTime} ${siteTimezone}`);
                     console.log(`   - Target time UTC: ${icpTargetUTC.toISOString()}`);
@@ -1896,6 +1928,7 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                             }],
                         taskQueue: config_1.temporalConfig.taskQueue,
                         workflowId: icpWorkflowId,
+                        workflowIdReusePolicy: workflowIdHelper_1.DAILY_WORKFLOW_REUSE_POLICY,
                         workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(icpDelayMs),
                     });
                     // Save cron status entry for ICP mining
@@ -1936,8 +1969,13 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                 const strategicTargetUTC = new Date(strategicTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
                 const strategicDelayMs = strategicTargetUTC.getTime() - now.getTime();
                 // Create unique workflow ID for strategic accounts
-                const strategicUniqueHash = Math.random().toString(36).substring(2, 15);
-                const strategicWorkflowId = `daily-strategic-accounts-timer-${site.id}-${finalLocalDateStr}-${strategicScheduledTime.replace(':', '')}-${strategicUniqueHash}`;
+                const strategicWorkflowId = (0, workflowIdHelper_1.generateDailyWorkflowId)({
+                    workflowType: 'daily-strategic-accounts',
+                    siteId: site.id,
+                    dateStr: finalLocalDateStr,
+                    timeStr: strategicScheduledTime,
+                    isTimer: true
+                });
                 console.log(`\n🎯 Scheduling Daily Strategic Accounts workflow (2h after Lead Generation):`);
                 console.log(`   - Strategic accounts time: ${strategicScheduledTime} ${siteTimezone}`);
                 console.log(`   - Target time UTC: ${strategicTargetUTC.toISOString()}`);
@@ -1991,6 +2029,7 @@ async function scheduleIndividualLeadGenerationActivity(businessHoursAnalysis, o
                             }],
                         taskQueue: config_1.temporalConfig.taskQueue,
                         workflowId: strategicWorkflowId,
+                        workflowIdReusePolicy: workflowIdHelper_1.DAILY_WORKFLOW_REUSE_POLICY,
                         workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(delayMs),
                     });
                     console.log(`✅ Successfully scheduled Daily Strategic Accounts with TIMER for ${site.name || 'Site'}`);
@@ -2454,8 +2493,13 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
                     console.log(`   ⏰ Will execute in ${delayHours.toFixed(2)} hours`);
                 }
                 // Create unique workflow ID for this site
-                const uniqueHash = Math.random().toString(36).substring(2, 15);
-                const workflowId = `daily-prospection-timer-${site.id}-${finalLocalDateStr}-${prospectionScheduledTime.replace(':', '')}-${uniqueHash}`;
+                const workflowId = (0, workflowIdHelper_1.generateDailyWorkflowId)({
+                    workflowType: 'daily-prospection',
+                    siteId: site.id,
+                    dateStr: finalLocalDateStr,
+                    timeStr: prospectionScheduledTime,
+                    isTimer: true
+                });
                 console.log(`   - Workflow ID: ${workflowId}`);
                 console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
                 // Prepare workflow arguments for dailyProspectionWorkflow
@@ -2508,6 +2552,7 @@ async function scheduleIndividualDailyProspectionActivity(businessHoursAnalysis,
                         }],
                     taskQueue: config_1.temporalConfig.taskQueue,
                     workflowId: workflowId,
+                    workflowIdReusePolicy: workflowIdHelper_1.DAILY_WORKFLOW_REUSE_POLICY,
                     workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(delayMs),
                 });
                 console.log(`✅ Successfully scheduled Daily Prospection with TIMER for ${site.name || 'Site'}`);
@@ -2638,8 +2683,13 @@ async function scheduleLeadQualificationActivity(businessHoursAnalysis, options 
                 console.log(`   - Next run (local): ${finalTargetLocal.getUTCHours().toString().padStart(2, '0')}:${finalTargetLocal.getUTCMinutes().toString().padStart(2, '0')} ${siteTimezone} on ${finalLocalDateStr}`);
                 console.log(`   - Next run (UTC): ${finalTargetUTC.toISOString()}`);
                 const delayMs = finalTargetUTC.getTime() - Date.now();
-                const uniqueHash = Math.random().toString(36).substring(2, 15);
-                const workflowId = `lead-qualification-timer-${site.id}-${finalLocalDateStr}-${scheduledTime.replace(':', '')}-${uniqueHash}`;
+                const workflowId = (0, workflowIdHelper_1.generateDailyWorkflowId)({
+                    workflowType: 'lead-qualification',
+                    siteId: site.id,
+                    dateStr: finalLocalDateStr,
+                    timeStr: scheduledTime,
+                    isTimer: true
+                });
                 const workflowArgs = [{
                         site_id: site.id,
                         userId: site.user_id,
@@ -2678,6 +2728,7 @@ async function scheduleLeadQualificationActivity(businessHoursAnalysis, options 
                         }],
                     taskQueue: config_1.temporalConfig.taskQueue,
                     workflowId,
+                    workflowIdReusePolicy: workflowIdHelper_1.DAILY_WORKFLOW_REUSE_POLICY,
                     workflowRunTimeout: (0, delayedExecutionTimeout_1.computeDelayedWorkflowRunTimeout)(delayMs),
                 });
                 console.log(`✅ Scheduled Lead Qualification via TIMER for ${site.name || site.id}`);

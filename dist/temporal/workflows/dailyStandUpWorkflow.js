@@ -39,7 +39,7 @@ async function dailyStandUpWorkflow(options) {
         searchAttributes.user_id = [options.userId];
     }
     (0, workflow_1.upsertSearchAttributes)(searchAttributes);
-    const workflowId = `daily-standup-${site_id}-${Date.now()}`;
+    const workflowId = (0, workflow_1.workflowInfo)().workflowId || `daily-standup-${site_id}-${new Date().toISOString().split('T')[0]}`;
     const startTime = Date.now();
     // Extract scheduleId - prioritize parent schedule ID from dailyOperations
     // Check if a parent schedule ID was passed through additionalData (from dailyOperationsWorkflow)
