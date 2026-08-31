@@ -1,4 +1,5 @@
-import { executeChild, sleep } from '@temporalio/workflow';
+import { executeChild, sleep, workflowInfo } from '@temporalio/workflow';
+import { WorkflowIdReusePolicy } from '@temporalio/common';
 
 export interface DelayedExecutionOptions {
   delayMs: number;
@@ -45,14 +46,27 @@ export async function delayedExecutionWorkflow(
     // Execute the target workflow
     console.log(`🚀 Starting ${targetWorkflow} for ${siteName || 'site'}`);
     
-    // Generate a more unique ID for the child workflow to prevent conflicts
-    const uniqueHash = Math.random().toString(36).substring(2, 15);
-    const childWorkflowId = `${targetWorkflow}-executed-${Date.now()}-${uniqueHash}`;
+    // Generate deterministic child workflow ID based on arguments if possible
+    const siteId = targetArgs?.[0]?.site_id || targetArgs?.[0]?.siteId;
+    const execDay = targetArgs?.[0]?.additionalData?.executionDay;
+    
+    // We capture the starting timestamp outside the sleep to keep it deterministic across replays/re-runs
+    // if we fall back to it.
+    const startTimestamp = workflowInfo().runId || 'unknown';
+    
+    let childWorkflowId: string;
+    if (siteId && execDay) {
+      childWorkflowId = `${targetWorkflow}-executed-${siteId}-${execDay}`;
+    } else {
+      // Fallback for non-daily/non-site executions
+      childWorkflowId = `${targetWorkflow}-executed-${siteId || 'unknown'}-${startTimestamp}`;
+    }
     
     console.log(`   - Child workflow ID: ${childWorkflowId}`);
     
     const targetResult = await executeChild(targetWorkflow, {
       workflowId: childWorkflowId,
+      workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
       args: targetArgs,
     });
 
@@ -67,6 +81,18 @@ export async function delayedExecutionWorkflow(
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    // If the error indicates we attempted to start a duplicate workflow, treat as success (already ran today).
+    if (errorMessage.includes('WorkflowExecutionAlreadyStartedError') || errorMessage.includes('Workflow execution already started')) {
+      console.log(`✅ Child workflow ${targetWorkflow} already started/completed today. This prevents duplicates.`);
+      return {
+        success: true,
+        delayedFor: `${(delayMs / 1000 / 60).toFixed(1)} minutes`,
+        targetWorkflow,
+        targetResult: { skipped: true, reason: 'Already started' }
+      };
+    }
+    
     console.error(`❌ Failed to execute delayed workflow ${targetWorkflow}: ${errorMessage}`);
     
     throw new Error(`Delayed execution workflow failed: ${errorMessage}`);

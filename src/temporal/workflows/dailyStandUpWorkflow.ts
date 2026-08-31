@@ -1,4 +1,4 @@
-import { proxyActivities, upsertSearchAttributes } from '@temporalio/workflow';
+import { proxyActivities, upsertSearchAttributes, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 // Define the activity interface and options
@@ -79,7 +79,7 @@ export async function dailyStandUpWorkflow(
   }
   upsertSearchAttributes(searchAttributes);
 
-  const workflowId = `daily-standup-${site_id}-${Date.now()}`;
+  const workflowId = workflowInfo().workflowId || `daily-standup-${site_id}-${new Date().toISOString().split('T')[0]}`;
   const startTime = Date.now();
   
   // Extract scheduleId - prioritize parent schedule ID from dailyOperations

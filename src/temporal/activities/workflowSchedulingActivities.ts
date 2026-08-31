@@ -14,6 +14,7 @@ import { logWorkflowExecutionActivity, checkSiteAnalysisActivity } from './supab
 import { getSupabaseService } from '../services/supabaseService';
 import { extractSearchAttributesFromInput } from '../utils/searchAttributes';
 import { computeDelayedWorkflowRunTimeout } from '../utils/delayedExecutionTimeout';
+import { generateDailyWorkflowId, DAILY_WORKFLOW_REUSE_POLICY } from '../utils/workflowIdHelper';
 
 export interface ScheduleWorkflowResult {
   workflowId: string;
@@ -1015,7 +1016,13 @@ async function executeDailyStandUpWorkflow(
     parentScheduleId?: string;
   }
 ): Promise<ScheduleWorkflowResult> {
-  const workflowId = `daily-standup-${site.id}-${Date.now()}`;
+  const finalLocalDateStr = new Date().toISOString().split('T')[0];
+  const workflowId = generateDailyWorkflowId({
+    workflowType: 'daily-standup',
+    siteId: site.id,
+    dateStr: finalLocalDateStr,
+    isTimer: false
+  });
 
   try {
     const client = await getTemporalClient();
@@ -1048,6 +1055,7 @@ async function executeDailyStandUpWorkflow(
       args: workflowArgs,
       taskQueue: temporalConfig.taskQueue,
       workflowId: workflowId,
+      workflowIdReusePolicy: DAILY_WORKFLOW_REUSE_POLICY as any,
       searchAttributes: Object.keys(searchAttributes).length > 0 ? searchAttributes : undefined
     });
     
@@ -1386,8 +1394,13 @@ export async function scheduleIndividualDailyStandUpsActivity(
         }
         
         // Create unique workflow ID for this site with better uniqueness
-        const uniqueHash = Math.random().toString(36).substring(2, 15); // 13 character random string
-        const dateSpecificId = `daily-standup-timer-${site.id}-${finalLocalDateStr}-${scheduledTime.replace(':', '')}-${uniqueHash}`;
+        const dateSpecificId = generateDailyWorkflowId({
+          workflowType: 'daily-standup',
+          siteId: site.id,
+          dateStr: finalLocalDateStr,
+          timeStr: scheduledTime,
+          isTimer: true
+        });
         
         console.log(`   - Workflow ID: ${dateSpecificId}`);
         console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
@@ -1432,10 +1445,11 @@ export async function scheduleIndividualDailyStandUpsActivity(
               siteName: site.name || 'Site',
               scheduledTime: `${scheduledTime} ${siteTimezone}`,
               executionType: 'timer-based-standup'
-            }],
-            taskQueue: temporalConfig.taskQueue,
-            workflowId: dateSpecificId,
-            workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
+          }],
+          taskQueue: temporalConfig.taskQueue,
+          workflowId: dateSpecificId,
+          workflowIdReusePolicy: DAILY_WORKFLOW_REUSE_POLICY as any,
+          workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
           });
 
           // Get the actual workflow ID from Temporal
@@ -1757,7 +1771,13 @@ export async function scheduleIndividualSiteAnalysisActivity(
         }
         
         // Create unique workflow ID for this site analysis
-        const workflowId = `site-analysis-timer-${site.id}-${Date.now()}`;
+        const workflowId = generateDailyWorkflowId({
+          workflowType: 'site-analysis',
+          siteId: site.id,
+          dateStr: finalLocalDateStr,
+          timeStr: analysisScheduledTime,
+          isTimer: true
+        });
         
         console.log(`   - Workflow ID: ${workflowId}`);
         console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
@@ -1805,6 +1825,7 @@ export async function scheduleIndividualSiteAnalysisActivity(
           }],
           taskQueue: temporalConfig.taskQueue,
           workflowId: workflowId,
+          workflowIdReusePolicy: DAILY_WORKFLOW_REUSE_POLICY as any,
           workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
         });
 
@@ -2090,8 +2111,13 @@ export async function scheduleIndividualLeadGenerationActivity(
         
         if (runLocalLeadGen) {
           // Create unique workflow ID for this site's lead generation
-          const uniqueHash = Math.random().toString(36).substring(2, 15);
-          const workflowId = `lead-generation-timer-${site.id}-${finalLocalDateStr}-${leadGenScheduledTime.replace(':', '')}-${uniqueHash}`;
+          const workflowId = generateDailyWorkflowId({
+            workflowType: 'lead-generation',
+            siteId: site.id,
+            dateStr: finalLocalDateStr,
+            timeStr: leadGenScheduledTime,
+            isTimer: true
+          });
           
           console.log(`   - Workflow ID: ${workflowId}`);
           console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
@@ -2141,6 +2167,7 @@ export async function scheduleIndividualLeadGenerationActivity(
             }],
             taskQueue: temporalConfig.taskQueue,
             workflowId: workflowId,
+            workflowIdReusePolicy: DAILY_WORKFLOW_REUSE_POLICY as any,
             workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
           });
 
@@ -2209,8 +2236,13 @@ export async function scheduleIndividualLeadGenerationActivity(
           const icpDelayMs = icpTargetUTC.getTime() - now.getTime();
 
           // Create unique workflow ID for ICP mining
-          const icpUniqueHash = Math.random().toString(36).substring(2, 15);
-          const icpWorkflowId = `icp-mining-timer-${site.id}-${finalLocalDateStr}-${icpScheduledTime.replace(':', '')}-${icpUniqueHash}`;
+          const icpWorkflowId = generateDailyWorkflowId({
+            workflowType: 'icp-mining',
+            siteId: site.id,
+            dateStr: finalLocalDateStr,
+            timeStr: icpScheduledTime,
+            isTimer: true
+          });
 
           console.log(`\n🎯 Scheduling ICP Mining workflow (30m after Lead Generation):`);
           console.log(`   - ICP mining time: ${icpScheduledTime} ${siteTimezone}`);
@@ -2261,6 +2293,7 @@ export async function scheduleIndividualLeadGenerationActivity(
             }],
             taskQueue: temporalConfig.taskQueue,
             workflowId: icpWorkflowId,
+            workflowIdReusePolicy: DAILY_WORKFLOW_REUSE_POLICY as any,
             workflowRunTimeout: computeDelayedWorkflowRunTimeout(icpDelayMs),
           });
 
@@ -2309,8 +2342,13 @@ export async function scheduleIndividualLeadGenerationActivity(
         const strategicDelayMs = strategicTargetUTC.getTime() - now.getTime();
         
         // Create unique workflow ID for strategic accounts
-        const strategicUniqueHash = Math.random().toString(36).substring(2, 15);
-        const strategicWorkflowId = `daily-strategic-accounts-timer-${site.id}-${finalLocalDateStr}-${strategicScheduledTime.replace(':', '')}-${strategicUniqueHash}`;
+        const strategicWorkflowId = generateDailyWorkflowId({
+          workflowType: 'daily-strategic-accounts',
+          siteId: site.id,
+          dateStr: finalLocalDateStr,
+          timeStr: strategicScheduledTime,
+          isTimer: true
+        });
         
         console.log(`\n🎯 Scheduling Daily Strategic Accounts workflow (2h after Lead Generation):`);
         console.log(`   - Strategic accounts time: ${strategicScheduledTime} ${siteTimezone}`);
@@ -2366,6 +2404,7 @@ export async function scheduleIndividualLeadGenerationActivity(
             }],
             taskQueue: temporalConfig.taskQueue,
             workflowId: strategicWorkflowId,
+            workflowIdReusePolicy: DAILY_WORKFLOW_REUSE_POLICY as any,
             workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
           });
 
@@ -2948,8 +2987,13 @@ export async function scheduleIndividualDailyProspectionActivity(
         }
         
         // Create unique workflow ID for this site
-        const uniqueHash = Math.random().toString(36).substring(2, 15);
-        const workflowId = `daily-prospection-timer-${site.id}-${finalLocalDateStr}-${prospectionScheduledTime.replace(':', '')}-${uniqueHash}`;
+        const workflowId = generateDailyWorkflowId({
+          workflowType: 'daily-prospection',
+          siteId: site.id,
+          dateStr: finalLocalDateStr,
+          timeStr: prospectionScheduledTime,
+          isTimer: true
+        });
         
         console.log(`   - Workflow ID: ${workflowId}`);
         console.log(`   - Delay: ${delayMs}ms (${(delayMs / 1000 / 60).toFixed(1)} minutes)`);
@@ -3005,6 +3049,7 @@ export async function scheduleIndividualDailyProspectionActivity(
           }],
           taskQueue: temporalConfig.taskQueue,
           workflowId: workflowId,
+          workflowIdReusePolicy: DAILY_WORKFLOW_REUSE_POLICY as any,
           workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
         });
 
@@ -3181,8 +3226,13 @@ export async function scheduleLeadQualificationActivity(
         console.log(`   - Next run (UTC): ${finalTargetUTC.toISOString()}`);
 
         const delayMs = finalTargetUTC.getTime() - Date.now();
-        const uniqueHash = Math.random().toString(36).substring(2, 15);
-        const workflowId = `lead-qualification-timer-${site.id}-${finalLocalDateStr}-${scheduledTime.replace(':', '')}-${uniqueHash}`;
+        const workflowId = generateDailyWorkflowId({
+          workflowType: 'lead-qualification',
+          siteId: site.id,
+          dateStr: finalLocalDateStr,
+          timeStr: scheduledTime,
+          isTimer: true
+        });
 
         const workflowArgs = [{
           site_id: site.id,
@@ -3223,6 +3273,7 @@ export async function scheduleLeadQualificationActivity(
           }],
           taskQueue: temporalConfig.taskQueue,
           workflowId,
+          workflowIdReusePolicy: DAILY_WORKFLOW_REUSE_POLICY as any,
           workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
         });
 
