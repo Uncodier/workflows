@@ -13,6 +13,7 @@ export interface Reservation {
   notes?: string;
   location_id?: string;
   channel?: string;
+  metadata?: any;
 }
 
 export async function fetchUpcomingReservations(
@@ -40,6 +41,12 @@ export async function fetchUpcomingReservations(
     throw new Error(`Failed to fetch upcoming reservations: ${error.message}`);
   }
 
-  console.log(`✅ Successfully fetched ${data?.length || 0} upcoming reservations for ${timeWindowHours}h window`);
-  return data || [];
+  // Filter out reservations that already had their reminder sent for this window
+  const validReservations = (data || []).filter(res => {
+    const flagKey = `_reminder_${timeWindowHours}h_sent`;
+    return !(res.metadata && res.metadata[flagKey]);
+  });
+
+  console.log(`✅ Successfully fetched ${validReservations.length} upcoming reservations for ${timeWindowHours}h window (filtered from ${data?.length || 0})`);
+  return validReservations;
 }

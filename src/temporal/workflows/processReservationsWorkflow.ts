@@ -5,7 +5,8 @@ const {
   fetchUpcomingReservationsActivity,
   getReservationMembersActivity,
   translateAndFormatNotificationActivity,
-  sendReservationNotificationActivity
+  sendReservationNotificationActivity,
+  markReservationReminderSentActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5m',
   retry: {
@@ -43,6 +44,13 @@ export async function processReservationsWorkflow(): Promise<{ processed: number
               lang: member.lang
             });
           }
+
+          // Mark reminder as sent to avoid duplicates
+          await markReservationReminderSentActivity({
+            reservation_id: reservation.id,
+            timeWindowHours
+          });
+
           totalProcessed++;
         } catch (err) {
           console.error(`❌ Error processing reservation ${reservation.id}:`, err);

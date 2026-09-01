@@ -6,7 +6,8 @@ const {
   getTaskMembersActivity,
   translateAndFormatTaskNotificationActivity,
   sendTaskNotificationActivity,
-  createTaskCommentActivity
+  createTaskCommentActivity,
+  markTaskReminderSentActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5m',
   retry: {
@@ -52,6 +53,13 @@ export async function processTasksWorkflow(): Promise<{ processed: number; error
               is_private: true
             });
           }
+
+          // Mark reminder as sent to avoid duplicates
+          await markTaskReminderSentActivity({
+            task_id: task.id,
+            timeWindowHours
+          });
+
           totalProcessed++;
         } catch (err) {
           console.error(`❌ Error processing task ${task.id}:`, err);

@@ -198,3 +198,39 @@ export async function createTaskCommentActivity(params: CreateTaskCommentParams)
   }
 }
 
+export interface MarkTaskReminderSentParams {
+  task_id: string;
+  timeWindowHours: number;
+}
+
+export async function markTaskReminderSentActivity(params: MarkTaskReminderSentParams): Promise<void> {
+  const supabase = getSupabaseService().getClient();
+  
+  const { data: task, error: fetchError } = await supabase
+    .from('tasks')
+    .select('metadata')
+    .eq('id', params.task_id)
+    .single();
+
+  if (fetchError) {
+    console.error(`❌ Failed to fetch task metadata for task ${params.task_id}:`, fetchError);
+    throw new Error(`Failed to fetch task metadata: ${fetchError.message}`);
+  }
+
+  const metadata = task?.metadata || {};
+  const flagKey = `_reminder_${params.timeWindowHours}h_sent`;
+  metadata[flagKey] = true;
+
+  const { error: updateError } = await supabase
+    .from('tasks')
+    .update({ metadata })
+    .eq('id', params.task_id);
+
+  if (updateError) {
+    console.error(`❌ Failed to update task metadata for task ${params.task_id}:`, updateError);
+    throw new Error(`Failed to update task metadata: ${updateError.message}`);
+  }
+  
+  console.log(`✅ Marked ${params.timeWindowHours}h reminder as sent for task ${params.task_id}`);
+}
+

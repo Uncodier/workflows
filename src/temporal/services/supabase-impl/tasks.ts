@@ -38,6 +38,12 @@ export async function fetchUpcomingTasks(
     throw new Error(`Failed to fetch upcoming tasks: ${error.message}`);
   }
 
-  console.log(`✅ Successfully fetched ${data?.length || 0} upcoming tasks for ${timeWindowHours}h window`);
-  return data || [];
+  // Filter out tasks that already had their reminder sent for this window
+  const validTasks = (data || []).filter(task => {
+    const flagKey = `_reminder_${timeWindowHours}h_sent`;
+    return !(task.metadata && task.metadata[flagKey]);
+  });
+
+  console.log(`✅ Successfully fetched ${validTasks.length} upcoming tasks for ${timeWindowHours}h window (filtered from ${data?.length || 0})`);
+  return validTasks;
 }

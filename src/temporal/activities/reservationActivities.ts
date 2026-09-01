@@ -106,10 +106,12 @@ export async function translateAndFormatNotificationActivity(params: FormatNotif
   const startTimeString = startDate.toLocaleTimeString(lang, timeOptions);
   const endTimeString = endDate.toLocaleTimeString(lang, timeOptions);
 
+  const displayNotes = reservation.notes || '';
+
   let detailsList = `- **Fecha:** ${dateString}\n- **Horario:** ${startTimeString} a ${endTimeString} (Zona Horaria: ${tz})`;
   if (serviceName) detailsList += `\n- **Servicio:** ${serviceName}`;
   if (locationInfo) detailsList += `\n- **Ubicación:** ${locationInfo}`;
-  if (reservation.notes) detailsList += `\n- **Notas:** ${reservation.notes}`;
+  if (displayNotes) detailsList += `\n- **Notas:** ${displayNotes}`;
 
   const message = `
 # Recordatorio de Reservación
@@ -154,4 +156,40 @@ export async function sendReservationNotificationActivity(params: SendReservatio
   if (!response.success) {
     throw new Error(`Failed to send reservation notification: ${response.error?.message}`);
   }
+}
+
+export interface MarkReservationReminderSentParams {
+  reservation_id: string;
+  timeWindowHours: number;
+}
+
+export async function markReservationReminderSentActivity(params: MarkReservationReminderSentParams): Promise<void> {
+  const supabase = getSupabaseService().getClient();
+  
+  const { data: reservation, error: fetchError } = await supabase
+    .from('reservations')
+    .select('metadata')
+    .eq('id', params.reservation_id)
+    .single();
+
+  if (fetchError) {
+    console.error(`❌ Failed to fetch reservation metadata for ${params.reservation_id}:`, fetchError);
+    throw new Error(`Failed to fetch reservation metadata: ${fetchError.message}`);
+  }
+
+  const metadata = reservation?.metadata || {};
+  const flagKey = `_reminder_${params.timeWindowHours}h_sent`;
+  metadata[flagKey] = true;
+
+  const { error: updateError } = await supabase
+    .from('reservations')
+    .update({ metadata })
+    .eq('id', params.reservation_id);
+
+  if (updateError) {
+    console.error(`❌ Failed to update reservation metadata for ${params.reservation_id}:`, updateError);
+    throw new Error(`Failed to update reservation metadata: ${updateError.message}`);
+  }
+  
+  console.log(`✅ Marked ${params.timeWindowHours}h reminder as sent for reservation ${params.reservation_id}`);
 }
