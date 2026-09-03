@@ -1,5 +1,5 @@
 import { apiService } from '../services/apiService';
-import { supabaseAdmin } from '../services/supabase';
+import { supabaseServiceRole as supabaseAdmin } from '../../lib/supabase/client';
 
 function tenantSchema() {
   return process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA || process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';

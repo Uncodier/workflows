@@ -68,6 +68,8 @@ const enrichLeadWorkflow_1 = require("./enrichLeadWorkflow");
 const generatePersonEmailWorkflow_1 = require("./generatePersonEmailWorkflow");
 const leadGenerationDomainSearchWorkflow_1 = require("./leadGenerationDomainSearchWorkflow");
 const sendApprovedMessagesWorkflow_1 = require("./sendApprovedMessagesWorkflow");
+const pollSocialCommentsWorkflow_1 = require("./pollSocialCommentsWorkflow");
+const pollSocialAnalyticsWorkflow_1 = require("./pollSocialAnalyticsWorkflow");
 const dailyCreditRenewalWorkflow_1 = require("./dailyCreditRenewalWorkflow");
 const processReservationsWorkflow_1 = require("./processReservationsWorkflow");
 const processSubscriptionsWorkflow_1 = require("./processSubscriptionsWorkflow");
@@ -120,6 +122,8 @@ __exportStar(require("./leadGenerationDomainSearchWorkflow"), exports);
 __exportStar(require("./sendApprovedMessagesWorkflow"), exports);
 __exportStar(require("./dailyCreditRenewalWorkflow"), exports);
 __exportStar(require("./processReservationsWorkflow"), exports);
+__exportStar(require("./pollSocialCommentsWorkflow"), exports);
+__exportStar(require("./pollSocialAnalyticsWorkflow"), exports);
 __exportStar(require("./processSubscriptionsWorkflow"), exports);
 __exportStar(require("./processTasksWorkflow"), exports);
 // Also export as a bundle for the client
@@ -173,6 +177,8 @@ exports.workflows = {
     generatePersonEmailWorkflow: generatePersonEmailWorkflow_1.generatePersonEmailWorkflow,
     leadGenerationDomainSearchWorkflow: leadGenerationDomainSearchWorkflow_1.leadGenerationDomainSearchWorkflow,
     sendApprovedMessagesWorkflow: sendApprovedMessagesWorkflow_1.sendApprovedMessagesWorkflow,
+    pollSocialCommentsWorkflow: pollSocialCommentsWorkflow_1.pollSocialCommentsWorkflow,
+    pollSocialAnalyticsWorkflow: pollSocialAnalyticsWorkflow_1.pollSocialAnalyticsWorkflow,
     dailyCreditRenewalWorkflow: dailyCreditRenewalWorkflow_1.dailyCreditRenewalWorkflow,
     processReservationsWorkflow: processReservationsWorkflow_1.processReservationsWorkflow,
     processSubscriptionsWorkflow: processSubscriptionsWorkflow_1.processSubscriptionsWorkflow,
@@ -235,6 +241,8 @@ exports.workflowNames = {
     generatePersonEmailWorkflow: 'generatePersonEmailWorkflow',
     leadGenerationDomainSearchWorkflow: 'leadGenerationDomainSearchWorkflow',
     sendApprovedMessagesWorkflow: 'sendApprovedMessagesWorkflow',
+    pollSocialCommentsWorkflow: 'pollSocialCommentsWorkflow',
+    pollSocialAnalyticsWorkflow: 'pollSocialAnalyticsWorkflow',
     dailyCreditRenewalWorkflow: 'dailyCreditRenewalWorkflow',
     processReservationsWorkflow: 'processReservationsWorkflow',
     processSubscriptionsWorkflow: 'processSubscriptionsWorkflow',

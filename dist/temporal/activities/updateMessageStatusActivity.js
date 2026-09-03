@@ -1,0 +1,190 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.updateMessageStatusToSentActivity = updateMessageStatusToSentActivity;
+const supabaseService_1 = require("../services/supabaseService");
+const updateMessageStatusMapping_1 = require("./updateMessageStatusMapping");
+/**
+ * Update message status after follow-up delivery.
+ * Chat UI reads custom_data.command_status (failed/success) in addition to status.
+ */
+async function updateMessageStatusToSentActivity(request) {
+    console.log(`📝 Updating message status to 'sent' after follow-up delivery...`);
+    console.log(`📋 Message ID: ${request.message_id}, Channel: ${request.delivery_channel}, Success: ${request.delivery_success}`);
+    try {
+        const supabaseService = (0, supabaseService_1.getSupabaseService)();
+        console.log('🔍 Checking database connection...');
+        const isConnected = await supabaseService.getConnectionStatus();
+        if (!isConnected) {
+            console.log('⚠️  Database not available, cannot update message status');
+            return {
+                success: false,
+                error: 'Database not available'
+            };
+        }
+        console.log('✅ Database connection confirmed, updating message status...');
+        const { supabaseServiceRole } = await Promise.resolve().then(() => __importStar(require('../../lib/supabase/client')));
+        let messageId = request.message_id;
+        if (!messageId && request.conversation_id) {
+            console.log(`🔍 No message ID provided, looking for a unique unsent assistant in conversation ${request.conversation_id}...`);
+            const { data: assistantMessages, error: findError } = await supabaseServiceRole
+                .from('messages')
+                .select('id, role, custom_data')
+                .eq('conversation_id', request.conversation_id)
+                .eq('role', 'assistant')
+                .order('created_at', { ascending: false })
+                .limit(20);
+            if (findError) {
+                console.error(`❌ Error finding assistant messages:`, findError);
+                return {
+                    success: false,
+                    error: `Failed to find assistant messages: ${findError.message}`
+                };
+            }
+            messageId = (0, updateMessageStatusMapping_1.selectUnsentAssistantForDeliveryUpdate)(assistantMessages || []);
+            if (messageId) {
+                console.log(`✅ Found unique unsent assistant message: ${messageId}`);
+            }
+            else {
+                console.log(`⚠️ No unique unsent assistant message in conversation ${request.conversation_id} - skipping delivery update`);
+            }
+        }
+        if (!messageId) {
+            console.log(`⚠️ No message found to update for lead ${request.lead_id} - this may indicate the message was not properly created`);
+            return {
+                success: true,
+                error: 'No message found to update'
+            };
+        }
+        console.log(`📝 Reloading and updating message ${messageId} status...`);
+        const { data: currentMessage, error: getCurrentError } = await supabaseServiceRole
+            .from('messages')
+            .select('id, conversation_id, content, role, custom_data, created_at, updated_at')
+            .eq('id', messageId)
+            .single();
+        if (getCurrentError) {
+            console.error(`❌ Error reloading current message data:`, getCurrentError);
+            return {
+                success: false,
+                error: `Failed to reload message: ${getCurrentError.message}`
+            };
+        }
+        if (request.conversation_id && currentMessage.conversation_id !== request.conversation_id) {
+            console.error(`❌ Message ${messageId} conversation mismatch:`);
+            console.error(`   - Expected: ${request.conversation_id}`);
+            console.error(`   - Actual: ${currentMessage.conversation_id}`);
+            return {
+                success: false,
+                error: 'Message conversation mismatch - possible data corruption'
+            };
+        }
+        const currentCustomData = currentMessage.custom_data || {};
+        const currentStatus = currentCustomData.status;
+        if ((0, updateMessageStatusMapping_1.shouldSkipDeliveryStatusUpdate)(currentCustomData, request.delivery_success)) {
+            console.log(`⚠️ Message ${messageId} was already processed and marked as 'sent'`);
+            console.log(`   - Current status: ${currentStatus}`);
+            console.log(`   - Processed at: ${currentCustomData.follow_up?.processed_at}`);
+            console.log(`   - Skipping duplicate processing`);
+            return {
+                success: true,
+                updated_message_id: messageId,
+                error: 'Message already processed'
+            };
+        }
+        if (currentStatus && currentStatus !== 'pending' && currentStatus !== 'sent' && currentStatus !== 'accepted') {
+            console.log(`⚠️ Message ${messageId} has unexpected status: ${currentStatus}`);
+            console.log(`   - Expected: 'pending', 'sent', or 'accepted'`);
+            console.log(`   - Proceeding with update anyway`);
+        }
+        const targetStatus = request.delivery_success ? 'sent' : 'failed';
+        console.log(`📝 Updating message status from '${currentStatus || 'undefined'}' to '${targetStatus}'`);
+        const updatedCustomData = (0, updateMessageStatusMapping_1.buildDeliveryStatusCustomData)(currentCustomData, request);
+        const { data, error } = await supabaseServiceRole
+            .from('messages')
+            .update({
+            custom_data: updatedCustomData,
+            updated_at: new Date().toISOString()
+        })
+            .eq('id', messageId)
+            .select()
+            .single();
+        if (error) {
+            console.error(`❌ Error updating message ${messageId}:`, error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+        if (!data) {
+            return {
+                success: false,
+                error: `Message ${messageId} not found or update failed`
+            };
+        }
+        console.log(`✅ Successfully updated message ${messageId} status to '${targetStatus}'`);
+        console.log(`📊 Message now marked as processed via ${request.delivery_channel}`);
+        if (request.delivery_success && targetStatus === 'sent') {
+            console.log(`👤 Updating lead ${request.lead_id} status to 'contacted' after successful message delivery...`);
+            const leadUpdateData = {
+                status: 'contacted',
+                updated_at: new Date().toISOString(),
+                last_contact: new Date().toISOString()
+            };
+            const { error: leadError } = await supabaseServiceRole
+                .from('leads')
+                .update(leadUpdateData)
+                .eq('id', request.lead_id)
+                .eq('site_id', request.site_id);
+            if (leadError) {
+                console.error(`❌ Warning: Failed to update lead status to 'contacted':`, leadError);
+            }
+            else {
+                console.log(`✅ Successfully updated lead ${request.lead_id} status to 'contacted'`);
+            }
+        }
+        return {
+            success: true,
+            updated_message_id: messageId
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Exception updating message status:`, errorMessage);
+        return {
+            success: false,
+            error: errorMessage
+        };
+    }
+}

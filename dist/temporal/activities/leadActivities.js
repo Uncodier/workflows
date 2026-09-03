@@ -1997,7 +1997,7 @@ async function cleanupFailedFollowUpActivity(request) {
             console.log(`🔍 Searching for tasks linked to conversation ${request.conversation_id}...`);
             const { data: tasks, error: tasksError } = await supabaseServiceRole
                 .from('tasks')
-                .select('id, task_id, name, stage, status, custom_data, created_at')
+                .select('id, title, stage, status, created_at')
                 .eq('lead_id', request.lead_id)
                 .eq('site_id', request.site_id)
                 .eq('conversation_id', request.conversation_id)
@@ -2011,7 +2011,7 @@ async function cleanupFailedFollowUpActivity(request) {
                 if (tasks && tasks.length > 0) {
                     console.log(`🗑️ Deleting ${tasks.length} conversation-specific tasks...`);
                     for (const task of tasks) {
-                        console.log(`   - Deleting task: ${task.name} (${task.stage}/${task.status}) linked to conversation ${request.conversation_id}`);
+                        console.log(`   - Deleting task: ${task.title} (${task.stage}/${task.status}) linked to conversation ${request.conversation_id}`);
                     }
                     const { error: deleteTasksError } = await supabaseServiceRole
                         .from('tasks')
@@ -2034,7 +2034,7 @@ async function cleanupFailedFollowUpActivity(request) {
             console.log(`⚠️ No conversation_id provided - searching for recent tasks to cleanup for lead ${request.lead_id}...`);
             const { data: tasks, error: tasksError } = await supabaseServiceRole
                 .from('tasks')
-                .select('id, task_id, name, stage, status, custom_data, created_at')
+                .select('id, title, stage, status, created_at')
                 .eq('lead_id', request.lead_id)
                 .eq('site_id', request.site_id)
                 .order('created_at', { ascending: false })
@@ -2047,7 +2047,7 @@ async function cleanupFailedFollowUpActivity(request) {
                 console.log(`📊 Found ${cleanupSummary.tasks_found} recent task(s) for this lead`);
                 if (tasks && tasks.length > 0) {
                     const recentTask = tasks[0];
-                    console.log(`🗑️ Deleting most recent task: ${recentTask.name} (${recentTask.stage}/${recentTask.status})...`);
+                    console.log(`🗑️ Deleting most recent task: ${recentTask.title} (${recentTask.stage}/${recentTask.status})...`);
                     const { error: deleteTasksError } = await supabaseServiceRole
                         .from('tasks')
                         .delete()

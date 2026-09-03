@@ -76,5 +76,7 @@ __exportStar(require("./leadGenerationDomainSearchWorkflow"), exports);
 __exportStar(require("./sendApprovedMessagesWorkflow"), exports);
 __exportStar(require("./dailyCreditRenewalWorkflow"), exports);
 __exportStar(require("./processReservationsWorkflow"), exports);
+__exportStar(require("./pollSocialCommentsWorkflow"), exports);
+__exportStar(require("./pollSocialAnalyticsWorkflow"), exports);
 __exportStar(require("./processSubscriptionsWorkflow"), exports);
 __exportStar(require("./processTasksWorkflow"), exports);

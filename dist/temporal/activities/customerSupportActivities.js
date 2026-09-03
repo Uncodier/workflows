@@ -118,6 +118,12 @@ baseParams) {
     if (emailData.channel_delivery === true) {
         messageRequest.channel_delivery = true;
     }
+    if (emailData.require_approval === true) {
+        messageRequest.require_approval = true;
+    }
+    if (emailData.custom_data && typeof emailData.custom_data === 'object') {
+        messageRequest.custom_data = emailData.custom_data;
+    }
     console.log('📤 Sending customer support message with payload:', {
         message: messageRequest.message?.substring(0, 50) + '...',
         hasName: !!messageRequest.name,

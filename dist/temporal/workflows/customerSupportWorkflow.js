@@ -512,6 +512,13 @@ async function customerSupportMessageWorkflow(messageData, baseParams) {
         }
         else if (effectiveBaseParams.origin === 'telegram' ||
             effectiveBaseParams.origin === 'messenger' ||
+            effectiveBaseParams.origin === 'facebook' ||
+            effectiveBaseParams.origin === 'instagram' ||
+            effectiveBaseParams.origin === 'threads' ||
+            effectiveBaseParams.origin === 'linkedin' ||
+            effectiveBaseParams.origin === 'x' ||
+            effectiveBaseParams.origin === 'twitter' ||
+            effectiveBaseParams.origin === 'youtube' ||
             (messageData?.channel_delivery === true &&
                 (effectiveBaseParams.origin === 'whatsapp' || effectiveBaseParams.origin === 'email'))) {
             return await (0, channelCustomerSupportWorkflow_1.channelCustomerSupportMessageWorkflow)(messageData, effectiveBaseParams);

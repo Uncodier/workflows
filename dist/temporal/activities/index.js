@@ -75,6 +75,7 @@ __exportStar(require("./reservationActivities"), exports);
 __exportStar(require("./subscriptionActivities"), exports);
 __exportStar(require("./taskActivities"), exports);
 __exportStar(require("./channelActivities"), exports);
+__exportStar(require("./outstandActivities"), exports);
 // Bundle all activities for the worker
 const supabaseActivities = __importStar(require("./supabaseActivities"));
 const apiActivities = __importStar(require("./apiActivities"));
@@ -113,6 +114,7 @@ const reservationActivities = __importStar(require("./reservationActivities"));
 const subscriptionActivities = __importStar(require("./subscriptionActivities"));
 const taskActivities = __importStar(require("./taskActivities"));
 const channelActivities = __importStar(require("./channelActivities"));
+const outstandActivities = __importStar(require("./outstandActivities"));
 exports.activities = {
     ...supabaseActivities,
     ...apiActivities,
@@ -150,7 +152,8 @@ exports.activities = {
     ...reservationActivities,
     ...subscriptionActivities,
     ...taskActivities,
-    ...channelActivities
+    ...channelActivities,
+    ...outstandActivities
 };
 var workflowSchedulingActivities_1 = require("./workflowSchedulingActivities");
 Object.defineProperty(exports, "executeDailyStandUpWorkflowsActivity", { enumerable: true, get: function () { return workflowSchedulingActivities_1.executeDailyStandUpWorkflowsActivity; } });

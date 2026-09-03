@@ -1,0 +1,80 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.createPaymentRecord = createPaymentRecord;
+exports.fetchLastCreditRenewalPayment = fetchLastCreditRenewalPayment;
+exports.fetchLastStripeSubscriptionPayment = fetchLastStripeSubscriptionPayment;
+async function createPaymentRecord(client, paymentData) {
+    console.log(`Creating payment record for site ${paymentData.site_id}`);
+    // For initial_credit payments, skip insert if one already exists to avoid
+    // duplicates when retrying after a partial initialization failure.
+    if (paymentData.payment_method === 'initial_credit') {
+        const { data: existing } = await client
+            .from('payments')
+            .select('id')
+            .eq('site_id', paymentData.site_id)
+            .eq('payment_method', 'initial_credit')
+            .maybeSingle();
+        if (existing) {
+            console.log(`Initial payment record already exists for site ${paymentData.site_id}, skipping.`);
+            return existing;
+        }
+    }
+    const { data, error } = await client
+        .from('payments')
+        .insert({
+        site_id: paymentData.site_id,
+        amount: paymentData.amount,
+        credits: paymentData.credits,
+        payment_method: paymentData.payment_method,
+        status: paymentData.status,
+        transaction_type: paymentData.transaction_type,
+        details: paymentData.details || {},
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        command_id: paymentData.command_id
+    })
+        .select()
+        .single();
+    if (error) {
+        if (error.code === '23503' && error.message?.includes('payments_site_id_fkey')) {
+            console.log(`⚠️ Site ${paymentData.site_id} no longer exists. Skipping payment record creation.`);
+            return null;
+        }
+        console.error(`❌ Error creating payment record for site ${paymentData.site_id}:`, error);
+        throw new Error(`Failed to create payment record: ${error.message}`);
+    }
+    console.log(`✅ Successfully created payment record for site ${paymentData.site_id}`);
+    return data;
+}
+/** Last monthly credit renewal record only (Stripe charges must not affect due-date logic). */
+async function fetchLastCreditRenewalPayment(client, siteId) {
+    const { data, error } = await client
+        .from('payments')
+        .select('*')
+        .eq('site_id', siteId)
+        .eq('payment_method', 'credit_renewal')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    if (error) {
+        console.error(`❌ Error fetching last credit renewal payment for site ${siteId}:`, error);
+        throw new Error(`Failed to fetch last credit renewal payment: ${error.message}`);
+    }
+    return data;
+}
+/** Most recent Stripe subscription payment (used only to avoid duplicate renewal invoices). */
+async function fetchLastStripeSubscriptionPayment(client, siteId, stripeSubscriptionId) {
+    const { data, error } = await client
+        .from('payments')
+        .select('*')
+        .eq('site_id', siteId)
+        .contains('details', { stripe_subscription_id: stripeSubscriptionId })
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    if (error) {
+        console.error(`❌ Error fetching last Stripe payment for site ${siteId}:`, error);
+        throw new Error(`Failed to fetch last Stripe payment: ${error.message}`);
+    }
+    return data;
+}
