@@ -42,14 +42,14 @@ export async function getApprovedMessagesActivity(): Promise<any[]> {
   const BATCH_SIZE = 100;
 
   const conversationIds = [...new Set(messages.map((m) => m.conversation_id).filter(Boolean))];
-  const conversationMap = new Map<string, { site_id: string; lead_id: string }>();
+  const conversationMap = new Map<string, { site_id: string; lead_id: string; channel: string | null }>();
 
   for (let i = 0; i < conversationIds.length; i += BATCH_SIZE) {
     const batch = conversationIds.slice(i, i + BATCH_SIZE);
     try {
       const { data: conversations, error: convError } = await supabaseServiceRole
         .from('conversations')
-        .select('id, site_id, lead_id')
+        .select('id, site_id, lead_id, channel, custom_data')
         .in('id', batch);
 
       if (convError) {
@@ -58,7 +58,8 @@ export async function getApprovedMessagesActivity(): Promise<any[]> {
       }
       if (conversations) {
         for (const c of conversations) {
-          conversationMap.set(c.id, { site_id: c.site_id, lead_id: c.lead_id });
+          const channel = c.channel || (c.custom_data as Record<string, any>)?.channel || null;
+          conversationMap.set(c.id, { site_id: c.site_id, lead_id: c.lead_id, channel });
         }
       }
     } catch (e) {
@@ -115,6 +116,7 @@ export async function getApprovedMessagesActivity(): Promise<any[]> {
         lead_phone: lead.phone,
         lead_name: lead.name,
         created_at: msg.created_at,
+        channel: conversation.channel,
       });
     } catch (e) {
       console.error(`⚠️ Error enriching message ${msg.id}`, e);

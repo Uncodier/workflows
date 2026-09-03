@@ -73,6 +73,8 @@ export interface CustomerSupportMessageRequest {
   origin?: string; // Nuevo parámetro opcional: "whatsapp" | "email"
   origin_message_id?: string;
   channel_delivery?: boolean;
+  require_approval?: boolean;
+  custom_data?: Record<string, unknown>;
 }
 
 export interface AgentSupervisorRequest {
@@ -223,6 +225,14 @@ export async function sendCustomerSupportMessageActivity(
 
   if (emailData.channel_delivery === true) {
     messageRequest.channel_delivery = true;
+  }
+
+  if (emailData.require_approval === true) {
+    messageRequest.require_approval = true;
+  }
+
+  if (emailData.custom_data && typeof emailData.custom_data === 'object') {
+    messageRequest.custom_data = emailData.custom_data;
   }
 
   console.log('📤 Sending customer support message with payload:', {

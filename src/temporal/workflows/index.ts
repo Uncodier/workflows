@@ -53,6 +53,8 @@ import { enrichLeadWorkflow } from './enrichLeadWorkflow';
 import { generatePersonEmailWorkflow } from './generatePersonEmailWorkflow';
 import { leadGenerationDomainSearchWorkflow } from './leadGenerationDomainSearchWorkflow';
 import { sendApprovedMessagesWorkflow } from './sendApprovedMessagesWorkflow';
+import { pollSocialCommentsWorkflow } from './pollSocialCommentsWorkflow';
+import { pollSocialAnalyticsWorkflow } from './pollSocialAnalyticsWorkflow';
 import { dailyCreditRenewalWorkflow } from './dailyCreditRenewalWorkflow';
 import { processReservationsWorkflow } from './processReservationsWorkflow';
 import { processSubscriptionsWorkflow } from './processSubscriptionsWorkflow';
@@ -106,6 +108,9 @@ export * from './leadGenerationDomainSearchWorkflow';
 export * from './sendApprovedMessagesWorkflow';
 export * from './dailyCreditRenewalWorkflow';
 export * from './processReservationsWorkflow';
+export * from './pollSocialCommentsWorkflow';
+export * from './pollSocialAnalyticsWorkflow';
+
 export * from './processSubscriptionsWorkflow';
 export * from './processTasksWorkflow';
 
@@ -160,6 +165,8 @@ export const workflows = {
   generatePersonEmailWorkflow,
   leadGenerationDomainSearchWorkflow,
   sendApprovedMessagesWorkflow,
+  pollSocialCommentsWorkflow,
+  pollSocialAnalyticsWorkflow,
   dailyCreditRenewalWorkflow,
   processReservationsWorkflow,
   processSubscriptionsWorkflow,
@@ -223,6 +230,8 @@ export const workflowNames = {
   generatePersonEmailWorkflow: 'generatePersonEmailWorkflow',
   leadGenerationDomainSearchWorkflow: 'leadGenerationDomainSearchWorkflow',
   sendApprovedMessagesWorkflow: 'sendApprovedMessagesWorkflow',
+  pollSocialCommentsWorkflow: 'pollSocialCommentsWorkflow',
+  pollSocialAnalyticsWorkflow: 'pollSocialAnalyticsWorkflow',
   dailyCreditRenewalWorkflow: 'dailyCreditRenewalWorkflow',
   processReservationsWorkflow: 'processReservationsWorkflow',
   processSubscriptionsWorkflow: 'processSubscriptionsWorkflow',

@@ -11,6 +11,8 @@ type WorkflowArgs = {
   processReservationsWorkflow: [];
   processSubscriptionsWorkflow: [];
   processTasksWorkflow: [];
+  pollSocialCommentsWorkflow: [];
+  pollSocialAnalyticsWorkflow: [];
 };
 
 export interface ScheduleSpec {
@@ -117,6 +119,32 @@ export const defaultSchedules: ScheduleSpec[] = [
     pauseOnFailure: false,
     catchupWindow: '1h',
     paused: false
+  },
+  {
+    id: 'poll-social-comments-schedule',
+    workflowType: 'pollSocialCommentsWorkflow',
+    intervalMinutes: 5,
+    args: [],
+    description: 'Poll social comment networks for new replies and ingest them into conversations',
+    startAt: new Date(),
+    jitterMs: 30000,
+    pauseOnFailure: false,
+    catchupWindow: '15m',
+    paused: false,
+    overlap: 'SKIP',
+  },
+  {
+    id: 'poll-social-analytics-schedule',
+    workflowType: 'pollSocialAnalyticsWorkflow',
+    intervalMinutes: 60, // Every hour
+    args: [],
+    description: 'Polls for social performance analytics every hour',
+    startAt: new Date(),
+    jitterMs: 60000,
+    pauseOnFailure: false,
+    catchupWindow: '2h',
+    paused: false,
+    overlap: 'SKIP',
   }
 ];
 

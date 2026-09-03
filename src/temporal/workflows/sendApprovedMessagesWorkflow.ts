@@ -1,6 +1,7 @@
 import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
+import { sendChannelMessageFromAgentWorkflow } from './sendChannelMessageFromAgentWorkflow';
 
 const {
   getApprovedMessagesActivity,
@@ -41,9 +42,11 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
 
   async function processOneMessage(msg: (typeof messages)[number]): Promise<boolean> {
     let sent = false;
-    const channel = msg.custom_data?.channel || (msg.custom_data?.type === 'email' ? 'email' : 'whatsapp');
+    const channel = (msg.custom_data?.channel || msg.custom_data?.source || msg.channel || (msg.custom_data?.type === 'email' ? 'email' : 'whatsapp')).toLowerCase();
     const messageId = msg.message_id;
     let sentMessageId: string | undefined;
+
+    const COMMENT_CHANNELS = ['facebook', 'instagram', 'threads', 'linkedin', 'x', 'twitter', 'youtube'];
 
     try {
       if (channel === 'email') {
@@ -67,6 +70,37 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         } else {
           throw new Error(`Email sending failed: ${emailResult.messageId}`);
         }
+      } else if (COMMENT_CHANNELS.includes(channel)) {
+        console.log(`📢 Dispatching ${channel} comment (child runs in background)...`);
+        const markResult = await markMessageAsSendingActivity({
+          message_id: msg.message_id,
+          conversation_id: msg.conversation_id,
+          site_id: msg.site_id,
+        });
+        if (!markResult.success) {
+          console.error(`❌ Cannot dispatch ${channel}: mark as sending failed for message ${msg.message_id}: ${markResult.error ?? 'unknown'}`);
+          return false;
+        }
+
+        const channelWorkflowId = `send-${channel}-approved-${msg.message_id}-${Date.now()}`;
+        await startChild(sendChannelMessageFromAgentWorkflow, {
+          workflowId: channelWorkflowId,
+          args: [{
+            channel,
+            to: msg.lead_id || 'social-comment-user',
+            message: msg.content,
+            site_id: msg.site_id,
+            agent_id: msg.custom_data?.userId,
+            conversation_id: msg.conversation_id,
+            lead_id: msg.lead_id,
+            message_id: msg.message_id,
+          }],
+          parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+        });
+        
+        sent = true;
+        console.log(`✅ ${channel} child started (workflowId: ${channelWorkflowId}).`);
+        return true;
       } else {
         if (!msg.lead_phone) {
           throw new Error('No phone number for lead');

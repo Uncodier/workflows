@@ -26,7 +26,13 @@ export async function channelCustomerSupportMessageWorkflow(
   const recipient = isEmail ? messageData.email : messageData.phone;
   console.log(`Detected ${channel} message - processing via channel delivery`);
 
-  const emailDataForCS: EmailData & { channel_delivery?: boolean } = {
+  const requireApproval = messageData.require_approval === true;
+  const emailDataForCS: EmailData & {
+    channel_delivery?: boolean;
+    require_approval?: boolean;
+    custom_data?: Record<string, unknown>;
+    origin_message_id?: string;
+  } = {
     summary: messageData.message || 'No message content',
     original_text: messageData.message,
     original_subject: messageData.name || `${channel} Contact`,
@@ -46,6 +52,9 @@ export async function channelCustomerSupportMessageWorkflow(
     conversation_id: undefined,
     visitor_id: undefined,
     channel_delivery: true,
+    require_approval: requireApproval,
+    custom_data: messageData.custom_data,
+    origin_message_id: messageData.origin_message_id || baseParams.origin_message_id,
   };
 
   const response = await sendCustomerSupportMessageActivity(emailDataForCS, baseParams);
@@ -65,7 +74,9 @@ export async function channelCustomerSupportMessageWorkflow(
       ? response.data?.conversation_title || `Re: ${emailDataForCS.original_subject || 'Your inquiry'}`
       : undefined;
 
-    if (!assistantMessage) {
+    if (requireApproval) {
+      console.log(`Skipping ${channel} instant send - require_approval=true, waiting for Accept`);
+    } else if (!assistantMessage) {
       console.log(`Skipping ${channel} send - no assistant message content from customer support`);
     } else if (!recipient) {
       console.log(`Skipping ${channel} send - no recipient provided in inbound messageData`);
