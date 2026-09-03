@@ -44,8 +44,8 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
         while (hasMore) {
           const result = await fetchOutstandPostsActivity(siteId, limit, offset);
           
-          const posts = result?.posts || result?.data || [];
-          const pagination = result?.pagination || { total: 0 };
+          const posts = Array.isArray(result) ? result : (result?.posts || result?.data || []);
+          const pagination = Array.isArray(result) ? { total: posts.length } : (result?.pagination || { total: posts.length });
           
           for (const post of posts) {
             // Filter to only check posts published on supported networks
@@ -66,7 +66,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
 
               // 2. Fetch replies
               const repliesResult = await fetchOutstandPostRepliesActivity(siteId, post.id);
-              const comments = repliesResult?.comments || repliesResult?.data || [];
+              const comments = Array.isArray(repliesResult) ? repliesResult : (repliesResult?.comments || repliesResult?.data || []);
               if (comments.length === 0) {
                 continue;
               }
