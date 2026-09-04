@@ -92,7 +92,10 @@ jobs:
       - name: Setup kubelogin
         uses: azure/use-kubelogin@v1
         with:
-          kubelogin-version: 'latest'
+          # Pin a release so the action does not need GITHUB_TOKEN to resolve "latest"
+          kubelogin-version: 'v0.2.12'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get AKS credentials
         run: |
