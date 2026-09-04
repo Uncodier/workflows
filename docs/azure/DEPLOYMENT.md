@@ -1,6 +1,6 @@
-# Deploy Temporal to Azure (AKS + App Service Workers)
+# Deploy Temporal to Azure (AKS Workers)
 
-This guide implements the production plan: Temporal Server on AKS, workers from Git on App Service, Microsoft observability, and search-attribute bootstrap.
+This guide implements the production plan: Temporal Server and Workers on AKS, Microsoft observability, and search-attribute bootstrap.
 
 ## Prerequisites
 
@@ -27,7 +27,7 @@ Set at least:
 - `POSTGRES_ADMIN_PASSWORD` (strong secret)
 - `WORKER_DEFAULT_NAME`, `WORKER_CRITICAL_NAME` (globally unique App Service names)
 - Supabase / app secrets used by workers today on Render
-- Optional: `GITHUB_REPO_URL`, `GITHUB_TOKEN` for source deploy
+- Optional: `GITHUB_REPO_URL`, `GITHUB_TOKEN` (legacy App Service deployment only)
 - Optional: `TEMPORAL_GATEWAY_HOSTNAME` (must include `temporal.cloud`), `TEMPORAL_GATEWAY_API_KEY`
 
 Do **not** commit `config.env` or `.deploy-outputs.env`.
@@ -49,7 +49,7 @@ chmod +x infra/azure/scripts/*.sh
 | Key Vault | Stores Postgres password |
 | Log Analytics + App Insights | Logs / worker telemetry |
 | Monitor Workspace + Managed Grafana | Metrics / dashboards |
-| 2× App Service (Always On) | Workers for `default` and `critical-priority` (`azure:startup:compiled`) |
+| 2× App Service (Always On) | Workers for `default` and `critical-priority` (Legacy) |
 | Internal Load Balancer | Temporal frontend reachable on VNet (`*:7233`) |
 
 ### After deploy
@@ -58,7 +58,22 @@ chmod +x infra/azure/scripts/*.sh
 2. Port-forward UI: `kubectl -n temporal port-forward svc/temporal-web 8080:8080`
 3. Confirm workers have `TEMPORAL_SERVER_URL=<internal-ip>:7233`
 4. Confirm search attributes exist (script `06` or UI query `site_id = "test"`)
-5. Push to `main` to deploy AKS workers via GitHub Actions (ACR build + `kubectl set image`). Configure `AZURE_CREDENTIALS` and `AZURE_RESOURCE_GROUP`.
+5. Push to `main` to deploy AKS workers via GitHub Actions.
+
+### CI/CD for Workers (GitHub Actions)
+
+Worker deployments run automatically on pushes to `main`. The workflow uses `docker buildx` with cache and updates the AKS deployments in parallel. 
+
+**Setup required in GitHub Repository Settings → Secrets and Variables → Actions**:
+
+*   `AZURE_CREDENTIALS`: A JSON string representing a Service Principal.
+
+The Service Principal needs the following roles in Azure:
+1.  **AcrPush** on the `uncodietmpacr` Azure Container Registry (ACR).
+2.  **Azure Kubernetes Service Cluster User Role** on the `uncodie-tmp-aks` cluster.
+3.  **RBAC permissions** to update deployments in the `temporal-workers` namespace.
+
+If `AZURE_CREDENTIALS` is missing, the workflow will fail immediately at the Azure Login step.
 
 ## Search attributes
 
@@ -71,9 +86,6 @@ Same list as [SEARCH_ATTRIBUTES_SETUP.md](../SEARCH_ATTRIBUTES_SETUP.md). **Must
 ## Networking model
 
 ```
-App Service (VNet integration)
-        |
-        v
   Internal LB IP:7233  -->  temporal-frontend (AKS)
         |
         v
@@ -88,7 +100,7 @@ App Service (VNet integration)
 - Container Insights on AKS
 - Azure Monitor managed Prometheus (scrape Temporal `prometheus.io/*` annotations)
 - Azure Managed Grafana
-- Application Insights on both worker App Services
+- Application Insights on worker App Services (if still used)
 - Log Analytics workspace
 
 Custom scrape helper: `infra/azure/observability/ama-metrics-temporal-config.yaml`
@@ -152,7 +164,7 @@ This stack does **not** import Cloud history. Use drain / dual-client / schedule
 | Helm schema job fails | Postgres firewall/VNet, password secret, DB names |
 | Workers cannot connect | Run `05-wire-network.sh`; verify VNet integration; `nc -vz <ip> 7233` |
 | Search attr errors | Re-run `06-register-search-attributes.sh` |
-| App Service build fails | Ensure Oryx runs `npm run build:all` (set via GitHub Action / app settings) |
+| App Service build fails | App Services are legacy; use AKS workers via GitHub Actions |
 | No LB IP | `kubectl -n temporal describe svc temporal-frontend` |
 | Gateway 401 / UNAUTHENTICATED | Bearer in Vercel must match `TEMPORAL_GATEWAY_API_KEY` |
 | Let's Encrypt not Ready | DNS A record must point at `TEMPORAL_GATEWAY_PUBLIC_IP`; re-run `08` |

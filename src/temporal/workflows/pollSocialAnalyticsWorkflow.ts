@@ -1,5 +1,6 @@
 import { proxyActivities, log, sleep } from '@temporalio/workflow';
 import type { Activities } from '../activities';
+import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 
 const {
   fetchSitesWithSocialCommentsActivity,
@@ -8,7 +9,8 @@ const {
   upsertContentPerformanceActivity,
   logWorkflowExecutionActivity,
 } = proxyActivities<Activities>({
-  startToCloseTimeout: '5 minutes',
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.NETWORK,
+  retry: RETRY_POLICIES.NETWORK,
 });
 
 /**

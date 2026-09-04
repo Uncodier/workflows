@@ -1,9 +1,9 @@
-# Temporal on Azure (AKS Server + App Service Workers)
+# Temporal on Azure (AKS Server + AKS Workers)
 
 Production-oriented self-hosted Temporal:
 
 - **Temporal Server** on **AKS** (official Helm chart) + **Azure Database for PostgreSQL** (dual DB: `temporal` + `temporal_visibility`)
-- **Workers** (`default` + `critical-priority`) on **Azure App Service** deployed **from Git** (same start command as Render)
+- **Workers** on **AKS** deployed via **GitHub Actions** (`.github/workflows/azure-workers-deploy.yml`)
 - **Observability** via Microsoft stack: Azure Monitor, Managed Prometheus, Managed Grafana, Log Analytics, Application Insights
 - **Search attributes** bootstrap script (same list as Cloud)
 
@@ -35,7 +35,7 @@ Or run steps individually:
 | `01-provision-infra.sh` | Bicep: VNet, AKS, Postgres, Key Vault, App Services, Monitor |
 | `02-deploy-temporal-helm.sh` | Helm Temporal + DB secret |
 | `03-setup-observability.sh` | Managed Prometheus / Grafana wiring |
-| `04-deploy-workers.sh` | App settings + optional Git source |
+| `04-deploy-workers.sh` | App settings for legacy App Service workers |
 | `05-wire-network.sh` | Internal LB IP → `TEMPORAL_SERVER_URL` on workers |
 | `06-register-search-attributes.sh` | Custom Keyword attrs |
 | `07-deploy-workers-aks.sh` | ACR image + AKS worker Deployments |
@@ -56,10 +56,10 @@ infra/azure/
 
 ## Workers
 
-Same commands as [render.yaml](../../render.yaml):
+Production workers run on AKS across multiple queues (`default`, `critical-priority`, `high`, `low-priority`, `background-priority`, `validation`).
 
-- Build: `npm run build:all`
-- Start: `npm run azure:startup:compiled` (health HTTP + same worker bootstrap as Render)
-- Queues: `default` and `critical-priority`
+The deployment path is GitHub Actions: [.github/workflows/azure-workers-deploy.yml](../../.github/workflows/azure-workers-deploy.yml).
 
-CI: [.github/workflows/azure-workers-deploy.yml](../../.github/workflows/azure-workers-deploy.yml)
+- Build: Handled by Docker + GitHub Actions (via `infra/azure/workers/Dockerfile`).
+- Start: `npm run azure:startup:compiled` (health HTTP + same worker bootstrap as Render).
+- Make sure `AZURE_CREDENTIALS` secret is set in GitHub repository settings with a Service Principal possessing `AcrPush` and AKS access.

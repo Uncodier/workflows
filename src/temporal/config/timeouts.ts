@@ -21,6 +21,9 @@ export const ACTIVITY_TIMEOUTS = {
   
   // Default para activities genéricas
   DEFAULT: '2 minutes',
+
+  // External HTTP / integration APIs
+  NETWORK: '2 minutes',
   
   // Operations de setup/configuración - pueden tardar
   SETUP_OPERATIONS: '10 minutes',

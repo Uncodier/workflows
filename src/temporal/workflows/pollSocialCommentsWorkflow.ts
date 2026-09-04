@@ -1,6 +1,8 @@
 import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
+import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
+import { getPublishedCommentNetworks, isOutstandDraftPost } from './helpers/outstandPoll';
 
 const {
   fetchSitesWithSocialCommentsActivity,
@@ -9,12 +11,9 @@ const {
   upsertContentFromOutstandPostActivity,
   logWorkflowExecutionActivity
 } = proxyActivities<Activities>({
-  startToCloseTimeout: '5 minutes',
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.NETWORK,
+  retry: RETRY_POLICIES.NETWORK, // Handle API flakiness properly, don't retry forever on 400s
 });
-
-// TikTok, Pinterest, Google Business Profile do not expose a comments API and will return an error
-// We only allow these networks for comments based on outstand docs
-const SUPPORTED_COMMENT_NETWORKS = ['instagram', 'facebook', 'threads', 'linkedin', 'x', 'twitter', 'youtube'];
 
 export async function pollSocialCommentsWorkflow(): Promise<any> {
   const workflowId = 'pollSocialCommentsWorkflow';
@@ -48,13 +47,9 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           const pagination = Array.isArray(result) ? { total: posts.length } : (result?.pagination || { total: posts.length });
           
           for (const post of posts) {
-            // Filter to only check posts published on supported networks
-            const socialAccounts = post.socialAccounts || [];
-            const hasSupportedNetwork = socialAccounts.some((acc: any) => 
-              SUPPORTED_COMMENT_NETWORKS.includes((acc.network || '').toLowerCase())
-            );
+            const uniqueNetworks = getPublishedCommentNetworks(post);
             
-            if (!hasSupportedNetwork || post.status === 'draft') {
+            if (uniqueNetworks.length === 0 || isOutstandDraftPost(post)) {
               continue;
             }
             
@@ -64,60 +59,67 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
               // 1. Upsert content to ensure we have a reference for any comments
               const contentId = await upsertContentFromOutstandPostActivity(siteId, post);
 
-              // 2. Fetch replies
-              const repliesResult = await fetchOutstandPostRepliesActivity(siteId, post.id);
-              const comments = Array.isArray(repliesResult) ? repliesResult : (repliesResult?.comments || repliesResult?.data || []);
-              if (comments.length === 0) {
-                continue;
-              }
+              // 2. Fetch replies for each valid published network
+              for (const network of uniqueNetworks) {
+                try {
+                  const repliesResult = await fetchOutstandPostRepliesActivity(siteId, post.id, network);
+                  const comments = Array.isArray(repliesResult) ? repliesResult : (repliesResult?.comments || repliesResult?.data || []);
+                  
+                  if (comments.length === 0) {
+                    continue;
+                  }
 
-              for (const comment of comments) {
-                const commentText = comment.text || comment.message || '';
-                const commentId = comment.id || comment.reply_id;
-                if (!commentText || !commentId) {
-                  continue;
-                }
-
-                const network = (comment.network || comment.account?.network || 'social').toLowerCase();
-                const handle = comment.username || comment.authorName || comment.accountUsername || '';
-                
-                const origin = network === 'twitter' ? 'x' : network;
-                await startChild(customerSupportMessageWorkflow, {
-                  workflowId: `cs-comment-${siteId}-${commentId}`,
-                  args: [
-                    {
-                      site_id: siteId,
-                      message: commentText,
-                      name: handle || 'Social User',
-                      origin,
-                      origin_message_id: commentId,
-                      channel_delivery: true,
-                      require_approval: true,
-                      custom_data: {
-                        platform_post_id: comment.platformPostId || comment.platform_post_id,
-                        platform_post_url: comment.platformPostUrl || comment.platform_post_url || post.url,
-                        parent_comment_id: comment.parentCommentId || comment.parent_comment_id,
-                        root_comment_id: comment.rootCommentId || comment.root_comment_id,
-                        account_username: handle,
-                        social_handle: handle,
-                        outstand_post_id: post.id,
-                        content_id: contentId,
-                        source: 'comment'
-                      }
-                    },
-                    {
-                      origin,
-                      origin_message_id: commentId,
+                  for (const comment of comments) {
+                    const commentText = comment.text || comment.message || '';
+                    const commentId = comment.id || comment.reply_id;
+                    if (!commentText || !commentId) {
+                      continue;
                     }
-                  ],
-                  parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
-                });
-                
-                processedComments++;
+
+                    const commentNetwork = (comment.network || comment.account?.network || 'social').toLowerCase();
+                    const handle = comment.username || comment.authorName || comment.accountUsername || '';
+                    
+                    const origin = commentNetwork === 'twitter' ? 'x' : commentNetwork;
+                    await startChild(customerSupportMessageWorkflow, {
+                      workflowId: `cs-comment-${siteId}-${commentId}`,
+                      args: [
+                        {
+                          site_id: siteId,
+                          message: commentText,
+                          name: handle || 'Social User',
+                          origin,
+                          origin_message_id: commentId,
+                          channel_delivery: true,
+                          require_approval: true,
+                          custom_data: {
+                            platform_post_id: comment.platformPostId || comment.platform_post_id,
+                            platform_post_url: comment.platformPostUrl || comment.platform_post_url || post.url,
+                            parent_comment_id: comment.parentCommentId || comment.parent_comment_id,
+                            root_comment_id: comment.rootCommentId || comment.root_comment_id,
+                            account_username: handle,
+                            social_handle: handle,
+                            outstand_post_id: post.id,
+                            content_id: contentId,
+                            source: 'comment'
+                          }
+                        },
+                        {
+                          origin,
+                          origin_message_id: commentId,
+                        }
+                      ],
+                      parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+                    });
+                    
+                    processedComments++;
+                  }
+                } catch (networkError) {
+                  console.error(`Failed to process replies for post ${post.id} on network ${network}:`, networkError);
+                }
               }
             } catch (postError) {
               // Log but continue with other posts
-              console.error(`Failed to process replies for post ${post.id}:`, postError);
+              console.error(`Failed to process post ${post.id}:`, postError);
             }
           }
           

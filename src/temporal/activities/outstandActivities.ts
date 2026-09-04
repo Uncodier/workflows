@@ -1,5 +1,12 @@
 import { apiService } from '../services/apiService';
 import { supabaseServiceRole as supabaseAdmin } from '../../lib/supabase/client';
+import { handleOutstandApiError } from './outstandHelpers';
+import {
+  buildOutstandCommentsPath,
+  extractOutstandPostText,
+  isOutstandClientError,
+  isPublishedContentForAnalytics,
+} from '../workflows/helpers/outstandPoll';
 
 function tenantSchema() {
   return process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA || process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
@@ -58,15 +65,15 @@ export async function fetchSitesWithSocialCommentsActivity(): Promise<any[]> {
 export async function fetchOutstandPostsActivity(siteId: string, limit: number = 100, offset: number = 0): Promise<any> {
   const response = await apiService.get(`/api/integrations/outstand/posts?tenant_id=${siteId}&limit=${limit}&offset=${offset}`);
   if (!response.success) {
-    throw new Error(`Failed to fetch outstand posts: ${response.error?.message}`);
+    throw handleOutstandApiError('fetchOutstandPosts', response.error?.message);
   }
   return response.data;
 }
 
-export async function fetchOutstandPostRepliesActivity(siteId: string, postId: string): Promise<any> {
-  const response = await apiService.get(`/api/integrations/outstand/posts/${postId}/comments?tenant_id=${siteId}`);
+export async function fetchOutstandPostRepliesActivity(siteId: string, postId: string, network: string): Promise<any> {
+  const response = await apiService.get(buildOutstandCommentsPath(siteId, postId, network));
   if (!response.success) {
-    throw new Error(`Failed to fetch outstand post replies for post ${postId}: ${response.error?.message}`);
+    throw handleOutstandApiError(`fetchOutstandPostReplies for post ${postId}`, response.error?.message);
   }
   return response.data;
 }
@@ -82,7 +89,12 @@ export async function submitCustomerSupportMessageActivity(payload: any): Promis
 export async function fetchOutstandPostAnalyticsActivity(siteId: string, postId: string): Promise<any> {
   const response = await apiService.get(`/api/integrations/outstand/posts/${postId}/analytics?tenant_id=${siteId}`);
   if (!response.success) {
-    throw new Error(`Failed to fetch outstand post analytics for post ${postId}: ${response.error?.message}`);
+    const errorMsg = response.error?.message || '';
+    if (isOutstandClientError(errorMsg)) {
+      console.log(`[fetchOutstandPostAnalyticsActivity] Skipping post ${postId}: ${errorMsg}`);
+      return null;
+    }
+    throw handleOutstandApiError(`fetchOutstandPostAnalytics for post ${postId}`, errorMsg);
   }
   return response.data;
 }
@@ -112,7 +124,7 @@ export async function fetchSocialPostsDueForAnalyticsActivity(
   const { data: contents, error: contentError } = await supabaseAdmin
     .schema(schema)
     .from('content')
-    .select('id, tags')
+    .select('id, tags, status, published_at')
     .eq('site_id', siteId)
     .not('tags', 'is', null);
 
@@ -120,18 +132,26 @@ export async function fetchSocialPostsDueForAnalyticsActivity(
     throw new Error(`Failed to load social content: ${contentError.message}`);
   }
 
+  const publishedContentByPostId = new Map<string, string>();
+  for (const content of contents || []) {
+    if (!isPublishedContentForAnalytics(content)) continue;
+    const postId = extractOutstandPostId(content.tags);
+    if (!postId) continue;
+    publishedContentByPostId.set(postId, content.id);
+  }
+
   const due = new Map<string, string | null>();
 
   for (const row of snapshots || []) {
     if (!row.outstand_post_id || recent.has(row.outstand_post_id)) continue;
-    due.set(row.outstand_post_id, row.content_id || null);
+    if (!publishedContentByPostId.has(row.outstand_post_id)) continue;
+    due.set(row.outstand_post_id, row.content_id || publishedContentByPostId.get(row.outstand_post_id) || null);
   }
 
-  for (const content of contents || []) {
-    const postId = extractOutstandPostId(content.tags);
-    if (!postId || recent.has(postId)) continue;
+  for (const [postId, contentId] of publishedContentByPostId.entries()) {
+    if (recent.has(postId)) continue;
     if (!due.has(postId) || !due.get(postId)) {
-      due.set(postId, content.id);
+      due.set(postId, contentId);
     }
   }
 
@@ -217,9 +237,11 @@ export async function upsertContentFromOutstandPostActivity(siteId: string, post
       return existing.id;
     }
 
-    // 2. If it doesn't exist, build and insert the content
-    const postText = post.containers?.[0]?.content || post.text || "";
-    if (!postText) return null;
+    const postText = extractOutstandPostText(post);
+    if (!postText) {
+      console.log(`[upsertContentFromOutstandPost] Skipping post ${outstandId}: empty text/content`);
+      return null;
+    }
 
     const platforms = post.socialAccounts?.map((a: any) => a.network || (typeof a === "string" ? a : null)).filter(Boolean) || [];
     const publishedTags = platforms.map((p: string) => `published_${p}`);
