@@ -31,11 +31,13 @@ export async function processSubscriptionRenewalActivity(sub: Subscription): Pro
   const saleData: any = {
     site_id: sub.site_id,
     amount: sub.amount,
+    amount_due: sub.amount,
     currency: 'USD',
-    status: 'completed',
+    status: 'pending',
     title: 'Subscription Renewal',
     sale_date: new Date().toISOString(),
     buyer_user_id: sub.buyer_user_id,
+    product_details: { subscription_id: sub.id },
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
@@ -47,7 +49,7 @@ export async function processSubscriptionRenewalActivity(sub: Subscription): Pro
     site_id: sub.site_id,
     subtotal: sub.amount,
     total: sub.amount,
-    status: 'completed',
+    status: 'pending',
     buyer_user_id: sub.buyer_user_id,
     items: [{
       catalog_item_id: sub.catalog_item_id,
@@ -104,17 +106,17 @@ export async function notifySubscriptionRenewalActivity(params: NotifySubscripti
     const currentNext = new Date(renewalData.next_billing_date);
     
     let markdownMessage = `
-# Recibo de Suscripción
+# Aviso de Cobro de Suscripción
 
 Hola ${userName},
 
-Tu suscripción ha sido renovada exitosamente.
+Tienes una nueva orden de pago pendiente para la renovación de tu suscripción.
 
 **Detalles de la transacción:**
 - **Fecha:** ${new Date().toLocaleDateString(userLang)}
-- **Monto Total:** $${renewalData.amount} ${renewalData.currency}
+- **Monto a Pagar:** $${renewalData.amount} ${renewalData.currency}
 - **Número de Orden:** ${renewalData.sale_id}
-- **Próximo Cobro:** ${currentNext.toLocaleDateString(userLang)}
+- **Siguiente Cobro Programado:** ${currentNext.toLocaleDateString(userLang)}
 `.trim();
 
     if (renewalData.public_access_token) {
@@ -127,7 +129,7 @@ Tu suscripción ha sido renovada exitosamente.
 
     const response = await apiService.post('/api/notifications/subscriptionRenewal', {
       email: userEmail,
-      subject: 'Recibo de Renovación de Suscripción',
+      subject: 'Aviso de Cobro de Suscripción',
       message: markdownMessage,
       site_id: sub.site_id,
       locale: locale
