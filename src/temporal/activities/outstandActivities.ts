@@ -23,18 +23,50 @@ function unwrapAnalytics(payload: any): any {
   return payload;
 }
 
+function resolveViews(network: string | null, metrics: any): number {
+  const views = metrics.views || 0;
+  const impressions = metrics.impressions || 0;
+  const reach = metrics.reach || 0;
+
+  if (!network) return views || impressions;
+
+  switch (network.toLowerCase()) {
+    case 'linkedin':
+    case 'twitter':
+    case 'x':
+    case 'pinterest':
+      // Text/image heavy networks where 'impressions' is equivalent to 'views'
+      return views || impressions;
+      
+    case 'facebook':
+    case 'instagram':
+      // Typically report reach and impressions; fallback to reach then impressions
+      return views || reach || impressions;
+
+    case 'tiktok':
+    case 'youtube':
+    case 'shorts':
+      // Video-first networks; views are absolute
+      return views;
+
+    default:
+      return views || impressions;
+  }
+}
+
 function normalizeMetricsByAccount(byAccount: any[]): Array<Record<string, unknown>> {
   if (!Array.isArray(byAccount)) return [];
   return byAccount.map((acc) => {
     const metrics = acc?.metrics || acc || {};
+    const network = acc?.social_account?.network || acc?.network || null;
     return {
-      network: acc?.social_account?.network || acc?.network || null,
+      network,
       username: acc?.social_account?.username || acc?.username || null,
       nickname: acc?.social_account?.nickname || acc?.nickname || null,
       likes: metrics.likes || 0,
       comments: metrics.comments || 0,
       shares: metrics.shares || 0,
-      views: metrics.views || metrics.impressions || 0,
+      views: resolveViews(network, metrics),
       impressions: metrics.impressions || 0,
       reach: metrics.reach || 0,
       engagement_rate: metrics.engagement_rate || 0,
@@ -180,6 +212,11 @@ export async function upsertContentPerformanceActivity(
 
     const metrics = unwrapAnalytics(analytics);
     const aggregated = metrics?.aggregated_metrics || {};
+    const normalizedAccounts = normalizeMetricsByAccount(metrics?.metrics_by_account || []);
+    
+    // Calculate total views from accounts that might have specific channel logic
+    const calculatedViews = normalizedAccounts.reduce((sum, acc) => sum + (Number(acc.views) || 0), 0);
+
     const upsertData = {
       site_id: siteId,
       outstand_post_id: postId,
@@ -187,11 +224,11 @@ export async function upsertContentPerformanceActivity(
       likes: aggregated.total_likes || 0,
       comments: aggregated.total_comments || 0,
       shares: aggregated.total_shares || 0,
-      views: aggregated.total_views || aggregated.total_impressions || 0,
+      views: aggregated.total_views || calculatedViews || 0,
       impressions: aggregated.total_impressions || 0,
       reach: aggregated.total_reach || 0,
       engagement_rate: aggregated.average_engagement_rate || 0,
-      metrics_by_account: normalizeMetricsByAccount(metrics?.metrics_by_account || []),
+      metrics_by_account: normalizedAccounts,
       fetched_at: new Date().toISOString(),
     };
 
