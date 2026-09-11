@@ -86,6 +86,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                     const handle = comment.username || comment.authorName || authorObj.username || authorObj.name || comment.accountUsername || '';
                     const authorId = String(comment.author_id || comment.authorId || authorObj.id || '');
                     const profileUrl = comment.author_url || comment.authorUrl || authorObj.url || authorObj.profileUrl || authorObj.profile_url || '';
+                    const platformCommentId = comment.platform_specific?.commentUrn || comment.platform_specific?.id;
                     
                     const origin = commentNetwork === 'twitter' ? 'x' : commentNetwork;
                     await startChild(customerSupportMessageWorkflow, {
@@ -103,6 +104,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                           custom_data: {
                             platform_post_id: comment.platformPostId || comment.platform_post_id || networkPlatformPostId,
                             platform_post_url: comment.platformPostUrl || comment.platform_post_url || post.url,
+                            platform_comment_id: platformCommentId,
                             parent_comment_id: comment.parentCommentId || comment.parent_comment_id,
                             root_comment_id: comment.rootCommentId || comment.root_comment_id,
                             account_username: handle,
