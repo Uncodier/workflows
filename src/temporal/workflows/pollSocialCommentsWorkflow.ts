@@ -76,7 +76,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                       continue;
                     }
 
-                    const commentNetwork = (comment.network || comment.account?.network || 'social').toLowerCase();
+                    const commentNetwork = (comment.network || comment.account?.network || network || 'social').toLowerCase();
                     const handle = comment.username || comment.authorName || comment.accountUsername || '';
                     
                     const origin = commentNetwork === 'twitter' ? 'x' : commentNetwork;
