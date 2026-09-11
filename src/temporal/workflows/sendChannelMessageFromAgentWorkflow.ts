@@ -20,6 +20,7 @@ export interface SendChannelMessageFromAgentParams {
   conversation_id?: string;
   lead_id?: string;
   message_id?: string;
+  custom_data?: Record<string, any>;
 }
 
 export interface SendChannelMessageFromAgentResult {

@@ -16,6 +16,7 @@ export async function sendChannelMessageFromAgentActivity(
     conversation_id: params.conversation_id,
     lead_id: params.lead_id,
     message_id: params.message_id,
+    custom_data: params.custom_data,
   });
 
   if (!response.success) {

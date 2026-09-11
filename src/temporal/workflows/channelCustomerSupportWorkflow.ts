@@ -96,6 +96,7 @@ export async function channelCustomerSupportMessageWorkflow(
             conversation_id: response.data?.conversation_id,
             lead_id: response.data?.lead_id,
             message_id: assistantMessageId,
+            custom_data: messageData.custom_data,
           },
         ],
         parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,

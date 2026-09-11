@@ -94,6 +94,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
             conversation_id: msg.conversation_id,
             lead_id: msg.lead_id,
             message_id: msg.message_id,
+            custom_data: msg.custom_data,
           }],
           parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
         });
