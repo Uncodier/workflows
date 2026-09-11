@@ -36,7 +36,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
         const siteId = site.site_id;
         
         // Fetch posts for the site
-        let limit = 100;
+        const limit = 100;
         let offset = 0;
         let hasMore = true;
         
@@ -77,7 +77,10 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                     }
 
                     const commentNetwork = (comment.network || comment.account?.network || network || 'social').toLowerCase();
-                    const handle = comment.username || comment.authorName || comment.accountUsername || '';
+                    const authorObj = comment.author || comment.from || comment.user || {};
+                    const handle = comment.username || comment.authorName || authorObj.username || authorObj.name || comment.accountUsername || '';
+                    const authorId = String(comment.author_id || comment.authorId || authorObj.id || '');
+                    const profileUrl = comment.author_url || comment.authorUrl || authorObj.url || authorObj.profileUrl || authorObj.profile_url || '';
                     
                     const origin = commentNetwork === 'twitter' ? 'x' : commentNetwork;
                     await startChild(customerSupportMessageWorkflow, {
@@ -91,6 +94,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                           origin_message_id: commentId,
                           channel_delivery: true,
                           require_approval: true,
+                          visitor_id: authorId ? `social-${origin}-${authorId}` : undefined,
                           custom_data: {
                             platform_post_id: comment.platformPostId || comment.platform_post_id,
                             platform_post_url: comment.platformPostUrl || comment.platform_post_url || post.url,
@@ -98,6 +102,8 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                             root_comment_id: comment.rootCommentId || comment.root_comment_id,
                             account_username: handle,
                             social_handle: handle,
+                            author_id: authorId,
+                            profile_url: profileUrl,
                             outstand_post_id: post.id,
                             content_id: contentId,
                             source: 'comment'
