@@ -61,6 +61,11 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
 
               // 2. Fetch replies for each valid published network
               for (const network of uniqueNetworks) {
+                const socialAccount = post.socialAccounts?.find((acc: any) => 
+                  acc.network && acc.network.toLowerCase() === network.toLowerCase()
+                );
+                const networkPlatformPostId = socialAccount?.platformPostId || socialAccount?.platform_post_id;
+
                 try {
                   const repliesResult = await fetchOutstandPostRepliesActivity(siteId, post.id, network);
                   const comments = Array.isArray(repliesResult) ? repliesResult : (repliesResult?.comments || repliesResult?.data || []);
@@ -96,7 +101,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                           require_approval: true,
                           visitor_id: authorId ? `social-${origin}-${authorId}` : undefined,
                           custom_data: {
-                            platform_post_id: comment.platformPostId || comment.platform_post_id,
+                            platform_post_id: comment.platformPostId || comment.platform_post_id || networkPlatformPostId,
                             platform_post_url: comment.platformPostUrl || comment.platform_post_url || post.url,
                             parent_comment_id: comment.parentCommentId || comment.parent_comment_id,
                             root_comment_id: comment.rootCommentId || comment.root_comment_id,
