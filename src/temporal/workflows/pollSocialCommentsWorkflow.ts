@@ -9,7 +9,11 @@ const {
   fetchOutstandPostsActivity,
   fetchOutstandPostRepliesActivity,
   upsertContentFromOutstandPostActivity,
-  logWorkflowExecutionActivity
+  logWorkflowExecutionActivity,
+  fetchOutstandAccountsActivity,
+  importOutstandPostsActivity,
+  checkIfImportTriggeredActivity,
+  markImportTriggeredActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.NETWORK,
   retry: RETRY_POLICIES.NETWORK, // Handle API flakiness properly, don't retry forever on 400s
@@ -45,6 +49,31 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           
           const posts = Array.isArray(result) ? result : (result?.posts || result?.data || []);
           const pagination = Array.isArray(result) ? { total: posts.length } : (result?.pagination || { total: posts.length });
+          
+          if (offset === 0 && posts.length === 0) {
+            try {
+              const alreadyTriggered = await checkIfImportTriggeredActivity(siteId);
+              if (!alreadyTriggered) {
+                const accounts = await fetchOutstandAccountsActivity(siteId);
+                let importStarted = false;
+                for (const account of accounts) {
+                  if (account.id) {
+                    try {
+                      await importOutstandPostsActivity(siteId, account.id);
+                      importStarted = true;
+                    } catch (importError) {
+                      console.error(`Failed to trigger import for account ${account.id}:`, importError);
+                    }
+                  }
+                }
+                if (importStarted) {
+                  await markImportTriggeredActivity(siteId);
+                }
+              }
+            } catch (triggerError) {
+              console.error(`Failed during historical import check for site ${siteId}:`, triggerError);
+            }
+          }
           
           for (const post of posts) {
             const uniqueNetworks = getPublishedCommentNetworks(post);
@@ -82,9 +111,23 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                     }
 
                     const commentNetwork = (comment.network || comment.account?.network || network || 'social').toLowerCase();
-                    const authorObj = comment.author || comment.from || comment.user || {};
-                    const handle = comment.username || comment.authorName || authorObj.username || authorObj.name || comment.accountUsername || '';
-                    const authorId = String(comment.author_id || comment.authorId || authorObj.id || '');
+                    
+                    const authorObj = (typeof comment.author === 'object' && comment.author) || 
+                                      (typeof comment.from === 'object' && comment.from) || 
+                                      (typeof comment.user === 'object' && comment.user) || {};
+                    
+                    const rawAuthorId = typeof comment.author === 'string' ? comment.author : 
+                                        typeof comment.from === 'string' ? comment.from : '';
+
+                    const handle = comment.username || 
+                                   comment.authorName || 
+                                   authorObj.username || 
+                                   authorObj.name || 
+                                   comment.accountUsername || 
+                                   rawAuthorId || 
+                                   '';
+                    
+                    const authorId = String(comment.author_id || comment.authorId || authorObj.id || rawAuthorId || '');
                     const profileUrl = comment.author_url || comment.authorUrl || authorObj.url || authorObj.profileUrl || authorObj.profile_url || '';
                     const platformCommentId = comment.platform_specific?.commentUrn || comment.platform_specific?.id;
                     

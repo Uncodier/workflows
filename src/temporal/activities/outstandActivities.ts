@@ -102,6 +102,67 @@ export async function fetchOutstandPostsActivity(siteId: string, limit: number =
   return response.data;
 }
 
+export async function fetchOutstandAccountsActivity(siteId: string): Promise<any[]> {
+  const response = await apiService.get(`/api/integrations/outstand/accounts?tenant_id=${siteId}`);
+  if (!response.success) {
+    throw handleOutstandApiError('fetchOutstandAccounts', response.error?.message);
+  }
+  return Array.isArray(response.data) ? response.data : (response.data?.accounts || response.data?.data || []);
+}
+
+export async function importOutstandPostsActivity(siteId: string, accountId: string): Promise<any> {
+  const response = await apiService.post(`/api/integrations/outstand/accounts/${accountId}/imports?tenant_id=${siteId}`, {});
+  if (!response.success) {
+    throw handleOutstandApiError(`importOutstandPosts for account ${accountId}`, response.error?.message);
+  }
+  return response.data;
+}
+
+export async function checkIfImportTriggeredActivity(siteId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .schema(tenantSchema())
+    .from('cron_status')
+    .select('id')
+    .eq('site_id', siteId)
+    .eq('activity_name', 'outstand_historical_import')
+    .maybeSingle();
+
+  if (error) {
+    console.error(`[checkIfImportTriggeredActivity] Error checking cron_status for site ${siteId}:`, error);
+    // On error we return true to prevent infinite loop / spam
+    return true; 
+  }
+
+  return !!data;
+}
+
+export async function markImportTriggeredActivity(siteId: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .schema(tenantSchema())
+    .from('cron_status')
+    .upsert(
+      {
+        site_id: siteId,
+        activity_name: 'outstand_historical_import',
+        workflow_id: `outstand_import_${siteId}_${Date.now()}`,
+        schedule_id: 'manual-execution',
+        status: 'COMPLETED',
+        last_run: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      },
+      {
+        onConflict: 'site_id,activity_name',
+        ignoreDuplicates: false,
+      }
+    );
+
+  if (error) {
+    console.error(`[markImportTriggeredActivity] Error marking import triggered for site ${siteId}:`, error);
+    throw new Error(`Failed to mark import triggered: ${error.message}`);
+  }
+}
+
 export async function fetchOutstandPostRepliesActivity(siteId: string, postId: string, network: string): Promise<any> {
   const response = await apiService.get(buildOutstandCommentsPath(siteId, postId, network));
   if (!response.success) {
