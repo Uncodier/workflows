@@ -33,7 +33,7 @@ export interface ScheduleWorkflowResult {
  */
 function shouldScheduleWorkflow(site: any, activityKey: string): boolean {
   // Define activities that are opt-in (require explicit 'active' status to run)
-  const optInActivities = ['supervise_conversations', 'assign_leads_to_team', 'local_lead_generation', 'icp_lead_generation'];
+  const optInActivities = ['supervise_conversations', 'assign_leads_to_team', 'local_lead_generation', 'icp_lead_generation', 'daily_resume_and_stand_up'];
   const isOptIn = optInActivities.includes(activityKey);
 
   // If settings.activities doesn't exist, handle based on opt-in status
