@@ -2,7 +2,7 @@ import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/work
 import type { Activities } from '../activities';
 import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
-import { getPublishedCommentNetworks, isOutstandDraftPost } from './helpers/outstandPoll';
+import { getPublishedCommentNetworks, isOutstandDraftPost, shouldPollPostForComments } from './helpers/outstandPoll';
 
 const {
   fetchSitesWithSocialCommentsActivity,
@@ -43,6 +43,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
         const limit = 100;
         let offset = 0;
         let hasMore = true;
+        const nowMs = Date.now();
         
         while (hasMore) {
           const result = await fetchOutstandPostsActivity(siteId, limit, offset);
@@ -75,10 +76,27 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
             }
           }
           
+          let pageHasRecentPosts = false;
+          
+          // First pass to see if there are any recent posts on this page
+          for (const post of posts) {
+            const { isTooOld } = shouldPollPostForComments(post, nowMs);
+            if (!isTooOld) {
+              pageHasRecentPosts = true;
+              break;
+            }
+          }
+          
           for (const post of posts) {
             const uniqueNetworks = getPublishedCommentNetworks(post);
             
             if (uniqueNetworks.length === 0 || isOutstandDraftPost(post)) {
+              continue;
+            }
+
+            const { shouldPoll, isTooOld } = shouldPollPostForComments(post, nowMs);
+            
+            if (isTooOld || !shouldPoll) {
               continue;
             }
             
@@ -181,6 +199,11 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           
           offset += limit;
           if (offset >= pagination.total || posts.length === 0) {
+            hasMore = false;
+          } else if (posts.length > 0 && !pageHasRecentPosts) {
+            // If the current page returned posts but NONE of them are recent,
+            // we can assume we've reached the older posts and can stop paginating.
+            console.log(`[pollSocialCommentsWorkflow] Stopping pagination for site ${siteId} as all posts on page are older than 30 days.`);
             hasMore = false;
           }
         }

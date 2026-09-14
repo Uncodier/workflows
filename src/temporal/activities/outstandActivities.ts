@@ -6,6 +6,7 @@ import {
   extractOutstandPostText,
   isOutstandClientError,
   isPublishedContentForAnalytics,
+  shouldPollPostForAnalytics,
 } from '../workflows/helpers/outstandPoll';
 
 function tenantSchema() {
@@ -196,7 +197,7 @@ export async function fetchSocialPostsDueForAnalyticsActivity(
   siteId: string
 ): Promise<Array<{ postId: string; contentId: string | null }>> {
   const schema = tenantSchema();
-  const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+  const nowMs = Date.now();
 
   const { data: snapshots, error: snapshotError } = await supabaseAdmin
     .schema(schema)
@@ -208,11 +209,15 @@ export async function fetchSocialPostsDueForAnalyticsActivity(
     throw new Error(`Failed to load performance snapshots: ${snapshotError.message}`);
   }
 
-  const recent = new Set(
-    (snapshots || [])
-      .filter((row) => row.fetched_at && row.fetched_at > sixHoursAgo)
-      .map((row) => row.outstand_post_id)
-  );
+  const snapshotMap = new Map<string, { contentId: string | null; fetchedAt: string | null }>();
+  for (const row of snapshots || []) {
+    if (row.outstand_post_id) {
+      snapshotMap.set(row.outstand_post_id, {
+        contentId: row.content_id,
+        fetchedAt: row.fetched_at,
+      });
+    }
+  }
 
   const { data: contents, error: contentError } = await supabaseAdmin
     .schema(schema)
@@ -225,26 +230,18 @@ export async function fetchSocialPostsDueForAnalyticsActivity(
     throw new Error(`Failed to load social content: ${contentError.message}`);
   }
 
-  const publishedContentByPostId = new Map<string, string>();
+  const due = new Map<string, string | null>();
+
   for (const content of contents || []) {
     if (!isPublishedContentForAnalytics(content)) continue;
     const postId = extractOutstandPostId(content.tags);
     if (!postId) continue;
-    publishedContentByPostId.set(postId, content.id);
-  }
-
-  const due = new Map<string, string | null>();
-
-  for (const row of snapshots || []) {
-    if (!row.outstand_post_id || recent.has(row.outstand_post_id)) continue;
-    if (!publishedContentByPostId.has(row.outstand_post_id)) continue;
-    due.set(row.outstand_post_id, row.content_id || publishedContentByPostId.get(row.outstand_post_id) || null);
-  }
-
-  for (const [postId, contentId] of publishedContentByPostId.entries()) {
-    if (recent.has(postId)) continue;
-    if (!due.has(postId) || !due.get(postId)) {
-      due.set(postId, contentId);
+    
+    const snapshot = snapshotMap.get(postId);
+    const lastFetchedAt = snapshot?.fetchedAt || null;
+    
+    if (shouldPollPostForAnalytics(content.published_at, nowMs, lastFetchedAt)) {
+      due.set(postId, snapshot?.contentId || content.id);
     }
   }
 

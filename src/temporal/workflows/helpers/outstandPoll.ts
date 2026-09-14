@@ -68,6 +68,41 @@ export function isPublishedContentForAnalytics(content: {
   return content.status === 'published' || Boolean(content.published_at);
 }
 
+export function shouldPollPostForAnalytics(
+  publishedAtStr: string | null | undefined,
+  nowMs: number,
+  lastFetchedAtStr?: string | null
+): boolean {
+  if (!publishedAtStr) return true;
+
+  const publishedAt = new Date(publishedAtStr).getTime();
+  const ageMs = nowMs - publishedAt;
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const ageInDays = ageMs / ONE_DAY;
+
+  // Stop polling posts older than 30 days
+  if (ageInDays > 30) {
+    return false;
+  }
+
+  // If we never fetched, fetch it
+  if (!lastFetchedAtStr) return true;
+  
+  const lastFetchedAt = new Date(lastFetchedAtStr).getTime();
+  const hoursSinceLastFetch = (nowMs - lastFetchedAt) / (60 * 60 * 1000);
+
+  if (ageInDays <= 1) {
+    // Poll every 6 hours
+    return hoursSinceLastFetch >= 6;
+  } else if (ageInDays <= 7) {
+    // Poll every 12 hours
+    return hoursSinceLastFetch >= 12;
+  } else {
+    // 7-30 days: poll every 24 hours
+    return hoursSinceLastFetch >= 24;
+  }
+}
+
 export function isOutstandClientError(message?: string | null): boolean {
   if (!message) return false;
   return (
@@ -80,4 +115,42 @@ export function isOutstandClientError(message?: string | null): boolean {
 
 export function extractOutstandPostText(post: any): string {
   return post?.containers?.[0]?.content || post?.text || '';
+}
+
+/**
+ * Determines if we should poll a post based on its publication date.
+ * Returns shouldPoll (whether to poll this run) and isTooOld (whether the post is older than 30 days).
+ */
+export function shouldPollPostForComments(
+  post: any,
+  nowMs: number
+): { shouldPoll: boolean; isTooOld: boolean } {
+  const publishedAtStr = post?.publishedAt || post?.createdAt;
+  if (!publishedAtStr) return { shouldPoll: true, isTooOld: false };
+
+  const publishedAt = new Date(publishedAtStr).getTime();
+  const ageMs = nowMs - publishedAt;
+
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const ageInDays = ageMs / ONE_DAY;
+
+  // Stop polling posts older than 30 days
+  if (ageInDays > 30) {
+    return { shouldPoll: false, isTooOld: true };
+  }
+
+  // < 1 day old: always poll
+  if (ageInDays <= 1) {
+    return { shouldPoll: true, isTooOld: false };
+  }
+
+  const currentHour = new Date(nowMs).getUTCHours();
+
+  // 1 to 7 days old: poll every 6 hours (0, 6, 12, 18)
+  if (ageInDays <= 7) {
+    return { shouldPoll: currentHour % 6 === 0, isTooOld: false };
+  }
+
+  // 7 to 30 days old: poll every 24 hours (at 0 UTC)
+  return { shouldPoll: currentHour === 0, isTooOld: false };
 }
