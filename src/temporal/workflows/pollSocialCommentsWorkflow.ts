@@ -158,14 +158,14 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                           message: commentText,
                           name: handle || 'Social User',
                           origin,
-                          origin_message_id: commentId,
+                          origin_message_id: undefined, // Fix bigint out of range error by moving to custom_data
                           channel_delivery: true,
                           require_approval: true,
-                          visitor_id: authorId ? `social-${origin}-${authorId}` : undefined,
+                          visitor_id: `social-${origin}-${authorId || handle || commentId}`,
                           custom_data: {
                             platform_post_id: comment.platformPostId || comment.platform_post_id || networkPlatformPostId,
                             platform_post_url: comment.platformPostUrl || comment.platform_post_url || post.url,
-                            platform_comment_id: platformCommentId,
+                            platform_comment_id: platformCommentId || commentId, // preserve real ID here
                             parent_comment_id: comment.parentCommentId || comment.parent_comment_id,
                             root_comment_id: comment.rootCommentId || comment.root_comment_id,
                             account_username: handle,
@@ -179,7 +179,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                         },
                         {
                           origin,
-                          origin_message_id: commentId,
+                          origin_message_id: undefined, // Fix bigint out of range error
                         }
                       ],
                       parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,

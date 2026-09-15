@@ -49,7 +49,7 @@ export async function channelCustomerSupportMessageWorkflow(
     priority: 'medium',
     intent: 'inquiry',
     potential_value: 'medium',
-    conversation_id: undefined,
+    conversation_id: messageData.conversation_id || undefined,
     visitor_id: messageData.visitor_id || undefined,
     channel_delivery: true,
     require_approval: requireApproval,
