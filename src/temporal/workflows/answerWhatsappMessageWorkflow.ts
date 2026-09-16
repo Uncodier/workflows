@@ -85,7 +85,8 @@ export async function answerWhatsappMessageWorkflow(
       
       const baseParams = {
         agentId: options?.agentId,
-        origin: "whatsapp"
+        origin: "whatsapp",
+        origin_message_id: messageData.messageId,
       };
       
       // Start customer support workflow as child workflow

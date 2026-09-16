@@ -81,6 +81,17 @@ describe('buildWhatsAppSendParams', () => {
     expect(buildWhatsAppSendParams({ csResponse: null, whatsappData })).toBeNull();
   });
 
+  it('returns null for the no-response placeholder', () => {
+    expect(
+      buildWhatsAppSendParams({
+        csResponse: {
+          messages: { assistant: { content: 'No response generated.' } },
+        },
+        whatsappData,
+      })
+    ).toBeNull();
+  });
+
   it('omits invalid UUIDs instead of passing tracking placeholders', () => {
     const params = buildWhatsAppSendParams({
       csResponse: {

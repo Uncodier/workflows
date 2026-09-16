@@ -28,6 +28,7 @@ export type BuiltWhatsAppSendParams = {
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const INVALID_RESPONSE_MARKERS = new Set(['no response generated']);
 
 function optionalUuid(value?: string | null): string | undefined {
   if (!value || typeof value !== 'string') return undefined;
@@ -38,7 +39,10 @@ function optionalUuid(value?: string | null): string | undefined {
 function nonEmpty(value?: string | null): string | undefined {
   if (!value || typeof value !== 'string') return undefined;
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
+  if (!trimmed) return undefined;
+
+  const normalized = trimmed.toLowerCase().replace(/[.!]+$/g, '').trim();
+  return INVALID_RESPONSE_MARKERS.has(normalized) ? undefined : trimmed;
 }
 
 /**

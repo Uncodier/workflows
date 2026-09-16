@@ -51,40 +51,38 @@ export const RETRY_POLICIES = {
   CUSTOMER_SUPPORT: {
     maximumAttempts: 4, // Initial attempt + 3 retries
     backoffCoefficient: 2.0,
-    initialIntervalMs: 5000, // 5 segundos
-    maximumIntervalMs: 60000, // 1 minuto
+    initialInterval: '5 seconds',
+    maximumInterval: '1 minute',
   },
   
   // Database operations - retry más agresivo
   DATABASE: {
     maximumAttempts: 5,
     backoffCoefficient: 1.5,
-    initialIntervalMs: 1000, // 1 segundo
-    maximumIntervalMs: 10000, // 10 segundos
+    initialInterval: '1 second',
+    maximumInterval: '10 seconds',
   },
   
   // Network operations
   NETWORK: {
     maximumAttempts: 3,
     backoffCoefficient: 2.0,
-    initialIntervalMs: 2000, // 2 segundos
-    maximumIntervalMs: 30000, // 30 segundos
+    initialInterval: '2 seconds',
+    maximumInterval: '30 seconds',
   },
   
   // No retry for non-critical operations
   NO_RETRY: {
     maximumAttempts: 1,
     backoffCoefficient: 1.0,
-    initialIntervalMs: 0,
-    maximumIntervalMs: 0,
   },
   
   // Default
   DEFAULT: {
     maximumAttempts: 3,
     backoffCoefficient: 2.0,
-    initialIntervalMs: 1000,
-    maximumIntervalMs: 30000,
+    initialInterval: '1 second',
+    maximumInterval: '30 seconds',
   },
 } as const;
 
