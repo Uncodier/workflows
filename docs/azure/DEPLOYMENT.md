@@ -68,9 +68,6 @@ Worker deployments run automatically on pushes to `main`. The workflow uses `doc
 **Setup required in GitHub Repository Settings → Secrets and Variables → Actions**:
 
 * `AZURE_CREDENTIALS`: A JSON string representing a Service Principal.
-* `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`, and
-  `SUPABASE_DB_PASSWORD`: used to apply pending `supabase/migrations/**`
-  before workers are rolled out.
 
 The Service Principal needs the following roles in Azure:
 1.  **AcrPush** on the `uncodietmpacr` Azure Container Registry (ACR).
@@ -78,6 +75,10 @@ The Service Principal needs the following roles in Azure:
 3.  **RBAC permissions** to update deployments in the `temporal-workers` namespace.
 
 If `AZURE_CREDENTIALS` is missing, the workflow will fail immediately at the Azure Login step.
+
+Supabase migrations are intentionally applied manually and are not part of the
+worker deployment workflow. Apply pending files from `supabase/migrations/`
+before deploying code that depends on them.
 
 ## Search attributes
 

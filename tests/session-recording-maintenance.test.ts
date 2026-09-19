@@ -54,12 +54,24 @@ describe('session recording maintenance activity', () => {
     });
   });
 
+  it('normalizes the migration retry state to pending', async () => {
+    const { client } = createRpcClient({
+      data: { state: 'retry', merged_rows: 0 },
+      error: null,
+    });
+
+    await expect(executeConsolidationRpc(client, 500)).resolves.toEqual({
+      state: 'pending',
+      merged_rows: 0,
+    });
+  });
+
   it('marks manifest conflicts as non-retryable', async () => {
     const { client } = createRpcClient({
       data: null,
       error: {
         code: 'P0001',
-        message: 'Session manifest conflict detected',
+        message: 'Cannot consolidate session because chunk manifests conflict',
       },
     });
 

@@ -57,8 +57,8 @@ export function isManifestConflict(error: SupabaseRpcError): boolean {
     .toLowerCase();
 
   return (
-    /\bmanifest\b[\s\S]*\bconflict\b/.test(errorText) ||
-    /\bconflict\b[\s\S]*\bmanifest\b/.test(errorText)
+    /\bmanifests?\b[\s\S]*\bconflict\b/.test(errorText) ||
+    /\bconflict\b[\s\S]*\bmanifests?\b/.test(errorText)
   );
 }
 
@@ -73,6 +73,8 @@ function parseBatchResult(data: unknown): ConsolidateSessionRecordingBatchResult
   }
 
   const candidate = result as Record<string, unknown>;
+  const normalizedState =
+    candidate.state === 'retry' ? 'pending' : candidate.state;
   const validStates: SessionRecordingConsolidationState[] = [
     'pending',
     'session_complete',
@@ -80,7 +82,7 @@ function parseBatchResult(data: unknown): ConsolidateSessionRecordingBatchResult
   ];
 
   if (
-    !validStates.includes(candidate.state as SessionRecordingConsolidationState) ||
+    !validStates.includes(normalizedState as SessionRecordingConsolidationState) ||
     typeof candidate.merged_rows !== 'number' ||
     !Number.isFinite(candidate.merged_rows) ||
     candidate.merged_rows < 0
@@ -92,7 +94,7 @@ function parseBatchResult(data: unknown): ConsolidateSessionRecordingBatchResult
   }
 
   return {
-    state: candidate.state as SessionRecordingConsolidationState,
+    state: normalizedState as SessionRecordingConsolidationState,
     merged_rows: candidate.merged_rows,
     ...(typeof candidate.session_id === 'string'
       ? { session_id: candidate.session_id }
