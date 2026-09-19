@@ -33,9 +33,6 @@ export async function executeWeatherTool() {
         city: 'name',
         humidity: 'main.humidity'
       }
-    },
-    environment: {
-      WEATHER_API_KEY: process.env.WEATHER_API_KEY || 'demo-key'
     }
   };
   
@@ -86,11 +83,6 @@ export async function executeLocalApiTool() {
         400: { message: 'error.message', code: 'BAD_REQUEST' },
         409: { message: 'error.details', code: 'CONFLICT' }
       }
-    },
-    environment: {
-      NODE_ENV: 'development',
-      PORT: '3000',
-      SERVICE_API_KEY: process.env.SERVICE_API_KEY || 'demo-key'
     }
   };
   

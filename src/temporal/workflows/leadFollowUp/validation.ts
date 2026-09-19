@@ -1,4 +1,8 @@
-import { startChild, ParentClosePolicy } from '@temporalio/workflow';
+import {
+  ApplicationFailure,
+  startChild,
+  ParentClosePolicy,
+} from '@temporalio/workflow';
 import { leadInvalidationWorkflow, type LeadInvalidationOptions } from '../leadInvalidationWorkflow';
 import type { LeadFollowUpOptions, LeadFollowUpResult } from './types';
 
@@ -232,6 +236,69 @@ export async function performEarlyValidation({
     }
   }
 
+  // Validation service failures explicitly marked as safe to bypass must not
+  // contradict the activity contract by failing the workflow.
+  if (!earlyValidationResult.success && earlyValidationResult.shouldProceed) {
+    const validationWarning =
+      `Contact validation unavailable: ${earlyValidationResult.error || earlyValidationResult.reason}`;
+    console.warn(`⚠️ ${validationWarning}. Continuing with available channels.`);
+    errors.push(validationWarning);
+
+    return {
+      shouldReturn: false,
+      emailInvalidatedInEarlyValidation,
+      errors,
+    };
+  }
+
+  // Check if the validation API itself failed and did not allow fail-open behavior.
+  if (!earlyValidationResult.success) {
+    console.log(`❌ Contact validation API failed - failing workflow`);
+    console.log(`🔍 API failure details:`);
+    console.log(`   - Error: ${earlyValidationResult.error}`);
+    console.log(`   - Reason: ${earlyValidationResult.reason}`);
+
+    const apiFailureError = `Contact validation API failed: ${earlyValidationResult.error || earlyValidationResult.reason}`;
+    errors.push(apiFailureError);
+
+    try {
+      await saveCronStatusActivity({
+        siteId: site_id,
+        workflowId,
+        scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+        activityName: 'leadFollowUpWorkflow',
+        status: 'FAILED',
+        lastRun: new Date().toISOString(),
+        errorMessage: apiFailureError
+      });
+    } catch (statusError) {
+      console.error(
+        'Failed to save cron status for contact validation rejection:',
+        statusError
+      );
+    }
+
+    try {
+      await logWorkflowExecutionActivity({
+        workflowId,
+        workflowType: 'leadFollowUpWorkflow',
+        status: 'FAILED',
+        input: options,
+        error: apiFailureError,
+      });
+    } catch (loggingError) {
+      console.error(
+        'Failed to log contact validation rejection:',
+        loggingError
+      );
+    }
+
+    throw ApplicationFailure.nonRetryable(
+      apiFailureError,
+      'CONTACT_VALIDATION_REJECTED'
+    );
+  }
+
   // If API worked but we shouldn't proceed, complete successfully after invalidation
   if (!earlyValidationResult.shouldProceed) {
     console.log(`✅ Contact validation API worked but email is invalid or not deliverable - completing workflow after successful invalidation`);
@@ -303,41 +370,6 @@ export async function performEarlyValidation({
       emailInvalidatedInEarlyValidation,
       errors
     };
-  }
-
-  // Check if the validation API itself failed (not just invalid email)
-  if (!earlyValidationResult.success) {
-    console.log(`❌ Contact validation API failed - failing workflow`);
-    console.log(`🔍 API failure details:`);
-    console.log(`   - Error: ${earlyValidationResult.error}`);
-    console.log(`   - Reason: ${earlyValidationResult.reason}`);
-
-    // Create appropriate error message for API failure
-    const apiFailureError = `Contact validation API failed: ${earlyValidationResult.error || earlyValidationResult.reason}`;
-    errors.push(apiFailureError);
-
-    // Update cron status to indicate API failure
-    await saveCronStatusActivity({
-      siteId: site_id,
-      workflowId,
-      scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
-      activityName: 'leadFollowUpWorkflow',
-      status: 'FAILED',
-      lastRun: new Date().toISOString(),
-      errorMessage: apiFailureError
-    });
-
-    // Log workflow failure due to API failure
-    await logWorkflowExecutionActivity({
-      workflowId,
-      workflowType: 'leadFollowUpWorkflow',
-      status: 'FAILED',
-      input: options,
-      error: apiFailureError,
-    });
-
-    // Throw error to properly fail the workflow when API fails
-    throw new Error(apiFailureError);
   }
 
   console.log(`✅ Early contact validation passed - proceeding with research and follow-up`);

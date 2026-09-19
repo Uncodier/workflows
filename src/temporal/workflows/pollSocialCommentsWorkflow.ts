@@ -1,8 +1,14 @@
-import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
+import {
+  ParentClosePolicy,
+  patched,
+  proxyActivities,
+  startChild,
+} from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { getPublishedCommentNetworks, isOutstandDraftPost, shouldPollPostForComments } from './helpers/outstandPoll';
+import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
 
 const {
   fetchSitesWithSocialCommentsActivity,
@@ -21,6 +27,8 @@ const {
 
 export async function pollSocialCommentsWorkflow(): Promise<any> {
   const workflowId = 'pollSocialCommentsWorkflow';
+  const useAgeFiltering = patched('poll-social-comments-age-filter-v1');
+  const useSafeSocialIdentifiers = patched('poll-social-comments-safe-identifiers-v1');
   
   await logWorkflowExecutionActivity({
     workflowId,
@@ -43,7 +51,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
         const limit = 100;
         let offset = 0;
         let hasMore = true;
-        const nowMs = Date.now();
+        const nowMs = useAgeFiltering ? Date.now() : 0;
         
         while (hasMore) {
           const result = await fetchOutstandPostsActivity(siteId, limit, offset);
@@ -76,14 +84,16 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
             }
           }
           
-          let pageHasRecentPosts = false;
+          let pageHasRecentPosts = !useAgeFiltering;
           
           // First pass to see if there are any recent posts on this page
-          for (const post of posts) {
-            const { isTooOld } = shouldPollPostForComments(post, nowMs);
-            if (!isTooOld) {
-              pageHasRecentPosts = true;
-              break;
+          if (useAgeFiltering) {
+            for (const post of posts) {
+              const { isTooOld } = shouldPollPostForComments(post, nowMs);
+              if (!isTooOld) {
+                pageHasRecentPosts = true;
+                break;
+              }
             }
           }
           
@@ -94,10 +104,11 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
               continue;
             }
 
-            const { shouldPoll, isTooOld } = shouldPollPostForComments(post, nowMs);
-            
-            if (isTooOld || !shouldPoll) {
-              continue;
+            if (useAgeFiltering) {
+              const { shouldPoll, isTooOld } = shouldPollPostForComments(post, nowMs);
+              if (isTooOld || !shouldPoll) {
+                continue;
+              }
             }
             
             processedPosts++;
@@ -158,14 +169,20 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                           message: commentText,
                           name: handle || 'Social User',
                           origin,
-                          origin_message_id: undefined, // Fix bigint out of range error by moving to custom_data
+                          origin_message_id: useSafeSocialIdentifiers ? undefined : commentId,
                           channel_delivery: true,
                           require_approval: true,
-                          visitor_id: `social-${origin}-${authorId || handle || commentId}`,
+                          visitor_id: useSafeSocialIdentifiers
+                            ? undefined
+                            : authorId
+                              ? `social-${origin}-${authorId}`
+                              : undefined,
                           custom_data: {
                             platform_post_id: comment.platformPostId || comment.platform_post_id || networkPlatformPostId,
                             platform_post_url: comment.platformPostUrl || comment.platform_post_url || post.url,
-                            platform_comment_id: platformCommentId || commentId, // preserve real ID here
+                            platform_comment_id: useSafeSocialIdentifiers
+                              ? platformCommentId || commentId
+                              : platformCommentId,
                             parent_comment_id: comment.parentCommentId || comment.parent_comment_id,
                             root_comment_id: comment.rootCommentId || comment.root_comment_id,
                             account_username: handle,
@@ -179,7 +196,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                         },
                         {
                           origin,
-                          origin_message_id: undefined, // Fix bigint out of range error
+                          origin_message_id: useSafeSocialIdentifiers ? undefined : commentId,
                         }
                       ],
                       parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
@@ -230,6 +247,10 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
       input: {},
       error: error instanceof Error ? error.message : String(error),
     });
-    throw error;
+    throw terminalWorkflowFailure(
+      error,
+      'Social comments polling workflow failed',
+      'SOCIAL_COMMENTS_WORKFLOW_FAILED'
+    );
   }
 }

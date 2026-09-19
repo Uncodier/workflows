@@ -22,7 +22,10 @@ export const TASK_QUEUES = {
   BACKGROUND: 'background-priority',
   
   // Email validation queue (dedicated AKS worker)
-  EMAIL_VALIDATION: 'validation'
+  EMAIL_VALIDATION: 'validation',
+
+  // Serialized one-off database maintenance jobs
+  DATABASE_MAINTENANCE: 'database-maintenance'
 } as const;
 
 export type TaskQueue = typeof TASK_QUEUES[keyof typeof TASK_QUEUES];
@@ -49,6 +52,7 @@ export function getTaskQueueForWorkflow(
       case TASK_QUEUES.LOW:
       case TASK_QUEUES.BACKGROUND:
       case TASK_QUEUES.EMAIL_VALIDATION:
+      case TASK_QUEUES.DATABASE_MAINTENANCE:
         return forcedQueue as TaskQueue;
     }
     return TASK_QUEUES.NORMAL;
@@ -82,6 +86,9 @@ export function getTaskQueueForWorkflow(
     // Email validation workflow (dedicated queue)
     case 'validateEmailWorkflow':
       return TASK_QUEUES.EMAIL_VALIDATION;
+
+    case 'consolidateSessionRecordingsWorkflow':
+      return TASK_QUEUES.DATABASE_MAINTENANCE;
     
     // Normal priority workflows
     case 'dailyStandUpWorkflow':
@@ -145,5 +152,11 @@ export const TASK_QUEUE_CONFIG = {
     maxConcurrentWorkflowTaskExecutions: 20,
     description: 'Email validation workflows running on Azure AKS',
     examples: ['SMTP email validation', 'Domain verification', 'Catchall detection']
+  },
+  [TASK_QUEUES.DATABASE_MAINTENANCE]: {
+    maxConcurrentActivityTaskExecutions: 1,
+    maxConcurrentWorkflowTaskExecutions: 1,
+    description: 'Serialized one-off database maintenance workflows',
+    examples: ['Session recording deduplication']
   }
 } as const;

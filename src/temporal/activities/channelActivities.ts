@@ -1,5 +1,27 @@
+import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
 import type { SendChannelMessageFromAgentParams } from '../workflows/sendChannelMessageFromAgentWorkflow';
+
+const RETRYABLE_CLIENT_STATUSES = new Set([408, 409, 425, 429]);
+
+export function createChannelApiFailure(
+  channel: string,
+  error: { code?: string; message?: string; status?: number } | undefined
+): ApplicationFailure {
+  const status = error?.status;
+  const nonRetryable =
+    typeof status === 'number' &&
+    status >= 400 &&
+    status < 500 &&
+    !RETRYABLE_CLIENT_STATUSES.has(status);
+
+  return ApplicationFailure.create({
+    message: `Failed to send ${channel} message: ${error?.message || 'Unknown error'}`,
+    type: nonRetryable ? 'CHANNEL_REQUEST_REJECTED' : 'CHANNEL_API_FAILURE',
+    nonRetryable,
+    details: [{ channel, code: error?.code, status }],
+  });
+}
 
 export async function sendChannelMessageFromAgentActivity(
   params: SendChannelMessageFromAgentParams
@@ -20,9 +42,7 @@ export async function sendChannelMessageFromAgentActivity(
   });
 
   if (!response.success) {
-    throw new Error(
-      `Failed to send ${params.channel} message: ${response.error?.message || 'Unknown error'}`
-    );
+    throw createChannelApiFailure(params.channel, response.error);
   }
 
   const messageId = response.data?.messageId || response.data?.message_id;

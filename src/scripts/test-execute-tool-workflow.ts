@@ -33,9 +33,6 @@ async function testExecuteToolWorkflow() {
           description: 'weather[0].description',
           city: 'name'
         }
-      },
-      environment: {
-        WEATHER_API_KEY: process.env.WEATHER_API_KEY || 'demo-key'
       }
     };
     
@@ -66,11 +63,6 @@ async function testExecuteToolWorkflow() {
           401: { message: 'error.details', code: 'UNAUTHORIZED' },
           500: { message: 'error.message', code: 'SERVER_ERROR' }
         }
-      },
-      environment: {
-        NODE_ENV: process.env.NODE_ENV || 'development',
-        PORT: process.env.PORT || '3000',
-        SERVICE_API_KEY: process.env.SERVICE_API_KEY || 'demo-api-key'
       }
     };
     
@@ -101,11 +93,6 @@ async function testExecuteToolWorkflow() {
           name: 'data.name',
           email: 'data.email'
         }
-      },
-      environment: {
-        NODE_ENV: 'development',
-        PORT: '3000',
-        SERVICE_API_KEY: process.env.SERVICE_API_KEY || 'demo-api-key'
       }
     };
     

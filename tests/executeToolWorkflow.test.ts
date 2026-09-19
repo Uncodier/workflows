@@ -190,13 +190,21 @@ describe('ExecuteTool Workflow Activities', () => {
             requiresAuth: true,
             authType: 'Bearer'
           }
-        },
-        environment: {
-          SERVICE_API_KEY: 'test-token-123'
         }
       };
 
-      const result = await executeApiCall(input);
+      const originalApiKey = process.env.API_KEY;
+      let result!: ExecuteToolResult;
+      try {
+        process.env.API_KEY = 'test-token-123';
+        result = await executeApiCall(input);
+      } finally {
+        if (originalApiKey === undefined) {
+          delete process.env.API_KEY;
+        } else {
+          process.env.API_KEY = originalApiKey;
+        }
+      }
 
       expect(result.success).toBe(true);
       expect(mockFetch).toHaveBeenCalledWith(
@@ -229,11 +237,6 @@ describe('ExecuteTool Workflow Activities', () => {
             method: 'GET',
             headers: {}
           }
-        },
-        environment: {
-          NODE_ENV: 'development',
-          PORT: '3000',
-          API_BASE_URL: 'https://myapi.com'
         }
       };
 
@@ -263,11 +266,6 @@ describe('ExecuteTool Workflow Activities', () => {
             method: 'GET',
             headers: {}
           }
-        },
-        environment: {
-          NODE_ENV: 'development',
-          PORT: '3000'
-          // Sin API_BASE_URL
         }
       };
 
@@ -306,7 +304,11 @@ describe('ExecuteTool Workflow Activities', () => {
         }
       };
 
-      await expect(executeApiCall(input)).rejects.toThrow('Tool error-test failed: HTTP 400: Bad Request (Status: 400)');
+      await expect(executeApiCall(input)).rejects.toMatchObject({
+        type: 'TOOL_REQUEST_REJECTED',
+        nonRetryable: true,
+        message: 'Tool error-test failed: HTTP 400: Bad Request (Status: 400)',
+      });
     });
   });
 
@@ -408,9 +410,6 @@ describe('ExecuteTool Workflow Integration', () => {
           method: 'POST',
           headers: {}
         }
-      },
-      environment: {
-        API_BASE_URL: 'http://127.0.0.1:3001'
       }
     };
 

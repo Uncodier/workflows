@@ -56,16 +56,49 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
                       default_source_code:
                         inline_string: |
+                          local read_only_methods = {
+                            CountWorkflowExecutions = true,
+                            DescribeBatchOperation = true,
+                            DescribeNamespace = true,
+                            DescribeSchedule = true,
+                            DescribeTaskQueue = true,
+                            DescribeWorkflowExecution = true,
+                            GetClusterInfo = true,
+                            GetSearchAttributes = true,
+                            GetSystemInfo = true,
+                            GetWorkerBuildIdCompatibility = true,
+                            GetWorkerTaskReachability = true,
+                            GetWorkflowExecutionHistory = true,
+                            GetWorkflowExecutionHistoryReverse = true,
+                            ListArchivedWorkflowExecutions = true,
+                            ListBatchOperations = true,
+                            ListClosedWorkflowExecutions = true,
+                            ListNamespaces = true,
+                            ListOpenWorkflowExecutions = true,
+                            ListScheduleMatchingTimes = true,
+                            ListSchedules = true,
+                            ListTaskQueuePartitions = true,
+                            ListWorkflowExecutions = true,
+                            QueryWorkflow = true,
+                          }
+
                           function envoy_on_request(request_handle)
-                            local expected = "Bearer __GATEWAY_API_KEY__"
+                            local service_auth = "Bearer __GATEWAY_SERVICE_API_KEY__"
+                            local read_only_auth = "Bearer __GATEWAY_READ_ONLY_API_KEY__"
                             local auth = request_handle:headers():get("authorization") or ""
-                            if auth ~= expected then
+                            local path = request_handle:headers():get(":path") or ""
+                            local method = string.match(path, "/([^/]+)$") or ""
+                            local allowed = auth == service_auth or
+                              (auth == read_only_auth and read_only_methods[method] == true)
+
+                            if not allowed then
                               request_handle:respond({
-                                [":status"] = "401",
-                                ["grpc-status"] = "16",
-                                ["grpc-message"] = "UNAUTHENTICATED",
+                                [":status"] = auth == "" and "401" or "403",
+                                ["grpc-status"] = auth == "" and "16" or "7",
+                                ["grpc-message"] = auth == "" and "UNAUTHENTICATED" or "PERMISSION_DENIED",
                                 ["content-type"] = "application/grpc"
                               }, "")
+                              return
                             end
                             request_handle:headers():remove("authorization")
                           end

@@ -1,6 +1,11 @@
-import { proxyActivities, upsertSearchAttributes } from '@temporalio/workflow';
+import {
+  ApplicationFailure,
+  proxyActivities,
+  upsertSearchAttributes,
+} from '@temporalio/workflow';
 import type * as activities from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
+import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
 
 // Configure activity options
 const {
@@ -41,7 +46,10 @@ export async function sendChannelMessageFromAgentWorkflow(params: SendChannelMes
 
   try {
     if (!params.channel || !params.to || !params.message || !params.site_id) {
-      throw new Error(`Missing required parameters: channel, to, message and site_id are required`);
+      throw ApplicationFailure.nonRetryable(
+        'Missing required parameters: channel, to, message and site_id are required',
+        'CHANNEL_MESSAGE_INVALID_INPUT'
+      );
     }
 
     const searchAttributes: Record<string, string[]> = {
@@ -77,7 +85,11 @@ export async function sendChannelMessageFromAgentWorkflow(params: SendChannelMes
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Send ${params.channel} from agent workflow failed:`, errorMessage);
-    
-    throw new Error(errorMessage);
+
+    throw terminalWorkflowFailure(
+      error,
+      `Send ${params.channel} from agent workflow failed`,
+      'CHANNEL_MESSAGE_WORKFLOW_FAILED'
+    );
   }
 }

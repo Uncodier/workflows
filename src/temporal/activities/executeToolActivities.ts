@@ -1,5 +1,55 @@
+import { ApplicationFailure } from '@temporalio/common';
 import { ExecuteToolInput, ExecuteToolResult } from '../workflows/executeToolWorkflow';
-import { apiService } from '../services/apiService';
+import { apiService, redactUrlForLogs } from '../services/apiService';
+
+const RETRYABLE_CLIENT_STATUSES = new Set([408, 409, 425, 429]);
+const SECRET_ENVIRONMENT_VARIABLES = {
+  SUPPORT_API_TOKEN: () => process.env.SUPPORT_API_TOKEN,
+  SERVICE_API_KEY: () => process.env.SERVICE_API_KEY || process.env.API_KEY,
+  WEATHER_API_KEY: () => process.env.WEATHER_API_KEY,
+} as const;
+
+function toolApiFailure(
+  toolName: string,
+  error: string | undefined,
+  statusCode: number | undefined
+): ApplicationFailure {
+  const nonRetryable =
+    typeof statusCode === 'number' &&
+    statusCode >= 400 &&
+    statusCode < 500 &&
+    !RETRYABLE_CLIENT_STATUSES.has(statusCode);
+
+  return ApplicationFailure.create({
+    message: `Tool ${toolName} failed: ${error || 'Unknown error'} (Status: ${statusCode})`,
+    type: nonRetryable ? 'TOOL_REQUEST_REJECTED' : 'TOOL_API_FAILURE',
+    nonRetryable,
+    details: [{ toolName, statusCode }],
+  });
+}
+
+export function resolveToolHeaders(
+  headers: Record<string, string>
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => {
+      const resolved = value.replace(
+        /\{\{(SUPPORT_API_TOKEN|SERVICE_API_KEY|WEATHER_API_KEY)\}\}/g,
+        (_placeholder, secretName: keyof typeof SECRET_ENVIRONMENT_VARIABLES) => {
+          const secret = SECRET_ENVIRONMENT_VARIABLES[secretName]();
+          if (!secret) {
+            throw ApplicationFailure.nonRetryable(
+              `Required tool credential ${secretName} is not configured on the worker`,
+              'TOOL_CREDENTIAL_MISSING'
+            );
+          }
+          return secret;
+        }
+      );
+      return [name, resolved];
+    })
+  );
+}
 
 export async function validateParameters(
   toolName: string, 
@@ -11,16 +61,19 @@ export async function validateParameters(
   
   // Agregar validaciones específicas aquí
   if (!toolName) {
-    throw new Error('Tool name is required');
+    throw ApplicationFailure.nonRetryable('Tool name is required', 'TOOL_INVALID_INPUT');
   }
   
   if (!apiConfig || !apiConfig.endpoint) {
-    throw new Error('API configuration is required');
+    throw ApplicationFailure.nonRetryable(
+      'API configuration is required',
+      'TOOL_INVALID_INPUT'
+    );
   }
 }
 
 export async function executeApiCall(input: ExecuteToolInput): Promise<ExecuteToolResult> {
-  const { toolName, args, apiConfig, environment = {} } = input;
+  const { toolName, args, apiConfig } = input;
   let url = apiConfig.endpoint.url;
   
   try {
@@ -37,7 +90,7 @@ export async function executeApiCall(input: ExecuteToolInput): Promise<ExecuteTo
           typeof value === 'string' && 
           /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)) {
         processedArgs[key] = `${value}Z`; // Agregar timezone UTC
-        console.log(`[Activity] Auto-corrected date format: ${key} = ${value} -> ${processedArgs[key]}`);
+        console.log(`[Activity] Auto-corrected date format for argument: ${key}`);
       }
     });
     
@@ -46,41 +99,18 @@ export async function executeApiCall(input: ExecuteToolInput): Promise<ExecuteTo
       url = url.replace(`{${key}}`, encodeURIComponent(String(processedArgs[key])));
     });
     
-    console.log(`[Activity] Final URL: ${url}`);
+    console.log(`[Activity] Final URL: ${redactUrlForLogs(url)}`);
     console.log(`[Activity] Method: ${method}`);
-    console.log(`[Activity] Processed args:`, processedArgs);
+    console.log(
+      `[Activity] Processed ${Object.keys(processedArgs).length} argument(s)`
+    );
     
     // Preparar headers personalizados
-    const customHeaders = { ...apiConfig.endpoint.headers };
+    let customHeaders = { ...apiConfig.endpoint.headers };
     
     // Procesar autenticación en headers
     if (apiConfig.endpoint.requiresAuth) {
-      switch (apiConfig.endpoint.authType) {
-        case 'Bearer':
-          Object.keys(customHeaders).forEach(key => {
-            if (customHeaders[key] && typeof customHeaders[key] === 'string' && customHeaders[key].includes('{{')) {
-              if (customHeaders[key].includes('{{SUPPORT_API_TOKEN}}')) {
-                customHeaders[key] = customHeaders[key].replace('{{SUPPORT_API_TOKEN}}', environment.SUPPORT_API_TOKEN || '');
-              }
-              if (customHeaders[key].includes('{{SERVICE_API_KEY}}')) {
-                customHeaders[key] = customHeaders[key].replace('{{SERVICE_API_KEY}}', environment.SERVICE_API_KEY || '');
-              }
-            }
-          });
-          break;
-        case 'ApiKey':
-          Object.keys(customHeaders).forEach(key => {
-            if (customHeaders[key] && typeof customHeaders[key] === 'string' && customHeaders[key].includes('{{')) {
-              if (customHeaders[key].includes('{{WEATHER_API_KEY}}')) {
-                customHeaders[key] = customHeaders[key].replace('{{WEATHER_API_KEY}}', environment.WEATHER_API_KEY || '');
-              }
-              if (customHeaders[key].includes('{{SERVICE_API_KEY}}')) {
-                customHeaders[key] = customHeaders[key].replace('{{SERVICE_API_KEY}}', environment.SERVICE_API_KEY || '');
-              }
-            }
-          });
-          break;
-      }
+      customHeaders = resolveToolHeaders(customHeaders);
     }
     
     let result: ExecuteToolResult;
@@ -105,18 +135,29 @@ export async function executeApiCall(input: ExecuteToolInput): Promise<ExecuteTo
     
     // ✅ IMPORTANTE: Si hay error o success es false, FALLAR el activity
     if (!result.success || result.error) {
-      const errorMessage = `Tool ${toolName} failed: ${result.error || 'Unknown error'} (Status: ${result.statusCode})`;
-      console.error(`[Activity] ${errorMessage}`);
-      throw new Error(errorMessage);
+      const failure = toolApiFailure(toolName, result.error, result.statusCode);
+      console.error(
+        `[Activity] Tool ${toolName} failed with status ${result.statusCode ?? 'unknown'}`
+      );
+      throw failure;
     }
     
     console.log(`[Activity] Tool ${toolName} executed successfully`);
     return result;
     
   } catch (error: any) {
-    console.error(`[Activity] Error in API call for ${toolName}:`, error);
-    // ✅ IMPORTANTE: Re-lanzar el error para que falle el activity
-    throw error;
+    console.error(
+      `[Activity] API call failed for ${toolName}: ${
+        error instanceof ApplicationFailure ? error.type : 'UNEXPECTED_ERROR'
+      }`
+    );
+    if (error instanceof ApplicationFailure) throw error;
+
+    throw ApplicationFailure.create({
+      message: `Tool ${toolName} failed: ${error instanceof Error ? error.message : String(error)}`,
+      type: 'TOOL_UNEXPECTED_FAILURE',
+      nonRetryable: false,
+    });
   }
 }
 

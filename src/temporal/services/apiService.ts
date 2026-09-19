@@ -1,4 +1,20 @@
 import { apiConfig } from '../../config/config';
+import { redactSensitiveHeaders } from './headerSecurity';
+
+export { redactSensitiveHeaders } from './headerSecurity';
+
+export function redactUrlForLogs(value: string): string {
+  const queryIndex = value.indexOf('?');
+  const fragmentIndex = value.indexOf('#');
+  const suffixIndexes = [queryIndex, fragmentIndex].filter((index) => index >= 0);
+  const pathEnd = suffixIndexes.length > 0 ? Math.min(...suffixIndexes) : value.length;
+  const safePath = value.slice(0, pathEnd).replace(
+    /^(https?:\/\/)[^/@\s]+@/i,
+    '$1[REDACTED]@'
+  );
+
+  return queryIndex >= 0 ? `${safePath}?[REDACTED]` : safePath;
+}
 
 /**
  * Centralized API Service
@@ -22,20 +38,26 @@ interface ApiResponse<T = any> {
   };
 }
 
-class ApiService {
+export class ApiService {
   private readonly baseUrl: string;
   private readonly apiKey: string;
 
-  constructor() {
-    this.baseUrl = apiConfig.baseUrl;
-    this.apiKey = apiConfig.apiKey;
+  constructor(baseUrl = apiConfig.baseUrl, apiKey = apiConfig.apiKey) {
+    this.baseUrl = baseUrl;
+    this.apiKey = apiKey;
     
     // 🔍 DIAGNOSTIC: Log configuration on initialization
     console.log('🔧 ApiService Configuration:');
-    console.log(`   Base URL: ${this.baseUrl || 'NOT_SET'}`);
+    console.log(`   Base URL: ${this.baseUrl ? redactUrlForLogs(this.baseUrl) : 'NOT_SET'}`);
     console.log(`   API Key: ${this.apiKey ? 'SET' : 'NOT_SET'}`);
     console.log(`   Environment: NODE_ENV=${process.env.NODE_ENV}`);
-    console.log(`   Raw API_BASE_URL: ${process.env.API_BASE_URL || 'NOT_SET'}`);
+    console.log(
+      `   Raw API_BASE_URL: ${
+        process.env.API_BASE_URL
+          ? redactUrlForLogs(process.env.API_BASE_URL)
+          : 'NOT_SET'
+      }`
+    );
     console.log(`   Raw API_KEY: ${process.env.API_KEY ? 'SET' : 'NOT_SET'}`);
     
     if (!this.baseUrl) {
@@ -80,22 +102,28 @@ class ApiService {
       ...this.getDefaultHeaders(),
       ...headers
     };
+    const serializedBody = body === undefined ? undefined : JSON.stringify(body);
+    const safeUrl = redactUrlForLogs(url);
+    const safeEndpoint = redactUrlForLogs(endpoint);
 
-    console.log(`🌐 API Request: ${method} ${url}`);
-    console.log(`🔧 Request Headers:`, JSON.stringify(requestHeaders, null, 2));
+    console.log(`🌐 API Request: ${method} ${safeUrl}`);
+    console.log(
+      `🔧 Request Headers:`,
+      JSON.stringify(redactSensitiveHeaders(requestHeaders), null, 2)
+    );
     console.log(`⏰ Timeout: ${timeout}ms`);
-    if (body) {
-      console.log(`📤 Request body:`, JSON.stringify(body, null, 2));
+    if (serializedBody !== undefined) {
+      console.log(`📤 Request body: [REDACTED] (${serializedBody.length} bytes)`);
     }
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
-      console.log(`🚀 Initiating fetch request to: ${endpoint}`);
+      console.log(`🚀 Initiating fetch request to: ${safeEndpoint}`);
       
       // Log request details for debugging 414 errors
-      const bodySize = body ? JSON.stringify(body).length : 0;
+      const bodySize = serializedBody?.length ?? 0;
       const urlLength = url.length;
       console.log(`📊 Request details: URL length: ${urlLength} chars, Body size: ${bodySize} bytes`);
       
@@ -110,7 +138,7 @@ class ApiService {
       const response = await fetch(url, {
         method,
         headers: requestHeaders,
-        body: body ? JSON.stringify(body) : undefined,
+        body: serializedBody,
         signal: controller.signal,
       });
 
@@ -128,10 +156,10 @@ class ApiService {
             status: 414
           };
           
-          console.error(`🚨 CRITICAL: 414 Request-URI Too Large detected on endpoint: ${endpoint}`);
-          console.error(`🔧 URL length: ${url.length} chars, Body size: ${body ? JSON.stringify(body).length : 0} bytes`);
+          console.error(`🚨 CRITICAL: 414 Request-URI Too Large detected on endpoint: ${safeEndpoint}`);
+          console.error(`🔧 URL length: ${url.length} chars, Body size: ${bodySize} bytes`);
           console.error(`🔧 SOLUTION: Consider using POST body instead of URL parameters for large data payloads`);
-          console.error(`🔧 Error details:`, error);
+          console.error(`🔧 Error status: ${error.code}`);
           
           return {
             success: false,
@@ -147,9 +175,9 @@ class ApiService {
             status: response.status
           };
           
-          console.error(`🚨 CRITICAL: HTML error page detected on endpoint: ${endpoint}`);
+          console.error(`🚨 CRITICAL: HTML error page detected on endpoint: ${safeEndpoint}`);
           console.error(`🔧 This is likely a 414 Request-URI Too Large error from Cloudflare`);
-          console.error(`🔧 URL length: ${url.length} chars, Body size: ${body ? JSON.stringify(body).length : 0} bytes`);
+          console.error(`🔧 URL length: ${url.length} chars, Body size: ${bodySize} bytes`);
           
           return {
             success: false,
@@ -163,7 +191,7 @@ class ApiService {
           status: response.status
         };
         
-        console.error(`❌ API Error:`, error);
+        console.error(`❌ API Error: ${error.code} (${response.status})`);
         
         return {
           success: false,
@@ -172,7 +200,7 @@ class ApiService {
       }
 
       const data = await response.json();
-      console.log(`✅ API Response:`, JSON.stringify(data, null, 2));
+      console.log(`✅ API Response received`);
       
       // If the API response already has success/data structure, return it directly
       if (data && typeof data === 'object' && 'success' in data && 'data' in data) {
@@ -208,24 +236,22 @@ class ApiService {
       };
       
       // 🔍 ENHANCED DIAGNOSTIC: More details about network error
-      console.error(`🔥 API Network Error:`, apiError);
+      console.error(`🔥 API Network Error: ${apiError.code}`);
       console.error(`🔍 Network Error Details:`);
-      console.error(`   URL attempted: ${url}`);
+      console.error(`   URL attempted: ${safeUrl}`);
       console.error(`   Method: ${method}`);
       console.error(`   Error type: ${error instanceof Error ? error.constructor.name : typeof error}`);
-      console.error(`   Error message: ${error instanceof Error ? error.message : String(error)}`);
-      console.error(`   Error stack:`, error instanceof Error ? error.stack : 'No stack available');
       
       // Check common connectivity issues
       if (error instanceof Error) {
         if (error.message.includes('ENOTFOUND')) {
-          console.error(`🚨 DNS Resolution Error: Cannot resolve hostname from ${url}`);
+          console.error(`🚨 DNS Resolution Error: Cannot resolve hostname from ${safeUrl}`);
         } else if (error.message.includes('ECONNREFUSED')) {
-          console.error(`🚨 Connection Refused: Server is not accepting connections at ${url}`);
+          console.error(`🚨 Connection Refused: Server is not accepting connections at ${safeUrl}`);
         } else if (error.message.includes('ETIMEDOUT') || error.message.includes('timeout')) {
-          console.error(`🚨 Connection Timeout: Server did not respond in time at ${url}`);
+          console.error(`🚨 Connection Timeout: Server did not respond in time at ${safeUrl}`);
         } else if (error.message.includes('certificate') || error.message.includes('SSL')) {
-          console.error(`🚨 SSL/TLS Error: Certificate or SSL handshake issue with ${url}`);
+          console.error(`🚨 SSL/TLS Error: Certificate or SSL handshake issue with ${safeUrl}`);
         }
       }
       

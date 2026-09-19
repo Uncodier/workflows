@@ -1,5 +1,6 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type * as activities from '../activities';
+import { assertTemporalSafeHeaders } from '../services/headerSecurity';
 
 const { executeApiCall, validateParameters, processResponse } = proxyActivities<typeof activities>({
   startToCloseTimeout: '5 minutes',
@@ -24,14 +25,6 @@ export interface ExecuteToolInput {
     responseMapping?: Record<string, string>;
     errors?: Record<number, { message: string; code: string }>;
   };
-  environment?: {
-    NODE_ENV?: string;
-    API_BASE_URL?: string;
-    PORT?: string;
-    SERVICE_API_KEY?: string;
-    SUPPORT_API_TOKEN?: string;
-    WEATHER_API_KEY?: string;
-  };
 }
 
 export interface ExecuteToolResult {
@@ -42,21 +35,42 @@ export interface ExecuteToolResult {
   url?: string;
 }
 
+export function sanitizeExecuteToolInput(input: ExecuteToolInput): ExecuteToolInput {
+  const { environment: _discardedEnvironment, ...safeInput } = input as ExecuteToolInput & {
+    environment?: unknown;
+  };
+  const headers = safeInput.apiConfig?.endpoint?.headers ?? {};
+
+  assertTemporalSafeHeaders(headers);
+
+  return {
+    ...safeInput,
+    apiConfig: {
+      ...safeInput.apiConfig,
+      endpoint: {
+        ...safeInput.apiConfig.endpoint,
+        headers: { ...headers },
+      },
+    },
+  };
+}
+
 export async function executeToolWorkflow(input: ExecuteToolInput): Promise<ExecuteToolResult> {
-  console.log(`[Workflow] Executing tool: ${input.toolName}`);
+  const safeInput = sanitizeExecuteToolInput(input);
+  console.log(`[Workflow] Executing tool: ${safeInput.toolName}`);
   
   // 1. Validar parámetros
-  await validateParameters(input.toolName, input.args, input.apiConfig);
+  await validateParameters(safeInput.toolName, safeInput.args, safeInput.apiConfig);
   
   // 2. Ejecutar la llamada API
   // ✅ IMPORTANTE: No capturar errores aquí, dejar que el workflow falle
-  const result = await executeApiCall(input);
+  const result = await executeApiCall(safeInput);
   
   // 3. Procesar respuesta si hay mapeo (solo si fue exitoso)
-  if (input.apiConfig.responseMapping) {
-    result.data = await processResponse(result.data, input.apiConfig.responseMapping);
+  if (safeInput.apiConfig.responseMapping) {
+    result.data = await processResponse(result.data, safeInput.apiConfig.responseMapping);
   }
   
-  console.log(`[Workflow] Tool ${input.toolName} executed successfully`);
+  console.log(`[Workflow] Tool ${safeInput.toolName} executed successfully`);
   return result;
 } 

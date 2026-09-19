@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Public Envoy gRPC gateway: TLS + Bearer API key in front of Temporal frontend.
+# Public Envoy gRPC gateway: TLS + separate read-only/service credentials.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
@@ -26,13 +26,21 @@ az aks get-credentials -g "${RESOURCE_GROUP}" -n "${AKS_NAME}" --overwrite-exist
 
 if [[ -z "${TEMPORAL_GATEWAY_API_KEY:-}" ]]; then
   TEMPORAL_GATEWAY_API_KEY="$(openssl rand -hex 32)"
-  log "Generated TEMPORAL_GATEWAY_API_KEY (stored in .deploy-outputs.env)"
+  log "Generated read-only TEMPORAL_GATEWAY_API_KEY (stored in .deploy-outputs.env)"
+fi
+if [[ -z "${TEMPORAL_GATEWAY_SERVICE_API_KEY:-}" ]]; then
+  TEMPORAL_GATEWAY_SERVICE_API_KEY="$(openssl rand -hex 32)"
+  log "Generated TEMPORAL_GATEWAY_SERVICE_API_KEY (stored in .deploy-outputs.env)"
 fi
 save_output TEMPORAL_GATEWAY_API_KEY "${TEMPORAL_GATEWAY_API_KEY}"
+save_output TEMPORAL_GATEWAY_SERVICE_API_KEY "${TEMPORAL_GATEWAY_SERVICE_API_KEY}"
 save_output TEMPORAL_GATEWAY_HOSTNAME "${GATEWAY_HOSTNAME}"
 
 if [[ -f "${CONFIG_FILE}" ]] && ! grep -q '^TEMPORAL_GATEWAY_API_KEY=' "${CONFIG_FILE}"; then
   echo "TEMPORAL_GATEWAY_API_KEY=${TEMPORAL_GATEWAY_API_KEY}" >>"${CONFIG_FILE}"
+fi
+if [[ -f "${CONFIG_FILE}" ]] && ! grep -q '^TEMPORAL_GATEWAY_SERVICE_API_KEY=' "${CONFIG_FILE}"; then
+  echo "TEMPORAL_GATEWAY_SERVICE_API_KEY=${TEMPORAL_GATEWAY_SERVICE_API_KEY}" >>"${CONFIG_FILE}"
 fi
 
 log "Ensuring cert-manager..."
@@ -78,7 +86,8 @@ fi
 log "Rendering Envoy config secret..."
 ENVOY_RENDER="$(mktemp)"
 sed \
-  -e "s|__GATEWAY_API_KEY__|${TEMPORAL_GATEWAY_API_KEY}|g" \
+  -e "s|__GATEWAY_READ_ONLY_API_KEY__|${TEMPORAL_GATEWAY_API_KEY}|g" \
+  -e "s|__GATEWAY_SERVICE_API_KEY__|${TEMPORAL_GATEWAY_SERVICE_API_KEY}|g" \
   -e "s|__TEMPORAL_FRONTEND_HOST__|${FRONTEND_HOST}|g" \
   "${AZURE_DIR}/gateway/envoy.yaml.tpl" >"${ENVOY_RENDER}"
 kubectl -n "${TEMPORAL_K8S_NAMESPACE}" create secret generic temporal-gateway-envoy \
@@ -147,7 +156,10 @@ echo
 echo "Vercel (API production) env:"
 echo "  TEMPORAL_SERVER_URL=${GATEWAY_HOSTNAME}:7233"
 echo "  TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}"
-echo "  TEMPORAL_SERVICE_API_KEY=<value in infra/azure/.deploy-outputs.env>"
-echo "  TEMPORAL_CLOUD_API_KEY=<same value>"
+echo "  TEMPORAL_SERVICE_API_KEY=<TEMPORAL_GATEWAY_SERVICE_API_KEY value>"
+echo "  TEMPORAL_CLOUD_API_KEY=<same service value>"
+echo
+echo "Read-only clients:"
+echo "  TEMPORAL_API_KEY=<TEMPORAL_GATEWAY_API_KEY value>"
 echo
 echo "Workers stay on temporal-frontend.${TEMPORAL_K8S_NAMESPACE}.svc.cluster.local:7233 (no gateway)."

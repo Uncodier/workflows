@@ -1,5 +1,6 @@
 import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
+import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 import { sendChannelMessageFromAgentWorkflow } from './sendChannelMessageFromAgentWorkflow';
 
@@ -7,7 +8,6 @@ const {
   getApprovedMessagesActivity,
   markMessageAsSendingActivity,
   resetStuckSendingMessagesActivity,
-  sendEmailFromAgentActivity,
   updateMessageStatusToSentActivity,
   updateMessageTimestampActivity,
   updateConversationStatusAfterFollowUpActivity,
@@ -15,9 +15,12 @@ const {
   cleanupFailedFollowUpActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
-  retry: {
-    maximumAttempts: 3,
-  },
+  retry: RETRY_POLICIES.DATABASE,
+});
+
+const { sendEmailFromAgentActivity } = proxyActivities<Activities>({
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.EMAIL_OPERATIONS,
+  retry: RETRY_POLICIES.NETWORK,
 });
 
 export async function sendApprovedMessagesWorkflow(): Promise<any> {

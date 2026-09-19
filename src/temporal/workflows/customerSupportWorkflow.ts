@@ -9,6 +9,7 @@ import type { WhatsAppMessageData } from '../activities/whatsappActivities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { TASK_QUEUES } from '../config/taskQueues';
 import { buildWhatsAppSendParams } from './helpers/buildWhatsAppSendParams';
+import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
 
 /**
  * Helper function to map WhatsApp intents to EmailData intents
@@ -650,7 +651,10 @@ export async function customerSupportMessageWorkflow(
       // Continue even if logging fails
     }
     
-    // Throw error to properly fail the workflow
-    throw new Error(`Customer support workflow failed: ${errorMessage}`);
+    throw terminalWorkflowFailure(
+      error,
+      'Customer support workflow failed',
+      'CUSTOMER_SUPPORT_WORKFLOW_FAILED'
+    );
   }
 } 

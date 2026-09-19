@@ -2,6 +2,7 @@ import { NativeConnection, Worker as TemporalWorker } from '@temporalio/worker';
 import { activities } from '../activities';
 import { logger } from '../../lib/logger';
 import { temporalConfig, workerVersioningConfig } from '../../config/config';
+import { TASK_QUEUES } from '../config/taskQueues';
 import * as workflows from '../workflows/worker-workflows';
 
 /**
@@ -85,6 +86,8 @@ export async function startWorker() {
     console.log('🔧 Creating Temporal worker...');
     logger.info('🔧 Creating Temporal worker...');
     
+    const isDatabaseMaintenanceWorker =
+      temporalConfig.taskQueue === TASK_QUEUES.DATABASE_MAINTENANCE;
     const workerOptions: any = {
       connection,
       namespace: temporalConfig.namespace,
@@ -92,8 +95,10 @@ export async function startWorker() {
       workflowsPath: require.resolve('../workflows/worker-workflows'),
       activities,
       // Optimize for persistent workers
-      maxConcurrentActivityTaskExecutions: 10,
-      maxConcurrentWorkflowTaskExecutions: 10,
+      maxConcurrentActivityTaskExecutions:
+        isDatabaseMaintenanceWorker ? 1 : 10,
+      maxConcurrentWorkflowTaskExecutions:
+        isDatabaseMaintenanceWorker ? 1 : 10,
     };
 
     // Add worker versioning configuration if enabled

@@ -1,4 +1,7 @@
-import { executeToolWorkflow } from '../workflows/executeToolWorkflow';
+import {
+  executeToolWorkflow,
+  sanitizeExecuteToolInput,
+} from '../workflows/executeToolWorkflow';
 import type { ExecuteToolInput, ExecuteToolResult } from '../workflows/executeToolWorkflow';
 
 export class TemporalToolExecutor {
@@ -42,7 +45,7 @@ export class TemporalToolExecutor {
       }
       
       const handle = await this.client.workflow.start(executeToolWorkflow, {
-        args: [input],
+        args: [sanitizeExecuteToolInput(input)],
         taskQueue: 'execute-tool-queue',
         workflowId: `execute-tool-${input.toolName}-${Date.now()}`,
       });
@@ -64,7 +67,7 @@ export class TemporalToolExecutor {
       }
       
       const handle = await this.client.workflow.start(executeToolWorkflow, {
-        args: [input],
+        args: [sanitizeExecuteToolInput(input)],
         taskQueue: 'execute-tool-queue',
         workflowId,
       });

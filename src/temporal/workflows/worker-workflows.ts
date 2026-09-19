@@ -61,3 +61,4 @@ export * from './pollSocialCommentsWorkflow';
 export * from './pollSocialAnalyticsWorkflow';
 export * from './processSubscriptionsWorkflow';
 export * from './processTasksWorkflow';
+export * from './consolidateSessionRecordingsWorkflow';

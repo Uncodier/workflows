@@ -32,6 +32,14 @@ type CustomerSupportApiData = {
 
 const INVALID_RESPONSE_MARKERS = new Set(['no response generated']);
 const RETRYABLE_CLIENT_STATUSES = new Set([408, 409, 425, 429]);
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function validVisitorId(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return UUID_PATTERN.test(trimmed) ? trimmed : undefined;
+}
 
 function normalizedContent(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -145,7 +153,12 @@ export async function sendCustomerSupportMessageActivity(
 
   if (baseParams.agentId) messageRequest.agentId = baseParams.agentId;
   if (conversationId) messageRequest.conversationId = conversationId;
-  if (visitorId) messageRequest.visitor_id = visitorId;
+  const normalizedVisitorId = validVisitorId(visitorId);
+  if (normalizedVisitorId) {
+    messageRequest.visitor_id = normalizedVisitorId;
+  } else if (visitorId) {
+    console.warn('⚠️ Omitting invalid visitor_id before customer support API call');
+  }
   if (contactName) messageRequest.name = contactName;
   if (contactEmail) messageRequest.email = contactEmail;
   if (contactPhone) messageRequest.phone = contactPhone;

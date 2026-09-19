@@ -1,9 +1,15 @@
-import { proxyActivities, sleep, upsertSearchAttributes } from '@temporalio/workflow';
+import {
+  ApplicationFailure,
+  proxyActivities,
+  sleep,
+  upsertSearchAttributes,
+} from '@temporalio/workflow';
 import type { Duration } from '@temporalio/common';
 import type * as activities from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { buildSendTemplateActivityParams } from './helpers/buildSendTemplateParams';
 import { shouldRetrySendTemplate } from './helpers/whatsappTemplateRejection';
+import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
 
 // Configure activity options using centralized timeouts
 const {
@@ -70,7 +76,10 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
   try {
     // Validate required parameters
     if (!params.phone_number || !params.message || !params.site_id) {
-      throw new Error('Missing required WhatsApp parameters: phone_number, message and site_id are all required');
+      throw ApplicationFailure.nonRetryable(
+        'Missing required WhatsApp parameters: phone_number, message and site_id are all required',
+        'WHATSAPP_INVALID_INPUT'
+      );
     }
 
     const searchAttributes: Record<string, string[]> = {
@@ -455,6 +464,10 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
       console.log('ℹ️ No message_id or conversation_id provided - skipping status update');
     }
     
-    throw error;
+    throw terminalWorkflowFailure(
+      error,
+      'Send WhatsApp from agent workflow failed',
+      'WHATSAPP_WORKFLOW_FAILED'
+    );
   }
 } 

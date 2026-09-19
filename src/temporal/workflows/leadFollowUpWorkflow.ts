@@ -1,8 +1,16 @@
-import { proxyActivities, patched, deprecatePatch, upsertSearchAttributes, workflowInfo } from '@temporalio/workflow';
+import {
+  ApplicationFailure,
+  proxyActivities,
+  patched,
+  deprecatePatch,
+  upsertSearchAttributes,
+  workflowInfo,
+} from '@temporalio/workflow';
 import type { Activities, LeadEmailRevalidationRequest } from '../activities';
 import { performEarlyValidation } from './leadFollowUp/validation';
 import { performResearch } from './leadFollowUp/research';
 import type { LeadFollowUpOptions, LeadFollowUpResult } from './leadFollowUp/types';
+import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
 export * from './leadFollowUp/types';
 
 // Define the activity interface and options
@@ -39,11 +47,17 @@ export async function leadFollowUpWorkflow(
   const { lead_id, site_id } = options;
   
   if (!lead_id) {
-    throw new Error('No lead ID provided');
+    throw ApplicationFailure.nonRetryable(
+      'No lead ID provided',
+      'LEAD_FOLLOW_UP_INVALID_INPUT'
+    );
   }
   
   if (!site_id) {
-    throw new Error('No site ID provided');
+    throw ApplicationFailure.nonRetryable(
+      'No site ID provided',
+      'LEAD_FOLLOW_UP_INVALID_INPUT'
+    );
   }
 
   const searchAttributes: Record<string, string[]> = {
@@ -447,6 +461,10 @@ export async function leadFollowUpWorkflow(
       error: errorMessage,
     });
 
-    throw new Error(`Lead follow-up workflow failed: ${errorMessage}`);
+    throw terminalWorkflowFailure(
+      error,
+      'Lead follow-up workflow failed',
+      'LEAD_FOLLOW_UP_WORKFLOW_FAILED'
+    );
   }
 }

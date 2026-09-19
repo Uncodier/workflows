@@ -44,35 +44,47 @@ async function startupRender() {
     console.log('✅ Worker ready');
     console.log('');
 
-    // Step 3: Initialize schedules
-    console.log('📅 Step 3: Creating Temporal schedules...');
-    const result = await createAllSchedules();
-    console.log('');
+    const shouldInitializeSchedules =
+      process.env.INITIALIZE_TEMPORAL_SCHEDULES !== 'false';
 
+    if (!shouldInitializeSchedules) {
+      console.log('⏭️ Step 3: Temporal schedule initialization disabled');
+      console.log('');
+    } else {
+      // Step 3: Initialize schedules
+      console.log('📅 Step 3: Creating Temporal schedules...');
+      const result = await createAllSchedules();
+      console.log('');
+
+      console.log(`📊 Total schedules: ${result.total}`);
+      console.log(`✅ Successful: ${result.success.length}`);
+      console.log(`❌ Failed: ${result.failed.length}`);
+
+      if (result.success.length > 0) {
+        console.log('');
+        console.log('📋 Successfully created schedules:');
+        result.success.forEach(id => {
+          console.log(`   ✅ ${id}`);
+        });
+      }
+
+      if (result.failed.length > 0) {
+        console.log('');
+        console.log('❌ Failed schedules:');
+        result.failed.forEach(({ id, error }) => {
+          console.log(`   ❌ ${id}: ${error}`);
+        });
+      }
+    }
+
+    console.log('');
     console.log('✅ RENDER STARTUP COMPLETED');
     console.log('===========================');
-    console.log(`📊 Total schedules: ${result.total}`);
-    console.log(`✅ Successful: ${result.success.length}`);
-    console.log(`❌ Failed: ${result.failed.length}`);
-
-    if (result.success.length > 0) {
-      console.log('');
-      console.log('📋 Successfully created schedules:');
-      result.success.forEach(id => {
-        console.log(`   ✅ ${id}`);
-      });
-    }
-
-    if (result.failed.length > 0) {
-      console.log('');
-      console.log('❌ Failed schedules:');
-      result.failed.forEach(({ id, error }) => {
-        console.log(`   ❌ ${id}: ${error}`);
-      });
-    }
-
-    console.log('');
-    console.log('🔄 Worker is now running and schedules are active');
+    console.log(
+      shouldInitializeSchedules
+        ? '🔄 Worker is now running and schedules are active'
+        : '🔄 Worker is now running without schedule initialization'
+    );
     console.log('💡 Check Temporal UI to see your schedules and workflows');
     console.log('');
 

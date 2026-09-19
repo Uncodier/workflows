@@ -2,6 +2,7 @@
 # Secrets required:
 #   AZURE_CREDENTIALS — service principal JSON for azure/login
 #     { clientId, clientSecret, subscriptionId, tenantId }
+#   SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF, SUPABASE_DB_PASSWORD
 
 name: Deploy Azure Temporal Workers
 
@@ -14,6 +15,7 @@ on:
       - 'package-lock.json'
       - 'worker.tsconfig.json'
       - 'infra/azure/workers/**'
+      - 'supabase/migrations/**'
       - '.github/workflows/azure-workers-deploy.yml'
   workflow_dispatch:
 
@@ -31,7 +33,46 @@ env:
   RG_NAME: rg-temporal-prod
 
 jobs:
+  apply-database-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require Supabase deployment secrets
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for variable in SUPABASE_ACCESS_TOKEN SUPABASE_PROJECT_REF SUPABASE_DB_PASSWORD; do
+            if [ -z "${!variable}" ]; then
+              echo "::error::${variable} is not set."
+              exit 1
+            fi
+          done
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Apply pending database migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          supabase link \
+            --project-ref "${SUPABASE_PROJECT_REF}" \
+            --password "${SUPABASE_DB_PASSWORD}"
+          supabase db push \
+            --linked \
+            --non-interactive \
+            --password "${SUPABASE_DB_PASSWORD}"
+
   deploy-aks-workers:
+    needs: apply-database-migrations
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

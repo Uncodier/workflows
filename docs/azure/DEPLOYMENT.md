@@ -28,7 +28,8 @@ Set at least:
 - `WORKER_DEFAULT_NAME`, `WORKER_CRITICAL_NAME` (globally unique App Service names)
 - Supabase / app secrets used by workers today on Render
 - Optional: `GITHUB_REPO_URL`, `GITHUB_TOKEN` (legacy App Service deployment only)
-- Optional: `TEMPORAL_GATEWAY_HOSTNAME` (must include `temporal.cloud`), `TEMPORAL_GATEWAY_API_KEY`
+- Optional: `TEMPORAL_GATEWAY_HOSTNAME` (must include `temporal.cloud`),
+  `TEMPORAL_GATEWAY_API_KEY` (read only), `TEMPORAL_GATEWAY_SERVICE_API_KEY`
 
 Do **not** commit `config.env` or `.deploy-outputs.env`.
 
@@ -66,7 +67,10 @@ Worker deployments run automatically on pushes to `main`. The workflow uses `doc
 
 **Setup required in GitHub Repository Settings → Secrets and Variables → Actions**:
 
-*   `AZURE_CREDENTIALS`: A JSON string representing a Service Principal.
+* `AZURE_CREDENTIALS`: A JSON string representing a Service Principal.
+* `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`, and
+  `SUPABASE_DB_PASSWORD`: used to apply pending `supabase/migrations/**`
+  before workers are rolled out.
 
 The Service Principal needs the following roles in Azure:
 1.  **AcrPush** on the `uncodietmpacr` Azure Container Registry (ACR).
@@ -113,7 +117,7 @@ Validate with [Azure Pricing Calculator](https://azure.microsoft.com/pricing/cal
 
 ## Public gRPC gateway (Vercel / API)
 
-The Temporal frontend stays on an **internal** LoadBalancer. Vercel has no static IPs, so a public **Envoy gateway** terminates TLS and requires `Authorization: Bearer <key>` — the same metadata the API already sends for Temporal Cloud.
+The Temporal frontend stays on an **internal** LoadBalancer. Vercel has no static IPs, so a public **Envoy gateway** terminates TLS and requires `Authorization: Bearer <key>` — the same metadata the API already sends for Temporal Cloud. The service key can mutate Temporal state; the separate external key permits only read operations and cannot start workflows.
 
 Hostname is **`temporal.cloud.makinari.com`** so `serverUrl.includes('temporal.cloud')` in the API client stays on the Cloud auth path. **Do not change market-fit or API code.**
 
@@ -145,13 +149,13 @@ Then:
 ```
 TEMPORAL_SERVER_URL=temporal.cloud.makinari.com:7233
 TEMPORAL_NAMESPACE=default
-TEMPORAL_SERVICE_API_KEY=<TEMPORAL_GATEWAY_API_KEY>
-TEMPORAL_CLOUD_API_KEY=<same gateway key>
+TEMPORAL_SERVICE_API_KEY=<TEMPORAL_GATEWAY_SERVICE_API_KEY>
+TEMPORAL_CLOUD_API_KEY=<same service key>
 ```
 
 Workers keep `TEMPORAL_SERVER_URL=temporal-frontend.temporal.svc.cluster.local:7233` with `TEMPORAL_TLS=false` and no API key.
 
-Without a valid Bearer token the gateway returns gRPC `UNAUTHENTICATED` (16). Temporal Web UI is not exposed on this path.
+Give monitoring clients only `TEMPORAL_GATEWAY_API_KEY`. Without a valid Bearer token the gateway returns gRPC `UNAUTHENTICATED` (16); read-only clients receive `PERMISSION_DENIED` (7) for workflow starts and other mutations. Temporal Web UI is not exposed on this path.
 
 ## Migrating off Temporal Cloud
 
@@ -166,6 +170,7 @@ This stack does **not** import Cloud history. Use drain / dual-client / schedule
 | Search attr errors | Re-run `06-register-search-attributes.sh` |
 | App Service build fails | App Services are legacy; use AKS workers via GitHub Actions |
 | No LB IP | `kubectl -n temporal describe svc temporal-frontend` |
-| Gateway 401 / UNAUTHENTICATED | Bearer in Vercel must match `TEMPORAL_GATEWAY_API_KEY` |
+| Gateway 401 / UNAUTHENTICATED | Bearer in Vercel must match `TEMPORAL_GATEWAY_SERVICE_API_KEY` |
+| Gateway 403 / PERMISSION_DENIED | A read-only gateway key was used for a mutation |
 | Let's Encrypt not Ready | DNS A record must point at `TEMPORAL_GATEWAY_PUBLIC_IP`; re-run `08` |
 | API still hits Temporal Cloud | Confirm `TEMPORAL_SERVER_URL` contains `temporal.cloud` and port `7233` |
