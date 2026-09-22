@@ -53,4 +53,20 @@ describe('placeVoiceCallFromAgentActivity', () => {
       nonRetryable: true,
     });
   });
+
+  it('marks capacity responses as safe to retry', async () => {
+    mockPost.mockResolvedValue({
+      success: false,
+      error: {
+        code: 'VOICE_CALL_CONCURRENCY_LIMIT',
+        message: 'Voice call concurrency limit reached',
+        status: 429,
+      },
+    });
+
+    await expect(placeVoiceCallFromAgentActivity(params)).rejects.toMatchObject({
+      type: 'VOICE_CALL_CAPACITY_REACHED',
+      nonRetryable: false,
+    });
+  });
 });

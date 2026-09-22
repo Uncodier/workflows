@@ -78,14 +78,17 @@ export async function placeVoiceCallFromAgentActivity(
 
   if (!response.success || !response.data?.callId) {
     const status = response.error?.status;
+    const capacityReached = status === 429;
     const placementUnknown =
-      status === undefined || status === 408 || status === 425 || status === 429 || status >= 500;
+      status === undefined || status === 408 || status === 425 || status >= 500;
     throw ApplicationFailure.create({
       message: response.error?.message || 'Failed to place Voice call',
-      type: placementUnknown
-        ? 'VOICE_CALL_PLACEMENT_UNKNOWN'
-        : 'VOICE_CALL_REQUEST_REJECTED',
-      nonRetryable: true,
+      type: capacityReached
+        ? 'VOICE_CALL_CAPACITY_REACHED'
+        : placementUnknown
+          ? 'VOICE_CALL_PLACEMENT_UNKNOWN'
+          : 'VOICE_CALL_REQUEST_REJECTED',
+      nonRetryable: !capacityReached,
       details: [{ status, code: response.error?.code }],
     });
   }

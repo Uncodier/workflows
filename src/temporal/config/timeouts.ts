@@ -70,6 +70,15 @@ export const RETRY_POLICIES = {
     initialInterval: '2 seconds',
     maximumInterval: '30 seconds',
   },
+
+  // Voice capacity responses are definitive non-placement outcomes and can
+  // wait for an active provider slot without risking a duplicate call.
+  VOICE_CALL_PLACEMENT: {
+    maximumAttempts: 121,
+    backoffCoefficient: 1.5,
+    initialInterval: '10 seconds',
+    maximumInterval: '1 minute',
+  },
   
   // No retry for non-critical operations
   NO_RETRY: {

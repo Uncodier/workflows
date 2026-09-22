@@ -5,6 +5,7 @@ import {
 } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
+import { hasApplicationFailureType } from './helpers/applicationFailureType';
 import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
 
 export interface SendVoiceCallFromAgentParams {
@@ -29,7 +30,7 @@ export interface SendVoiceCallFromAgentResult {
 
 const { placeVoiceCallFromAgentActivity } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.NETWORK,
-  retry: RETRY_POLICIES.NO_RETRY,
+  retry: RETRY_POLICIES.VOICE_CALL_PLACEMENT,
 });
 
 const { updateMessageStatusToSentActivity } = proxyActivities<Activities>({
@@ -62,9 +63,10 @@ export async function sendVoiceCallFromAgentWorkflow(
   try {
     return await placeVoiceCallFromAgentActivity(params);
   } catch (error) {
-    const placementUnknown =
-      error instanceof ApplicationFailure
-      && error.type === 'VOICE_CALL_PLACEMENT_UNKNOWN';
+    const placementUnknown = hasApplicationFailureType(
+      error,
+      'VOICE_CALL_PLACEMENT_UNKNOWN'
+    );
     const failureReason = error instanceof Error ? error.message : String(error);
 
     await updateMessageStatusToSentActivity({

@@ -5,6 +5,8 @@ import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 import { sendChannelMessageFromAgentWorkflow } from './sendChannelMessageFromAgentWorkflow';
 import { sendVoiceCallFromAgentWorkflow } from './sendVoiceCallFromAgentWorkflow';
 import { resolveApprovedMessageDispatch } from './helpers/approvedMessageDispatch';
+import { resolveApprovedMessageContent } from './helpers/approvedMessageContent';
+import { settleInBatches } from './helpers/settleInBatches';
 
 const {
   getApprovedMessagesActivity,
@@ -47,17 +49,29 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
 
   async function processOneMessage(msg: (typeof messages)[number]): Promise<boolean> {
     let sent = false;
+    let voiceChildStarted = false;
     const channel = (msg.custom_data?.channel || msg.custom_data?.source || msg.channel || (msg.custom_data?.type === 'email' ? 'email' : 'whatsapp')).toLowerCase();
     const dispatch = resolveApprovedMessageDispatch(
       channel,
       msg.custom_data?.voice_mode
     );
+    const resolvedMessage = resolveApprovedMessageContent(
+      msg.content,
+      msg.custom_data,
+      dispatch === 'whatsapp-child'
+    );
+    const deliveryContent = resolvedMessage.content;
     const messageId = msg.message_id;
     let sentMessageId: string | undefined;
 
     const COMMENT_CHANNELS = ['facebook', 'instagram', 'threads', 'linkedin', 'x', 'twitter', 'youtube'];
 
     try {
+      if (resolvedMessage.unresolved.length > 0) {
+        throw new Error(
+          `Unresolved delivery placeholders: ${resolvedMessage.unresolved.join(', ')}`
+        );
+      }
       if (channel === 'email') {
         if (!msg.lead_email) {
           throw new Error('No email address for lead');
@@ -66,7 +80,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         const emailResult = await sendEmailFromAgentActivity({
           email: msg.lead_email,
           subject: msg.custom_data?.title || msg.custom_data?.subject || 'Follow-up',
-          message: msg.content,
+          message: deliveryContent,
           site_id: msg.site_id,
           agent_id: msg.custom_data?.userId,
           lead_id: msg.lead_id,
@@ -97,7 +111,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
           args: [{
             channel,
             to: msg.lead_id || 'social-comment-user',
-            message: msg.content,
+            message: deliveryContent,
             site_id: msg.site_id,
             agent_id: msg.custom_data?.userId,
             conversation_id: msg.conversation_id,
@@ -174,11 +188,11 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
 
         if (dispatch === 'voice-call-child') {
           const workflowId = `send-voice-call-approved-${msg.message_id}`;
-          await startChild(sendVoiceCallFromAgentWorkflow, {
+          const voiceChild = await startChild(sendVoiceCallFromAgentWorkflow, {
             workflowId,
             args: [{
               to: recipient,
-              message: msg.content,
+              message: deliveryContent,
               site_id: msg.site_id,
               agent_id: msg.custom_data?.userId,
               conversation_id: msg.conversation_id,
@@ -190,7 +204,9 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
             }],
             parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
           });
-          console.log(`✅ Voice call child started (workflowId: ${workflowId}).`);
+          voiceChildStarted = true;
+          await voiceChild.result();
+          console.log(`✅ Voice call child completed placement (workflowId: ${workflowId}).`);
         } else {
           const workflowId = `send-${channel}-approved-${msg.message_id}`;
           await startChild(sendChannelMessageFromAgentWorkflow, {
@@ -198,7 +214,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
             args: [{
               channel,
               to: recipient,
-              message: msg.content,
+              message: deliveryContent,
               site_id: msg.site_id,
               agent_id: msg.custom_data?.userId,
               conversation_id: msg.conversation_id,
@@ -259,6 +275,9 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     } catch (error) {
       console.error(`❌ Failed to send message ${msg.message_id}:`, error);
       if (!sent) {
+        if (dispatch === 'voice-call-child' && voiceChildStarted) {
+          return false;
+        }
         const failureReason = error instanceof Error ? error.message : String(error);
         try {
           const recipient = channel === 'email' ? msg.lead_email : msg.lead_phone;
@@ -287,9 +306,6 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
           });
         } catch (updateErr) {
           console.error(`⚠️ Failed to update message status to failed:`, updateErr);
-        }
-        if (dispatch === 'voice-call-child') {
-          return false;
         }
         try {
           const cleanupPayload: Record<string, unknown> = {
@@ -342,15 +358,14 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     console.log(`📤 Processing message ${msg.message_id} (Lead: ${msg.lead_id})...`);
     return processOneMessage(msg);
   }));
-  const voiceCallResults: PromiseSettledResult<boolean>[] = [];
-  const voiceCallConcurrency = 5;
-  for (let index = 0; index < voiceCallMessages.length; index += voiceCallConcurrency) {
-    const batch = voiceCallMessages.slice(index, index + voiceCallConcurrency);
-    voiceCallResults.push(...await Promise.allSettled(batch.map((msg) => {
+  const voiceCallResults = await settleInBatches(
+    voiceCallMessages,
+    5,
+    (msg) => {
       console.log(`📞 Processing Voice call ${msg.message_id} (Lead: ${msg.lead_id})...`);
       return processOneMessage(msg);
-    })));
-  }
+    }
+  );
   const results = [...await regularResultsPromise, ...voiceCallResults];
 
   const successCount = results.filter((r) => r.status === 'fulfilled' && r.value === true).length;
