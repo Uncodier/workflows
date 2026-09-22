@@ -3,7 +3,7 @@ export type MessageDeliveryStatusRequest = {
   conversation_id?: string;
   lead_id: string;
   site_id: string;
-  delivery_channel: 'email' | 'whatsapp';
+  delivery_channel: 'email' | 'whatsapp' | 'sms' | 'telegram' | 'voice';
   delivery_success: boolean;
   delivery_details?: {
     error?: unknown;

@@ -13,6 +13,7 @@ import { channelCustomerSupportMessageWorkflow } from './channelCustomerSupportW
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 import { sendChannelMessageFromAgentWorkflow } from './sendChannelMessageFromAgentWorkflow';
+import { sendVoiceCallFromAgentWorkflow } from './sendVoiceCallFromAgentWorkflow';
 import { answerWhatsappMessageWorkflow, processWhatsAppMessagesWorkflow } from './answerWhatsappMessageWorkflow';
 import { leadAttentionWorkflow } from './leadAttentionWorkflow';
 
@@ -77,6 +78,7 @@ export * from './robotWorkflow';
 export * from './promptRobotWorkflow';
 export * from './sendWhatsappFromAgentWorkflow';
 export * from './sendChannelMessageFromAgentWorkflow';
+export * from './sendVoiceCallFromAgentWorkflow';
 export * from './channelCustomerSupportWorkflow';
 export * from './answerWhatsappMessageWorkflow';
 export * from './siteSetupWorkflow';
@@ -133,6 +135,7 @@ export const workflows = {
   sendEmailFromAgent,
   sendWhatsappFromAgent,
   sendChannelMessageFromAgentWorkflow,
+  sendVoiceCallFromAgentWorkflow,
   answerWhatsappMessageWorkflow,
   processWhatsAppMessagesWorkflow,
   siteSetupWorkflow,
@@ -199,6 +202,7 @@ export const workflowNames = {
   sendEmailFromAgent: 'sendEmailFromAgent',
   sendWhatsappFromAgent: 'sendWhatsappFromAgent',
   sendChannelMessageFromAgentWorkflow: 'sendChannelMessageFromAgentWorkflow',
+  sendVoiceCallFromAgentWorkflow: 'sendVoiceCallFromAgentWorkflow',
   answerWhatsappMessageWorkflow: 'answerWhatsappMessageWorkflow',
   processWhatsAppMessagesWorkflow: 'processWhatsAppMessagesWorkflow',
   siteSetupWorkflow: 'siteSetupWorkflow',

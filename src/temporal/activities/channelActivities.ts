@@ -1,6 +1,7 @@
 import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
 import type { SendChannelMessageFromAgentParams } from '../workflows/sendChannelMessageFromAgentWorkflow';
+import type { SendVoiceCallFromAgentParams } from '../workflows/sendVoiceCallFromAgentWorkflow';
 
 const RETRYABLE_CLIENT_STATUSES = new Set([408, 409, 425, 429]);
 
@@ -52,4 +53,42 @@ export async function sendChannelMessageFromAgentActivity(
     success: true,
     messageId,
   };
+}
+
+export async function placeVoiceCallFromAgentActivity(
+  params: SendVoiceCallFromAgentParams
+): Promise<{ success: true; callId: string; status: string; deliveryId?: string }> {
+  const response = await apiService.post<{
+    success: true;
+    callId: string;
+    status: string;
+    deliveryId?: string;
+  }>('/api/agents/tools/placeVoiceCall', {
+    to: params.to,
+    message: params.message,
+    site_id: params.site_id,
+    agent_id: params.agent_id,
+    conversation_id: params.conversation_id,
+    lead_id: params.lead_id,
+    message_id: params.message_id,
+    audience_id: params.audience_id,
+    language: params.language,
+    max_duration_minutes: params.max_duration_minutes,
+  });
+
+  if (!response.success || !response.data?.callId) {
+    const status = response.error?.status;
+    const placementUnknown =
+      status === undefined || status === 408 || status === 425 || status === 429 || status >= 500;
+    throw ApplicationFailure.create({
+      message: response.error?.message || 'Failed to place Voice call',
+      type: placementUnknown
+        ? 'VOICE_CALL_PLACEMENT_UNKNOWN'
+        : 'VOICE_CALL_REQUEST_REJECTED',
+      nonRetryable: true,
+      details: [{ status, code: response.error?.code }],
+    });
+  }
+
+  return response.data;
 }

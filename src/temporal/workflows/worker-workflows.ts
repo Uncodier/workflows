@@ -13,6 +13,7 @@ export * from './channelCustomerSupportWorkflow';
 export * from './sendEmailFromAgentWorkflow';
 export * from './sendWhatsappFromAgentWorkflow';
 export * from './sendChannelMessageFromAgentWorkflow';
+export * from './sendVoiceCallFromAgentWorkflow';
 export * from './answerWhatsappMessageWorkflow';
 // Export alias for backward compatibility  
 export { answerWhatsappMessageWorkflow as whatsappMessageWorkflow } from './answerWhatsappMessageWorkflow';

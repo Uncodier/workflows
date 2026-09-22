@@ -3,6 +3,8 @@ import type { Activities } from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 import { sendChannelMessageFromAgentWorkflow } from './sendChannelMessageFromAgentWorkflow';
+import { sendVoiceCallFromAgentWorkflow } from './sendVoiceCallFromAgentWorkflow';
+import { resolveApprovedMessageDispatch } from './helpers/approvedMessageDispatch';
 
 const {
   getApprovedMessagesActivity,
@@ -46,6 +48,10 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
   async function processOneMessage(msg: (typeof messages)[number]): Promise<boolean> {
     let sent = false;
     const channel = (msg.custom_data?.channel || msg.custom_data?.source || msg.channel || (msg.custom_data?.type === 'email' ? 'email' : 'whatsapp')).toLowerCase();
+    const dispatch = resolveApprovedMessageDispatch(
+      channel,
+      msg.custom_data?.voice_mode
+    );
     const messageId = msg.message_id;
     let sentMessageId: string | undefined;
 
@@ -105,7 +111,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         sent = true;
         console.log(`✅ ${channel} child started (workflowId: ${channelWorkflowId}).`);
         return true;
-      } else {
+      } else if (dispatch === 'whatsapp-child') {
         if (!msg.lead_phone) {
           throw new Error('No phone number for lead');
         }
@@ -146,6 +152,65 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         // Do not await child result: each hourly run processes its batch and exits; child updates DB on success/failure
         sent = true;
         console.log(`✅ WhatsApp child started (workflowId: ${whatsappWorkflowId}).`);
+        return true;
+      } else {
+        if (!msg.lead_phone) {
+          throw new Error(`No phone number for ${channel} recipient`);
+        }
+        const markResult = await markMessageAsSendingActivity({
+          message_id: msg.message_id,
+          conversation_id: msg.conversation_id,
+          site_id: msg.site_id,
+        });
+        if (!markResult.success) {
+          console.error(`❌ Cannot dispatch ${channel}: mark as sending failed for message ${msg.message_id}: ${markResult.error ?? 'unknown'}`);
+          return false;
+        }
+
+        let recipient = msg.lead_phone.replace(/[^\d+]/g, '');
+        recipient = recipient.startsWith('+')
+          ? `+${recipient.slice(1).replace(/\+/g, '')}`
+          : recipient.replace(/\+/g, '');
+
+        if (dispatch === 'voice-call-child') {
+          const workflowId = `send-voice-call-approved-${msg.message_id}`;
+          await startChild(sendVoiceCallFromAgentWorkflow, {
+            workflowId,
+            args: [{
+              to: recipient,
+              message: msg.content,
+              site_id: msg.site_id,
+              agent_id: msg.custom_data?.userId,
+              conversation_id: msg.conversation_id,
+              lead_id: msg.lead_id,
+              message_id: msg.message_id,
+              audience_id: msg.custom_data?.audience_id,
+              language: msg.custom_data?.language,
+              max_duration_minutes: msg.custom_data?.max_duration_minutes,
+            }],
+            parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+          });
+          console.log(`✅ Voice call child started (workflowId: ${workflowId}).`);
+        } else {
+          const workflowId = `send-${channel}-approved-${msg.message_id}`;
+          await startChild(sendChannelMessageFromAgentWorkflow, {
+            workflowId,
+            args: [{
+              channel,
+              to: recipient,
+              message: msg.content,
+              site_id: msg.site_id,
+              agent_id: msg.custom_data?.userId,
+              conversation_id: msg.conversation_id,
+              lead_id: msg.lead_id,
+              message_id: msg.message_id,
+              custom_data: msg.custom_data,
+            }],
+            parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+          });
+          console.log(`✅ ${channel} child started (workflowId: ${workflowId}).`);
+        }
+        sent = true;
         return true;
       }
 
@@ -223,6 +288,9 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         } catch (updateErr) {
           console.error(`⚠️ Failed to update message status to failed:`, updateErr);
         }
+        if (dispatch === 'voice-call-child') {
+          return false;
+        }
         try {
           const cleanupPayload: Record<string, unknown> = {
             lead_id: msg.lead_id,
@@ -254,10 +322,36 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     }
   }
 
-  const results = await Promise.allSettled(messages.map((msg) => {
+  const voiceCallMessages = messages.filter((msg) => {
+    const channel = (
+      msg.custom_data?.channel
+      || msg.custom_data?.source
+      || msg.channel
+      || (msg.custom_data?.type === 'email' ? 'email' : 'whatsapp')
+    ).toLowerCase();
+    return resolveApprovedMessageDispatch(
+      channel,
+      msg.custom_data?.voice_mode
+    ) === 'voice-call-child';
+  });
+  const regularMessages = messages.filter(
+    (message) => !voiceCallMessages.includes(message)
+  );
+
+  const regularResultsPromise = Promise.allSettled(regularMessages.map((msg) => {
     console.log(`📤 Processing message ${msg.message_id} (Lead: ${msg.lead_id})...`);
     return processOneMessage(msg);
   }));
+  const voiceCallResults: PromiseSettledResult<boolean>[] = [];
+  const voiceCallConcurrency = 5;
+  for (let index = 0; index < voiceCallMessages.length; index += voiceCallConcurrency) {
+    const batch = voiceCallMessages.slice(index, index + voiceCallConcurrency);
+    voiceCallResults.push(...await Promise.allSettled(batch.map((msg) => {
+      console.log(`📞 Processing Voice call ${msg.message_id} (Lead: ${msg.lead_id})...`);
+      return processOneMessage(msg);
+    })));
+  }
+  const results = [...await regularResultsPromise, ...voiceCallResults];
 
   const successCount = results.filter((r) => r.status === 'fulfilled' && r.value === true).length;
   const failedCount = results.filter((r) => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === false)).length;
