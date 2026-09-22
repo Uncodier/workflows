@@ -37,6 +37,7 @@ export * from './subscriptionActivities';
 export * from './taskActivities';
 export * from './channelActivities';
 export * from './outstandActivities';
+export * from './syncedObjectActivities';
 export * from './sessionRecordingMaintenanceActivities';
 
 // Bundle all activities for the worker
@@ -78,6 +79,7 @@ import * as subscriptionActivities from './subscriptionActivities';
 import * as taskActivities from './taskActivities';
 import * as channelActivities from './channelActivities';
 import * as outstandActivities from './outstandActivities';
+import * as syncedObjectActivities from './syncedObjectActivities';
 import * as sessionRecordingMaintenanceActivities from './sessionRecordingMaintenanceActivities';
 
 export const activities = {
@@ -119,6 +121,7 @@ export const activities = {
   ...taskActivities,
   ...channelActivities,
   ...outstandActivities,
+  ...syncedObjectActivities,
   ...sessionRecordingMaintenanceActivities
 };
 

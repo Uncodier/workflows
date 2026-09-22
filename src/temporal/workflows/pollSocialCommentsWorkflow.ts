@@ -5,9 +5,15 @@ import {
   startChild,
 } from '@temporalio/workflow';
 import type { Activities } from '../activities';
-import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
+import { ingestSocialCommentWorkflow } from './ingestSocialCommentWorkflow';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
-import { getPublishedCommentNetworks, isOutstandDraftPost, shouldPollPostForComments } from './helpers/outstandPoll';
+import {
+  buildSocialCommentExternalId,
+  buildSocialCommentWorkflowId,
+  getPublishedCommentNetworks,
+  isOutstandDraftPost,
+  shouldPollPostForComments,
+} from './helpers/outstandPoll';
 import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
 
 const {
@@ -20,6 +26,8 @@ const {
   importOutstandPostsActivity,
   checkIfImportTriggeredActivity,
   markImportTriggeredActivity,
+  claimSyncedObjectActivity,
+  finishSyncedObjectClaimActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.NETWORK,
   retry: RETRY_POLICIES.NETWORK, // Handle API flakiness properly, don't retry forever on 400s
@@ -28,7 +36,7 @@ const {
 export async function pollSocialCommentsWorkflow(): Promise<any> {
   const workflowId = 'pollSocialCommentsWorkflow';
   const useAgeFiltering = patched('poll-social-comments-age-filter-v1');
-  const useSafeSocialIdentifiers = patched('poll-social-comments-safe-identifiers-v1');
+  patched('poll-social-comments-safe-identifiers-v1');
   
   await logWorkflowExecutionActivity({
     workflowId,
@@ -161,46 +169,73 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                     const platformCommentId = comment.platform_specific?.commentUrn || comment.platform_specific?.id;
                     
                     const origin = commentNetwork === 'twitter' ? 'x' : commentNetwork;
-                    await startChild(customerSupportMessageWorkflow, {
-                      workflowId: `cs-comment-${siteId}-${commentId}`,
-                      args: [
-                        {
-                          site_id: siteId,
-                          message: commentText,
-                          name: handle || 'Social User',
-                          origin,
-                          origin_message_id: useSafeSocialIdentifiers ? undefined : commentId,
-                          channel_delivery: true,
-                          require_approval: true,
-                          visitor_id: useSafeSocialIdentifiers
-                            ? undefined
-                            : authorId
-                              ? `social-${origin}-${authorId}`
-                              : undefined,
-                          custom_data: {
-                            platform_post_id: comment.platformPostId || comment.platform_post_id || networkPlatformPostId,
-                            platform_post_url: comment.platformPostUrl || comment.platform_post_url || post.url,
-                            platform_comment_id: useSafeSocialIdentifiers
-                              ? platformCommentId || commentId
-                              : platformCommentId,
-                            parent_comment_id: comment.parentCommentId || comment.parent_comment_id,
-                            root_comment_id: comment.rootCommentId || comment.root_comment_id,
-                            account_username: handle,
-                            social_handle: handle,
-                            author_id: authorId,
-                            profile_url: profileUrl,
-                            outstand_post_id: post.id,
-                            content_id: contentId,
-                            source: 'comment'
-                          }
-                        },
-                        {
-                          origin,
-                          origin_message_id: useSafeSocialIdentifiers ? undefined : commentId,
-                        }
-                      ],
-                      parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+                    const stableCommentId = String(platformCommentId || commentId);
+                    const externalId = buildSocialCommentExternalId(origin, stableCommentId);
+                    const claim = await claimSyncedObjectActivity({
+                      siteId,
+                      objectType: 'social_comment',
+                      externalId,
+                      provider: origin,
+                      metadata: {
+                        platform_comment_id: platformCommentId || commentId,
+                        outstand_post_id: post.id,
+                      },
                     });
+
+                    if (!claim.claimed || !claim.claimToken) {
+                      continue;
+                    }
+
+                    const messageData = {
+                      site_id: siteId,
+                      message: commentText,
+                      name: handle || 'Social User',
+                      origin,
+                      origin_message_id: externalId,
+                      channel_delivery: true,
+                      require_approval: true,
+                      custom_data: {
+                        platform_post_id: comment.platformPostId || comment.platform_post_id || networkPlatformPostId,
+                        platform_post_url: comment.platformPostUrl || comment.platform_post_url || post.url,
+                        platform_comment_id: platformCommentId || commentId,
+                        parent_comment_id: comment.parentCommentId || comment.parent_comment_id,
+                        root_comment_id: comment.rootCommentId || comment.root_comment_id,
+                        account_username: handle,
+                        social_handle: handle,
+                        author_id: authorId,
+                        profile_url: profileUrl,
+                        outstand_post_id: post.id,
+                        content_id: contentId,
+                        source: 'comment',
+                      },
+                    };
+
+                    try {
+                      await startChild(ingestSocialCommentWorkflow, {
+                        workflowId: buildSocialCommentWorkflowId(siteId, origin, stableCommentId),
+                        args: [{
+                          siteId,
+                          externalId,
+                          claimToken: claim.claimToken,
+                          messageData,
+                          baseParams: {
+                            origin,
+                            origin_message_id: externalId,
+                          },
+                        }],
+                        parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+                      });
+                    } catch (startError) {
+                      await finishSyncedObjectClaimActivity({
+                        siteId,
+                        objectType: 'social_comment',
+                        externalId,
+                        claimToken: claim.claimToken,
+                        status: 'error',
+                        errorMessage: startError instanceof Error ? startError.message : String(startError),
+                      });
+                      throw startError;
+                    }
                     
                     processedComments++;
                   }

@@ -54,6 +54,7 @@ import { generatePersonEmailWorkflow } from './generatePersonEmailWorkflow';
 import { leadGenerationDomainSearchWorkflow } from './leadGenerationDomainSearchWorkflow';
 import { sendApprovedMessagesWorkflow } from './sendApprovedMessagesWorkflow';
 import { pollSocialCommentsWorkflow } from './pollSocialCommentsWorkflow';
+import { ingestSocialCommentWorkflow } from './ingestSocialCommentWorkflow';
 import { pollSocialAnalyticsWorkflow } from './pollSocialAnalyticsWorkflow';
 import { dailyCreditRenewalWorkflow } from './dailyCreditRenewalWorkflow';
 import { processReservationsWorkflow } from './processReservationsWorkflow';
@@ -109,6 +110,7 @@ export * from './sendApprovedMessagesWorkflow';
 export * from './dailyCreditRenewalWorkflow';
 export * from './processReservationsWorkflow';
 export * from './pollSocialCommentsWorkflow';
+export * from './ingestSocialCommentWorkflow';
 export * from './pollSocialAnalyticsWorkflow';
 
 export * from './processSubscriptionsWorkflow';
@@ -166,6 +168,7 @@ export const workflows = {
   leadGenerationDomainSearchWorkflow,
   sendApprovedMessagesWorkflow,
   pollSocialCommentsWorkflow,
+  ingestSocialCommentWorkflow,
   pollSocialAnalyticsWorkflow,
   dailyCreditRenewalWorkflow,
   processReservationsWorkflow,
@@ -231,6 +234,7 @@ export const workflowNames = {
   leadGenerationDomainSearchWorkflow: 'leadGenerationDomainSearchWorkflow',
   sendApprovedMessagesWorkflow: 'sendApprovedMessagesWorkflow',
   pollSocialCommentsWorkflow: 'pollSocialCommentsWorkflow',
+  ingestSocialCommentWorkflow: 'ingestSocialCommentWorkflow',
   pollSocialAnalyticsWorkflow: 'pollSocialAnalyticsWorkflow',
   dailyCreditRenewalWorkflow: 'dailyCreditRenewalWorkflow',
   processReservationsWorkflow: 'processReservationsWorkflow',

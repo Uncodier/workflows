@@ -58,6 +58,7 @@ export * from './sendApprovedMessagesWorkflow';
 export * from './dailyCreditRenewalWorkflow';
 export * from './processReservationsWorkflow';
 export * from './pollSocialCommentsWorkflow';
+export * from './ingestSocialCommentWorkflow';
 export * from './pollSocialAnalyticsWorkflow';
 export * from './processSubscriptionsWorkflow';
 export * from './processTasksWorkflow';

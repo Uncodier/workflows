@@ -3,11 +3,16 @@ import { supabaseServiceRole as supabaseAdmin } from '../../lib/supabase/client'
 import { handleOutstandApiError } from './outstandHelpers';
 import {
   buildOutstandCommentsPath,
+  buildSocialPostExternalId,
   extractOutstandPostText,
   isOutstandClientError,
   isPublishedContentForAnalytics,
   shouldPollPostForAnalytics,
 } from '../workflows/helpers/outstandPoll';
+import {
+  claimSyncedObjectActivity,
+  finishSyncedObjectClaimActivity,
+} from './syncedObjectActivities';
 
 function tenantSchema() {
   return process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA || process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
@@ -338,6 +343,19 @@ export async function upsertContentFromOutstandPostActivity(siteId: string, post
       return null;
     }
 
+    const externalId = buildSocialPostExternalId(String(outstandId));
+    const claim = await claimSyncedObjectActivity({
+      siteId,
+      objectType: 'social_post',
+      externalId,
+      provider: 'outstand',
+      metadata: { outstand_post_id: outstandId },
+    });
+
+    if (!claim.claimed || !claim.claimToken) {
+      return null;
+    }
+
     const platforms = post.socialAccounts?.map((a: any) => a.network || (typeof a === "string" ? a : null)).filter(Boolean) || [];
     const publishedTags = platforms.map((p: string) => `published_${p}`);
     
@@ -377,8 +395,24 @@ export async function upsertContentFromOutstandPostActivity(siteId: string, post
 
     if (insertError) {
       console.error(`[upsertContentFromOutstandPost] Error inserting content for post ${outstandId}:`, insertError);
+      await finishSyncedObjectClaimActivity({
+        siteId,
+        objectType: 'social_post',
+        externalId,
+        claimToken: claim.claimToken,
+        status: 'error',
+        errorMessage: insertError.message,
+      });
       return null;
     }
+
+    await finishSyncedObjectClaimActivity({
+      siteId,
+      objectType: 'social_post',
+      externalId,
+      claimToken: claim.claimToken,
+      status: 'completed',
+    });
 
     return inserted?.id || null;
   } catch (error) {

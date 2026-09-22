@@ -1,4 +1,7 @@
 import {
+  buildSocialCommentExternalId,
+  buildSocialCommentWorkflowId,
+  buildSocialPostExternalId,
   normalizeOutstandNetwork,
   isAccountPublished,
   isOutstandDraftPost,
@@ -34,6 +37,37 @@ describe('outstandPoll helpers', () => {
     it('includes tenant_id and normalized network', () => {
       const path = buildOutstandCommentsPath('site-1', 'cFRzL', 'twitter');
       expect(path).toBe('/api/integrations/outstand/posts/cFRzL/comments?tenant_id=site-1&network=x');
+    });
+  });
+
+  describe('stable social ingestion identifiers', () => {
+    it('builds the same comment key on every poll', () => {
+      expect(buildSocialCommentExternalId('Twitter', 'comment-123')).toBe(
+        'outstand:x:comment-123'
+      );
+      expect(buildSocialCommentExternalId('x', 'comment-123')).toBe(
+        'outstand:x:comment-123'
+      );
+    });
+
+    it('keeps identical provider IDs separate across networks', () => {
+      expect(buildSocialCommentExternalId('facebook', '123')).not.toBe(
+        buildSocialCommentExternalId('instagram', '123')
+      );
+    });
+
+    it('builds bounded deterministic workflow IDs', () => {
+      const longCommentId = `urn:${'comment:'.repeat(80)}`;
+      const first = buildSocialCommentWorkflowId('site-1', 'linkedin', longCommentId);
+      const second = buildSocialCommentWorkflowId('site-1', 'linkedin', longCommentId);
+
+      expect(first).toBe(second);
+      expect(first.length).toBeLessThanOrEqual(240);
+      expect(first).toMatch(/^[a-zA-Z0-9._-]+$/);
+    });
+
+    it('builds stable post keys', () => {
+      expect(buildSocialPostExternalId(' post-123 ')).toBe('outstand:post-123');
     });
   });
 

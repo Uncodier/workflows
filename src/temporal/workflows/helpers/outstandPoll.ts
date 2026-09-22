@@ -19,6 +19,39 @@ export function normalizeOutstandNetwork(network?: string | null): string {
   return normalized;
 }
 
+export function buildSocialCommentExternalId(
+  network: string,
+  commentId: string
+): string {
+  return `outstand:${normalizeOutstandNetwork(network)}:${commentId.trim()}`;
+}
+
+export function buildSocialPostExternalId(postId: string): string {
+  return `outstand:${postId.trim()}`;
+}
+
+export function buildSocialCommentWorkflowId(
+  siteId: string,
+  network: string,
+  commentId: string
+): string {
+  const externalId = buildSocialCommentExternalId(network, commentId);
+  const rawId = `social-comment-${siteId}-${externalId}`;
+  const sanitizedId = rawId.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  if (sanitizedId.length <= 240) {
+    return sanitizedId;
+  }
+
+  let hash = 2166136261;
+  for (let index = 0; index < rawId.length; index += 1) {
+    hash ^= rawId.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `${sanitizedId.slice(0, 230)}-${(hash >>> 0).toString(36)}`;
+}
+
 /**
  * Checks if a social account within an Outstand post is published.
  */
