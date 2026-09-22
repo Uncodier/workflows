@@ -8,6 +8,22 @@ export const SUPPORTED_COMMENT_NETWORKS = [
   'youtube',
 ] as const;
 
+const ACCOUNT_ID_FIELDS = [
+  'id',
+  'accountId',
+  'account_id',
+  'socialAccountId',
+  'social_account_id',
+  'customer_social_network_id',
+  'network_unique_id',
+] as const;
+
+export interface ConnectedCommentAccount {
+  network: string;
+  identifiers: string[];
+  pageIds: string[];
+}
+
 /**
  * Normalizes a network string for the Outstand API.
  * e.g., 'twitter' -> 'x'
@@ -65,6 +81,119 @@ export function isAccountPublished(account: any): boolean {
 
 export function isOutstandDraftPost(post: any): boolean {
   return Boolean(post?.isDraft || post?.status === 'draft');
+}
+
+function normalizedIdentifier(value: unknown): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function accountIdentifiers(account: any): string[] {
+  if (!account || typeof account !== 'object') return [];
+
+  const nestedAccount = account.socialAccount || account.social_account;
+  const identifiers = ACCOUNT_ID_FIELDS.flatMap((field) => [
+    normalizedIdentifier(account[field]),
+    normalizedIdentifier(nestedAccount?.[field]),
+  ]).filter((value): value is string => Boolean(value));
+
+  return [...new Set(identifiers)];
+}
+
+function connectedPageIds(account: any): string[] {
+  const pages = account?.connectedPages || account?.connected_pages;
+  if (!Array.isArray(pages)) return [];
+
+  return [
+    ...new Set(
+      pages
+        .map((page: any) => normalizedIdentifier(page?.id))
+        .filter((value): value is string => Boolean(value))
+    ),
+  ];
+}
+
+function isActiveConnectedAccount(account: any): boolean {
+  if (!account || typeof account !== 'object') return false;
+  const active = account.isActive === true || account.isActive === 'true';
+  return active && (accountIdentifiers(account).length > 0 || connectedPageIds(account).length > 0);
+}
+
+export function getConnectedCommentAccounts(
+  socialMedia: unknown
+): ConnectedCommentAccount[] {
+  if (!Array.isArray(socialMedia)) return [];
+
+  return socialMedia.flatMap((account: any) => {
+    const network = normalizeOutstandNetwork(account?.network || account?.platform);
+    if (
+      !network ||
+      !SUPPORTED_COMMENT_NETWORKS.includes(
+        network as (typeof SUPPORTED_COMMENT_NETWORKS)[number]
+      ) ||
+      !isActiveConnectedAccount(account)
+    ) {
+      return [];
+    }
+
+    return [{
+      network,
+      identifiers: accountIdentifiers(account),
+      pageIds: connectedPageIds(account),
+    }];
+  });
+}
+
+function platformPostBelongsToPage(platformPostId: unknown, pageId: string): boolean {
+  const normalizedPostId = normalizedIdentifier(platformPostId);
+  if (!normalizedPostId) return false;
+
+  return normalizedPostId === pageId || normalizedPostId.startsWith(`${pageId}_`);
+}
+
+export function isPostAccountOwnedBySite(
+  postAccount: any,
+  connectedAccounts: ConnectedCommentAccount[]
+): boolean {
+  const network = normalizeOutstandNetwork(postAccount?.network);
+  if (!network) return false;
+
+  const postIdentifiers = new Set(accountIdentifiers(postAccount));
+  const platformPostId =
+    postAccount?.platformPostId
+    || postAccount?.platform_post_id
+    || postAccount?.socialAccount?.platformPostId
+    || postAccount?.social_account?.platform_post_id;
+
+  return connectedAccounts.some((connectedAccount) => {
+    if (connectedAccount.network !== network) return false;
+
+    const identifierMatch = connectedAccount.identifiers.some((identifier) =>
+      postIdentifiers.has(identifier)
+    );
+    const pageMatch = connectedAccount.pageIds.some((pageId) =>
+      platformPostBelongsToPage(platformPostId, pageId)
+    );
+
+    return identifierMatch || pageMatch;
+  });
+}
+
+export function getOwnedPublishedCommentAccounts(
+  post: any,
+  socialMedia: unknown
+): any[] {
+  const connectedAccounts = getConnectedCommentAccounts(socialMedia);
+  if (connectedAccounts.length === 0) return [];
+
+  return (post?.socialAccounts || []).filter(
+    (account: any) =>
+      account?.network &&
+      SUPPORTED_COMMENT_NETWORKS.includes(account.network.toLowerCase()) &&
+      isAccountPublished(account) &&
+      isPostAccountOwnedBySite(account, connectedAccounts)
+  );
 }
 
 export function getPublishedCommentNetworks(post: any): string[] {

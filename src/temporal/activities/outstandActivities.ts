@@ -5,6 +5,7 @@ import {
   buildOutstandCommentsPath,
   buildSocialPostExternalId,
   extractOutstandPostText,
+  getConnectedCommentAccounts,
   isOutstandClientError,
   isPublishedContentForAnalytics,
   shouldPollPostForAnalytics,
@@ -91,12 +92,7 @@ export async function fetchSitesWithSocialCommentsActivity(): Promise<any[]> {
   }
   
   return (data || []).filter(setting => {
-    // Only sites that have outstand accounts connected
-    if (!setting.social_media || !Array.isArray(setting.social_media) || setting.social_media.length === 0) {
-      return false;
-    }
-    // and maybe some specific comments_inbox flag if exists, for now all with social media
-    return true;
+    return getConnectedCommentAccounts(setting.social_media).length > 0;
   }).map(s => ({ site_id: s.site_id, social_media: s.social_media }));
 }
 

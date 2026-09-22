@@ -5,6 +5,8 @@ import {
   normalizeOutstandNetwork,
   isAccountPublished,
   isOutstandDraftPost,
+  getConnectedCommentAccounts,
+  getOwnedPublishedCommentAccounts,
   getPublishedCommentNetworks,
   buildOutstandCommentsPath,
   isPublishedContentForAnalytics,
@@ -110,6 +112,80 @@ describe('outstandPoll helpers', () => {
           { network: 'instagram', status: 'pending' },
         ],
       })).toEqual(['x']);
+    });
+
+    it('keeps only posts owned by an active connected account', () => {
+      const socialMedia = [
+        {
+          id: 'Lm3jV',
+          platform: 'instagram',
+          network: 'instagram',
+          isActive: true,
+          network_unique_id: '28519188847732336',
+        },
+      ];
+      const ownedAccount = {
+        accountId: 'Lm3jV',
+        network: 'instagram',
+        status: 'published',
+        platformPostId: 'instagram-post-1',
+      };
+
+      expect(getOwnedPublishedCommentAccounts({
+        socialAccounts: [
+          ownedAccount,
+          {
+            id: 'z9bIP',
+            network: 'linkedin',
+            status: 'published',
+            platformPostId: 'urn:li:share:7503888783185117184',
+          },
+        ],
+      }, socialMedia)).toEqual([ownedAccount]);
+    });
+
+    it('rejects same-network posts owned by another account', () => {
+      const socialMedia = [{
+        id: 'site-instagram-account',
+        network: 'instagram',
+        isActive: true,
+      }];
+
+      expect(getOwnedPublishedCommentAccounts({
+        socialAccounts: [{
+          id: 'different-instagram-account',
+          network: 'instagram',
+          status: 'published',
+          platformPostId: 'instagram-post-1',
+        }],
+      }, socialMedia)).toEqual([]);
+    });
+
+    it('matches legacy Facebook pages by platform post prefix', () => {
+      const socialMedia = [{
+        platform: 'facebook',
+        isActive: true,
+        connectedPages: [{ id: '101600695973502' }],
+      }];
+      const facebookAccount = {
+        network: 'facebook',
+        status: 'published',
+        platformPostId: '101600695973502_1047007201431553',
+      };
+
+      expect(getOwnedPublishedCommentAccounts({
+        socialAccounts: [facebookAccount],
+      }, socialMedia)).toEqual([facebookAccount]);
+    });
+
+    it('ignores descriptive profiles without an active connection identity', () => {
+      expect(getConnectedCommentAccounts([
+        {
+          platform: 'linkedin',
+          url: 'https://linkedin.com/company/example',
+          username: 'example',
+        },
+      ])).toEqual([]);
     });
   });
 

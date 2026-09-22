@@ -10,8 +10,9 @@ import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import {
   buildSocialCommentExternalId,
   buildSocialCommentWorkflowId,
-  getPublishedCommentNetworks,
+  getOwnedPublishedCommentAccounts,
   isOutstandDraftPost,
+  normalizeOutstandNetwork,
   shouldPollPostForComments,
 } from './helpers/outstandPoll';
 import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
@@ -106,7 +107,17 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           }
           
           for (const post of posts) {
-            const uniqueNetworks = getPublishedCommentNetworks(post);
+            const ownedSocialAccounts = getOwnedPublishedCommentAccounts(
+              post,
+              site.social_media
+            );
+            const uniqueNetworks = [
+              ...new Set(
+                ownedSocialAccounts
+                  .map((account: any) => normalizeOutstandNetwork(account.network))
+                  .filter(Boolean)
+              ),
+            ];
             
             if (uniqueNetworks.length === 0 || isOutstandDraftPost(post)) {
               continue;
@@ -127,8 +138,8 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
 
               // 2. Fetch replies for each valid published network
               for (const network of uniqueNetworks) {
-                const socialAccount = post.socialAccounts?.find((acc: any) => 
-                  acc.network && acc.network.toLowerCase() === network.toLowerCase()
+                const socialAccount = ownedSocialAccounts.find((account: any) =>
+                  normalizeOutstandNetwork(account.network) === network
                 );
                 const networkPlatformPostId = socialAccount?.platformPostId || socialAccount?.platform_post_id;
 
@@ -148,6 +159,12 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                     }
 
                     const commentNetwork = (comment.network || comment.account?.network || network || 'social').toLowerCase();
+                    if (normalizeOutstandNetwork(commentNetwork) !== network) {
+                      console.warn(
+                        `Skipping comment ${commentId}: returned network ${commentNetwork} does not match owned network ${network}`
+                      );
+                      continue;
+                    }
                     
                     const authorObj = (typeof comment.author === 'object' && comment.author) || 
                                       (typeof comment.from === 'object' && comment.from) || 
