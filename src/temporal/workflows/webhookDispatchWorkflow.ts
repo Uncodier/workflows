@@ -1,4 +1,6 @@
 import { proxyActivities } from '@temporalio/workflow';
+import { resolveWebhookEventNames } from './helpers/webhookEventName';
+import { resolveWebhookRecord } from './helpers/webhookRecord';
 
 interface WebhookDispatchInput {
   site_id: string;
@@ -6,6 +8,7 @@ interface WebhookDispatchInput {
   event_type: 'CREATE' | 'UPDATE' | 'DELETE' | string;
   object_id: string;
   event?: string; // explicit event name (e.g., tasks.created)
+  record?: unknown; // DB webhook snapshot; required to deliver deleted records
   subscription_ids?: string[]; // limit to specific subscriptions
   // If true, run immediately on main task queue; otherwise normal background is also on queue.
   // Placeholder for future priority/queue overrides.
@@ -57,7 +60,15 @@ const {
 } = activities as unknown as Activities;
 
 export async function webhookDispatchWorkflow(input: WebhookDispatchInput): Promise<WebhookDispatchResult> {
-  const { site_id, table, event_type, object_id, event, subscription_ids } = input;
+  const {
+    site_id,
+    table,
+    event_type,
+    object_id,
+    event,
+    record: eventRecord,
+    subscription_ids,
+  } = input;
 
   console.log(`🔔 WebhookDispatchWorkflow start: site=${site_id} event=${event_type} table=${table} id=${object_id}`);
 
@@ -69,11 +80,13 @@ export async function webhookDispatchWorkflow(input: WebhookDispatchInput): Prom
   }
 
   // 2) Get subscriptions for event type
-  const normalizedEvent = (event || `${table}.${event_type}`).toLowerCase();
-  const altEvent = normalizedEvent.replace(/s\./, '.'); // tasks.created -> task.created
+  const {
+    canonical: normalizedEvent,
+    candidates: subscriptionEvents,
+  } = resolveWebhookEventNames({ table, eventType: event_type, event });
   const subscriptions = await getActiveWebhookSubscriptionsActivity({
     site_id,
-    event_types: Array.from(new Set([normalizedEvent, altEvent])),
+    event_types: subscriptionEvents,
     subscription_ids,
   });
   console.log(`🧾 Subscriptions found: ${subscriptions.length}`);
@@ -97,8 +110,13 @@ export async function webhookDispatchWorkflow(input: WebhookDispatchInput): Prom
     endpointIdToSubscription.set(sub.endpoint_id, { id: sub.id });
   }
 
-  // 3) Fetch the object record
-  const record = await fetchRecordByTableAndIdActivity({ table, id: object_id });
+  // 3) Prefer the database event snapshot. Deleted rows cannot be fetched after commit.
+  const record = await resolveWebhookRecord({
+    record: eventRecord,
+    table,
+    objectId: object_id,
+    fetchRecord: fetchRecordByTableAndIdActivity,
+  });
 
   // 4) Deliver to all endpoints that have a subscription
   const targetEndpoints = endpoints.filter((e) => endpointIdToSubscription.has(e.id));
