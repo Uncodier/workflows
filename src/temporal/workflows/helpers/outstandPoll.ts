@@ -24,6 +24,16 @@ export interface ConnectedCommentAccount {
   pageIds: string[];
 }
 
+export interface SiteSocialMediaSettings {
+  site_id: string;
+  social_media: unknown;
+}
+
+export interface PostSiteOwnership {
+  siteId: string;
+  socialAccounts: any[];
+}
+
 /**
  * Normalizes a network string for the Outstand API.
  * e.g., 'twitter' -> 'x'
@@ -194,6 +204,22 @@ export function getOwnedPublishedCommentAccounts(
       isAccountPublished(account) &&
       isPostAccountOwnedBySite(account, connectedAccounts)
   );
+}
+
+export function getPostSiteOwnerships(
+  post: any,
+  sites: SiteSocialMediaSettings[]
+): PostSiteOwnership[] {
+  return sites.flatMap((site) => {
+    const socialAccounts = getOwnedPublishedCommentAccounts(
+      post,
+      site.social_media
+    );
+
+    return socialAccounts.length > 0
+      ? [{ siteId: site.site_id, socialAccounts }]
+      : [];
+  });
 }
 
 export function getPublishedCommentNetworks(post: any): string[] {

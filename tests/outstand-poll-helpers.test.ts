@@ -7,6 +7,7 @@ import {
   isOutstandDraftPost,
   getConnectedCommentAccounts,
   getOwnedPublishedCommentAccounts,
+  getPostSiteOwnerships,
   getPublishedCommentNetworks,
   buildOutstandCommentsPath,
   isPublishedContentForAnalytics,
@@ -159,6 +160,40 @@ describe('outstandPoll helpers', () => {
           platformPostId: 'instagram-post-1',
         }],
       }, socialMedia)).toEqual([]);
+    });
+
+    it('maps a shared-organization post only to its owning site', () => {
+      const post = {
+        socialAccounts: [{
+          id: 'makinari-linkedin-account',
+          network: 'linkedin',
+          status: 'published',
+          platformPostId: 'urn:li:share:7504314017792995328',
+        }],
+      };
+      const sites = [
+        {
+          site_id: 'pigs-site',
+          social_media: [{
+            id: 'pigs-instagram-account',
+            network: 'instagram',
+            isActive: true,
+          }],
+        },
+        {
+          site_id: 'makinari-site',
+          social_media: [{
+            id: 'makinari-linkedin-account',
+            network: 'linkedin',
+            isActive: true,
+          }],
+        },
+      ];
+
+      expect(getPostSiteOwnerships(post, sites)).toEqual([{
+        siteId: 'makinari-site',
+        socialAccounts: post.socialAccounts,
+      }]);
     });
 
     it('matches legacy Facebook pages by platform post prefix', () => {

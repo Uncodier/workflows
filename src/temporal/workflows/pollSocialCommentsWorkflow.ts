@@ -10,7 +10,7 @@ import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import {
   buildSocialCommentExternalId,
   buildSocialCommentWorkflowId,
-  getOwnedPublishedCommentAccounts,
+  getPostSiteOwnerships,
   isOutstandDraftPost,
   normalizeOutstandNetwork,
   shouldPollPostForComments,
@@ -107,10 +107,9 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           }
           
           for (const post of posts) {
-            const ownedSocialAccounts = getOwnedPublishedCommentAccounts(
-              post,
-              site.social_media
-            );
+            const ownership = getPostSiteOwnerships(post, sites)
+              .find((candidate) => candidate.siteId === siteId);
+            const ownedSocialAccounts = ownership?.socialAccounts || [];
             const uniqueNetworks = [
               ...new Set(
                 ownedSocialAccounts
@@ -134,7 +133,11 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
             
             try {
               // 1. Upsert content to ensure we have a reference for any comments
-              const contentId = await upsertContentFromOutstandPostActivity(siteId, post);
+              const contentId = await upsertContentFromOutstandPostActivity(
+                siteId,
+                post,
+                site.social_media
+              );
 
               // 2. Fetch replies for each valid published network
               for (const network of uniqueNetworks) {

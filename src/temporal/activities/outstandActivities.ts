@@ -3,9 +3,9 @@ import { supabaseServiceRole as supabaseAdmin } from '../../lib/supabase/client'
 import { handleOutstandApiError } from './outstandHelpers';
 import {
   buildOutstandCommentsPath,
-  buildSocialPostExternalId,
   extractOutstandPostText,
   getConnectedCommentAccounts,
+  getOwnedPublishedCommentAccounts,
   isOutstandClientError,
   isPublishedContentForAnalytics,
   shouldPollPostForAnalytics,
@@ -14,6 +14,14 @@ import {
   claimSyncedObjectActivity,
   finishSyncedObjectClaimActivity,
 } from './syncedObjectActivities';
+import {
+  buildOutstandContentExternalId,
+  buildOutstandContentHash,
+  buildOwnedOutstandTags,
+  mergeOutstandMetadata,
+  mergeOutstandTags,
+  normalizeOutstandContent,
+} from './outstandContentIdentity';
 
 function tenantSchema() {
   return process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA || process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
@@ -309,28 +317,21 @@ export async function upsertContentPerformanceActivity(
   }
 }
 
-export async function upsertContentFromOutstandPostActivity(siteId: string, post: any): Promise<string | null> {
+export async function upsertContentFromOutstandPostActivity(
+  siteId: string,
+  post: any,
+  socialMedia: unknown
+): Promise<string | null> {
   const outstandId = post.id;
   if (!outstandId) return null;
 
   try {
-    // 1. Check if it already exists (same as resolveContentIdForOutstandPostActivity)
-    const { data: existing, error: searchError } = await supabaseAdmin
-      .schema(process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA || process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public')
-      .from('content')
-      .select('id')
-      .eq('site_id', siteId)
-      .contains('tags', [`outstand_id_${outstandId}`])
-      .limit(1)
-      .maybeSingle();
-
-    if (searchError) {
-      console.error(`[upsertContentFromOutstandPost] Error finding content for post ${outstandId}:`, searchError);
+    const ownedSocialAccounts = getOwnedPublishedCommentAccounts(post, socialMedia);
+    if (ownedSocialAccounts.length === 0) {
+      console.warn(
+        `[upsertContentFromOutstandPost] Skipping post ${outstandId}: no published account belongs to site ${siteId}`
+      );
       return null;
-    }
-
-    if (existing?.id) {
-      return existing.id;
     }
 
     const postText = extractOutstandPostText(post);
@@ -339,32 +340,81 @@ export async function upsertContentFromOutstandPostActivity(siteId: string, post
       return null;
     }
 
-    const externalId = buildSocialPostExternalId(String(outstandId));
+    const normalizedPostText = normalizeOutstandContent(postText);
+    const contentHash = buildOutstandContentHash(normalizedPostText);
+    const externalId = buildOutstandContentExternalId(contentHash);
+    const tags = buildOwnedOutstandTags(String(outstandId), ownedSocialAccounts);
+
+    // Match both stable external IDs and identical logical content. Outstand can
+    // return one record per network for the same post.
+    const { data: candidates, error: searchError } = await supabaseAdmin
+      .schema(process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA || process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public')
+      .from('content')
+      .select('id, tags, text, description, metadata')
+      .eq('site_id', siteId)
+      .order('created_at', { ascending: true })
+      .limit(1000);
+
+    if (searchError) {
+      console.error(`[upsertContentFromOutstandPost] Error finding content for post ${outstandId}:`, searchError);
+      return null;
+    }
+
+    const existing = (candidates || []).find((candidate: any) => {
+      const hasExternalId = candidate.tags?.includes(`outstand_id_${outstandId}`);
+      const hasOutstandEvidence = candidate.tags?.some(
+        (tag: string) => tag === 'outstand_only' || tag.startsWith('outstand_id_')
+      ) || candidate.metadata?.source === 'outstand';
+      const candidateText = candidate.text?.trim()
+        ? candidate.text
+        : candidate.description || '';
+      return hasExternalId
+        || (
+          hasOutstandEvidence
+          && normalizeOutstandContent(candidateText) === normalizedPostText
+        );
+    });
+
+    if (existing?.id) {
+      const { error: mergeError } = await supabaseAdmin
+        .schema(process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA || process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public')
+        .from('content')
+        .update({
+          tags: mergeOutstandTags(existing.tags, tags),
+          metadata: mergeOutstandMetadata(
+            existing.metadata,
+            contentHash,
+            String(outstandId)
+          ),
+        })
+        .eq('id', existing.id)
+        .eq('site_id', siteId);
+
+      if (mergeError) {
+        console.error(
+          `[upsertContentFromOutstandPost] Error consolidating post ${outstandId}:`,
+          mergeError
+        );
+        return null;
+      }
+
+      return existing.id;
+    }
+
     const claim = await claimSyncedObjectActivity({
       siteId,
       objectType: 'social_post',
       externalId,
       provider: 'outstand',
-      metadata: { outstand_post_id: outstandId },
+      metadata: {
+        outstand_post_id: outstandId,
+        source_content_hash: contentHash,
+      },
     });
 
     if (!claim.claimed || !claim.claimToken) {
       return null;
     }
-
-    const platforms = post.socialAccounts?.map((a: any) => a.network || (typeof a === "string" ? a : null)).filter(Boolean) || [];
-    const publishedTags = platforms.map((p: string) => `published_${p}`);
-    
-    // Some basic platform post IDs if outstand provides them at the root level
-    const platformPostTags: string[] = [];
-    post.socialAccounts?.forEach((acc: any) => {
-      if (acc.platformPostId) {
-        platformPostTags.push(`platform_post_id_${acc.platformPostId}`);
-        platformPostTags.push(`platform_post_id_${acc.network}_${acc.platformPostId}`);
-      }
-    });
-
-    const tags = ["outstand_only", `outstand_id_${outstandId}`, ...publishedTags, ...platformPostTags];
     const status = post.isDraft ? "draft" : (post.scheduledAt ? "approved" : "published");
 
     const insertData = {
@@ -378,6 +428,7 @@ export async function upsertContentFromOutstandPostActivity(siteId: string, post
       updated_at: post.createdAt || new Date().toISOString(),
       published_at: post.publishedAt || null,
       tags,
+      metadata: mergeOutstandMetadata(null, contentHash, String(outstandId)),
       word_count: postText.split(" ").length,
       estimated_reading_time: 1,
     };
