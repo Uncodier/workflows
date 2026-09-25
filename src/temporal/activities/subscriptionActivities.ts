@@ -13,6 +13,65 @@ export async function fetchDueSubscriptionsActivity(): Promise<Subscription[]> {
   return fetchDueSubscriptions(supabase);
 }
 
+export interface SubscriptionContact {
+  email: string | null;
+  name: string;
+  language: string;
+}
+
+export async function fetchSubscriptionContactsActivity(
+  subscriptions: Subscription[]
+): Promise<Record<string, SubscriptionContact>> {
+  const supabase = getSupabaseService().getClient();
+  const buyerIds = [...new Set(
+    subscriptions.map((subscription) => subscription.buyer_user_id).filter(Boolean)
+  )] as string[];
+  const leadIds = [...new Set(
+    subscriptions.map((subscription) => subscription.lead_id).filter(Boolean)
+  )] as string[];
+
+  const [profileResult, leadResult] = await Promise.all([
+    buyerIds.length > 0
+      ? supabase.from('profiles').select('id, email, name').in('id', buyerIds)
+      : Promise.resolve({ data: [], error: null }),
+    leadIds.length > 0
+      ? supabase.from('leads').select('id, email, name, language').in('id', leadIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (profileResult.error || leadResult.error) {
+    const error = profileResult.error || leadResult.error;
+    throw new Error(`Failed to fetch subscription contacts: ${error?.message}`);
+  }
+
+  const profiles = new Map((profileResult.data || []).map((row) => [row.id, row]));
+  const leads = new Map((leadResult.data || []).map((row) => [row.id, row]));
+  const result: Record<string, SubscriptionContact> = {};
+
+  for (const subscription of subscriptions) {
+    const profile = subscription.buyer_user_id
+      ? profiles.get(subscription.buyer_user_id)
+      : undefined;
+    const lead = subscription.lead_id
+      ? leads.get(subscription.lead_id)
+      : undefined;
+
+    result[subscription.id] = profile
+      ? {
+          email: profile.email || null,
+          name: profile.name || 'Customer',
+          language: 'es-MX',
+        }
+      : {
+          email: lead?.email || null,
+          name: lead?.name || 'Customer',
+          language: lead?.language || 'es-MX',
+        };
+  }
+
+  return result;
+}
+
 export interface ProcessSubscriptionRenewalResult {
   sale_id: string;
   amount: number;
@@ -77,23 +136,24 @@ export async function processSubscriptionRenewalActivity(sub: Subscription): Pro
 export interface NotifySubscriptionRenewalParams {
   sub: Subscription;
   renewalData: ProcessSubscriptionRenewalResult;
+  contact?: SubscriptionContact;
 }
 
 export async function notifySubscriptionRenewalActivity(params: NotifySubscriptionRenewalParams): Promise<void> {
   const { sub, renewalData } = params;
   const supabase = getSupabaseService().getClient();
 
-  let userEmail = null;
-  let userName = 'Customer';
-  let userLang = 'es-MX';
+  let userEmail = params.contact?.email || null;
+  let userName = params.contact?.name || 'Customer';
+  let userLang = params.contact?.language || 'es-MX';
 
-  if (sub.buyer_user_id) {
+  if (!params.contact && sub.buyer_user_id) {
     const { data: profile } = await supabase.from('profiles').select('email, name').eq('id', sub.buyer_user_id).maybeSingle();
     if (profile?.email) {
       userEmail = profile.email;
       if (profile.name) userName = profile.name;
     }
-  } else if (sub.lead_id) {
+  } else if (!params.contact && sub.lead_id) {
     const { data: lead } = await supabase.from('leads').select('email, name, language').eq('id', sub.lead_id).maybeSingle();
     if (lead?.email) {
       userEmail = lead.email;

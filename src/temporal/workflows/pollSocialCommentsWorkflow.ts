@@ -28,6 +28,7 @@ const {
   checkIfImportTriggeredActivity,
   markImportTriggeredActivity,
   claimSyncedObjectActivity,
+  claimSyncedObjectsBatchActivity,
   finishSyncedObjectClaimActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.NETWORK,
@@ -37,6 +38,8 @@ const {
 export async function pollSocialCommentsWorkflow(): Promise<any> {
   const workflowId = 'pollSocialCommentsWorkflow';
   const useAgeFiltering = patched('poll-social-comments-age-filter-v1');
+  const useBucketCadence = patched('poll-social-comments-bucket-cadence-v2');
+  const useBatchClaims = patched('poll-social-comments-batch-claims-v1');
   patched('poll-social-comments-safe-identifiers-v1');
   
   await logWorkflowExecutionActivity({
@@ -98,7 +101,11 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           // First pass to see if there are any recent posts on this page
           if (useAgeFiltering) {
             for (const post of posts) {
-              const { isTooOld } = shouldPollPostForComments(post, nowMs);
+              const { isTooOld } = shouldPollPostForComments(
+                post,
+                nowMs,
+                useBucketCadence
+              );
               if (!isTooOld) {
                 pageHasRecentPosts = true;
                 break;
@@ -123,7 +130,11 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
             }
 
             if (useAgeFiltering) {
-              const { shouldPoll, isTooOld } = shouldPollPostForComments(post, nowMs);
+              const { shouldPoll, isTooOld } = shouldPollPostForComments(
+                post,
+                nowMs,
+                useBucketCadence
+              );
               if (isTooOld || !shouldPoll) {
                 continue;
               }
@@ -153,6 +164,19 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                   if (comments.length === 0) {
                     continue;
                   }
+
+                  const commentCandidates = new Map<string, {
+                    comment: any;
+                    commentId: string;
+                    commentText: string;
+                    origin: string;
+                    stableCommentId: string;
+                    externalId: string;
+                    handle: string;
+                    authorId: string;
+                    profileUrl: string;
+                    platformCommentId: unknown;
+                  }>();
 
                   for (const comment of comments) {
                     const commentText = comment.text || comment.message || '';
@@ -191,18 +215,65 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                     const origin = commentNetwork === 'twitter' ? 'x' : commentNetwork;
                     const stableCommentId = String(platformCommentId || commentId);
                     const externalId = buildSocialCommentExternalId(origin, stableCommentId);
-                    const claim = await claimSyncedObjectActivity({
-                      siteId,
-                      objectType: 'social_comment',
+
+                    commentCandidates.set(externalId, {
+                      comment,
+                      commentId: String(commentId),
+                      commentText,
+                      origin,
+                      stableCommentId,
                       externalId,
-                      provider: origin,
+                      handle,
+                      authorId,
+                      profileUrl,
+                      platformCommentId,
+                    });
+                  }
+
+                  if (commentCandidates.size === 0) {
+                    continue;
+                  }
+
+                  const claimRequests = [...commentCandidates.values()].map(
+                    (candidate) => ({
+                      siteId,
+                      objectType: 'social_comment' as const,
+                      externalId: candidate.externalId,
+                      provider: candidate.origin,
                       metadata: {
-                        platform_comment_id: platformCommentId || commentId,
+                        platform_comment_id:
+                          candidate.platformCommentId || candidate.commentId,
                         outstand_post_id: post.id,
                       },
-                    });
+                    })
+                  );
+                  const claims = useBatchClaims
+                    ? await claimSyncedObjectsBatchActivity(claimRequests)
+                    : [];
+                  if (!useBatchClaims) {
+                    for (const request of claimRequests) {
+                      claims.push(await claimSyncedObjectActivity(request));
+                    }
+                  }
+                  const claimsByExternalId = new Map(
+                    claims.map((claim) => [claim.externalId, claim])
+                  );
 
-                    if (!claim.claimed || !claim.claimToken) {
+                  for (const candidate of commentCandidates.values()) {
+                    const {
+                      comment,
+                      commentId,
+                      commentText,
+                      origin,
+                      stableCommentId,
+                      externalId,
+                      handle,
+                      authorId,
+                      profileUrl,
+                      platformCommentId,
+                    } = candidate;
+                    const claim = claimsByExternalId.get(externalId);
+                    if (!claim?.claimed || !claim.claimToken) {
                       continue;
                     }
 
@@ -254,7 +325,14 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                         status: 'error',
                         errorMessage: startError instanceof Error ? startError.message : String(startError),
                       });
-                      throw startError;
+                      console.error(
+                        `Failed to start ingestion for comment ${commentId}:`,
+                        startError
+                      );
+                      if (!useBatchClaims) {
+                        throw startError;
+                      }
+                      continue;
                     }
                     
                     processedComments++;

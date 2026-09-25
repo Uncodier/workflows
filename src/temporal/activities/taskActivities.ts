@@ -19,40 +19,64 @@ export interface TaskMember {
   tz?: string;
 }
 
-export async function getTaskMembersActivity(task: Task): Promise<TaskMember[]> {
+export async function getTaskMembersBatchActivity(
+  tasks: Task[]
+): Promise<Record<string, TaskMember[]>> {
   const supabase = getSupabaseService().getClient();
-  const members: TaskMember[] = [];
+  const leadIds = [...new Set(tasks.map((task) => task.lead_id).filter(Boolean))] as string[];
+  const assigneeIds = [...new Set(tasks.map((task) => task.assignee).filter(Boolean))] as string[];
 
-  // Get lead
-  if (task.lead_id) {
-    const { data: lead, error: leadError } = await supabase.from('leads').select('email, name, language').eq('id', task.lead_id).maybeSingle();
-    if (leadError) console.error(`Error fetching lead for task ${task.id}:`, leadError);
-    if (lead?.email) {
-      members.push({ 
-        email: lead.email, 
-        name: lead.name || 'Customer', 
-        role: 'lead',
-        lang: lead.language
-      });
-    }
+  const [leadResult, profileResult] = await Promise.all([
+    leadIds.length > 0
+      ? supabase.from('leads').select('id, email, name, language').in('id', leadIds)
+      : Promise.resolve({ data: [], error: null }),
+    assigneeIds.length > 0
+      ? supabase.from('profiles').select('id, email, name, language, timezone').in('id', assigneeIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (leadResult.error) {
+    throw new Error(`Failed to fetch task leads: ${leadResult.error.message}`);
+  }
+  if (profileResult.error) {
+    throw new Error(`Failed to fetch task assignees: ${profileResult.error.message}`);
   }
 
-  // Get assignee
-  if (task.assignee) {
-    const { data: profile, error: profileError } = await supabase.from('profiles').select('email, name, language, timezone').eq('id', task.assignee).maybeSingle();
-    if (profileError) console.error(`Error fetching profile for task ${task.id}:`, profileError);
+  const leads = new Map((leadResult.data || []).map((lead) => [lead.id, lead]));
+  const profiles = new Map((profileResult.data || []).map((profile) => [profile.id, profile]));
+  const result: Record<string, TaskMember[]> = {};
+
+  for (const task of tasks) {
+    const members: TaskMember[] = [];
+    const lead = task.lead_id ? leads.get(task.lead_id) : undefined;
+    if (lead?.email) {
+      members.push({
+        email: lead.email,
+        name: lead.name || 'Customer',
+        role: 'lead',
+        lang: lead.language,
+      });
+    }
+
+    const profile = task.assignee ? profiles.get(task.assignee) : undefined;
     if (profile?.email) {
-      members.push({ 
-        email: profile.email, 
-        name: profile.name || 'Team Member', 
+      members.push({
+        email: profile.email,
+        name: profile.name || 'Team Member',
         role: 'assignee',
         lang: profile.language,
-        tz: profile.timezone
+        tz: profile.timezone,
       });
     }
+    result[task.id] = members;
   }
 
-  return members;
+  return result;
+}
+
+export async function getTaskMembersActivity(task: Task): Promise<TaskMember[]> {
+  const membersByTask = await getTaskMembersBatchActivity([task]);
+  return membersByTask[task.id] || [];
 }
 
 export interface FormatTaskNotificationParams {
@@ -205,30 +229,15 @@ export interface MarkTaskReminderSentParams {
 
 export async function markTaskReminderSentActivity(params: MarkTaskReminderSentParams): Promise<void> {
   const supabase = getSupabaseService().getClient();
-  
-  const { data: task, error: fetchError } = await supabase
-    .from('tasks')
-    .select('metadata')
-    .eq('id', params.task_id)
-    .single();
 
-  if (fetchError) {
-    console.error(`❌ Failed to fetch task metadata for task ${params.task_id}:`, fetchError);
-    throw new Error(`Failed to fetch task metadata: ${fetchError.message}`);
-  }
+  const { error } = await supabase.rpc('mark_task_reminder_sent', {
+    p_task_id: params.task_id,
+    p_time_window_hours: params.timeWindowHours,
+  });
 
-  const metadata = task?.metadata || {};
-  const flagKey = `_reminder_${params.timeWindowHours}h_sent`;
-  metadata[flagKey] = true;
-
-  const { error: updateError } = await supabase
-    .from('tasks')
-    .update({ metadata })
-    .eq('id', params.task_id);
-
-  if (updateError) {
-    console.error(`❌ Failed to update task metadata for task ${params.task_id}:`, updateError);
-    throw new Error(`Failed to update task metadata: ${updateError.message}`);
+  if (error) {
+    console.error(`❌ Failed to update task metadata for task ${params.task_id}:`, error);
+    throw new Error(`Failed to update task metadata: ${error.message}`);
   }
   
   console.log(`✅ Marked ${params.timeWindowHours}h reminder as sent for task ${params.task_id}`);

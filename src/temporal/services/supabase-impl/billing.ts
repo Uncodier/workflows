@@ -67,45 +67,17 @@ export async function fetchBillingForSite(client: SupabaseClient, siteId: string
 export async function fetchSitesWithoutBilling(client: SupabaseClient): Promise<string[]> {
   console.log('🔍 Fetching sites needing billing initialization...');
 
-  const { data: sites, error: sitesError } = await client
-    .from('sites')
-    .select('id');
+  const { data, error } = await client.rpc(
+    'fetch_sites_needing_billing_initialization'
+  );
 
-  if (sitesError) {
-    console.error('❌ Error fetching sites:', sitesError);
-    throw new Error(`Failed to fetch sites: ${sitesError.message}`);
+  if (error) {
+    throw new Error(`Failed to fetch sites needing billing initialization: ${error.message}`);
   }
 
-  const { data: billingSites, error: billingError } = await client
-    .from('billing')
-    .select('site_id');
-
-  if (billingError) {
-    console.error('❌ Error fetching billing sites:', billingError);
-    throw new Error(`Failed to fetch billing sites: ${billingError.message}`);
-  }
-
-  // Sites that have a billing record but are missing the initial payment record
-  // are also included so a partial failure can be retried.
-  const { data: initialPayments, error: paymentsError } = await client
-    .from('payments')
-    .select('site_id')
-    .eq('payment_method', 'initial_credit');
-
-  if (paymentsError) {
-    console.error('❌ Error fetching initial payments:', paymentsError);
-    throw new Error(`Failed to fetch initial payments: ${paymentsError.message}`);
-  }
-
-  const billingSiteIds = new Set(billingSites?.map(b => b.site_id) || []);
-  const initializedSiteIds = new Set(initialPayments?.map(p => p.site_id) || []);
-
-  const sitesNeedingInit = (sites || [])
-    .filter(site => !billingSiteIds.has(site.id) || !initializedSiteIds.has(site.id))
-    .map(site => site.id);
-
-  console.log(`✅ Found ${sitesNeedingInit.length} sites needing billing initialization`);
-  return sitesNeedingInit;
+  const siteIds = (data || []).map((row: { site_id: string }) => row.site_id);
+  console.log(`✅ Found ${siteIds.length} sites needing billing initialization`);
+  return siteIds;
 }
 
 export async function createBillingRecord(

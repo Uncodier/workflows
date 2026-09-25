@@ -19,60 +19,34 @@ export async function fetchCronStatus(client: SupabaseClient, activityName: stri
 
 export async function upsertCronStatus(client: SupabaseClient, cronStatusRecord: any): Promise<void> {
   console.log(`🔍 Upserting cron status for site ${cronStatusRecord.site_id}...`);
-
-  // Try to find existing record
-  const { data: existingRecord, error: selectError } = await client
-    .from('cron_status')
-    .select('id')
-    .eq('site_id', cronStatusRecord.site_id)
-    .eq('activity_name', cronStatusRecord.activity_name)
-    .single();
-
-  if (selectError && selectError.code !== 'PGRST116') { // PGRST116 = no rows returned
-    console.error('❌ Error checking existing cron status:', selectError);
-    throw new Error(`Failed to check existing cron status: ${selectError.message}`);
-  }
-
-  if (existingRecord) {
-    // Update existing record
-    console.log(`📝 Updating existing cron status record ${existingRecord.id}...`);
-    const { error: updateError } = await client
-      .from('cron_status')
-      .update({
-        ...cronStatusRecord,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', existingRecord.id);
-
-    if (updateError) {
-      console.error('❌ Error updating cron status:', updateError);
-      throw new Error(`Failed to update cron status: ${updateError.message}`);
-    }
-    console.log('✅ Successfully updated cron status record');
-  } else {
-    // Insert new record
-    console.log('📝 Inserting new cron status record...');
-    const { error: insertError } = await client
-      .from('cron_status')
-      .insert({
-        ...cronStatusRecord,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      });
-
-    if (insertError) {
-      console.error('❌ Error inserting cron status:', insertError);
-      throw new Error(`Failed to insert cron status: ${insertError.message}`);
-    }
-    console.log('✅ Successfully inserted new cron status record');
-  }
+  await batchUpsertCronStatus(client, [cronStatusRecord]);
 }
 
 export async function batchUpsertCronStatus(client: SupabaseClient, records: any[]): Promise<void> {
+  if (records.length === 0) return;
+
   console.log(`📝 Batch upserting ${records.length} cron status records...`);
-  for (const record of records) {
-    await upsertCronStatus(client, record);
+  const updatedAt = new Date().toISOString();
+  const normalizedRecords = records.map((record) => ({
+    ...record,
+    status: typeof record.status === 'string'
+      ? record.status.toUpperCase()
+      : record.status,
+    updated_at: updatedAt,
+  }));
+
+  const { error } = await client
+    .from('cron_status')
+    .upsert(normalizedRecords, {
+      onConflict: 'site_id,activity_name',
+      ignoreDuplicates: false,
+    });
+
+  if (error) {
+    console.error('❌ Error batch upserting cron status:', error);
+    throw new Error(`Failed to batch upsert cron status: ${error.message}`);
   }
+
   console.log(`✅ Successfully processed ${records.length} cron status records`);
 }
 

@@ -1,8 +1,9 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { patched, proxyActivities } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 const {
   fetchUpcomingReservationsActivity,
+  getReservationNotificationContextsActivity,
   getReservationMembersActivity,
   translateAndFormatNotificationActivity,
   sendReservationNotificationActivity,
@@ -17,6 +18,7 @@ const {
 
 export async function processReservationsWorkflow(): Promise<{ processed: number; errors: number }> {
   console.log('🔄 Starting processReservationsWorkflow (Cron)...');
+  const useBatchContextLookup = patched('reservation-reminders-batch-context-v1');
 
   let totalProcessed = 0;
   let totalErrors = 0;
@@ -24,17 +26,31 @@ export async function processReservationsWorkflow(): Promise<{ processed: number
   for (const timeWindowHours of [24, 1]) {
     try {
       const reservations = await fetchUpcomingReservationsActivity({ timeWindowHours });
+      const contexts = useBatchContextLookup
+        ? await getReservationNotificationContextsActivity(reservations)
+        : {};
       
       for (const reservation of reservations) {
         try {
-          const members = await getReservationMembersActivity(reservation);
+          const context = contexts[reservation.id];
+          const members = useBatchContextLookup
+            ? context?.members || []
+            : await getReservationMembersActivity(reservation);
           
           for (const member of members) {
-            const { subject, message } = await translateAndFormatNotificationActivity({
-              reservation,
-              member,
-              timeWindowHours
-            });
+            const { subject, message } = useBatchContextLookup
+              ? await translateAndFormatNotificationActivity({
+                  reservation,
+                  member,
+                  timeWindowHours,
+                  serviceName: context?.serviceName ?? '',
+                  locationInfo: context?.locationInfo ?? '',
+                })
+              : await translateAndFormatNotificationActivity({
+                  reservation,
+                  member,
+                  timeWindowHours,
+                });
             
             await sendReservationNotificationActivity({
               email: member.email,

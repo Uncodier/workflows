@@ -19,48 +19,116 @@ export interface ReservationMember {
   tz?: string;
 }
 
-export async function getReservationMembersActivity(reservation: Reservation): Promise<ReservationMember[]> {
-  const supabase = getSupabaseService().getClient();
-  const members: ReservationMember[] = [];
+export interface ReservationNotificationContext {
+  members: ReservationMember[];
+  serviceName: string;
+  locationInfo: string;
+}
 
-  if (reservation.lead_id) {
-    const { data: lead } = await supabase.from('leads').select('email, name, language').eq('id', reservation.lead_id).maybeSingle();
+export async function getReservationNotificationContextsActivity(
+  reservations: Reservation[]
+): Promise<Record<string, ReservationNotificationContext>> {
+  const supabase = getSupabaseService().getClient();
+  const leadIds = [...new Set(reservations.map((item) => item.lead_id).filter(Boolean))] as string[];
+  const buyerIds = [...new Set(reservations.map((item) => item.buyer_user_id).filter(Boolean))] as string[];
+  const itemIds = [...new Set(reservations.map((item) => item.catalog_item_id).filter(Boolean))] as string[];
+  const locationIds = [...new Set(reservations.map((item) => item.location_id).filter(Boolean))] as string[];
+
+  const [leadResult, profileResult, itemResult, locationResult] = await Promise.all([
+    leadIds.length > 0
+      ? supabase.from('leads').select('id, email, name, language').in('id', leadIds)
+      : Promise.resolve({ data: [], error: null }),
+    buyerIds.length > 0
+      ? supabase.from('profiles').select('id, email, name').in('id', buyerIds)
+      : Promise.resolve({ data: [], error: null }),
+    itemIds.length > 0
+      ? supabase.from('catalog_items').select('id, name').in('id', itemIds)
+      : Promise.resolve({ data: [], error: null }),
+    locationIds.length > 0
+      ? supabase.from('locations').select('id, name, address').in('id', locationIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const queryError = leadResult.error
+    || profileResult.error
+    || itemResult.error
+    || locationResult.error;
+  if (queryError) {
+    throw new Error(`Failed to enrich reservation reminders: ${queryError.message}`);
+  }
+
+  const leads = new Map((leadResult.data || []).map((row) => [row.id, row]));
+  const profiles = new Map((profileResult.data || []).map((row) => [row.id, row]));
+  const items = new Map((itemResult.data || []).map((row) => [row.id, row]));
+  const locations = new Map((locationResult.data || []).map((row) => [row.id, row]));
+  const result: Record<string, ReservationNotificationContext> = {};
+
+  for (const reservation of reservations) {
+    const members: ReservationMember[] = [];
+    const lead = reservation.lead_id ? leads.get(reservation.lead_id) : undefined;
     if (lead?.email) {
-      members.push({ 
-        email: lead.email, 
-        name: lead.name || 'Customer', 
+      members.push({
+        email: lead.email,
+        name: lead.name || 'Customer',
         role: 'lead',
         lang: lead.language,
-        tz: 'America/Mexico_City'
+        tz: 'America/Mexico_City',
       });
     }
-  }
 
-  if (reservation.buyer_user_id) {
-    const { data: profile } = await supabase.from('profiles').select('email, name').eq('id', reservation.buyer_user_id).maybeSingle();
-    if (profile?.email) {
-      members.push({ email: profile.email, name: profile.name || 'Buyer', role: 'buyer' });
+    const buyer = reservation.buyer_user_id
+      ? profiles.get(reservation.buyer_user_id)
+      : undefined;
+    if (buyer?.email) {
+      members.push({
+        email: buyer.email,
+        name: buyer.name || 'Buyer',
+        role: 'buyer',
+      });
     }
+
+    const item = reservation.catalog_item_id
+      ? items.get(reservation.catalog_item_id)
+      : undefined;
+    const location = reservation.location_id
+      ? locations.get(reservation.location_id)
+      : undefined;
+    result[reservation.id] = {
+      members,
+      serviceName: item?.name || '',
+      locationInfo: reservation.channel === 'digital'
+        ? 'Reunión en línea (Digital Meet Room)'
+        : location
+          ? `${location.name}${location.address ? ` - ${location.address}` : ''}`
+          : '',
+    };
   }
 
-  return members;
+  return result;
+}
+
+export async function getReservationMembersActivity(reservation: Reservation): Promise<ReservationMember[]> {
+  const contexts = await getReservationNotificationContextsActivity([reservation]);
+  return contexts[reservation.id]?.members || [];
 }
 
 export interface FormatNotificationParams {
   reservation: Reservation;
   member: ReservationMember;
   timeWindowHours: number;
+  serviceName?: string;
+  locationInfo?: string;
 }
 
 export async function translateAndFormatNotificationActivity(params: FormatNotificationParams): Promise<{ subject: string, message: string }> {
   const { reservation, member, timeWindowHours } = params;
   const supabase = getSupabaseService().getClient();
   
-  let serviceName = '';
-  let locationInfo = '';
+  let serviceName = params.serviceName ?? '';
+  let locationInfo = params.locationInfo ?? '';
 
-  // Get service / item name
-  if (reservation.catalog_item_id) {
+  // Keep direct callers compatible while the cron path uses batched enrichment.
+  if (params.serviceName === undefined && reservation.catalog_item_id) {
     const { data: item } = await supabase.from('catalog_items').select('name').eq('id', reservation.catalog_item_id).maybeSingle();
     if (item?.name) {
       serviceName = item.name;
@@ -68,7 +136,9 @@ export async function translateAndFormatNotificationActivity(params: FormatNotif
   }
 
   // Get location details based on channel
-  if (reservation.channel === 'digital') {
+  if (params.locationInfo !== undefined) {
+    locationInfo = params.locationInfo;
+  } else if (reservation.channel === 'digital') {
     locationInfo = 'Reunión en línea (Digital Meet Room)';
     // If there is a meet url in notes or somewhere, it could be appended here, but for now we label it as digital
   } else if (reservation.location_id) {
@@ -165,30 +235,15 @@ export interface MarkReservationReminderSentParams {
 
 export async function markReservationReminderSentActivity(params: MarkReservationReminderSentParams): Promise<void> {
   const supabase = getSupabaseService().getClient();
-  
-  const { data: reservation, error: fetchError } = await supabase
-    .from('reservations')
-    .select('metadata')
-    .eq('id', params.reservation_id)
-    .single();
 
-  if (fetchError) {
-    console.error(`❌ Failed to fetch reservation metadata for ${params.reservation_id}:`, fetchError);
-    throw new Error(`Failed to fetch reservation metadata: ${fetchError.message}`);
-  }
+  const { error } = await supabase.rpc('mark_reservation_reminder_sent', {
+    p_reservation_id: params.reservation_id,
+    p_time_window_hours: params.timeWindowHours,
+  });
 
-  const metadata = reservation?.metadata || {};
-  const flagKey = `_reminder_${params.timeWindowHours}h_sent`;
-  metadata[flagKey] = true;
-
-  const { error: updateError } = await supabase
-    .from('reservations')
-    .update({ metadata })
-    .eq('id', params.reservation_id);
-
-  if (updateError) {
-    console.error(`❌ Failed to update reservation metadata for ${params.reservation_id}:`, updateError);
-    throw new Error(`Failed to update reservation metadata: ${updateError.message}`);
+  if (error) {
+    console.error(`❌ Failed to update reservation metadata for ${params.reservation_id}:`, error);
+    throw new Error(`Failed to update reservation metadata: ${error.message}`);
   }
   
   console.log(`✅ Marked ${params.timeWindowHours}h reminder as sent for reservation ${params.reservation_id}`);

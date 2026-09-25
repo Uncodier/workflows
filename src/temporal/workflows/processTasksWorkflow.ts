@@ -1,8 +1,9 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { patched, proxyActivities } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 const {
   fetchUpcomingTasksActivity,
+  getTaskMembersBatchActivity,
   getTaskMembersActivity,
   translateAndFormatTaskNotificationActivity,
   sendTaskNotificationActivity,
@@ -18,6 +19,7 @@ const {
 
 export async function processTasksWorkflow(): Promise<{ processed: number; errors: number }> {
   console.log('🔄 Starting processTasksWorkflow (Cron)...');
+  const useBatchMemberLookup = patched('task-reminders-batch-members-v1');
 
   let totalProcessed = 0;
   let totalErrors = 0;
@@ -25,10 +27,15 @@ export async function processTasksWorkflow(): Promise<{ processed: number; error
   for (const timeWindowHours of [24, 1]) {
     try {
       const tasks = await fetchUpcomingTasksActivity({ timeWindowHours });
+      const membersByTask = useBatchMemberLookup
+        ? await getTaskMembersBatchActivity(tasks)
+        : {};
       
       for (const task of tasks) {
         try {
-          const members = await getTaskMembersActivity(task);
+          const members = useBatchMemberLookup
+            ? membersByTask[task.id] || []
+            : await getTaskMembersActivity(task);
           
           for (const member of members) {
             const { subject, message } = await translateAndFormatTaskNotificationActivity({

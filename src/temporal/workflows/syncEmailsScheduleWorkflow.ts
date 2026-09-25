@@ -3,7 +3,7 @@
  * Workflow to schedule email synchronization workflows for multiple sites
  */
 
-import { proxyActivities } from '@temporalio/workflow';
+import { patched, proxyActivities } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { SchedulingOptions, SiteWithCronStatus } from '../services';
 
@@ -12,7 +12,7 @@ const {
   logWorkflowExecutionActivity,
   fetchSitesActivity,
   scheduleMultipleEmailSyncWorkflowsActivity,
-  batchSaveCronStatusActivity
+  batchSaveCronStatusActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -35,6 +35,7 @@ export async function syncEmailsScheduleWorkflow(
   options: SyncEmailsScheduleOptions = {}
 ): Promise<any> {
   const workflowId = `sync-emails-schedule-${Date.now()}`;
+  const useSingleStatusOwner = patched('sync-emails-single-status-owner-v1');
   
   // Log workflow execution start
   await logWorkflowExecutionActivity({
@@ -103,26 +104,23 @@ export async function syncEmailsScheduleWorkflow(
     console.log(`✅ Email sync scheduling completed`);
     console.log(`📊 Results: ${schedulingResult.scheduled} scheduled, ${schedulingResult.skipped} skipped, ${schedulingResult.failed} failed`);
 
-    // Step 3: Update cron status records for successfully scheduled workflows
-    if (schedulingResult.scheduled > 0) {
-      console.log('📝 Step 3: Updating cron status records...');
-      
-      const successfulResults = schedulingResult.results.filter(result => result.success);
-      const cronUpdates = successfulResults.map(result => ({
-        siteId: sitesToSchedule.find(site => result.workflowId.includes(site.id))?.id || '',
-        workflowId: result.workflowId,
-        scheduleId: result.scheduleId,
-        activityName: 'syncEmailsWorkflow',
-        status: 'RUNNING',
-        nextRun: new Date(Date.now() + 60 * 60 * 1000).toISOString() // Next run in 1 hour
-      }));
+    if (!useSingleStatusOwner && schedulingResult.scheduled > 0) {
+      const cronUpdates = schedulingResult.results
+        .filter((scheduled) => scheduled.success)
+        .map((scheduled) => ({
+          siteId: sitesToSchedule.find((site) =>
+            scheduled.workflowId.includes(site.id)
+          )?.id || '',
+          workflowId: scheduled.workflowId,
+          scheduleId: scheduled.scheduleId,
+          activityName: 'syncEmailsWorkflow',
+          status: 'RUNNING',
+          nextRun: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        }));
 
       if (cronUpdates.length > 0) {
         await batchSaveCronStatusActivity(cronUpdates);
-        console.log(`✅ Cron status records updated for ${cronUpdates.length} workflows`);
       }
-    } else {
-      console.log('⏭️  No workflows were scheduled, skipping cron status updates');
     }
 
     const result = {

@@ -56,8 +56,8 @@ export class SupabaseService {
   }
 
   private async testConnection(): Promise<boolean> {
-    if (this.connectionTested) {
-      return this.isConnected;
+    if (this.connectionTested && this.isConnected) {
+      return true;
     }
 
     try {

@@ -45,6 +45,28 @@ export async function fetchSitesDueForCreditRenewalActivity(): Promise<any[]> {
 
   const supabaseService = getSupabaseService();
   const billings = await supabaseService.fetchActiveBillings();
+  const siteIds = billings.map((billing) => billing.site_id).filter(Boolean);
+  const latestRenewalBySite = new Map<string, string>();
+
+  if (siteIds.length > 0) {
+    const { data: renewalPayments, error } = await supabaseService
+      .getClient()
+      .from('payments')
+      .select('site_id, created_at')
+      .in('site_id', siteIds)
+      .eq('payment_method', 'credit_renewal')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new Error(`Failed to fetch credit renewal history: ${error.message}`);
+    }
+
+    for (const payment of renewalPayments || []) {
+      if (payment.site_id && !latestRenewalBySite.has(payment.site_id)) {
+        latestRenewalBySite.set(payment.site_id, payment.created_at);
+      }
+    }
+  }
 
   const today = new Date();
   const todayDay = today.getUTCDate();
@@ -75,10 +97,10 @@ export async function fetchSitesDueForCreditRenewalActivity(): Promise<any[]> {
 
     let isDue = isExactMatch || isEndOfMonthCatchup;
 
-    const lastRenewal = await supabaseService.fetchLastCreditRenewalPayment(billing.site_id);
+    const lastRenewalAt = latestRenewalBySite.get(billing.site_id);
 
-    if (lastRenewal) {
-      const lastRenewalDate = new Date(lastRenewal.created_at);
+    if (lastRenewalAt) {
+      const lastRenewalDate = new Date(lastRenewalAt);
       const daysSinceLastRenewal =
         (today.getTime() - lastRenewalDate.getTime()) / (1000 * 60 * 60 * 24);
 

@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
+import { patched, proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { scheduleCustomerSupportMessagesWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
 import { isEmailAuthFailure } from '../utils/emailAuthErrors';
@@ -71,7 +71,10 @@ export async function syncEmailsWorkflow(
     throw new Error('User ID is required for syncEmailsWorkflow');
   }
   const siteId = options.siteId || options.site_id || userId;
-  const workflowId = `sync-emails-${userId}`;
+  const useTemporalWorkflowId = patched('sync-emails-temporal-workflow-id-v1');
+  const workflowId = useTemporalWorkflowId
+    ? workflowInfo().workflowId
+    : `sync-emails-${userId}`;
 
   const searchAttributes: Record<string, string[]> = {
     user_id: [userId],
@@ -124,11 +127,18 @@ export async function syncEmailsWorkflow(
   // Validate and clean any stuck cron status records before execution
   console.log('🔍 Validating cron status before email sync execution...');
   
-  const cronValidation = await validateAndCleanStuckCronStatusActivity(
-    'syncEmailsWorkflow',
-    siteId,
-    12 // 12 hours threshold - email sync should not be stuck longer than 12h
-  );
+  const cronValidation = useTemporalWorkflowId
+    ? await validateAndCleanStuckCronStatusActivity(
+        'syncEmailsWorkflow',
+        siteId,
+        12,
+        workflowId
+      )
+    : await validateAndCleanStuckCronStatusActivity(
+        'syncEmailsWorkflow',
+        siteId,
+        12
+      );
   
   console.log(`📋 Cron validation result: ${cronValidation.reason}`);
   if (cronValidation.wasStuck) {
@@ -159,7 +169,7 @@ export async function syncEmailsWorkflow(
   });
 
   // Update cron status to indicate the workflow is running
-  if (siteId) {
+  if (siteId && (!useTemporalWorkflowId || !cronValidation.isCurrentWorkflow)) {
     await saveCronStatusActivity({
       siteId,
       workflowId,

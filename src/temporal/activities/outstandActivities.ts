@@ -3,33 +3,12 @@ import { supabaseServiceRole as supabaseAdmin } from '../../lib/supabase/client'
 import { handleOutstandApiError } from './outstandHelpers';
 import {
   buildOutstandCommentsPath,
-  extractOutstandPostText,
   getConnectedCommentAccounts,
-  getOwnedPublishedCommentAccounts,
   isOutstandClientError,
-  isPublishedContentForAnalytics,
-  shouldPollPostForAnalytics,
 } from '../workflows/helpers/outstandPoll';
-import {
-  claimSyncedObjectActivity,
-  finishSyncedObjectClaimActivity,
-} from './syncedObjectActivities';
-import {
-  buildOutstandContentExternalId,
-  buildOutstandContentHash,
-  buildOwnedOutstandTags,
-  mergeOutstandMetadata,
-  mergeOutstandTags,
-  normalizeOutstandContent,
-} from './outstandContentIdentity';
 
 function tenantSchema() {
   return process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA || process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public';
-}
-
-function extractOutstandPostId(tags?: string[] | null): string | null {
-  const tag = (tags || []).find((t) => typeof t === 'string' && t.startsWith('outstand_id_'));
-  return tag ? tag.replace('outstand_id_', '') : null;
 }
 
 function unwrapAnalytics(payload: any): any {
@@ -93,7 +72,8 @@ export async function fetchSitesWithSocialCommentsActivity(): Promise<any[]> {
   const { data, error } = await supabaseAdmin
     .schema(process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA || process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public')
     .from('settings')
-    .select('site_id, social_media, channels');
+    .select('site_id, social_media')
+    .not('social_media', 'is', null);
     
   if (error) {
     throw new Error(`Failed to fetch sites: ${error.message}`);
@@ -205,89 +185,51 @@ export async function fetchOutstandPostAnalyticsActivity(siteId: string, postId:
 export async function fetchSocialPostsDueForAnalyticsActivity(
   siteId: string
 ): Promise<Array<{ postId: string; contentId: string | null }>> {
-  const schema = tenantSchema();
-  const nowMs = Date.now();
-
-  const { data: snapshots, error: snapshotError } = await supabaseAdmin
-    .schema(schema)
-    .from('content_performance')
-    .select('outstand_post_id, content_id, fetched_at')
-    .eq('site_id', siteId);
-
-  if (snapshotError) {
-    throw new Error(`Failed to load performance snapshots: ${snapshotError.message}`);
-  }
-
-  const snapshotMap = new Map<string, { contentId: string | null; fetchedAt: string | null }>();
-  for (const row of snapshots || []) {
-    if (row.outstand_post_id) {
-      snapshotMap.set(row.outstand_post_id, {
-        contentId: row.content_id,
-        fetchedAt: row.fetched_at,
-      });
-    }
-  }
-
-  const { data: contents, error: contentError } = await supabaseAdmin
-    .schema(schema)
-    .from('content')
-    .select('id, tags, status, published_at')
-    .eq('site_id', siteId)
-    .not('tags', 'is', null);
-
-  if (contentError) {
-    throw new Error(`Failed to load social content: ${contentError.message}`);
-  }
-
-  const due = new Map<string, string | null>();
-
-  for (const content of contents || []) {
-    if (!isPublishedContentForAnalytics(content)) continue;
-    const postId = extractOutstandPostId(content.tags);
-    if (!postId) continue;
-    
-    const snapshot = snapshotMap.get(postId);
-    const lastFetchedAt = snapshot?.fetchedAt || null;
-    
-    if (shouldPollPostForAnalytics(content.published_at, nowMs, lastFetchedAt)) {
-      due.set(postId, snapshot?.contentId || content.id);
-    }
-  }
-
-  return Array.from(due.entries()).map(([postId, contentId]) => ({ postId, contentId }));
+  const due = await fetchAllSocialPostsDueForAnalyticsActivity([siteId]);
+  return due.map(({ postId, contentId }) => ({ postId, contentId }));
 }
 
-export async function upsertContentPerformanceActivity(
+export async function fetchAllSocialPostsDueForAnalyticsActivity(
+  siteIds: string[],
+  limit = 5000
+): Promise<Array<{ siteId: string; postId: string; contentId: string | null }>> {
+  if (siteIds.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .schema(tenantSchema())
+    .rpc('fetch_social_posts_due_for_analytics', {
+      p_site_ids: siteIds,
+      p_limit: limit,
+    });
+
+  if (error) {
+    throw new Error(`Failed to load due social analytics: ${error.message}`);
+  }
+
+  return (data || []).map((row: any) => ({
+    siteId: row.site_id,
+    postId: row.post_id,
+    contentId: row.content_id || null,
+  }));
+}
+
+export interface ContentPerformanceUpdate {
   siteId: string,
   postId: string,
   analytics: any,
-  contentId?: string | null
-): Promise<void> {
-  try {
-    let resolvedContentId = contentId ?? null;
-    if (!resolvedContentId) {
-      const { data: existing } = await supabaseAdmin
-        .schema(tenantSchema())
-        .from('content')
-        .select('id')
-        .eq('site_id', siteId)
-        .contains('tags', [`outstand_id_${postId}`])
-        .limit(1)
-        .maybeSingle();
-      resolvedContentId = existing?.id || null;
-    }
+  contentId?: string | null,
+}
 
-    const metrics = unwrapAnalytics(analytics);
+function buildContentPerformanceRow(update: ContentPerformanceUpdate) {
+    const metrics = unwrapAnalytics(update.analytics);
     const aggregated = metrics?.aggregated_metrics || {};
     const normalizedAccounts = normalizeMetricsByAccount(metrics?.metrics_by_account || []);
-    
-    // Calculate total views from accounts that might have specific channel logic
     const calculatedViews = normalizedAccounts.reduce((sum, acc) => sum + (Number(acc.views) || 0), 0);
 
-    const upsertData = {
-      site_id: siteId,
-      outstand_post_id: postId,
-      content_id: resolvedContentId,
+    return {
+      site_id: update.siteId,
+      outstand_post_id: update.postId,
+      content_id: update.contentId || null,
       likes: aggregated.total_likes || 0,
       comments: aggregated.total_comments || 0,
       shares: aggregated.total_shares || 0,
@@ -298,172 +240,52 @@ export async function upsertContentPerformanceActivity(
       metrics_by_account: normalizedAccounts,
       fetched_at: new Date().toISOString(),
     };
+}
 
+export async function upsertContentPerformanceBatchActivity(
+  updates: ContentPerformanceUpdate[]
+): Promise<void> {
+  const batchSize = 100;
+  for (let index = 0; index < updates.length; index += batchSize) {
+    const rows = updates.slice(index, index + batchSize).map(buildContentPerformanceRow);
     const { error } = await supabaseAdmin
       .schema(tenantSchema())
       .from('content_performance')
-      .upsert(upsertData, {
+      .upsert(rows, {
         onConflict: 'site_id,outstand_post_id',
         ignoreDuplicates: false,
       });
 
     if (error) {
-      console.error(`[upsertContentPerformanceActivity] Error upserting performance for post ${postId}:`, error);
-      throw error;
+      throw new Error(`Failed to upsert social analytics batch: ${error.message}`);
     }
-  } catch (error) {
-    console.error(`[upsertContentPerformanceActivity] Exception processing performance for post ${postId}:`, error);
-    throw error;
   }
 }
 
-export async function upsertContentFromOutstandPostActivity(
+export async function upsertContentPerformanceActivity(
   siteId: string,
-  post: any,
-  socialMedia: unknown
-): Promise<string | null> {
-  const outstandId = post.id;
-  if (!outstandId) return null;
-
-  try {
-    const ownedSocialAccounts = getOwnedPublishedCommentAccounts(post, socialMedia);
-    if (ownedSocialAccounts.length === 0) {
-      console.warn(
-        `[upsertContentFromOutstandPost] Skipping post ${outstandId}: no published account belongs to site ${siteId}`
-      );
-      return null;
-    }
-
-    const postText = extractOutstandPostText(post);
-    if (!postText) {
-      console.log(`[upsertContentFromOutstandPost] Skipping post ${outstandId}: empty text/content`);
-      return null;
-    }
-
-    const normalizedPostText = normalizeOutstandContent(postText);
-    const contentHash = buildOutstandContentHash(normalizedPostText);
-    const externalId = buildOutstandContentExternalId(contentHash);
-    const tags = buildOwnedOutstandTags(String(outstandId), ownedSocialAccounts);
-
-    // Match both stable external IDs and identical logical content. Outstand can
-    // return one record per network for the same post.
-    const { data: candidates, error: searchError } = await supabaseAdmin
-      .schema(process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA || process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public')
+  postId: string,
+  analytics: any,
+  contentId?: string | null
+): Promise<void> {
+  let resolvedContentId = contentId || null;
+  if (!resolvedContentId) {
+    const { data, error } = await supabaseAdmin
+      .schema(tenantSchema())
       .from('content')
-      .select('id, tags, text, description, metadata')
-      .eq('site_id', siteId)
-      .order('created_at', { ascending: true })
-      .limit(1000);
-
-    if (searchError) {
-      console.error(`[upsertContentFromOutstandPost] Error finding content for post ${outstandId}:`, searchError);
-      return null;
-    }
-
-    const existing = (candidates || []).find((candidate: any) => {
-      const hasExternalId = candidate.tags?.includes(`outstand_id_${outstandId}`);
-      const hasOutstandEvidence = candidate.tags?.some(
-        (tag: string) => tag === 'outstand_only' || tag.startsWith('outstand_id_')
-      ) || candidate.metadata?.source === 'outstand';
-      const candidateText = candidate.text?.trim()
-        ? candidate.text
-        : candidate.description || '';
-      return hasExternalId
-        || (
-          hasOutstandEvidence
-          && normalizeOutstandContent(candidateText) === normalizedPostText
-        );
-    });
-
-    if (existing?.id) {
-      const { error: mergeError } = await supabaseAdmin
-        .schema(process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA || process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public')
-        .from('content')
-        .update({
-          tags: mergeOutstandTags(existing.tags, tags),
-          metadata: mergeOutstandMetadata(
-            existing.metadata,
-            contentHash,
-            String(outstandId)
-          ),
-        })
-        .eq('id', existing.id)
-        .eq('site_id', siteId);
-
-      if (mergeError) {
-        console.error(
-          `[upsertContentFromOutstandPost] Error consolidating post ${outstandId}:`,
-          mergeError
-        );
-        return null;
-      }
-
-      return existing.id;
-    }
-
-    const claim = await claimSyncedObjectActivity({
-      siteId,
-      objectType: 'social_post',
-      externalId,
-      provider: 'outstand',
-      metadata: {
-        outstand_post_id: outstandId,
-        source_content_hash: contentHash,
-      },
-    });
-
-    if (!claim.claimed || !claim.claimToken) {
-      return null;
-    }
-    const status = post.isDraft ? "draft" : (post.scheduledAt ? "approved" : "published");
-
-    const insertData = {
-      title: postText.substring(0, 50) + (postText.length > 50 ? "..." : ""),
-      description: postText,
-      type: "social_post",
-      text: postText,
-      status,
-      site_id: siteId,
-      created_at: post.createdAt || new Date().toISOString(),
-      updated_at: post.createdAt || new Date().toISOString(),
-      published_at: post.publishedAt || null,
-      tags,
-      metadata: mergeOutstandMetadata(null, contentHash, String(outstandId)),
-      word_count: postText.split(" ").length,
-      estimated_reading_time: 1,
-    };
-
-    const { data: inserted, error: insertError } = await supabaseAdmin
-      .schema(process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA || process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || 'public')
-      .from('content')
-      .insert([insertData])
       .select('id')
-      .single();
+      .eq('site_id', siteId)
+      .contains('tags', [`outstand_id_${postId}`])
+      .limit(1)
+      .maybeSingle();
 
-    if (insertError) {
-      console.error(`[upsertContentFromOutstandPost] Error inserting content for post ${outstandId}:`, insertError);
-      await finishSyncedObjectClaimActivity({
-        siteId,
-        objectType: 'social_post',
-        externalId,
-        claimToken: claim.claimToken,
-        status: 'error',
-        errorMessage: insertError.message,
-      });
-      return null;
+    if (error) {
+      throw new Error(`Failed to resolve analytics content: ${error.message}`);
     }
-
-    await finishSyncedObjectClaimActivity({
-      siteId,
-      objectType: 'social_post',
-      externalId,
-      claimToken: claim.claimToken,
-      status: 'completed',
-    });
-
-    return inserted?.id || null;
-  } catch (error) {
-    console.error(`[upsertContentFromOutstandPost] Exception processing post ${outstandId}:`, error);
-    return null;
+    resolvedContentId = data?.id || null;
   }
+
+  await upsertContentPerformanceBatchActivity([
+    { siteId, postId, analytics, contentId: resolvedContentId },
+  ]);
 }

@@ -1,5 +1,6 @@
 import { temporalConfig } from '../../config/config';
 import { WorkflowType, workflowNames } from '../workflows';
+import { createTemporalConnection, withTimeout } from './connection';
 
 // Define specific argument types for each workflow
 type WorkflowArgs = {
@@ -64,13 +65,13 @@ export const defaultSchedules: ScheduleSpec[] = [
     workflowType: 'sendApprovedMessagesWorkflow',
     intervalMinutes: 60, // Every 60 minutes (1 hour)
     args: [],
-    description: 'Check for and send approved messages every hour; each run processes its own batch (overlap allowed)',
+    description: 'Check for and send approved messages every hour without overlapping runs',
     startAt: new Date(), // Start immediately
     jitterMs: 60000, // 1 minute jitter
     pauseOnFailure: false,
     catchupWindow: '1h',
     paused: false,
-    overlap: 'ALLOW' as const, // Each hour starts a new run even if previous is still waiting on WhatsApp
+    overlap: 'SKIP' as const,
   },
   {
     id: 'daily-credit-renewal',
@@ -148,17 +149,6 @@ export const defaultSchedules: ScheduleSpec[] = [
   }
 ];
 
-// Connection timeout wrapper
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => {
-      reject(new Error(`${operation} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-  });
-
-  return Promise.race([promise, timeoutPromise]);
-}
-
 // Retry wrapper
 async function withRetry<T>(
   operation: () => Promise<T>, 
@@ -187,48 +177,51 @@ async function withRetry<T>(
   throw new Error(`${operationName} failed after ${maxRetries} attempts. Last error: ${lastError.message}`);
 }
 
-// Helper function to create connection with proper configuration
-async function createTemporalConnection() {
-  console.log('🔗 Creating Temporal connection...');
-  
-  const { Connection } = require('@temporalio/client');
-  
-  const connectionOptions: any = {
-    address: temporalConfig.serverUrl,
-    // Add connection timeout options
-    connectTimeout: '10s',
-    rpcTimeout: '30s',
-  };
+function buildScheduleOptions(
+  spec: ScheduleSpec,
+  overlapPolicies: { ALLOW_ALL: unknown; SKIP: unknown },
+  workflowId = `${spec.id}-${Date.now()}`
+) {
+  const scheduleSpec = spec.cron
+    ? {
+        cronExpressions: [spec.cron],
+        timezone: spec.timezone || 'UTC',
+        ...(spec.startAt ? { startAt: spec.startAt } : {}),
+        ...(spec.endAt ? { endAt: spec.endAt } : {}),
+      }
+    : {
+        intervals: [{
+          every: `${spec.intervalMinutes || 30}m`,
+          offset: '0s',
+        }],
+        startAt: spec.startAt || new Date(),
+        endAt: spec.endAt || undefined,
+        jitter: spec.jitterMs ? `${spec.jitterMs}ms` : '30s',
+        timezone: spec.timezone || 'UTC',
+      };
 
-  // Add TLS and API key for remote connections (Temporal Cloud)
-  if (temporalConfig.tls) {
-    connectionOptions.tls = {
-      // Add TLS timeout options
-      handshakeTimeout: '10s',
-    };
-  }
-
-  if (temporalConfig.apiKey) {
-    connectionOptions.metadata = {
-      'temporal-namespace': temporalConfig.namespace,
-    };
-    connectionOptions.apiKey = temporalConfig.apiKey;
-  }
-
-  console.log('🔗 Connection options:', {
-    address: connectionOptions.address,
-    hasTls: !!connectionOptions.tls,
-    hasApiKey: !!connectionOptions.apiKey,
-    connectTimeout: connectionOptions.connectTimeout,
-    rpcTimeout: connectionOptions.rpcTimeout
-  });
-
-  // Wrap connection with timeout
-  return await withTimeout(
-    Connection.connect(connectionOptions),
-    15000, // 15 second timeout
-    'Temporal connection'
-  );
+  return {
+    scheduleId: spec.id,
+    action: {
+      type: 'startWorkflow',
+      workflowType: workflowNames[spec.workflowType],
+      taskQueue: temporalConfig.taskQueue,
+      args: spec.args || [],
+      workflowId,
+    },
+    spec: scheduleSpec,
+    policies: {
+      catchupWindow: spec.catchupWindow || '1h',
+      overlap: spec.overlap === 'ALLOW'
+        ? overlapPolicies.ALLOW_ALL
+        : overlapPolicies.SKIP,
+      pauseOnFailure: spec.pauseOnFailure ?? false,
+    },
+    state: {
+      note: `Managed schedule: ${spec.id}`,
+      paused: spec.paused || false,
+    },
+  } as any;
 }
 
 export async function createSchedule(spec: ScheduleSpec) {
@@ -245,6 +238,7 @@ export async function createSchedule(spec: ScheduleSpec) {
       connection,
       namespace: temporalConfig.namespace,
     });
+    const scheduleOptions = buildScheduleOptions(spec, ScheduleOverlapPolicy);
 
     // First, check if the schedule already exists
     try {
@@ -252,20 +246,31 @@ export async function createSchedule(spec: ScheduleSpec) {
       const handle = client.getHandle(spec.id);
       const description = await handle.describe();
       
-      // Safely check the schedule state with proper validation
-      let scheduleStatus = 'unknown';
-      if (description && description.schedule && description.schedule.state) {
-        scheduleStatus = description.schedule.state.paused ? 'paused' : 'running';
-      } else {
-        console.log(`⚠️ Schedule ${spec.id} description has incomplete state information`);
-        scheduleStatus = 'exists (state unknown)';
-      }
-      
-      console.log(`✅ Schedule ${spec.id} already exists and is ${scheduleStatus}`);
-      console.log(`🔒 Closing connection for ${spec.id}...`);
+      const currentSchedule = description;
+      const updatedOptions = buildScheduleOptions(
+        spec,
+        ScheduleOverlapPolicy,
+        currentSchedule?.action?.workflowId || scheduleOptions.action.workflowId
+      );
+
+      await handle.update((current: any) => ({
+        action: updatedOptions.action,
+        spec: {
+          ...updatedOptions.spec,
+          startAt: current.spec?.startAt || updatedOptions.spec.startAt,
+        },
+        policies: updatedOptions.policies,
+        state: {
+          ...current.state,
+          note: updatedOptions.state.note,
+          paused: Boolean(current.state?.paused || updatedOptions.state.paused),
+        },
+        searchAttributes: current.searchAttributes,
+        typedSearchAttributes: current.typedSearchAttributes,
+      }));
       await (connection as any).close();
-      
-      return { message: `Schedule ${spec.id} already exists (no action needed)` };
+
+      return { message: `Schedule ${spec.id} already exists and was reconciled` };
     } catch (error) {
       // If we get an error, it likely means the schedule doesn't exist
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -277,59 +282,10 @@ export async function createSchedule(spec: ScheduleSpec) {
           errorMessage.includes('ScheduleNotFound')) {
         console.log(`📝 Schedule ${spec.id} doesn't exist, proceeding with creation...`);
       } else {
-        console.log(`⚠️ Unexpected error checking schedule ${spec.id}: ${errorMessage}`);
-        console.log(`📝 Proceeding with creation attempt anyway...`);
+        await (connection as any).close();
+        throw error;
       }
     }
-
-    // Build schedule spec - either intervals or cron
-    let scheduleSpec: any;
-    if (spec.cron) {
-      // Use cron expression
-      scheduleSpec = {
-        cron: spec.cron,
-        timezone: spec.timezone || 'UTC',
-      };
-      if (spec.startAt) {
-        scheduleSpec.startAt = spec.startAt;
-      }
-      if (spec.endAt) {
-        scheduleSpec.endAt = spec.endAt;
-      }
-    } else {
-      // Use intervals (legacy approach)
-      scheduleSpec = {
-        intervals: [{
-          every: `${spec.intervalMinutes || 30}m`, // Use minutes format
-          offset: '0s', // Start immediately
-        }],
-        startAt: spec.startAt || new Date(),
-        endAt: spec.endAt || undefined,
-        jitter: spec.jitterMs ? `${spec.jitterMs}ms` : '30s', // Default 30 second jitter
-        timezone: spec.timezone || 'UTC',
-      };
-    }
-
-    const scheduleOptions = {
-      scheduleId: spec.id,
-      action: {
-        type: 'startWorkflow',
-        workflowType: workflowNames[spec.workflowType],
-        taskQueue: temporalConfig.taskQueue,
-        args: spec.args || [],
-        workflowId: `${spec.id}-${Date.now()}`, // Unique workflow ID for each run
-      },
-      spec: scheduleSpec,
-      policies: {
-        catchupWindow: spec.catchupWindow || '1h',
-        overlap: spec.overlap === 'ALLOW' ? ScheduleOverlapPolicy.ALLOW : ScheduleOverlapPolicy.SKIP,
-        pauseOnFailure: spec.pauseOnFailure !== undefined ? spec.pauseOnFailure : false,
-      },
-      state: {
-        note: `Schedule created: ${new Date().toISOString()}`,
-        paused: spec.paused || false,
-      },
-    } as any;
 
     console.log(`🚀 Creating schedule ${spec.id} in Temporal...`);
     if (spec.cron) {

@@ -25,25 +25,21 @@ export async function fetchUpcomingTasks(
   
   const targetTimeStart = new Date(now.getTime() + (timeWindowHours - 0.5) * 60 * 60 * 1000);
   const targetTimeEnd = new Date(now.getTime() + (timeWindowHours + 0.5) * 60 * 60 * 1000);
+  const reminderFlag = `_reminder_${timeWindowHours}h_sent`;
 
   const { data, error } = await client
     .from('tasks')
-    .select('*')
+    .select('id, site_id, lead_id, title, description, type, status, stage, scheduled_date, assignee, notes, metadata')
     .in('status', ['pending', 'in_progress']) // Only active tasks
     .gte('scheduled_date', targetTimeStart.toISOString())
-    .lte('scheduled_date', targetTimeEnd.toISOString());
+    .lte('scheduled_date', targetTimeEnd.toISOString())
+    .or(`metadata->>${reminderFlag}.is.null,metadata->>${reminderFlag}.neq.true`);
 
   if (error) {
     console.error('❌ Error fetching upcoming tasks:', error);
     throw new Error(`Failed to fetch upcoming tasks: ${error.message}`);
   }
 
-  // Filter out tasks that already had their reminder sent for this window
-  const validTasks = (data || []).filter(task => {
-    const flagKey = `_reminder_${timeWindowHours}h_sent`;
-    return !(task.metadata && task.metadata[flagKey]);
-  });
-
-  console.log(`✅ Successfully fetched ${validTasks.length} upcoming tasks for ${timeWindowHours}h window (filtered from ${data?.length || 0})`);
-  return validTasks;
+  console.log(`✅ Successfully fetched ${data?.length || 0} upcoming tasks for ${timeWindowHours}h window`);
+  return data || [];
 }

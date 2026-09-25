@@ -6,7 +6,6 @@
 import { 
   getSupabaseService, 
   EmailConfigService, 
-  MockDataService,
   Site,
   EmailSyncSchedulingService,
   SiteWithCronStatus,
@@ -33,57 +32,50 @@ export async function fetchSitesActivity(options: SchedulingOptions = {}): Promi
     const isConnected = await supabaseService.getConnectionStatus();
     
     if (!isConnected) {
-      console.log('⚠️  Database not available, falling back to mock data...');
-      return await fetchMockSitesData(options);
+      throw new Error('Database not available');
     }
 
     console.log('✅ Database connection confirmed, proceeding with real data...');
 
-    // For testing: fetch ALL sites instead of just email-enabled ones
-    console.log('🔍 Querying ALL sites (test mode)...');
-    const allSitesData = await supabaseService.fetchSites();
+    const client = supabaseService.getClient();
+    const { data: settingsData, error: settingsError } = await client
+      .from('settings')
+      .select('site_id, channels')
+      .eq('channels->email->>enabled', 'true')
+      .not('channels->email->>email', 'is', null);
 
-    if (!allSitesData || allSitesData.length === 0) {
-      console.log('⚠️  No sites found in database');
-      return [];
+    if (settingsError) {
+      throw new Error(`Failed to fetch email settings: ${settingsError.message}`);
     }
 
-    console.log(`✅ Found ${allSitesData.length} total sites in database`);
-
-    // Fetch settings for all sites to get email configurations
-    console.log('🔍 Querying settings table for email configurations...');
-    const siteIds = allSitesData.map(site => site.id);
-    const settingsData = await supabaseService.fetchSettings(siteIds);
-
-    console.log(`✅ Found ${settingsData?.length || 0} settings records`);
-
-    // Convert to Site objects with email configurations
-    const sites: Site[] = allSitesData.map(siteRow => {
-      const site: Site = {
-        id: siteRow.id,
-        name: siteRow.name || 'Unnamed Site',
-        url: siteRow.url || '',
-        user_id: siteRow.user_id,
-        created_at: siteRow.created_at,
-        updated_at: siteRow.updated_at
-      };
-
-      // Find and extract email configuration from settings
-      const siteSettings = settingsData?.find(setting => setting.site_id === site.id);
-      if (siteSettings) {
-        const emailConfig = EmailConfigService.extractEmailConfigFromSettings(siteSettings);
-        if (emailConfig) {
-          site.email = emailConfig;
-          console.log(`📧 Site ${site.name} has email config: ${emailConfig.email} (enabled: ${emailConfig.enabled})`);
-        } else {
-          console.log(`⚠️  Site ${site.name} has settings but no valid email config`);
-        }
-      } else {
-        console.log(`⚠️  Site ${site.name} has no settings record`);
+    const emailSettings = new Map<
+      string,
+      NonNullable<ReturnType<typeof EmailConfigService.extractEmailConfigFromSettings>>
+    >();
+    for (const settings of settingsData || []) {
+      const emailConfig = EmailConfigService.extractEmailConfigFromSettings(settings);
+      if (emailConfig) {
+        emailSettings.set(settings.site_id, emailConfig);
       }
+    }
+    const siteIds = [...emailSettings.keys()];
+    if (siteIds.length === 0) return [];
 
-      return site;
-    });
+    const { data: siteRows, error: sitesError } = await client
+      .from('sites')
+      .select('id, name, url, user_id, created_at, updated_at')
+      .in('id', siteIds);
+
+    if (sitesError) {
+      throw new Error(`Failed to fetch email-enabled sites: ${sitesError.message}`);
+    }
+
+    const sites: Site[] = (siteRows || []).map((siteRow) => ({
+      ...siteRow,
+      name: siteRow.name || 'Unnamed Site',
+      url: siteRow.url || '',
+      email: emailSettings.get(siteRow.id),
+    }));
 
     // Fetch cron status for these sites to determine last sync times
     console.log('🔍 Querying cron_status table for sync history...');
@@ -105,50 +97,8 @@ export async function fetchSitesActivity(options: SchedulingOptions = {}): Promi
 
   } catch (error) {
     console.error('❌ Error in fetchSitesActivity:', error);
-    console.error('   Error details:', {
-      name: error instanceof Error ? error.name : 'Unknown',
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined
-    });
-    
-    // Fallback to mock data if database is not available
-    console.log('⚠️  Falling back to mock data due to error...');
-    return await fetchMockSitesData(options);
+    throw error;
   }
-}
-
-/**
- * Fallback function with mock data (for development/testing)
- */
-async function fetchMockSitesData(options: SchedulingOptions = {}): Promise<SiteWithCronStatus[]> {
-  console.log('📂 Using mock data for sites and email sync status...');
-  
-  const mockData = MockDataService.generateCompleteDataset();
-  const { sites: mockSites, cronStatuses: mockCronStatuses, settings: mockSettings } = mockData;
-
-  // Add email configurations to mock sites
-  const sitesWithEmail: Site[] = mockSites.map(site => {
-    const siteSettings = mockSettings.find(setting => setting.site_id === site.id);
-    if (siteSettings) {
-      const emailConfig = EmailConfigService.extractEmailConfigFromSettings(siteSettings);
-      if (emailConfig) {
-        site.email = emailConfig;
-      }
-    }
-    return site;
-  });
-
-  // Process sites for scheduling using the scheduling service
-  const sitesWithStatus = EmailSyncSchedulingService.processSitesForScheduling(
-    sitesWithEmail,
-    mockCronStatuses,
-    options
-  );
-
-  // Log detailed analysis
-  EmailSyncSchedulingService.logSchedulingAnalysis(sitesWithStatus, options);
-
-  return sitesWithStatus;
 }
 
 /**

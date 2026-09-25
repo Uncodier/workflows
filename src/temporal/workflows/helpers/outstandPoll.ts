@@ -261,9 +261,15 @@ export function shouldPollPostForAnalytics(
   nowMs: number,
   lastFetchedAtStr?: string | null
 ): boolean {
-  if (!publishedAtStr) return true;
+  if (!publishedAtStr) {
+    if (!lastFetchedAtStr) return true;
+    const lastFetchedAt = new Date(lastFetchedAtStr).getTime();
+    if (!Number.isFinite(lastFetchedAt)) return true;
+    return nowMs - lastFetchedAt >= 6 * 60 * 60 * 1000;
+  }
 
   const publishedAt = new Date(publishedAtStr).getTime();
+  if (!Number.isFinite(publishedAt)) return true;
   const ageMs = nowMs - publishedAt;
   const ONE_DAY = 24 * 60 * 60 * 1000;
   const ageInDays = ageMs / ONE_DAY;
@@ -311,7 +317,8 @@ export function extractOutstandPostText(post: any): string {
  */
 export function shouldPollPostForComments(
   post: any,
-  nowMs: number
+  nowMs: number,
+  useFiveMinuteBuckets = true
 ): { shouldPoll: boolean; isTooOld: boolean } {
   const publishedAtStr = post?.publishedAt || post?.createdAt;
   if (!publishedAtStr) return { shouldPoll: true, isTooOld: false };
@@ -332,13 +339,29 @@ export function shouldPollPostForComments(
     return { shouldPoll: true, isTooOld: false };
   }
 
+  const FIVE_MINUTES_MS = 5 * 60 * 1000;
+  const currentPollBucket = Math.floor(nowMs / FIVE_MINUTES_MS);
   const currentHour = new Date(nowMs).getUTCHours();
 
-  // 1 to 7 days old: poll every 6 hours (0, 6, 12, 18)
+  // The workflow runs every five minutes. Match one five-minute bucket per
+  // interval instead of polling on every run throughout the matching hour.
   if (ageInDays <= 7) {
-    return { shouldPoll: currentHour % 6 === 0, isTooOld: false };
+    if (!useFiveMinuteBuckets) {
+      return { shouldPoll: currentHour % 6 === 0, isTooOld: false };
+    }
+    const sixHourBuckets = (6 * 60) / 5;
+    return {
+      shouldPoll: currentPollBucket % sixHourBuckets === 0,
+      isTooOld: false,
+    };
   }
 
-  // 7 to 30 days old: poll every 24 hours (at 0 UTC)
-  return { shouldPoll: currentHour === 0, isTooOld: false };
+  const dailyBuckets = (24 * 60) / 5;
+  if (!useFiveMinuteBuckets) {
+    return { shouldPoll: currentHour === 0, isTooOld: false };
+  }
+  return {
+    shouldPoll: currentPollBucket % dailyBuckets === 0,
+    isTooOld: false,
+  };
 }

@@ -13,6 +13,8 @@ import {
   isPublishedContentForAnalytics,
   isOutstandClientError,
   extractOutstandPostText,
+  shouldPollPostForAnalytics,
+  shouldPollPostForComments,
 } from '../src/temporal/workflows/helpers/outstandPoll';
 import { handleOutstandApiError } from '../src/temporal/activities/outstandHelpers';
 
@@ -230,6 +232,73 @@ describe('outstandPoll helpers', () => {
       expect(isPublishedContentForAnalytics({ status: 'approved' })).toBe(false);
       expect(isPublishedContentForAnalytics({ status: 'published' })).toBe(true);
       expect(isPublishedContentForAnalytics({ status: 'draft', published_at: '2026-01-01' })).toBe(true);
+    });
+  });
+
+  describe('shouldPollPostForAnalytics', () => {
+    const now = Date.UTC(2026, 8, 24, 12, 0, 0);
+
+    it('uses the six-hour refresh interval when publication time is missing', () => {
+      expect(shouldPollPostForAnalytics(null, now, null)).toBe(true);
+      expect(
+        shouldPollPostForAnalytics(
+          null,
+          now,
+          new Date(now - 5 * 60 * 60 * 1000).toISOString()
+        )
+      ).toBe(false);
+      expect(
+        shouldPollPostForAnalytics(
+          null,
+          now,
+          new Date(now - 6 * 60 * 60 * 1000).toISOString()
+        )
+      ).toBe(true);
+    });
+  });
+
+  describe('shouldPollPostForComments', () => {
+    const now = Date.UTC(2026, 8, 24, 6, 0, 0);
+
+    it('polls posts newer than one day on every five-minute run', () => {
+      const post = { publishedAt: new Date(now - 12 * 60 * 60 * 1000).toISOString() };
+
+      expect(shouldPollPostForComments(post, now).shouldPoll).toBe(true);
+      expect(shouldPollPostForComments(post, now + 5 * 60 * 1000).shouldPoll).toBe(true);
+    });
+
+    it('polls one bucket every six hours for posts up to seven days old', () => {
+      const post = { publishedAt: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString() };
+
+      expect(shouldPollPostForComments(post, now).shouldPoll).toBe(true);
+      expect(shouldPollPostForComments(post, now + 5 * 60 * 1000).shouldPoll).toBe(false);
+      expect(shouldPollPostForComments(post, now + 6 * 60 * 60 * 1000).shouldPoll).toBe(true);
+    });
+
+    it('retains the legacy hourly window for Temporal replay', () => {
+      const post = { publishedAt: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString() };
+
+      expect(
+        shouldPollPostForComments(post, now + 5 * 60 * 1000, false).shouldPoll
+      ).toBe(true);
+    });
+
+    it('polls one bucket per day for posts between seven and thirty days old', () => {
+      const post = { publishedAt: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString() };
+      const midnight = Date.UTC(2026, 8, 25, 0, 0, 0);
+
+      expect(shouldPollPostForComments(post, midnight).shouldPoll).toBe(true);
+      expect(shouldPollPostForComments(post, midnight + 5 * 60 * 1000).shouldPoll).toBe(false);
+      expect(shouldPollPostForComments(post, midnight + 24 * 60 * 60 * 1000).shouldPoll).toBe(true);
+    });
+
+    it('stops polling posts older than thirty days', () => {
+      const post = { publishedAt: new Date(now - 31 * 24 * 60 * 60 * 1000).toISOString() };
+
+      expect(shouldPollPostForComments(post, now)).toEqual({
+        shouldPoll: false,
+        isTooOld: true,
+      });
     });
   });
 

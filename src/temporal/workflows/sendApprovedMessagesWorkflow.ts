@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
+import { patched, proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
@@ -10,6 +10,7 @@ import { settleInBatches } from './helpers/settleInBatches';
 
 const {
   getApprovedMessagesActivity,
+  claimApprovedMessagesBatchActivity,
   markMessageAsSendingActivity,
   resetStuckSendingMessagesActivity,
   updateMessageStatusToSentActivity,
@@ -29,6 +30,7 @@ const { sendEmailFromAgentActivity } = proxyActivities<Activities>({
 
 export async function sendApprovedMessagesWorkflow(): Promise<any> {
   console.log('🚀 Starting sendApprovedMessagesWorkflow...');
+  const useBatchClaims = patched('send-approved-messages-batch-claims-v1');
 
   const resetResult = await resetStuckSendingMessagesActivity();
   if (resetResult.resetCount > 0) {
@@ -38,10 +40,29 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     console.warn('⚠️ resetStuckSendingMessages failed (non-fatal):', resetResult.error);
   }
 
-  const messages = await getApprovedMessagesActivity();
+  const approvedMessages = await getApprovedMessagesActivity();
   
-  if (!messages || messages.length === 0) {
+  if (!approvedMessages || approvedMessages.length === 0) {
     console.log('✅ No approved messages to send.');
+    return { processed: 0, success: 0, failed: 0 };
+  }
+
+  let messages = approvedMessages;
+  if (useBatchClaims) {
+    const claimedIds = await claimApprovedMessagesBatchActivity(
+      approvedMessages.map((message) => ({
+        message_id: message.message_id,
+        conversation_id: message.conversation_id,
+        site_id: message.site_id,
+      }))
+    );
+    const claimedIdSet = new Set(claimedIds);
+    messages = approvedMessages.filter((message) =>
+      claimedIdSet.has(message.message_id)
+    );
+  }
+
+  if (messages.length === 0) {
     return { processed: 0, success: 0, failed: 0 };
   }
 
@@ -95,14 +116,13 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         }
       } else if (COMMENT_CHANNELS.includes(channel)) {
         console.log(`📢 Dispatching ${channel} comment (child runs in background)...`);
-        const markResult = await markMessageAsSendingActivity({
-          message_id: msg.message_id,
-          conversation_id: msg.conversation_id,
-          site_id: msg.site_id,
-        });
-        if (!markResult.success) {
-          console.error(`❌ Cannot dispatch ${channel}: mark as sending failed for message ${msg.message_id}: ${markResult.error ?? 'unknown'}`);
-          return false;
+        if (!useBatchClaims) {
+          const claim = await markMessageAsSendingActivity({
+            message_id: msg.message_id,
+            conversation_id: msg.conversation_id,
+            site_id: msg.site_id,
+          });
+          if (!claim.success) return false;
         }
 
         const channelWorkflowId = `send-${channel}-approved-${msg.message_id}-${Date.now()}`;
@@ -130,15 +150,15 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
           throw new Error('No phone number for lead');
         }
         console.log(`📱 Dispatching WhatsApp to ${msg.lead_phone} (child runs in background)...`);
-        const markResult = await markMessageAsSendingActivity({
-          message_id: msg.message_id,
-          conversation_id: msg.conversation_id,
-          site_id: msg.site_id,
-        });
-        if (!markResult.success) {
-          console.error(`❌ Cannot dispatch WhatsApp: mark as sending failed for message ${msg.message_id}: ${markResult.error ?? 'unknown'}`);
-          return false; // Message stays in 'accepted'; next hourly run will retry without duplicate send
+        if (!useBatchClaims) {
+          const claim = await markMessageAsSendingActivity({
+            message_id: msg.message_id,
+            conversation_id: msg.conversation_id,
+            site_id: msg.site_id,
+          });
+          if (!claim.success) return false;
         }
+
         let cleanPhone = msg.lead_phone.replace(/[^\d+]/g, '');
         if (cleanPhone.startsWith('+')) {
           cleanPhone = '+' + cleanPhone.slice(1).replace(/\+/g, '');
@@ -171,14 +191,13 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         if (!msg.lead_phone) {
           throw new Error(`No phone number for ${channel} recipient`);
         }
-        const markResult = await markMessageAsSendingActivity({
-          message_id: msg.message_id,
-          conversation_id: msg.conversation_id,
-          site_id: msg.site_id,
-        });
-        if (!markResult.success) {
-          console.error(`❌ Cannot dispatch ${channel}: mark as sending failed for message ${msg.message_id}: ${markResult.error ?? 'unknown'}`);
-          return false;
+        if (!useBatchClaims) {
+          const claim = await markMessageAsSendingActivity({
+            message_id: msg.message_id,
+            conversation_id: msg.conversation_id,
+            site_id: msg.site_id,
+          });
+          if (!claim.success) return false;
         }
 
         let recipient = msg.lead_phone.replace(/[^\d+]/g, '');
