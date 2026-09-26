@@ -165,6 +165,8 @@ export async function callRobotPlanActivity(params: {
   error_context?: string;
   message?: string;
   context?: any;
+  skill_slugs?: string[];
+  skill_mode?: 'auto' | 'required';
 }): Promise<{
   success: boolean;
   data?: any;
@@ -172,7 +174,7 @@ export async function callRobotPlanActivity(params: {
   plan_completed?: boolean;
   instance_plan_id?: string;
 }> {
-  const { site_id, activity, instance_id, instance_plan_id, user_id, error_context, message, context } = params;
+  const { site_id, activity, instance_id, instance_plan_id, user_id, error_context, message, context, skill_slugs, skill_mode } = params;
 
   console.log(`🤖 Calling robot plan API for site: ${site_id}, activity: ${activity}, instance: ${instance_id}${instance_plan_id ? `, plan: ${instance_plan_id}` : ''}${user_id ? `, user: ${user_id}` : ''}${error_context ? ' (with error context)' : ''}${message ? ' (with message)' : ''}${context ? ' (with context)' : ''}`);
 
@@ -181,7 +183,9 @@ export async function callRobotPlanActivity(params: {
     const payload: any = {
       site_id,
       activity,
-      instance_id
+      instance_id,
+      skill_slugs,
+      skill_mode
     };
     
     if (instance_plan_id) {
@@ -251,6 +255,8 @@ export async function callRobotPlanActActivity(params: {
   instance_id: string;
   instance_plan_id?: string;
   user_id?: string;
+  skill_slugs?: string[];
+  skill_mode?: 'auto' | 'required';
 }): Promise<{
   success: boolean;
   data?: any;
@@ -258,7 +264,7 @@ export async function callRobotPlanActActivity(params: {
   plan_completed?: boolean;
   instance_plan_id?: string;
 }> {
-  const { site_id, activity, instance_id, instance_plan_id, user_id } = params;
+  const { site_id, activity, instance_id, instance_plan_id, user_id, skill_slugs, skill_mode } = params;
 
   console.log(`⚡ Calling robot plan act API for site: ${site_id}, activity: ${activity}, instance: ${instance_id}${instance_plan_id ? `, plan: ${instance_plan_id}` : ''}${user_id ? `, user: ${user_id}` : ''}`);
 
@@ -267,7 +273,9 @@ export async function callRobotPlanActActivity(params: {
     const payload: any = {
       site_id,
       activity,
-      instance_id
+      instance_id,
+      skill_slugs,
+      skill_mode
     };
     
     if (instance_plan_id) {
@@ -361,6 +369,8 @@ export async function callRobotInstanceActActivity(params: {
   step_status: string;
   site_id: string;
   context?: string;
+  skill_slugs?: string[];
+  skill_mode?: 'auto' | 'required';
 }): Promise<{
   success: boolean;
   data?: any;
@@ -368,7 +378,7 @@ export async function callRobotInstanceActActivity(params: {
   plan_completed?: boolean;
   instance_status?: string;
 }> {
-  const { instance_id, message, step_status, site_id, context } = params;
+  const { instance_id, message, step_status, site_id, context, skill_slugs, skill_mode } = params;
 
   console.log(`🎯 Calling robot instance act API for instance: ${instance_id}, site: ${site_id}`);
   console.log(`📝 Message: ${message}`);
@@ -380,7 +390,9 @@ export async function callRobotInstanceActActivity(params: {
       message,
       step_status,
       site_id,
-      ...(context && { context })
+      ...(context && { context }),
+      skill_slugs,
+      skill_mode
     };
 
     const response = await apiService.post('/api/robots/instance/act', payload);

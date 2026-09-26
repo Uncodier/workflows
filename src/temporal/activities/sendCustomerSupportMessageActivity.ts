@@ -20,6 +20,8 @@ export interface CustomerSupportMessageRequest {
   channel_delivery?: boolean;
   require_approval?: boolean;
   custom_data?: Record<string, unknown>;
+  channel_guidance_processed?: boolean;
+  channel_guidance_run_plan_ids?: string[];
 }
 
 type CustomerSupportApiData = {
@@ -121,7 +123,7 @@ export async function sendCustomerSupportMessageActivity(
     conversationId = emailData.conversation_id;
     visitorId = emailData.visitor_id;
     leadId = emailData.lead_id;
-    originMessageId = emailData.origin_message_id;
+    originMessageId = emailData.origin_message_id || emailData.messageId;
     contactName = emailData.contact_info.name;
     contactEmail = emailData.contact_info.email;
     contactPhone = emailData.contact_info.phone;
@@ -133,7 +135,7 @@ export async function sendCustomerSupportMessageActivity(
     conversationId = emailData.conversationId;
     visitorId = emailData.visitor_id;
     leadId = emailData.lead_id;
-    originMessageId = emailData.origin_message_id;
+    originMessageId = emailData.origin_message_id || emailData.messageId;
     contactName = emailData.name;
     contactEmail = emailData.email;
     contactPhone = emailData.phone;
@@ -149,7 +151,16 @@ export async function sendCustomerSupportMessageActivity(
     userId,
     lead_notification: 'none',
     origin: baseParams.origin,
+    channel_guidance_processed: true,
   };
+
+  // Run IDs are server-only references; do not accept or forward raw guidance.
+  if (Array.isArray(emailData.channel_guidance_run_plan_ids)) {
+    const runIds = emailData.channel_guidance_run_plan_ids.filter(
+      (id: unknown): id is string => typeof id === 'string' && id.trim().length > 0
+    );
+    if (runIds.length) messageRequest.channel_guidance_run_plan_ids = runIds.slice(0, 10);
+  }
 
   if (baseParams.agentId) messageRequest.agentId = baseParams.agentId;
   if (conversationId) messageRequest.conversationId = conversationId;
@@ -164,7 +175,7 @@ export async function sendCustomerSupportMessageActivity(
   if (contactPhone) messageRequest.phone = contactPhone;
   if (leadId) messageRequest.lead_id = leadId;
 
-  originMessageId ||= baseParams.origin_message_id;
+  originMessageId = baseParams.origin_message_id || originMessageId;
   if (originMessageId) messageRequest.origin_message_id = originMessageId;
   if (emailData.channel_delivery === true) messageRequest.channel_delivery = true;
   if (emailData.require_approval === true) messageRequest.require_approval = true;

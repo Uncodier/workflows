@@ -24,6 +24,8 @@ export interface RobotWorkflowInput {
   instance_id: string;
   instance_plan_id?: string;
   user_id?: string;
+  skill_slugs?: string[];
+  skill_mode?: 'auto' | 'required';
 }
 
 export interface RobotWorkflowResult {
@@ -168,7 +170,7 @@ function finalizeWorkflow(
 }
 
 export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWorkflowResult> {
-  const { site_id, activity, instance_id, instance_plan_id, user_id } = input;
+  const { site_id, activity, instance_id, instance_plan_id, user_id, skill_slugs, skill_mode } = input;
   
   console.log(`🤖 Starting robot execution workflow for site: ${site_id}, activity: ${activity}, instance: ${instance_id}${instance_plan_id ? `, plan: ${instance_plan_id}` : ''}${user_id ? `, user: ${user_id}` : ''}`);
 
@@ -182,7 +184,9 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
     planParams = {
       site_id,
       activity,
-      instance_id
+      instance_id,
+      skill_slugs,
+      skill_mode
     };
     
     if (instance_plan_id) {
@@ -381,7 +385,9 @@ export async function robotWorkflow(input: RobotWorkflowInput): Promise<RobotWor
               activity,
               instance_id,
               user_id,
-              error_context: JSON.stringify(errorContext)
+              error_context: JSON.stringify(errorContext),
+              skill_slugs,
+              skill_mode
             });
             
             if (newPlanResult.success && newPlanResult.instance_plan_id) {

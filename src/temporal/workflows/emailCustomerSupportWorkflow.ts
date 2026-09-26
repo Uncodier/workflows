@@ -1,10 +1,12 @@
-import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
+import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes, isCancellation } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
 import { agentSupervisorWorkflow } from './agentSupervisorWorkflow';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { TASK_QUEUES } from '../config/taskQueues';
+import { runChannelGuidance } from './helpers/runChannelGuidance';
+import { channelGuidanceEnabled } from './helpers/channelGuidanceVersion';
 
 // Configure activity options using centralized timeouts
 const { 
@@ -37,6 +39,7 @@ export async function emailCustomerSupportMessageWorkflow(
   data?: any;
   error?: string;
 }> {
+  const useChannelGuidance = channelGuidanceEnabled();
   console.log('🎯 Starting email customer support message workflow...');
   console.log(`📋 Processing email ID: ${emailData.analysis_id}`);
   console.log(`🏢 Site: ${emailData.site_id}, User: ${emailData.user_id}`);
@@ -74,7 +77,17 @@ export async function emailCustomerSupportMessageWorkflow(
     console.log('📞 Processing email - sending customer support message');
     
     // Send the customer support message using data from emailData
-    const response = await sendCustomerSupportMessageActivity(emailData, baseParams);
+    // Legacy email analysis can lack origin. Match the guidance channel to the
+    // customer-support request without changing explicitly provided origins.
+    const requestParams = useChannelGuidance && (!baseParams.origin || baseParams.origin === 'not specified')
+      ? { ...baseParams, origin: 'email' }
+      : baseParams;
+    const requestData = useChannelGuidance
+      ? { ...emailData, channel_guidance_run_plan_ids: await runChannelGuidance(emailData, requestParams) }
+      : emailData;
+    const response = await sendCustomerSupportMessageActivity(
+      requestData, requestParams
+    );
     
     // ✅ Verificar que la llamada a customer support fue exitosa antes de continuar
     if (!response || !response.success) {
@@ -136,6 +149,7 @@ export async function emailCustomerSupportMessageWorkflow(
       }
       
     } catch (emailError) {
+      if (useChannelGuidance && isCancellation(emailError)) throw emailError;
       console.error('❌ Email workflow failed, but customer support was successful:', emailError);
       // Don't fail the entire workflow if email fails
     }
@@ -336,6 +350,7 @@ export async function emailCustomerSupportMessageWorkflow(
     };
     
   } catch (error) {
+    if (useChannelGuidance && isCancellation(error)) throw error;
     console.error('❌ Email customer support message workflow failed:', error);
     throw new Error(`Email customer support message workflow failed: ${error instanceof Error ? error.message : String(error)}`);
   }

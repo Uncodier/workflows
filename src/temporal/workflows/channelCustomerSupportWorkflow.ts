@@ -1,8 +1,10 @@
-import { proxyActivities, startChild, ParentClosePolicy } from '@temporalio/workflow';
+import { proxyActivities, startChild, ParentClosePolicy, isCancellation } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
 import { sendChannelMessageFromAgentWorkflow } from './sendChannelMessageFromAgentWorkflow';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
+import { runChannelGuidance } from './helpers/runChannelGuidance';
+import { channelGuidanceEnabled } from './helpers/channelGuidanceVersion';
 
 const { sendCustomerSupportMessageActivity } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.CUSTOMER_SUPPORT,
@@ -21,6 +23,7 @@ export async function channelCustomerSupportMessageWorkflow(
   data?: any;
   error?: string;
 }> {
+  const useChannelGuidance = channelGuidanceEnabled();
   const channel = baseParams.origin || 'telegram';
   const isEmail = channel === 'email';
   const recipient = isEmail ? messageData.email : messageData.phone;
@@ -54,10 +57,17 @@ export async function channelCustomerSupportMessageWorkflow(
     channel_delivery: true,
     require_approval: requireApproval,
     custom_data: messageData.custom_data,
-    origin_message_id: messageData.origin_message_id || baseParams.origin_message_id,
+    origin_message_id: useChannelGuidance
+      ? baseParams.origin_message_id || messageData.origin_message_id || messageData.messageId
+      : messageData.origin_message_id || baseParams.origin_message_id,
   };
 
-  const response = await sendCustomerSupportMessageActivity(emailDataForCS, baseParams);
+  const requestData = useChannelGuidance
+    ? { ...emailDataForCS, channel_guidance_run_plan_ids: await runChannelGuidance(messageData, baseParams) }
+    : emailDataForCS;
+  const response = await sendCustomerSupportMessageActivity(
+    requestData, baseParams
+  );
 
   if (!response || !response.success) {
     console.error(`${channel} customer support message failed:`, response?.error || 'Unknown error');
@@ -106,6 +116,7 @@ export async function channelCustomerSupportMessageWorkflow(
       channelMessageSent = Boolean(channelResult.success);
     }
   } catch (channelError) {
+    if (useChannelGuidance && isCancellation(channelError)) throw channelError;
     console.error(`${channel} send workflow failed, but customer support was successful:`, channelError);
   }
 

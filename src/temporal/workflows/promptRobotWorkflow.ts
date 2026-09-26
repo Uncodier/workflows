@@ -23,6 +23,8 @@ export interface PromptRobotWorkflowInput {
   context?: string;
   activity?: string;
   user_id?: string;
+  skill_slugs?: string[];
+  skill_mode?: 'auto' | 'required';
 }
 
 export interface PromptRobotWorkflowResult {
@@ -62,7 +64,7 @@ export interface PromptRobotWorkflowResult {
  * Optional: context, activity, user_id
  */
 export async function promptRobotWorkflow(input: PromptRobotWorkflowInput): Promise<PromptRobotWorkflowResult> {
-  const { instance_id, message, step_status, site_id, context, activity, user_id } = input;
+  const { instance_id, message, step_status, site_id, context, activity, user_id, skill_slugs, skill_mode } = input;
   
   console.log(`🎯 Starting prompt robot workflow for instance: ${instance_id}, site: ${site_id}`);
   console.log(`📝 Message: ${message}`);
@@ -89,7 +91,9 @@ export async function promptRobotWorkflow(input: PromptRobotWorkflowInput): Prom
       message,
       step_status,
       site_id,
-      context
+      context,
+      skill_slugs,
+      skill_mode
     });
 
     if (!actResult.success) {
@@ -139,7 +143,9 @@ export async function promptRobotWorkflow(input: PromptRobotWorkflowInput): Prom
           site_id,
           activity: activity || 'robot-prompt',
           instance_id,
-          user_id
+          user_id,
+          skill_slugs,
+          skill_mode
         };
 
         robot_workflow_result = await startChild(robotWorkflow, {

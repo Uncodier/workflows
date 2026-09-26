@@ -36,6 +36,7 @@ export * from './reservationActivities';
 export * from './subscriptionActivities';
 export * from './taskActivities';
 export * from './channelActivities';
+export * from './channelGuidanceActivities';
 export * from './outstandActivities';
 export * from './outstandContentActivities';
 export * from './syncedObjectActivities';
@@ -79,6 +80,7 @@ import * as reservationActivities from './reservationActivities';
 import * as subscriptionActivities from './subscriptionActivities';
 import * as taskActivities from './taskActivities';
 import * as channelActivities from './channelActivities';
+import * as channelGuidanceActivities from './channelGuidanceActivities';
 import * as outstandActivities from './outstandActivities';
 import * as outstandContentActivities from './outstandContentActivities';
 import * as syncedObjectActivities from './syncedObjectActivities';
@@ -122,6 +124,7 @@ export const activities = {
   ...subscriptionActivities,
   ...taskActivities,
   ...channelActivities,
+  ...channelGuidanceActivities,
   ...outstandActivities,
   ...outstandContentActivities,
   ...syncedObjectActivities,

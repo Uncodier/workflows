@@ -1,40 +1,17 @@
-import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
+import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes, isCancellation } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
 import { emailCustomerSupportMessageWorkflow } from './emailCustomerSupportWorkflow';
 import { sendWhatsappFromAgent } from './sendWhatsappFromAgentWorkflow';
 import { channelCustomerSupportMessageWorkflow } from './channelCustomerSupportWorkflow';
-import { agentSupervisorWorkflow } from './agentSupervisorWorkflow';
 import type { WhatsAppMessageData } from '../activities/whatsappActivities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
-import { TASK_QUEUES } from '../config/taskQueues';
 import { buildWhatsAppSendParams } from './helpers/buildWhatsAppSendParams';
 import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
-
-/**
- * Helper function to map WhatsApp intents to EmailData intents
- * Currently not used but kept for future WhatsApp integration
- */
-// function mapWhatsAppIntentToEmailIntent(
-//   whatsappIntent?: 'inquiry' | 'complaint' | 'purchase' | 'support' | 'greeting' | 'follow_up' | 'unknown'
-// ): 'inquiry' | 'complaint' | 'purchase' | 'support' | 'partnership' | 'demo_request' | undefined {
-//   switch (whatsappIntent) {
-//     case 'inquiry':
-//       return 'inquiry';
-//     case 'complaint':
-//       return 'complaint';
-//     case 'purchase':
-//       return 'purchase';
-//     case 'support':
-//       return 'support';
-//     case 'greeting':
-//     case 'follow_up':
-//       return 'inquiry'; // Map greeting and follow_up to inquiry
-//     case 'unknown':
-//     default:
-//       return 'inquiry'; // Default to inquiry for unknown or undefined
-//   }
-// }
+import { runChannelGuidance } from './helpers/runChannelGuidance';
+import { channelGuidanceEnabled } from './helpers/channelGuidanceVersion';
+import { customerSupportBaseParams, whatsappCustomerSupportData } from './helpers/customerSupportInput';
+import { startCustomerSupportSupervisor } from './helpers/startCustomerSupportSupervisor';
 
 // Configure activity options using centralized timeouts
 const { 
@@ -71,40 +48,10 @@ export async function customerSupportMessageWorkflow(
   data?: any;
   error?: string;
 }> {
+  const useChannelGuidance = channelGuidanceEnabled();
   console.log('🎯 Starting customer support message workflow...');
   
-  // ✅ NEW: Support for parameters in root of request
-  // If baseParams is undefined or missing values, look for them in messageData
-  let origin = baseParams?.origin;
-  let agentId = baseParams?.agentId;
-  let originMessageId = baseParams?.origin_message_id;
-  
-  // If not found in baseParams, check messageData root level
-  if (!origin && messageData && typeof messageData === 'object' && 'origin' in messageData) {
-    origin = (messageData as any).origin;
-    console.log(`Found origin in messageData root: ${origin}`);
-  }
-
-  if (typeof origin === 'string') {
-    origin = origin.trim().toLowerCase();
-  }
-  
-  if (!agentId && messageData && typeof messageData === 'object' && 'agentId' in messageData) {
-    agentId = (messageData as any).agentId;
-    console.log(`🔍 Found agentId in messageData root: ${agentId}`);
-  }
-  
-  if (!originMessageId && messageData && typeof messageData === 'object' && 'origin_message_id' in messageData) {
-    originMessageId = (messageData as any).origin_message_id;
-    console.log(`🔍 Found origin_message_id in messageData root: ${originMessageId}`);
-  }
-  
-  // Create effective baseParams for internal use
-  const effectiveBaseParams = {
-    origin: origin || 'not specified',
-    agentId: agentId,
-    origin_message_id: originMessageId
-  };
+  const effectiveBaseParams = customerSupportBaseParams(messageData, baseParams);
   
   console.log(`🔄 Origin: ${effectiveBaseParams.origin}`);
   console.log(`🤖 Agent ID: ${effectiveBaseParams.agentId || 'not specified'}`);
@@ -137,7 +84,12 @@ export async function customerSupportMessageWorkflow(
       console.log('📞 Processing website chat message - sending customer support message');
       
       // Send customer support message with original data (no transformation to EmailData)
-      const response = await sendCustomerSupportMessageActivity(messageData, effectiveBaseParams);
+      const requestData = useChannelGuidance
+        ? { ...messageData, channel_guidance_run_plan_ids: await runChannelGuidance(messageData, effectiveBaseParams) }
+        : messageData;
+      const response = await sendCustomerSupportMessageActivity(
+        requestData, effectiveBaseParams
+      );
       
       if (!response || !response.success) {
         console.error('❌ Website chat customer support message failed:', response?.error || 'Unknown error');
@@ -200,66 +152,10 @@ export async function customerSupportMessageWorkflow(
       // Don't throw - this is a non-critical operation that shouldn't fail the main workflow
         }
       
-      // 🎯 Start agent supervisor workflow as child (fire-and-forget, high priority)
-      try {
-        const commandId = response.data?.command_id;
-        const conversationId = response.data?.conversation_id;
-        
-        if (commandId || conversationId) {
-          // Get site_id for validation
-          let siteIdForValidation = response.data?.site_id || messageData.site_id || siteId;
-          
-          // If site_id is not available, try to get it from command_id or conversation_id
-          if (!siteIdForValidation) {
-            console.log('🔍 Site ID not in response, fetching from command/conversation...');
-            const siteIdResult = await getSiteIdFromCommandOrConversationActivity({
-              command_id: commandId,
-              conversation_id: conversationId
-            });
-            
-            if (siteIdResult.success && siteIdResult.site_id) {
-              siteIdForValidation = siteIdResult.site_id;
-              console.log(`✅ Found site_id from command/conversation: ${siteIdForValidation}`);
-            }
-          }
-          
-          // Validate that supervise_conversations activity is active before starting workflow
-          if (siteIdForValidation) {
-            console.log('🔐 Validating supervise_conversations activity status before starting supervisor workflow...');
-            const configValidation = await validateWorkflowConfigActivity(
-              siteIdForValidation,
-              'supervise_conversations'
-            );
-            
-            if (!configValidation.shouldExecute) {
-              console.log(`⛔ Supervisor workflow blocked: ${configValidation.reason}`);
-              console.log('⚠️ Skipping agent supervisor workflow - supervise_conversations is not active');
-            } else {
-              console.log(`✅ Activity validation passed: ${configValidation.reason}`);
-              console.log('🎯 Starting agent supervisor workflow as child (high priority, fire-and-forget)...');
-              
-              await startChild(agentSupervisorWorkflow, {
-                args: [{
-                  command_id: commandId,
-                  conversation_id: conversationId
-                }],
-                workflowId: `agent-supervisor-${commandId || conversationId}-${Date.now()}`,
-                taskQueue: TASK_QUEUES.HIGH, // High priority task queue
-                parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON // Fire-and-forget
-              });
-              
-              console.log('✅ Agent supervisor workflow started successfully (running independently)');
-            }
-          } else {
-            console.log('⚠️ Could not determine site_id for validation - skipping supervisor workflow');
-          }
-        } else {
-          console.log('⚠️ No command_id or conversation_id available for supervisor call');
-        }
-      } catch (supervisorError) {
-        console.error('❌ Agent supervisor workflow start error (non-blocking):', supervisorError);
-        // Don't throw - workflow continues normally
-      }
+      await startCustomerSupportSupervisor(
+        response.data, response.data?.site_id || messageData.site_id || siteId,
+        { getSiteIdFromCommandOrConversationActivity, validateWorkflowConfigActivity }, useChannelGuidance
+      );
 
       // 🔔 Notify team on inbound message (non-blocking, complementary activity)
       try {
@@ -313,34 +209,21 @@ export async function customerSupportMessageWorkflow(
       
       const whatsappData = messageData.whatsappData;
       
-      // Prepare EmailData compatible payload without UX-altering prefixes
-      const emailDataForCS: EmailData = {
-        summary: whatsappData.messageContent || 'No message content',
-        original_text: whatsappData.messageContent,
-        original_subject: whatsappData.senderName || whatsappData.phoneNumber,
-        contact_info: {
-          name: whatsappData.senderName || 'WhatsApp Contact',
-          email: '', // WhatsApp no tiene email
-          phone: whatsappData.phoneNumber,
-          company: ''
-        },
-        site_id: whatsappData.siteId,
-        user_id: whatsappData.userId,
-        lead_notification: "none", // Evitar duplicar notificaciones
-        analysis_id: `whatsapp-${whatsappData.messageId || Date.now()}`,
-        priority: 'medium', // Default priority for WhatsApp
-        intent: 'inquiry', // Default intent for WhatsApp  
-        potential_value: 'medium', // Default value for WhatsApp
-        // Agregar campos específicos de WhatsApp
-        conversation_id: whatsappData.conversationId, // Pasar conversation ID a la activity
-        visitor_id: undefined // WhatsApp normalmente no tiene visitor_id, se maneja por phone
-      };
+      const emailDataForCS = whatsappCustomerSupportData(
+        whatsappData, `whatsapp-${whatsappData.messageId || Date.now()}`,
+        useChannelGuidance, effectiveBaseParams.origin_message_id
+      );
       
       // ✅ FIXED: Para WhatsApp siempre procesar - eliminar filtro innecesario
       console.log('📞 Processing WhatsApp message - sending customer support message directly');
       
       // Enviar mensaje de customer support
-      const response = await sendCustomerSupportMessageActivity(emailDataForCS, effectiveBaseParams);
+      const requestData = useChannelGuidance
+        ? { ...emailDataForCS, channel_guidance_run_plan_ids: await runChannelGuidance(messageData, effectiveBaseParams) }
+        : emailDataForCS;
+      const response = await sendCustomerSupportMessageActivity(
+        requestData, effectiveBaseParams
+      );
       
       if (!response || !response.success) {
         console.error('❌ WhatsApp customer support message failed:', response?.error || 'Unknown error');
@@ -484,14 +367,6 @@ export async function customerSupportMessageWorkflow(
           console.log('⚠️ Continuing customer support workflow - lead notification is a secondary operation');
           // Don't throw - this is a non-critical operation that shouldn't fail the main workflow
         }
-      
-      // 🎯 Start agent supervisor workflow as child (fire-and-forget, high priority)
-      try {
-        const commandId = response.data?.command_id;
-        const conversationId = response.data?.conversation_id;
-        
-        if (commandId || conversationId) {
-          // Get site_id for validation
           let siteIdForValidation = response.data?.site_id || emailDataForCS.site_id;
           
           // If site_id is not available, try to get it from command_id or conversation_id
@@ -613,6 +488,7 @@ export async function customerSupportMessageWorkflow(
     }
     
   } catch (error) {
+    if (useChannelGuidance && isCancellation(error)) throw error;
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error('❌ Customer support workflow failed:', errorMessage);
     

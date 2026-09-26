@@ -25,6 +25,8 @@ export interface StartRobotInput {
   instance_id?: string;
   message?: string;
   context?: any;
+  skill_slugs?: string[];
+  skill_mode?: 'auto' | 'required';
 }
 
 export interface StartRobotResult {
@@ -63,7 +65,7 @@ export interface StartRobotResult {
  * Child workflow receives: site_id, activity, instance_id, instance_plan_id, and optionally user_id
  */
 export async function startRobotWorkflow(input: StartRobotInput): Promise<StartRobotResult> {
-  const { site_id, activity, user_id, instance_id: providedInstanceId, message, context } = input;
+  const { site_id, activity, user_id, instance_id: providedInstanceId, message, context, skill_slugs, skill_mode } = input;
   
   console.log(`🚀 Starting robot workflow for site: ${site_id}, activity: ${activity}${user_id ? `, user: ${user_id}` : ''}${message ? `, message: ${message}` : ''}${context ? `, context: ${JSON.stringify(context)}` : ''}`);
 
@@ -135,6 +137,8 @@ export async function startRobotWorkflow(input: StartRobotInput): Promise<StartR
       }
       
       planParams.message = message;
+      planParams.skill_slugs = skill_slugs;
+      planParams.skill_mode = skill_mode;
       
       if (context) {
         planParams.context = context;
@@ -171,7 +175,9 @@ export async function startRobotWorkflow(input: StartRobotInput): Promise<StartR
             activity,
             instance_id,
             instance_plan_id,
-            user_id
+             user_id,
+             skill_slugs,
+             skill_mode
           }],
           workflowId: `robot-execution-${site_id}-${instance_id}-${Date.now()}`,
           taskQueue: 'default', // Use the same task queue as the parent workflow
