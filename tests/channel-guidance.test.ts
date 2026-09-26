@@ -4,6 +4,12 @@ const mockPrepare = jest.fn<(...args: any[]) => Promise<any>>();
 const mockAdvance = jest.fn<(...args: any[]) => Promise<any>>();
 const mockResult = jest.fn<(...args: any[]) => Promise<any>>();
 const mockSleep = jest.fn<(...args: any[]) => Promise<void>>();
+const mockPatched = jest.fn<(id: string) => boolean>();
+const mockParentScope = { consideredCancelled: false };
+const mockScopeCreated = jest.fn();
+const mockScopeRun = jest.fn<(
+  scope: { consideredCancelled: boolean }, fn: () => Promise<any>
+) => Promise<any>>();
 
 jest.mock('@temporalio/workflow', () => ({
   proxyActivities: () => ({
@@ -11,8 +17,19 @@ jest.mock('@temporalio/workflow', () => ({
     advanceChannelGuidanceActivity: mockAdvance,
     resultChannelGuidanceActivity: mockResult,
   }),
+  patched: mockPatched,
   sleep: mockSleep,
-  CancellationScope: { withTimeout: async (_timeout: number, fn: () => Promise<any>) => fn() },
+  CancellationScope: class {
+    consideredCancelled = false;
+
+    constructor(options: { cancellable: boolean; timeout: number }) {
+      mockScopeCreated(options);
+    }
+
+    static current() { return mockParentScope; }
+
+    run(fn: () => Promise<any>) { return mockScopeRun(this, fn); }
+  },
   isCancellation: (error: any) => error?.name === 'CancelledFailure',
 }));
 
@@ -27,16 +44,26 @@ const websiteData = {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  // The deadline timer is never reached in tests unless explicitly simulated.
-  mockSleep.mockImplementation(async (duration: number) => {
-    if (duration === 240_000) return new Promise<void>(() => {});
-  });
+  mockPatched.mockReturnValue(true);
+  mockParentScope.consideredCancelled = false;
+  mockScopeRun.mockImplementation(async (_scope, fn) => fn());
+  mockSleep.mockResolvedValue(undefined);
   mockPrepare.mockResolvedValue({ runs: [{ runPlanId: 'plan-1', status: 'pending' }] });
   mockAdvance.mockResolvedValue({ status: 'completed' });
   mockResult.mockResolvedValue({ guidance: 'Brief, bounded advice' });
 });
 
 describe('runChannelGuidance', () => {
+  it('does not schedule guidance or a deadline for histories without the patch', async () => {
+    mockPatched.mockReturnValue(false);
+    await expect(runChannelGuidance(websiteData, { origin: 'web' })).resolves.toEqual([]);
+    expect(mockPatched).toHaveBeenCalledWith('customer-support-channel-guidance-v1');
+    expect(mockScopeCreated).not.toHaveBeenCalled();
+    expect(mockPrepare).not.toHaveBeenCalled();
+    expect(mockAdvance).not.toHaveBeenCalled();
+    expect(mockResult).not.toHaveBeenCalled();
+  });
+
   it('prepares website_chat as web and passes only completed run IDs', async () => {
     await expect(runChannelGuidance(websiteData, { origin: 'website_chat' })).resolves.toEqual(['plan-1']);
     expect(mockPrepare).toHaveBeenCalledWith({
@@ -129,18 +156,29 @@ describe('runChannelGuidance', () => {
 });
 
 it('catches the four-minute cancellation and fails open without forwarding run IDs', async () => {
-  const { CancellationScope } = jest.requireMock('@temporalio/workflow') as {
-    CancellationScope: { withTimeout: jest.Mock };
-  };
-  const previous = CancellationScope.withTimeout;
-  CancellationScope.withTimeout = jest.fn<(...args: any[]) => Promise<any>>().mockRejectedValue(
-    Object.assign(new Error('deadline'), { name: 'CancelledFailure' })
-  );
-  try {
-    await expect(runChannelGuidance(websiteData, { origin: 'web' })).resolves.toEqual([]);
-    expect(CancellationScope.withTimeout).toHaveBeenCalledWith(240_000, expect.any(Function));
-    expect(mockResult).not.toHaveBeenCalled();
-  } finally {
-    CancellationScope.withTimeout = previous;
-  }
+  mockScopeRun.mockImplementation(async scope => {
+    scope.consideredCancelled = true;
+    throw Object.assign(new Error('deadline'), { name: 'CancelledFailure' });
+  });
+  await expect(runChannelGuidance(websiteData, { origin: 'web' })).resolves.toEqual([]);
+  expect(mockScopeCreated).toHaveBeenCalledWith({ cancellable: true, timeout: 240_000 });
+  expect(mockResult).not.toHaveBeenCalled();
+});
+
+it('propagates parent cancellation instead of producing a successful response', async () => {
+  const cancellation = Object.assign(new Error('workflow cancelled'), { name: 'CancelledFailure' });
+  mockParentScope.consideredCancelled = true;
+  mockScopeRun.mockImplementation(async scope => {
+    scope.consideredCancelled = true;
+    throw cancellation;
+  });
+  await expect(runChannelGuidance(websiteData, { origin: 'web' })).rejects.toBe(cancellation);
+  expect(mockResult).not.toHaveBeenCalled();
+});
+
+it('propagates activity cancellation when the local deadline has not expired', async () => {
+  const cancellation = Object.assign(new Error('activity cancelled'), { name: 'CancelledFailure' });
+  mockAdvance.mockRejectedValue(cancellation);
+  await expect(runChannelGuidance(websiteData, { origin: 'web' })).rejects.toBe(cancellation);
+  expect(mockResult).not.toHaveBeenCalled();
 });

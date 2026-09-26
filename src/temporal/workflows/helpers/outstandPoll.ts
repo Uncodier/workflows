@@ -155,6 +155,27 @@ export function getConnectedCommentAccounts(
   });
 }
 
+/** Only import history for accounts actually connected to this site. The
+ * Outstand accounts endpoint can return accounts from the shared organization.
+ */
+export function isImportAccountOwnedBySite(
+  account: any,
+  socialMedia: unknown
+): boolean {
+  if (!account || account.isActive === false || account.isActive === 'false') return false;
+  const network = normalizeOutstandNetwork(account.network || account.platform);
+  const ids = accountIdentifiers(account);
+  const pages = connectedPageIds(account);
+  if (!network || !normalizedIdentifier(account.id)) return false;
+
+  return getConnectedCommentAccounts(socialMedia).some((connected) =>
+    connected.network === network && (
+      connected.identifiers.some((identifier) => ids.includes(identifier)) ||
+      connected.pageIds.some((pageId) => pages.includes(pageId))
+    )
+  );
+}
+
 function platformPostBelongsToPage(platformPostId: unknown, pageId: string): boolean {
   const normalizedPostId = normalizedIdentifier(platformPostId);
   if (!normalizedPostId) return false;
@@ -206,6 +227,8 @@ export function getOwnedPublishedCommentAccounts(
   );
 }
 
+// Preserve the pre-patch mapping for Temporal histories without the strict
+// ownership marker. Changing this branch changes their activity sequence.
 export function getPostSiteOwnerships(
   post: any,
   sites: SiteSocialMediaSettings[]
@@ -220,6 +243,25 @@ export function getPostSiteOwnerships(
       ? [{ siteId: site.site_id, socialAccounts }]
       : [];
   });
+}
+
+export function getUnambiguousPostSiteOwnerships(
+  post: any,
+  sites: SiteSocialMediaSettings[]
+): PostSiteOwnership[] {
+  // A shared organization must not turn a multiply-configured account into a
+  // post for every site. Ambiguous ownership is unsafe; skip those accounts.
+  const ownedAccounts = new Map<string, any[]>();
+  for (const account of post?.socialAccounts || []) {
+    if (!account?.network || !isAccountPublished(account)) continue;
+    const owners = sites.filter((site) =>
+      getOwnedPublishedCommentAccounts({ socialAccounts: [account] }, site.social_media).length > 0
+    );
+    if (owners.length !== 1) continue;
+    const siteId = owners[0].site_id;
+    ownedAccounts.set(siteId, [...(ownedAccounts.get(siteId) || []), account]);
+  }
+  return [...ownedAccounts].map(([siteId, socialAccounts]) => ({ siteId, socialAccounts }));
 }
 
 export function getPublishedCommentNetworks(post: any): string[] {

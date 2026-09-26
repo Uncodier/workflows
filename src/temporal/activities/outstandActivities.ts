@@ -1,9 +1,11 @@
+import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
 import { supabaseServiceRole as supabaseAdmin } from '../../lib/supabase/client';
 import { handleOutstandApiError } from './outstandHelpers';
 import {
   buildOutstandCommentsPath,
   getConnectedCommentAccounts,
+  isImportAccountOwnedBySite,
   isOutstandClientError,
 } from '../workflows/helpers/outstandPoll';
 
@@ -101,7 +103,47 @@ export async function fetchOutstandAccountsActivity(siteId: string): Promise<any
 }
 
 export async function importOutstandPostsActivity(siteId: string, accountId: string): Promise<any> {
-  const response = await apiService.post(`/api/integrations/outstand/accounts/${accountId}/imports?tenant_id=${siteId}`, {});
+  if (typeof accountId !== 'string' || !accountId.trim()) {
+    throw ApplicationFailure.nonRetryable(
+      'Outstand import requires an account ID',
+      'OUTSTAND_IMPORT_INVALID_INPUT'
+    );
+  }
+
+  // Pending activities and retries still contain the original string ID.
+  // Resolve it on every attempt; never trust an account snapshot from history.
+  const accounts = await fetchOutstandAccountsActivity(siteId);
+  if (!Array.isArray(accounts)) {
+    throw new Error('Failed to verify Outstand import: invalid accounts response');
+  }
+  const matches = accounts.filter((candidate) => candidate?.id === accountId);
+  if (matches.length !== 1) {
+    throw ApplicationFailure.nonRetryable(
+      `Refusing Outstand import: account ${accountId} is missing or ambiguous`,
+      'OUTSTAND_IMPORT_OWNERSHIP_REJECTED'
+    );
+  }
+  const account = matches[0];
+  const { data: settings, error } = await supabaseAdmin
+    .schema(tenantSchema())
+    .from('settings')
+    .select('site_id, social_media')
+    .not('social_media', 'is', null);
+  if (error) {
+    // Transient lookup failures may retry, but must never reach the import POST.
+    throw new Error(`Failed to verify Outstand import ownership: ${error.message}`);
+  }
+  const owners = (settings || []).filter((site) =>
+    isImportAccountOwnedBySite(account, site.social_media)
+  );
+  if (owners.length !== 1 || owners[0].site_id !== siteId) {
+    throw ApplicationFailure.nonRetryable(
+      `Refusing Outstand import: account ownership is missing or ambiguous for site ${siteId}`,
+      'OUTSTAND_IMPORT_OWNERSHIP_REJECTED'
+    );
+  }
+
+  const response = await apiService.post(`/api/integrations/outstand/accounts/${encodeURIComponent(accountId)}/imports?tenant_id=${encodeURIComponent(siteId)}`, {});
   if (!response.success) {
     throw handleOutstandApiError(`importOutstandPosts for account ${accountId}`, response.error?.message);
   }

@@ -6,8 +6,10 @@ import {
   isAccountPublished,
   isOutstandDraftPost,
   getConnectedCommentAccounts,
+  isImportAccountOwnedBySite,
   getOwnedPublishedCommentAccounts,
   getPostSiteOwnerships,
+  getUnambiguousPostSiteOwnerships,
   getPublishedCommentNetworks,
   buildOutstandCommentsPath,
   isPublishedContentForAnalytics,
@@ -198,6 +200,35 @@ describe('outstandPoll helpers', () => {
       }]);
     });
 
+    it('rejects an account configured as active by multiple sites', () => {
+      const account = { id: 'shared-account', network: 'linkedin', status: 'published' };
+      expect(getUnambiguousPostSiteOwnerships({ socialAccounts: [account] }, [
+        { site_id: 'first', social_media: [{ ...account, isActive: true }] },
+        { site_id: 'second', social_media: [{ ...account, isActive: true }] },
+      ])).toEqual([]);
+    });
+
+    it('preserves the legacy mapping and site order for pre-patch histories', () => {
+      const account = { id: 'shared-account', network: 'linkedin', status: 'published' };
+      const sites = [
+        { site_id: 'second', social_media: [{ ...account, isActive: true }] },
+        { site_id: 'first', social_media: [{ ...account, isActive: true }] },
+      ];
+      expect(getPostSiteOwnerships({ socialAccounts: [account] }, sites)).toEqual([
+        { siteId: 'second', socialAccounts: [account] },
+        { siteId: 'first', socialAccounts: [account] },
+      ]);
+    });
+
+    it('keeps uniquely owned post accounts when another account is ambiguous', () => {
+      const shared = { id: 'shared', network: 'linkedin', status: 'published' };
+      const owned = { id: 'owned', network: 'instagram', status: 'published' };
+      expect(getUnambiguousPostSiteOwnerships({ socialAccounts: [shared, owned] }, [
+        { site_id: 'first', social_media: [shared, owned].map(account => ({ ...account, isActive: true })) },
+        { site_id: 'second', social_media: [{ ...shared, isActive: true }] },
+      ])).toEqual([{ siteId: 'first', socialAccounts: [owned] }]);
+    });
+
     it('matches legacy Facebook pages by platform post prefix', () => {
       const socialMedia = [{
         platform: 'facebook',
@@ -223,6 +254,46 @@ describe('outstandPoll helpers', () => {
           username: 'example',
         },
       ])).toEqual([]);
+    });
+
+    it('imports history only for an active account actually connected to the site', () => {
+      const connected = [{
+        id: 'owned-account', network: 'linkedin', isActive: true,
+        network_unique_id: 'urn:li:organization:owner',
+      }];
+      expect(isImportAccountOwnedBySite({
+        id: 'owned-account', network: 'linkedin', isActive: true,
+      }, connected)).toBe(true);
+      expect(isImportAccountOwnedBySite({
+        id: 'other-account', network: 'linkedin', isActive: true,
+      }, connected)).toBe(false);
+      expect(isImportAccountOwnedBySite({
+        id: 'owned-account', network: 'facebook', isActive: true,
+      }, connected)).toBe(false);
+      expect(isImportAccountOwnedBySite({
+        id: 'owned-account', network: 'linkedin', isActive: false,
+      }, connected)).toBe(false);
+      expect(isImportAccountOwnedBySite({
+        id: 'owned-account', network: 'linkedin', isActive: true,
+      }, [{ ...connected[0], isActive: false }])).toBe(false);
+      expect(isImportAccountOwnedBySite({
+        id: 'owned-account', network: 'linkedin', isActive: true,
+      }, null)).toBe(false);
+    });
+
+    it('matches a legacy connected Facebook page without trusting an unrelated page', () => {
+      const connected = [{
+        platform: 'facebook', isActive: true,
+        connectedPages: [{ id: 'owner-page' }],
+      }];
+      expect(isImportAccountOwnedBySite({
+        id: 'outstand-account', network: 'facebook',
+        connectedPages: [{ id: 'owner-page' }],
+      }, connected)).toBe(true);
+      expect(isImportAccountOwnedBySite({
+        id: 'outstand-account', network: 'facebook',
+        connectedPages: [{ id: 'another-page' }],
+      }, connected)).toBe(false);
     });
   });
 

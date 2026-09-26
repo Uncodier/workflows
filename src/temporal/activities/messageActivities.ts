@@ -82,13 +82,19 @@ export async function getApprovedMessagesActivity(): Promise<any[]> {
   }
 
   const leadIds = [...new Set([...conversationMap.values()].map((c) => c.lead_id).filter(Boolean))];
-  const leadMap = new Map<string, { id: string; email: string | null; phone: string | null; name: string | null }>();
+  const leadMap = new Map<string, {
+    id: string;
+    email: string | null;
+    phone: string | null;
+    name: string | null;
+    metadata: Record<string, unknown> | null;
+  }>();
 
   for (let i = 0; i < leadIds.length; i += RELATED_RECORD_BATCH_SIZE) {
     const batch = leadIds.slice(i, i + RELATED_RECORD_BATCH_SIZE);
     const { data: leads, error: leadError } = await supabaseServiceRole
       .from('leads')
-      .select('id, email, phone, name')
+      .select('id, email, phone, name, metadata')
       .in('id', batch);
 
     if (leadError) {
@@ -96,7 +102,10 @@ export async function getApprovedMessagesActivity(): Promise<any[]> {
     }
     if (leads) {
       for (const l of leads) {
-        leadMap.set(l.id, { id: l.id, email: l.email ?? null, phone: l.phone ?? null, name: l.name ?? null });
+        leadMap.set(l.id, {
+          id: l.id, email: l.email ?? null, phone: l.phone ?? null,
+          name: l.name ?? null, metadata: l.metadata ?? null,
+        });
       }
     }
   }
@@ -130,6 +139,12 @@ export async function getApprovedMessagesActivity(): Promise<any[]> {
           customData: msg.custom_data,
           reason,
         });
+        continue;
+      }
+      // Incident quarantine is a delivery veto, even if a pending response is
+      // later approved. Keep the message and its history for review.
+      if (lead.metadata?.quarantined_cross_tenant === true) {
+        console.warn(`Skipping approved message ${msg.id}: cross-tenant lead is quarantined`);
         continue;
       }
       enhancedMessages.push({

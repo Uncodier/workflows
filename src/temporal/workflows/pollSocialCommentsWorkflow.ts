@@ -11,6 +11,8 @@ import {
   buildSocialCommentExternalId,
   buildSocialCommentWorkflowId,
   getPostSiteOwnerships,
+  getUnambiguousPostSiteOwnerships,
+  isImportAccountOwnedBySite,
   isOutstandDraftPost,
   normalizeOutstandNetwork,
   shouldPollPostForComments,
@@ -41,6 +43,9 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
   const useBucketCadence = patched('poll-social-comments-bucket-cadence-v2');
   const useBatchClaims = patched('poll-social-comments-batch-claims-v1');
   patched('poll-social-comments-safe-identifiers-v1');
+  // Both ownership filters can remove activity/child-workflow commands. Keep
+  // the old decisions for histories that predate this marker.
+  const useStrictSiteOwnership = patched('poll-social-comments-strict-site-ownership-v1');
   
   await logWorkflowExecutionActivity({
     workflowId,
@@ -78,8 +83,16 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                 const accounts = await fetchOutstandAccountsActivity(siteId);
                 let importStarted = false;
                 for (const account of accounts) {
-                  if (account.id) {
+                  const canImport = useStrictSiteOwnership
+                    ? isImportAccountOwnedBySite(account, site.social_media) &&
+                      sites.filter((candidate) =>
+                        isImportAccountOwnedBySite(account, candidate.social_media)
+                      ).length === 1
+                    : Boolean(account.id);
+                  if (canImport) {
                     try {
+                      // Keep the historical activity payload for pending tasks
+                      // and retries. The activity revalidates ownership itself.
                       await importOutstandPostsActivity(siteId, account.id);
                       importStarted = true;
                     } catch (importError) {
@@ -114,7 +127,10 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           }
           
           for (const post of posts) {
-            const ownership = getPostSiteOwnerships(post, sites)
+            const ownerships = useStrictSiteOwnership
+              ? getUnambiguousPostSiteOwnerships(post, sites)
+              : getPostSiteOwnerships(post, sites);
+            const ownership = ownerships
               .find((candidate) => candidate.siteId === siteId);
             const ownedSocialAccounts = ownership?.socialAccounts || [];
             const uniqueNetworks = [
