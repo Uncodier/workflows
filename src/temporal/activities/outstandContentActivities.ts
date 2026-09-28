@@ -1,5 +1,5 @@
 import { supabaseServiceRole as supabaseAdmin } from '../../lib/supabase/client';
-import { extractOutstandPostText, getOwnedPublishedCommentAccounts } from '../workflows/helpers/outstandPoll';
+import { getOwnedPublishedSocialPostAccounts } from '../workflows/helpers/outstandPoll';
 import {
   buildOutstandContentExternalId,
   buildOutstandContentHash,
@@ -7,6 +7,7 @@ import {
   mergeOutstandMetadata,
   mergeOutstandTags,
   normalizeOutstandContent,
+  outstandPostText,
 } from './outstandContentIdentity';
 import {
   claimSyncedObjectActivity,
@@ -108,11 +109,12 @@ export async function upsertContentFromOutstandPostActivity(
   if (!outstandId) return null;
 
   try {
-    const ownedSocialAccounts = getOwnedPublishedCommentAccounts(post, socialMedia);
+    const ownedSocialAccounts = getOwnedPublishedSocialPostAccounts(post, socialMedia);
     if (ownedSocialAccounts.length === 0) return null;
 
-    const postText = extractOutstandPostText(post);
-    if (!postText) return null;
+    // Instagram/TikTok media can have no caption. Give each captionless post a
+    // stable, post-specific identity instead of dropping it or merging media.
+    const postText = outstandPostText(post);
 
     const normalizedPostText = normalizeOutstandContent(postText);
     const contentHash = buildOutstandContentHash(normalizedPostText);

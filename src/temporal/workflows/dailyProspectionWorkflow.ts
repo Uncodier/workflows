@@ -1,4 +1,4 @@
-import { proxyActivities, workflowInfo, upsertSearchAttributes } from '@temporalio/workflow';
+import { patched, proxyActivities, workflowInfo, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 // Import specific daily prospection activities
@@ -556,9 +556,10 @@ export async function dailyProspectionWorkflow(
     console.log(`📡 Step 0: Validating communication channels for ${site_id}...`);
     
     // Validate that the site has email or WhatsApp channels configured
-    const channelsValidation = await validateCommunicationChannelsActivity({
-      site_id: site_id
-    });
+    const requireHealthyOutbound = patched('outbound-channel-health-gate-v1');
+    const channelsValidation = await validateCommunicationChannelsActivity(
+      requireHealthyOutbound ? { site_id, requireHealthyOutbound: true } : { site_id }
+    );
     
     if (!channelsValidation.success) {
       const errorMsg = `Failed to validate communication channels: ${channelsValidation.error}`;

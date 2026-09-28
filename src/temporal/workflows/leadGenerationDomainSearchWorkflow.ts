@@ -1,4 +1,4 @@
-import { proxyActivities, workflowInfo, upsertSearchAttributes } from '@temporalio/workflow';
+import { patched, proxyActivities, workflowInfo, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 // Finder + DB activities for domain-based person search
@@ -14,6 +14,7 @@ const {
   checkExistingLeadForPersonActivity,
   upsertCompanyActivity,
   logWorkflowExecutionActivity,
+  validateCommunicationChannelsActivity,
 } = proxyActivities<{
   callPersonRoleSearchActivity: (o: { role_query_id?: string; query?: any; page: number; page_size?: number; site_id?: string; userId?: string }) => Promise<{ success: boolean; persons?: any[]; total?: number; page?: number; pageSize?: number; hasMore?: boolean; error?: string }>;
   callPersonWorkEmailsActivity: (o: { external_person_id?: string | number; full_name?: string; company_name?: string; site_id?: string }) => Promise<{ success: boolean; emails?: string[]; error?: string }>;
@@ -26,6 +27,7 @@ const {
   checkExistingLeadForPersonActivity: (o: { person_id: string; site_id: string }) => Promise<{ success: boolean; hasExistingLead: boolean; existingLead?: any; error?: string }>;
   upsertCompanyActivity: (companyData: any) => Promise<{ success: boolean; company?: any; error?: string }>;
   logWorkflowExecutionActivity: (params: any) => Promise<void>;
+  validateCommunicationChannelsActivity: (params: { site_id: string; requireHealthyOutbound?: boolean }) => Promise<{ success: boolean; hasAnyChannel: boolean }>;
 }>({
   startToCloseTimeout: '10 minutes',
   retry: { maximumAttempts: 3 },
@@ -94,6 +96,18 @@ export async function leadGenerationDomainSearchWorkflow(
   });
 
   // Call Finder API for this specific page with organization_domains
+  if (patched('domain-search-outbound-health-gate-v1')) {
+    const outbound = await validateCommunicationChannelsActivity({
+      site_id, requireHealthyOutbound: true,
+    });
+    if (!outbound.success || !outbound.hasAnyChannel) {
+      return {
+        success: false, processed: 0, foundMatches: 0,
+        leadsCreated: [], hasMore: false,
+        errors: ['No recently healthy outbound channel for domain search'],
+      };
+    }
+  }
   const pageRes = await callPersonRoleSearchActivity({
     query: {
       organization_domains: domains,

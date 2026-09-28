@@ -4,6 +4,11 @@ export function normalizeOutstandContent(text: string): string {
   return text.replace(/\r\n/g, '\n').trim();
 }
 
+export function outstandPostText(post: { id?: unknown; containers?: Array<{ content?: string | null }>; text?: string | null }): string {
+  const caption = post.containers?.[0]?.content?.trim() || post.text?.trim();
+  return caption || `Social media post ${String(post.id)}`;
+}
+
 export function buildOutstandContentHash(text: string): string {
   return createHash('sha256')
     .update(normalizeOutstandContent(text), 'utf8')

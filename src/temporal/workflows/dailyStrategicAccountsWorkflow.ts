@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, workflowInfo, ParentClosePolicy } from '@temporalio/workflow';
+import { patched, proxyActivities, startChild, workflowInfo, ParentClosePolicy } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { leadGenerationWorkflow, type LeadGenerationOptions, type LeadGenerationResult } from './leadGenerationWorkflow';
 
@@ -8,6 +8,7 @@ import { leadGenerationWorkflow, type LeadGenerationOptions, type LeadGeneration
 const { 
   logWorkflowExecutionActivity,
   saveCronStatusActivity,
+  validateCommunicationChannelsActivity,
 
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
@@ -170,6 +171,30 @@ export async function dailyStrategicAccountsWorkflow(
   let regionSearchResult: any = null;
 
   try {
+    if (patched('strategic-accounts-outbound-health-gate-v1')) {
+      const channels = await validateCommunicationChannelsActivity({
+        site_id, requireHealthyOutbound: true,
+      });
+      if (!channels.success || !channels.hasAnyChannel) {
+        const reason = 'No available outbound channel for strategic accounts';
+        await saveCronStatusActivity({
+          siteId: site_id, workflowId: realWorkflowId, scheduleId: realScheduleId,
+          activityName: 'dailyStrategicAccountsWorkflow', status: 'COMPLETED',
+          lastRun: new Date().toISOString(), errorMessage: reason,
+        });
+        await logWorkflowExecutionActivity({
+          workflowId: realWorkflowId, workflowType: 'dailyStrategicAccountsWorkflow',
+          status: 'BLOCKED', input: options, error: reason,
+        });
+        return {
+          success: false, siteId: site_id, leadsGenerated: 0,
+          leadsProcessed: 0, tasksCreated: 0, statusUpdated: 0,
+          strategicAccountResults: [], errors: [reason],
+          executionTime: `${Date.now() - startTime}ms`,
+          completedAt: new Date().toISOString(),
+        };
+      }
+    }
     console.log(`🎯 Step 1: Starting strategic accounts lead generation...`);
     console.log(`🌍 Using region: "world" and keywords: "key accounts"`);
     

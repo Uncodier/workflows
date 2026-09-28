@@ -1,5 +1,6 @@
 import { getSupabaseService } from '../../services/supabaseService';
 import { ValidateCommunicationChannelsParams, ValidateCommunicationChannelsResult } from './types';
+import { availableOutboundChannels } from './outboundHealth';
 
 /**
  * Activity to validate communication channels (email or WhatsApp) are configured for a site
@@ -45,10 +46,10 @@ export async function validateCommunicationChannelsActivity(
     const siteSettings = settings[0];
     const channels = siteSettings.channels || {};
     
-    console.log(`🔍 Checking channel configurations for channels:`, channels);
+    console.log('🔍 Checking channel configuration');
     console.log(`🔍 DEBUG: channels type:`, typeof channels);
     console.log(`🔍 DEBUG: channels isArray:`, Array.isArray(channels));
-    console.log(`🔍 DEBUG: channels value:`, JSON.stringify(channels, null, 2));
+    // Do not log the channels object: it may contain email passwords and API tokens.
     
     let hasEmailChannel = false;
     let hasWhatsappChannel = false;
@@ -85,8 +86,7 @@ export async function validateCommunicationChannelsActivity(
     } else if (typeof channels === 'object' && channels !== null) {
       // Object format: channels.email.enabled, channels.whatsapp.enabled
       console.log(`📋 Processing channels as object structure`);
-      console.log(`🔍 DEBUG: Channels object keys:`, Object.keys(channels));
-      console.log(`🔍 DEBUG: Full channels object:`, JSON.stringify(channels, null, 2));
+      console.log('🔍 Checking configured channel keys:', Object.keys(channels));
       
       // Check email configuration
       let isEmailActive = false;
@@ -98,7 +98,7 @@ export async function validateCommunicationChannelsActivity(
         isEmailActive = channels.email.enabled === true && 
                         (channels.email.status === 'active' || channels.email.status === 'synced') &&
                         hasEmailData;
-        console.log(`   - Email enabled: ${isEmailActive} (hasEmailData: ${hasEmailData})`, channels.email);
+        console.log(`   - Email enabled: ${isEmailActive} (hasEmailData: ${hasEmailData})`);
         // Detect aliases: accept string, array or truthy value
         const aliasesValue = channels.email.aliases;
         if (typeof aliasesValue === 'string') {
@@ -113,16 +113,15 @@ export async function validateCommunicationChannelsActivity(
       // Check agent channel
       const isAgentActive = channels.agent && channels.agent.enabled === true && channels.agent.status === 'active';
       if (channels.agent) {
-         console.log(`   - Agent enabled: ${isAgentActive}`, channels.agent);
+         console.log(`   - Agent enabled: ${isAgentActive}`);
       }
       
       // Check agent_mail channel (and agent_email) with relaxed validation
       console.log(`🔍 DEBUG: Checking agent_mail/agent_email channels...`);
-      console.log(`🔍 DEBUG: channels.agent_mail =`, channels.agent_mail);
-      console.log(`🔍 DEBUG: channels.agent_email =`, channels.agent_email);
+      console.log('🔍 Checking agent mail configuration');
       
       const agentMailChannel = channels.agent_mail || channels.agent_email;
-      console.log(`🔍 DEBUG: agentMailChannel =`, agentMailChannel);
+      console.log(`🔍 DEBUG: agentMailChannel configured =`, !!agentMailChannel);
       
       if (agentMailChannel) {
         console.log(`🔍 DEBUG: agentMailChannel.enabled =`, agentMailChannel.enabled);
@@ -139,7 +138,7 @@ export async function validateCommunicationChannelsActivity(
       console.log(`🔍 DEBUG: isAgentMailActive =`, isAgentMailActive);
       
       if (agentMailChannel) {
-         console.log(`   - Agent Mail/Email found (status=${agentMailChannel.status}, enabled=${agentMailChannel.enabled}): ${isAgentMailActive}`, agentMailChannel);
+         console.log(`   - Agent Mail/Email found (status=${agentMailChannel.status}, enabled=${agentMailChannel.enabled}): ${isAgentMailActive}`);
       } else {
          console.log(`   - Agent Mail/Email NOT FOUND in channels object`);
       }
@@ -148,11 +147,10 @@ export async function validateCommunicationChannelsActivity(
       
       // Check WhatsApp configuration (including agent_whatsapp)
       console.log(`🔍 DEBUG: Checking WhatsApp channels...`);
-      console.log(`🔍 DEBUG: channels.whatsapp =`, channels.whatsapp);
-      console.log(`🔍 DEBUG: channels.agent_whatsapp =`, channels.agent_whatsapp);
+      console.log('🔍 Checking WhatsApp configuration');
       
       const whatsappChannel = channels.whatsapp || channels.agent_whatsapp;
-      console.log(`🔍 DEBUG: whatsappChannel =`, whatsappChannel);
+      console.log(`🔍 DEBUG: whatsappChannel configured =`, !!whatsappChannel);
       
       if (whatsappChannel && typeof whatsappChannel === 'object') {
         console.log(`🔍 DEBUG: whatsappChannel.enabled =`, whatsappChannel.enabled);
@@ -168,7 +166,7 @@ export async function validateCommunicationChannelsActivity(
           whatsappConfig = whatsappChannel;
         }
         console.log(`🔍 DEBUG: hasWhatsappChannel =`, hasWhatsappChannel);
-        console.log(`   - WhatsApp/Agent WhatsApp enabled: ${hasWhatsappChannel} (hasWhatsappData: ${hasWhatsappData})`, whatsappChannel);
+        console.log(`   - WhatsApp/Agent WhatsApp enabled: ${hasWhatsappChannel} (hasWhatsappData: ${hasWhatsappData})`);
       } else {
         console.log(`   - WhatsApp/Agent WhatsApp NOT FOUND in channels object`);
       }
@@ -176,6 +174,23 @@ export async function validateCommunicationChannelsActivity(
     } else {
       console.log(`⚠️  Channels configuration is neither array nor object:`, typeof channels);
     }
+    if (params.requireHealthyOutbound && (hasEmailChannel || hasWhatsappChannel)) {
+      // New outbound work requires a working gate. A failed health read must
+      // not silently allow chargeable lead generation to proceed.
+      const { supabaseServiceRole } = await import('../../../lib/supabase/client');
+      const { data: health, error: healthError } = await supabaseServiceRole
+        .from('channel_health')
+        .select('channel, status, updated_at, last_success_at, last_failure_at, reset_at')
+        .eq('site_id', params.site_id)
+        .eq('direction', 'outbound');
+      if (healthError) throw new Error(`Channel health unavailable: ${healthError.code || 'query_failed'}`);
+      const available = availableOutboundChannels(
+        { email: hasEmailChannel, whatsapp: hasWhatsappChannel }, health || []
+      );
+      hasEmailChannel = available.email;
+      hasWhatsappChannel = available.whatsapp;
+    }
+
     const hasAnyChannel = hasEmailChannel || hasWhatsappChannel;
     
     console.log(`📊 Channel validation results:`);
@@ -191,7 +206,9 @@ export async function validateCommunicationChannelsActivity(
         hasEmailChannel: false,
         hasWhatsappChannel: false,
         hasAnyChannel: false,
-        error: 'No communication channels (email or WhatsApp) are configured and enabled'
+        error: params.requireHealthyOutbound
+          ? 'No configured and healthy outbound channels available'
+          : 'No communication channels (email or WhatsApp) are configured and enabled'
       };
     }
 

@@ -1,4 +1,4 @@
-import { proxyActivities, executeChild } from '@temporalio/workflow';
+import { proxyActivities, executeChild, patched } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { enrichLeadWorkflow } from './enrichLeadWorkflow';
 
@@ -8,11 +8,13 @@ const {
   callPersonRoleSearchActivity,
   getSegmentIdFromRoleQueryActivity,
   logWorkflowExecutionActivity,
+  validateCommunicationChannelsActivity,
 } = proxyActivities<{
   getRoleQueryByIdActivity: (id: string) => Promise<{ success: boolean; roleQuery?: any; error?: string }>;
   callPersonRoleSearchActivity: (o: { role_query_id?: string; query?: any; page: number; page_size?: number; site_id?: string; userId?: string }) => Promise<{ success: boolean; persons?: any[]; total?: number; page?: number; pageSize?: number; hasMore?: boolean; error?: string }>;
   getSegmentIdFromRoleQueryActivity: (roleQueryId: string) => Promise<{ success: boolean; segmentId?: string; error?: string }>;
   logWorkflowExecutionActivity: (params: any) => Promise<void>;
+  validateCommunicationChannelsActivity: (params: { site_id: string; requireHealthyOutbound?: boolean }) => Promise<{ success: boolean; hasAnyChannel: boolean }>;
 }>({
   startToCloseTimeout: '10 minutes',
   retry: { maximumAttempts: 3 },
@@ -87,6 +89,18 @@ export async function idealClientProfilePageSearchWorkflow(
   });
 
   // Call Finder API for this specific page
+  if (patched('icp-page-outbound-health-gate-v1')) {
+    const outbound = await validateCommunicationChannelsActivity({
+      site_id, requireHealthyOutbound: true,
+    });
+    if (!outbound.success || !outbound.hasAnyChannel) {
+      return {
+        success: false, processed: 0, foundMatches: 0,
+        leadsCreated: [], hasMore: false,
+        errors: ['No recently healthy outbound channel for ICP page search'],
+      };
+    }
+  }
   const pageRes = await callPersonRoleSearchActivity({
     query: roleQuery.query,
     page,

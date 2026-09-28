@@ -5,9 +5,17 @@ import {
   mergeOutstandMetadata,
   mergeOutstandTags,
   normalizeOutstandContent,
+  outstandPostText,
 } from '../src/temporal/activities/outstandContentIdentity';
 
 describe('Outstand content identity', () => {
+  it('retains captionless media as distinct posts rather than dropping or merging them', () => {
+    expect(outstandPostText({ id: 'post-1', containers: [{ content: '' }] })).toBe('Social media post post-1');
+    expect(outstandPostText({ id: 'post-2', containers: [{ content: '  ' }] })).toBe('Social media post post-2');
+    expect(outstandPostText({ id: 'post-1', text: '  Real caption ' })).toBe('Real caption');
+    expect(buildOutstandContentHash(outstandPostText({ id: 'post-1' })))
+      .not.toBe(buildOutstandContentHash(outstandPostText({ id: 'post-2' })));
+  });
   it('normalizes equivalent text before hashing', () => {
     const unix = 'Same post\nAcross networks';
     const windows = '  Same post\r\nAcross networks  ';

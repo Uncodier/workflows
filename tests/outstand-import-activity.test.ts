@@ -1,117 +1,120 @@
 const mockGet = jest.fn();
-const mockPost = jest.fn();
+const mockEq = jest.fn();
 const mockNot = jest.fn();
-const mockSelect = jest.fn(() => ({ not: mockNot }));
-const mockFrom = jest.fn(() => ({ select: mockSelect }));
+const mockSelect = jest.fn(() => ({ not: mockNot, eq: mockEq }));
+const mockFrom = jest.fn(() => ({ select: mockSelect, upsert: jest.fn().mockResolvedValue({ error: null }) }));
 const mockSchema = jest.fn(() => ({ from: mockFrom }));
 
 jest.mock('../src/temporal/services/apiService', () => ({
-  apiService: { get: mockGet, post: mockPost },
+  apiService: { get: mockGet },
 }));
 jest.mock('../src/lib/supabase/client', () => ({
   supabaseServiceRole: { schema: mockSchema },
 }));
 
-import { importOutstandPostsActivity } from '../src/temporal/activities/outstandActivities';
+import {
+  checkIfImportTriggeredActivity,
+  fetchOutstandAccountsActivity,
+  fetchOutstandImportJobsActivity,
+  fetchOutstandPostAnalyticsActivity,
+  fetchOutstandPostsActivity,
+  importOutstandPostsActivity,
+  markImportTriggeredActivity,
+} from '../src/temporal/activities/outstandActivities';
 
 const account = { id: 'account-1', network: 'linkedin', isActive: true };
-const owner = { site_id: 'site-1', social_media: [account] };
-const rejected = { type: 'OUTSTAND_IMPORT_OWNERSHIP_REJECTED', nonRetryable: true };
+const rejected = { type: 'OUTSTAND_IMPORT_REQUIRES_CONFIRMATION', nonRetryable: true };
 
 describe('importOutstandPostsActivity historical ID contract', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGet.mockResolvedValue({ success: true, data: { accounts: [account] } });
-    mockNot.mockResolvedValue({ data: [owner], error: null });
-    mockPost.mockResolvedValue({ success: true, data: { importId: 'import-1' } });
   });
 
-  it('accepts the original string payload and resolves ownership before POST', async () => {
-    await expect(importOutstandPostsActivity('site-1', 'account-1'))
-      .resolves.toEqual({ importId: 'import-1' });
-    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/accounts?tenant_id=site-1');
-    expect(mockFrom).toHaveBeenCalledWith('settings');
-    expect(mockSelect).toHaveBeenCalledWith('site_id, social_media');
-    expect(mockPost).toHaveBeenCalledWith(
-      '/api/integrations/outstand/accounts/account-1/imports?tenant_id=site-1', {}
-    );
-    expect(mockNot.mock.invocationCallOrder[0]).toBeLessThan(mockPost.mock.invocationCallOrder[0]);
-  });
-
-  it('does not trust the shared-organization accounts list as proof of ownership', async () => {
-    mockNot.mockResolvedValue({ data: [{ ...owner, site_id: 'another-site' }], error: null });
+  it('rejects old automatic imports before any network or database side effect', async () => {
     await expect(importOutstandPostsActivity('site-1', account.id)).rejects.toMatchObject(rejected);
-    expect(mockPost).not.toHaveBeenCalled();
-  });
-
-  it('rejects accounts connected to two sites without retrying the import', async () => {
-    mockNot.mockResolvedValue({ data: [owner, { ...owner, site_id: 'site-2' }], error: null });
-    await expect(importOutstandPostsActivity('site-1', account.id)).rejects.toMatchObject(rejected);
-    expect(mockPost).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    { settings: [] },
-    { settings: [{ ...owner, social_media: [{ ...account, isActive: false }] }] },
-    { settings: [{ ...owner, social_media: [{ ...account, network: 'facebook' }] }] },
-  ])('rejects missing, inactive or mismatched connections: %j', async ({ settings }) => {
-    mockNot.mockResolvedValue({ data: settings, error: null });
-    await expect(importOutstandPostsActivity('site-1', account.id)).rejects.toMatchObject(rejected);
-    expect(mockPost).not.toHaveBeenCalled();
-  });
-
-  it('rechecks current ownership when retrying a previously valid account ID', async () => {
-    await importOutstandPostsActivity('site-1', account.id);
-    mockNot.mockResolvedValue({ data: [{ ...owner, site_id: 'new-owner' }], error: null });
-    await expect(importOutstandPostsActivity('site-1', account.id)).rejects.toMatchObject(rejected);
-    expect(mockGet).toHaveBeenCalledTimes(2);
-    expect(mockPost).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([
-    { accounts: [] },
-    { accounts: [account, { ...account }] },
-    { accounts: [{ ...account, isActive: false }] },
-  ])(
-    'rejects missing, ambiguous or inactive provider accounts: %j', async ({ accounts }) => {
-      mockGet.mockResolvedValue({ success: true, data: accounts });
-      await expect(importOutstandPostsActivity('site-1', account.id)).rejects.toMatchObject(rejected);
-      expect(mockPost).not.toHaveBeenCalled();
-    }
-  );
-
-  it('fails closed on a database error while allowing Temporal to retry the lookup', async () => {
-    mockNot.mockResolvedValue({ data: null, error: { message: 'connection unavailable' } });
-    await expect(importOutstandPostsActivity('site-1', account.id))
-      .rejects.toThrow('Failed to verify Outstand import ownership: connection unavailable');
-    expect(mockPost).not.toHaveBeenCalled();
-  });
-
-  it('fails closed when resolving the account fails', async () => {
-    mockGet.mockResolvedValue({ success: false, error: { message: '500 upstream unavailable' } });
-    await expect(importOutstandPostsActivity('site-1', account.id)).rejects.toThrow('fetchOutstandAccounts failed');
-    expect(mockNot).not.toHaveBeenCalled();
-    expect(mockPost).not.toHaveBeenCalled();
-  });
-
-  it('rejects a malformed accounts response before POST', async () => {
-    mockGet.mockResolvedValue({ success: true, data: { accounts: {} } });
-    await expect(importOutstandPostsActivity('site-1', account.id)).rejects.toThrow('invalid accounts response');
-    expect(mockPost).not.toHaveBeenCalled();
-  });
-
-  it.each(['', ' ', null, { id: account.id }])('rejects invalid ID payloads: %j', async payload => {
-    await expect(importOutstandPostsActivity('site-1', payload as string)).rejects.toMatchObject({
-      type: 'OUTSTAND_IMPORT_INVALID_INPUT', nonRetryable: true,
-    });
     expect(mockGet).not.toHaveBeenCalled();
-    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockFrom).not.toHaveBeenCalled();
   });
 
-  it('preserves provider import errors after successful ownership validation', async () => {
-    mockPost.mockResolvedValue({ success: false, error: { message: '400 Bad Request' } });
-    await expect(importOutstandPostsActivity('site-1', account.id)).rejects.toMatchObject({
-      type: 'OUTSTAND_CLIENT_ERROR', nonRetryable: true,
+  it('scopes the posts list to the tenant even with a shared provider organization', async () => {
+    mockGet.mockResolvedValueOnce({ success: true, data: { posts: [], pagination: { total: 0 } } });
+    await fetchOutstandPostsActivity('site-1', 100, 0);
+    expect(mockGet).toHaveBeenCalledWith(
+      '/api/integrations/outstand/posts?tenant_id=site-1&tenantId=site-1&limit=100&offset=0'
+    );
+  });
+
+  it('unwraps the real Outstand posts envelope rather than silently treating it as empty', async () => {
+    const post = { id: 'ig-post', socialAccounts: [{ id: 'account-1', network: 'instagram' }] };
+    mockGet.mockResolvedValueOnce({
+      success: true,
+      data: { success: true, posts: [post], data: [post], pagination: { total: 1 } },
     });
+    await expect(fetchOutstandPostsActivity('site-1', 100, 0)).resolves.toEqual({
+      posts: [post], pagination: { total: 1 },
+    });
+  });
+
+  it('fails on a malformed Outstand posts response rather than skipping import', async () => {
+    mockGet.mockResolvedValueOnce({ success: true, data: { success: true, pagination: { total: 6 } } });
+    await expect(fetchOutstandPostsActivity('site-1')).rejects.toThrow('Invalid Outstand posts response');
+  });
+
+  it('preserves the Outstand analytics envelope instead of silently writing zeros', async () => {
+    const analytics = {
+      success: true,
+      post: { id: 'ig-post' },
+      metrics_by_account: [{ network: 'instagram', metrics: { views: 25 } }],
+      aggregated_metrics: { total_views: 25 },
+    };
+    mockGet.mockResolvedValueOnce({ success: true, data: analytics });
+    await expect(fetchOutstandPostAnalyticsActivity('site-1', 'ig-post')).resolves.toEqual(analytics);
+  });
+
+  it('rejects analytics payloads without metrics rather than reporting zero performance', async () => {
+    mockGet.mockResolvedValueOnce({ success: true, data: { success: true, data: {} } });
+    await expect(fetchOutstandPostAnalyticsActivity('site-1', 'ig-post'))
+      .rejects.toThrow('missing aggregated_metrics');
+  });
+
+  it('unwraps the existing API social-accounts response', async () => {
+    mockGet.mockResolvedValueOnce({ success: true, data: { success: true, data: [account], accounts: [account] } });
+    await expect(fetchOutstandAccountsActivity('site-1')).resolves.toEqual([account]);
+  });
+
+  it('lists provider import jobs without creating a billable import', async () => {
+    const job = { id: 'job-1', status: 'queued', imported: 0, failed: 0 };
+    mockGet.mockResolvedValueOnce({ success: true, data: { success: true, data: [job], count: 1 } });
+    await expect(fetchOutstandImportJobsActivity('site-1', account.id)).resolves.toEqual([job]);
+    expect(mockGet).toHaveBeenCalledWith(
+      '/api/integrations/outstand/social-accounts/account-1/imports?tenant_id=site-1'
+    );
+  });
+
+  it('accepts the import jobs array unwrapped by ApiService', async () => {
+    const job = { id: 'job-1', status: 'completed', imported: 6, failed: 0 };
+    mockGet.mockResolvedValueOnce({ success: true, data: [job] });
+    await expect(fetchOutstandImportJobsActivity('site-1', account.id)).resolves.toEqual([job]);
+  });
+
+  it('fails closed on a malformed provider jobs response', async () => {
+    mockGet.mockResolvedValueOnce({ success: true, data: { success: true, data: null } });
+    await expect(fetchOutstandImportJobsActivity('site-1', account.id))
+      .rejects.toThrow('Invalid Outstand import jobs response');
+  });
+
+  it('does not mark an account imported merely because another account was imported', async () => {
+    const mockMaybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
+    mockEq.mockReturnValue({ eq: jest.fn(() => ({ maybeSingle: mockMaybeSingle })) });
+    await expect(checkIfImportTriggeredActivity('site-1', 'yTdoj')).resolves.toBe(false);
+    expect(mockEq).toHaveBeenCalledWith('site_id', 'site-1');
+    expect(mockEq.mock.results[0].value.eq).toHaveBeenCalledWith('activity_name', 'outstand_historical_import_yTdoj');
+
+    await markImportTriggeredActivity('site-1', 'yTdoj');
+    expect(mockFrom.mock.results[mockFrom.mock.results.length - 1]?.value.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ activity_name: 'outstand_historical_import_yTdoj' }),
+      { onConflict: 'site_id,activity_name', ignoreDuplicates: false },
+    );
   });
 });

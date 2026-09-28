@@ -1,4 +1,4 @@
-import { proxyActivities, executeChild } from '@temporalio/workflow';
+import { proxyActivities, executeChild, patched } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { idealClientProfilePageSearchWorkflow } from './idealClientProfilePageSearchWorkflow';
 import { selectNextIcp } from './icpMining/selectIcp';
@@ -13,6 +13,7 @@ const {
   logWorkflowExecutionActivity,
   saveCronStatusActivity,
   validateWorkflowConfigActivity,
+  validateCommunicationChannelsActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: { maximumAttempts: 3 },
@@ -104,6 +105,21 @@ export async function idealClientProfileMiningWorkflow(
       foundMatches: 0,
       errors: [`Workflow is ${configValidation.activityStatus} in site settings`],
     };
+  }
+
+  // ICP enrichment can spend credits before a lead exists. Only new histories
+  // add this Activity so old executions keep their recorded command sequence.
+  if (patched('icp-mining-outbound-health-gate-v1')) {
+    const outbound = await validateCommunicationChannelsActivity({
+      site_id: options.site_id, requireHealthyOutbound: true,
+    });
+    if (!outbound.success || !outbound.hasAnyChannel) {
+      return {
+        success: false, icp_mining_id: options.icp_mining_id || 'batch',
+        processed: 0, foundMatches: 0,
+        errors: ['No recently healthy outbound channel for ICP mining'],
+      };
+    }
   }
   
   console.log(`✅ Configuration validated: ${configValidation.reason}`);

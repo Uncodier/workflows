@@ -4,9 +4,10 @@ import { supabaseServiceRole as supabaseAdmin } from '../../lib/supabase/client'
 import { handleOutstandApiError } from './outstandHelpers';
 import {
   buildOutstandCommentsPath,
-  getConnectedCommentAccounts,
+  getConnectedSocialPostAccounts,
   isImportAccountOwnedBySite,
   isOutstandClientError,
+  shouldPollPostForAnalytics,
 } from '../workflows/helpers/outstandPoll';
 
 function tenantSchema() {
@@ -82,100 +83,129 @@ export async function fetchSitesWithSocialCommentsActivity(): Promise<any[]> {
   }
   
   return (data || []).filter(setting => {
-    return getConnectedCommentAccounts(setting.social_media).length > 0;
+    return getConnectedSocialPostAccounts(setting.social_media).length > 0;
   }).map(s => ({ site_id: s.site_id, social_media: s.social_media }));
 }
 
 export async function fetchOutstandPostsActivity(siteId: string, limit: number = 100, offset: number = 0): Promise<any> {
-  const response = await apiService.get(`/api/integrations/outstand/posts?tenant_id=${siteId}&limit=${limit}&offset=${offset}`);
+  // X-Tenant-ID alone does not scope the Outstand posts list. The tenantId
+  // query filter prevents posts from other sites in a shared organization from
+  // appearing in this site's poll. The API wraps the provider response, so
+  // the actual posts may live under response.data.posts.
+  const tenant = encodeURIComponent(siteId);
+  const response = await apiService.get(`/api/integrations/outstand/posts?tenant_id=${tenant}&tenantId=${tenant}&limit=${limit}&offset=${offset}`);
   if (!response.success) {
     throw handleOutstandApiError('fetchOutstandPosts', response.error?.message);
   }
-  return response.data;
+  const payload = response.data;
+  if (payload?.success === false) {
+    throw new Error(`Outstand posts request failed: ${payload.error || 'Unknown error'}`);
+  }
+  if (Array.isArray(payload)) return payload;
+  const posts = payload?.posts || payload?.data;
+  if (!Array.isArray(posts)) {
+    throw new Error(`Invalid Outstand posts response for site ${siteId}`);
+  }
+  return { posts, pagination: payload.pagination || { total: posts.length } };
 }
 
 export async function fetchOutstandAccountsActivity(siteId: string): Promise<any[]> {
-  const response = await apiService.get(`/api/integrations/outstand/accounts?tenant_id=${siteId}`);
+  const response = await apiService.get(`/api/integrations/outstand/social-accounts?tenant_id=${encodeURIComponent(siteId)}`);
   if (!response.success) {
     throw handleOutstandApiError('fetchOutstandAccounts', response.error?.message);
   }
-  return Array.isArray(response.data) ? response.data : (response.data?.accounts || response.data?.data || []);
+  const payload = response.data;
+  // The API wrapper returns { success, data, accounts }. Do not silently
+  // treat a malformed response as "no accounts" and skip all imports.
+  if (payload?.success === false || payload?.data?.success === false) {
+    throw new Error('Failed to fetch Outstand accounts');
+  }
+  const accounts = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.data)
+      ? payload.data
+      : Array.isArray(payload?.accounts)
+        ? payload.accounts
+        : payload?.data?.accounts;
+  if (!Array.isArray(accounts)) {
+    throw new Error('Failed to fetch Outstand accounts: invalid accounts response');
+  }
+  return accounts;
 }
 
 export async function importOutstandPostsActivity(siteId: string, accountId: string): Promise<any> {
-  if (typeof accountId !== 'string' || !accountId.trim()) {
-    throw ApplicationFailure.nonRetryable(
-      'Outstand import requires an account ID',
-      'OUTSTAND_IMPORT_INVALID_INPUT'
-    );
-  }
-
-  // Pending activities and retries still contain the original string ID.
-  // Resolve it on every attempt; never trust an account snapshot from history.
-  const accounts = await fetchOutstandAccountsActivity(siteId);
-  if (!Array.isArray(accounts)) {
-    throw new Error('Failed to verify Outstand import: invalid accounts response');
-  }
-  const matches = accounts.filter((candidate) => candidate?.id === accountId);
-  if (matches.length !== 1) {
-    throw ApplicationFailure.nonRetryable(
-      `Refusing Outstand import: account ${accountId} is missing or ambiguous`,
-      'OUTSTAND_IMPORT_OWNERSHIP_REJECTED'
-    );
-  }
-  const account = matches[0];
-  const { data: settings, error } = await supabaseAdmin
-    .schema(tenantSchema())
-    .from('settings')
-    .select('site_id, social_media')
-    .not('social_media', 'is', null);
-  if (error) {
-    // Transient lookup failures may retry, but must never reach the import POST.
-    throw new Error(`Failed to verify Outstand import ownership: ${error.message}`);
-  }
-  const owners = (settings || []).filter((site) =>
-    isImportAccountOwnedBySite(account, site.social_media)
+  // Outstand bills each imported post. Never run this automatic historical
+  // activity (including retries of older Temporal histories). Only the
+  // explicitly confirmed API endpoint may start a bounded import job.
+  void siteId;
+  void accountId;
+  throw ApplicationFailure.nonRetryable(
+    'Historical Outstand imports require explicit confirmation and a bounded limit',
+    'OUTSTAND_IMPORT_REQUIRES_CONFIRMATION'
   );
-  if (owners.length !== 1 || owners[0].site_id !== siteId) {
-    throw ApplicationFailure.nonRetryable(
-      `Refusing Outstand import: account ownership is missing or ambiguous for site ${siteId}`,
-      'OUTSTAND_IMPORT_OWNERSHIP_REJECTED'
-    );
-  }
-
-  const response = await apiService.post(`/api/integrations/outstand/accounts/${encodeURIComponent(accountId)}/imports?tenant_id=${encodeURIComponent(siteId)}`, {});
-  if (!response.success) {
-    throw handleOutstandApiError(`importOutstandPosts for account ${accountId}`, response.error?.message);
-  }
-  return response.data;
 }
 
-export async function checkIfImportTriggeredActivity(siteId: string): Promise<boolean> {
+export interface OutstandImportJob {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'partial' | 'failed';
+  imported: number;
+  skipped: number;
+  failed: number;
+  error?: string | null;
+}
+
+export async function fetchOutstandImportJobsActivity(siteId: string, accountId: string): Promise<OutstandImportJob[]> {
+  if (!/^[a-zA-Z0-9_-]{1,80}$/.test(accountId)) {
+    throw ApplicationFailure.nonRetryable('Invalid Outstand account ID', 'OUTSTAND_IMPORT_INVALID_INPUT');
+  }
+  const response = await apiService.get(
+    `/api/integrations/outstand/social-accounts/${encodeURIComponent(accountId)}/imports?tenant_id=${encodeURIComponent(siteId)}`
+  );
+  if (!response.success) {
+    throw handleOutstandApiError(`fetchOutstandImportJobs for account ${accountId}`, response.error?.message);
+  }
+  // ApiService unwraps { success, data } API responses automatically.
+  const jobs = Array.isArray(response.data) ? response.data : response.data?.data;
+  if (!Array.isArray(jobs)) {
+    throw new Error(`Invalid Outstand import jobs response for account ${accountId}`);
+  }
+  return jobs;
+}
+
+function historicalImportActivityName(accountId?: string): string {
+  // Account IDs are validated against the current, site-owned provider list
+  // before a POST. Bound the marker length to the cron_status activity key.
+  if (!accountId) return 'outstand_historical_import';
+  if (!/^[a-zA-Z0-9_-]{1,80}$/.test(accountId)) {
+    throw ApplicationFailure.nonRetryable('Invalid Outstand account ID', 'OUTSTAND_IMPORT_INVALID_INPUT');
+  }
+  return `outstand_historical_import_${accountId}`;
+}
+
+export async function checkIfImportTriggeredActivity(siteId: string, accountId?: string): Promise<boolean> {
   const { data, error } = await supabaseAdmin
     .schema(tenantSchema())
     .from('cron_status')
     .select('id')
     .eq('site_id', siteId)
-    .eq('activity_name', 'outstand_historical_import')
+    .eq('activity_name', historicalImportActivityName(accountId))
     .maybeSingle();
 
   if (error) {
-    console.error(`[checkIfImportTriggeredActivity] Error checking cron_status for site ${siteId}:`, error);
-    // On error we return true to prevent infinite loop / spam
-    return true; 
+    throw new Error(`Failed to check historical import status for site ${siteId}: ${error.message}`);
   }
 
   return !!data;
 }
 
-export async function markImportTriggeredActivity(siteId: string): Promise<void> {
+export async function markImportTriggeredActivity(siteId: string, accountId?: string): Promise<void> {
   const { error } = await supabaseAdmin
     .schema(tenantSchema())
     .from('cron_status')
     .upsert(
       {
         site_id: siteId,
-        activity_name: 'outstand_historical_import',
+        activity_name: historicalImportActivityName(accountId),
         workflow_id: `outstand_import_${siteId}_${Date.now()}`,
         schedule_id: 'manual-execution',
         status: 'COMPLETED',
@@ -221,7 +251,17 @@ export async function fetchOutstandPostAnalyticsActivity(siteId: string, postId:
     }
     throw handleOutstandApiError(`fetchOutstandPostAnalytics for post ${postId}`, errorMsg);
   }
-  return response.data;
+  // The Outstand analytics endpoint returns { success, post,
+  // metrics_by_account, aggregated_metrics } (no `data` property). ApiService
+  // wraps that envelope. Never persist zero metrics by treating it as a row.
+  const payload = response.data;
+  if (payload?.success === false) {
+    throw new Error(`Failed to fetch analytics for post ${postId}: ${payload.error || 'Unknown error'}`);
+  }
+  if (!unwrapAnalytics(payload)?.aggregated_metrics) {
+    throw new Error(`Outstand analytics for post ${postId} is missing aggregated_metrics`);
+  }
+  return payload;
 }
 
 export async function fetchSocialPostsDueForAnalyticsActivity(
@@ -245,7 +285,54 @@ export async function fetchAllSocialPostsDueForAnalyticsActivity(
     });
 
   if (error) {
-    throw new Error(`Failed to load due social analytics: ${error.message}`);
+    // Deployments may run the worker before the RPC migration has been applied.
+    // Restrict the fallback to an absent RPC; other database errors must surface.
+    if (error.code !== 'PGRST202' && error.code !== '42883') {
+      throw new Error(`Failed to load due social analytics: ${error.message}`);
+    }
+    console.warn('Social analytics RPC is not installed; using bounded content lookup');
+    const { data: contents, error: contentError } = await supabaseAdmin
+      .schema(tenantSchema())
+      .from('content')
+      .select('id, site_id, tags, published_at, status')
+      .in('site_id', siteIds)
+      .or('status.eq.published,published_at.not.is.null')
+      .not('tags', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (contentError) throw new Error(`Failed to load social content: ${contentError.message}`);
+
+    const posts: Array<{ siteId: string; postId: string; contentId: string }> = (contents || []).flatMap((content: any) => {
+      return (content.tags || [])
+        .filter((value: string) => value.startsWith('outstand_id_') && value.length > 'outstand_id_'.length)
+        .map((tag: string) => ({
+          siteId: content.site_id,
+          postId: tag.slice('outstand_id_'.length),
+          contentId: content.id,
+        }));
+    });
+    if (posts.length === 0) return [];
+
+    const { data: snapshots, error: performanceError } = await supabaseAdmin
+      .schema(tenantSchema())
+      .from('content_performance')
+      .select('site_id, outstand_post_id, fetched_at')
+      .in('site_id', siteIds)
+      .in('outstand_post_id', posts.map((post) => post.postId));
+    if (performanceError) throw new Error(`Failed to load social analytics snapshots: ${performanceError.message}`);
+
+    const lastFetched = new Map((snapshots || []).map((snapshot: any) => [
+      `${snapshot.site_id}:${snapshot.outstand_post_id}`, snapshot.fetched_at,
+    ]));
+    const publishedAtByContentId = new Map((contents || []).map((content: any) => [content.id, content.published_at]));
+    const nowMs = Date.now();
+    return posts.filter((post) => shouldPollPostForAnalytics(
+      publishedAtByContentId.get(post.contentId) as string | null,
+      nowMs,
+      lastFetched.get(`${post.siteId}:${post.postId}`) as string | null
+    )).filter((post, index, due) => due.findIndex((candidate) =>
+      candidate.siteId === post.siteId && candidate.postId === post.postId
+    ) === index).slice(0, limit);
   }
 
   return (data || []).map((row: any) => ({

@@ -1,4 +1,4 @@
-import { proxyActivities, upsertSearchAttributes, workflowInfo } from '@temporalio/workflow';
+import { patched, proxyActivities, upsertSearchAttributes, workflowInfo } from '@temporalio/workflow';
 
 import type { Activities } from '../activities';
 
@@ -100,9 +100,10 @@ export async function leadQualificationWorkflow(
 
   // STEP 0.5: Validate communication channels
   console.log(`📡 Step 0.5: Validating communication channels for ${site_id}...`);
-  const channelsValidation = await validateCommunicationChannelsActivity({
-    site_id: site_id,
-  });
+  const requireHealthyOutbound = patched('outbound-channel-health-gate-v1');
+  const channelsValidation = await validateCommunicationChannelsActivity(
+    requireHealthyOutbound ? { site_id, requireHealthyOutbound: true } : { site_id }
+  );
 
   if (!channelsValidation.success) {
     const errorMsg = `Failed to validate communication channels: ${channelsValidation.error}`;

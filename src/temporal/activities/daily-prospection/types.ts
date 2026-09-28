@@ -29,6 +29,8 @@ export interface DailyProspectionOptions {
 // New interfaces for communication channels validation
 export interface ValidateCommunicationChannelsParams {
   site_id: string;
+  /** Only for new outbound work; historical workflows keep configuration-only behavior. */
+  requireHealthyOutbound?: boolean;
 }
 
 export interface ValidateCommunicationChannelsResult {

@@ -12,6 +12,7 @@ import {
   buildSocialCommentWorkflowId,
   getPostSiteOwnerships,
   getUnambiguousPostSiteOwnerships,
+  getUnambiguousSocialPostSiteOwnerships,
   isImportAccountOwnedBySite,
   isOutstandDraftPost,
   normalizeOutstandNetwork,
@@ -27,6 +28,7 @@ const {
   logWorkflowExecutionActivity,
   fetchOutstandAccountsActivity,
   importOutstandPostsActivity,
+  fetchOutstandImportJobsActivity,
   checkIfImportTriggeredActivity,
   markImportTriggeredActivity,
   claimSyncedObjectActivity,
@@ -46,6 +48,8 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
   // Both ownership filters can remove activity/child-workflow commands. Keep
   // the old decisions for histories that predate this marker.
   const useStrictSiteOwnership = patched('poll-social-comments-strict-site-ownership-v1');
+  const useSocialPostNetworks = patched('poll-social-comments-tiktok-posts-v1');
+  const useImportJobStatus = patched('poll-social-comments-import-job-status-v1');
   
   await logWorkflowExecutionActivity({
     workflowId,
@@ -74,14 +78,26 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           const result = await fetchOutstandPostsActivity(siteId, limit, offset);
           
           const posts = Array.isArray(result) ? result : (result?.posts || result?.data || []);
-          const pagination = Array.isArray(result) ? { total: posts.length } : (result?.pagination || { total: posts.length });
+          // Older activity histories may contain only an array with no total.
+          // Only the new branch continues on full pages; preserve the command
+          // sequence for older Temporal histories.
+          const pagination = Array.isArray(result)
+            ? { total: useSocialPostNetworks && useImportJobStatus && posts.length === limit
+              ? offset + posts.length + 1
+              : posts.length }
+            : (result?.pagination || { total: posts.length });
           
-          if (offset === 0 && posts.length === 0) {
+          if (offset === 0 && (useSocialPostNetworks && useImportJobStatus
+            ? posts.length === 0
+            : useSocialPostNetworks || posts.length === 0)) {
             try {
-              const alreadyTriggered = await checkIfImportTriggeredActivity(siteId);
+              const alreadyTriggered = useSocialPostNetworks
+                ? false // New branch checks each connected account separately below.
+                : await checkIfImportTriggeredActivity(siteId);
               if (!alreadyTriggered) {
                 const accounts = await fetchOutstandAccountsActivity(siteId);
                 let importStarted = false;
+                let importFailed = false;
                 for (const account of accounts) {
                   const canImport = useStrictSiteOwnership
                     ? isImportAccountOwnedBySite(account, site.social_media) &&
@@ -91,16 +107,34 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                     : Boolean(account.id);
                   if (canImport) {
                     try {
+                      if (useImportJobStatus && useSocialPostNetworks) {
+                        const jobs = await fetchOutstandImportJobsActivity(siteId, account.id);
+                        const latestJob = jobs[0]; // Outstand returns newest first.
+                        if (latestJob) {
+                          if (latestJob.status === 'failed' || latestJob.status === 'partial') {
+                            console.error(`Outstand import for account ${account.id} failed: ${latestJob.error || 'Unknown error'}`);
+                          }
+                        }
+                        // Importing is billable. A poll must never enqueue a new
+                        // job, whether the previous one failed or no job exists.
+                        continue;
+                      } else if (useSocialPostNetworks && await checkIfImportTriggeredActivity(siteId, account.id)) {
+                        continue;
+                      }
                       // Keep the historical activity payload for pending tasks
                       // and retries. The activity revalidates ownership itself.
                       await importOutstandPostsActivity(siteId, account.id);
                       importStarted = true;
+                      if (useSocialPostNetworks && !useImportJobStatus) {
+                        await markImportTriggeredActivity(siteId, account.id);
+                      }
                     } catch (importError) {
+                      importFailed = true;
                       console.error(`Failed to trigger import for account ${account.id}:`, importError);
                     }
                   }
                 }
-                if (importStarted) {
+                if (importStarted && !useSocialPostNetworks && !importFailed) {
                   await markImportTriggeredActivity(siteId);
                 }
               }
@@ -128,24 +162,29 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           
           for (const post of posts) {
             const ownerships = useStrictSiteOwnership
-              ? getUnambiguousPostSiteOwnerships(post, sites)
+              ? useSocialPostNetworks
+                ? getUnambiguousSocialPostSiteOwnerships(post, sites)
+                : getUnambiguousPostSiteOwnerships(post, sites)
               : getPostSiteOwnerships(post, sites);
             const ownership = ownerships
               .find((candidate) => candidate.siteId === siteId);
             const ownedSocialAccounts = ownership?.socialAccounts || [];
+            // TikTok is eligible for post/analytics ingestion, but the comments
+            // API does not support it. Do not gate the post on comment networks.
+            const hasPublishedPost = ownedSocialAccounts.length > 0;
             const uniqueNetworks = [
               ...new Set(
                 ownedSocialAccounts
                   .map((account: any) => normalizeOutstandNetwork(account.network))
-                  .filter(Boolean)
+                  .filter((network) => Boolean(network) && (!useSocialPostNetworks || network !== 'tiktok'))
               ),
             ];
             
-            if (uniqueNetworks.length === 0 || isOutstandDraftPost(post)) {
+            if ((useSocialPostNetworks ? !hasPublishedPost : uniqueNetworks.length === 0) || isOutstandDraftPost(post)) {
               continue;
             }
 
-            if (useAgeFiltering) {
+            if (useAgeFiltering && !(useSocialPostNetworks && useImportJobStatus)) {
               const { shouldPoll, isTooOld } = shouldPollPostForComments(
                 post,
                 nowMs,
@@ -156,8 +195,6 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
               }
             }
             
-            processedPosts++;
-            
             try {
               // 1. Upsert content to ensure we have a reference for any comments
               const contentId = await upsertContentFromOutstandPostActivity(
@@ -165,9 +202,21 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                 post,
                 site.social_media
               );
+              if (useSocialPostNetworks && useImportJobStatus && !contentId) {
+                console.error(`Outstand post ${post.id} could not be persisted for site ${siteId}`);
+                continue;
+              }
+              processedPosts++;
+
+              // Historical posts must be persisted even when they are too old
+              // to fetch replies. Never create conversations for old imports.
+              const pollReplies = !useAgeFiltering || shouldPollPostForComments(
+                post, nowMs, useBucketCadence
+              ).shouldPoll;
 
               // 2. Fetch replies for each valid published network
               for (const network of uniqueNetworks) {
+                if (useSocialPostNetworks && useImportJobStatus && !pollReplies) continue;
                 const socialAccount = ownedSocialAccounts.find((account: any) =>
                   normalizeOutstandNetwork(account.network) === network
                 );
@@ -366,7 +415,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           offset += limit;
           if (offset >= pagination.total || posts.length === 0) {
             hasMore = false;
-          } else if (posts.length > 0 && !pageHasRecentPosts) {
+          } else if (posts.length > 0 && !pageHasRecentPosts && !(useSocialPostNetworks && useImportJobStatus)) {
             // If the current page returned posts but NONE of them are recent,
             // we can assume we've reached the older posts and can stop paginating.
             console.log(`[pollSocialCommentsWorkflow] Stopping pagination for site ${siteId} as all posts on page are older than 30 days.`);

@@ -10,6 +10,7 @@ const mockActivities = {
   importOutstandPostsActivity: jest.fn(),
   checkIfImportTriggeredActivity: jest.fn(),
   markImportTriggeredActivity: jest.fn(),
+  fetchOutstandImportJobsActivity: jest.fn(),
   claimSyncedObjectActivity: jest.fn(),
   claimSyncedObjectsBatchActivity: jest.fn(),
   finishSyncedObjectClaimActivity: jest.fn(),
@@ -29,12 +30,15 @@ jest.mock('../src/temporal/workflows/ingestSocialCommentWorkflow', () => ({
 import { pollSocialCommentsWorkflow } from '../src/temporal/workflows/pollSocialCommentsWorkflow';
 
 const ownershipPatch = 'poll-social-comments-strict-site-ownership-v1';
+const tiktokPatch = 'poll-social-comments-tiktok-posts-v1';
+const importJobPatch = 'poll-social-comments-import-job-status-v1';
 const account = { id: 'account-1', network: 'linkedin', isActive: true };
 const site = { site_id: 'site-1', social_media: [account] };
 const now = Date.UTC(2026, 8, 26, 12);
 
 function useOwnershipPatch(enabled: boolean) {
-  mockPatched.mockImplementation((id: string) => id === ownershipPatch ? enabled : true);
+  mockPatched.mockImplementation((id: string) => id === ownershipPatch ? enabled :
+    id === tiktokPatch || id === importJobPatch ? false : true);
 }
 
 function commandNames(): string[] {
@@ -66,6 +70,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
     mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([site]);
     mockActivities.fetchOutstandPostsActivity.mockResolvedValue([]);
     mockActivities.fetchOutstandAccountsActivity.mockResolvedValue([account]);
+    mockActivities.fetchOutstandImportJobsActivity.mockResolvedValue([]);
     mockActivities.checkIfImportTriggeredActivity.mockResolvedValue(false);
     mockActivities.fetchOutstandPostRepliesActivity.mockResolvedValue([]);
     mockActivities.upsertContentFromOutstandPostActivity.mockResolvedValue('content-1');
@@ -86,6 +91,8 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
       'poll-social-comments-batch-claims-v1',
       'poll-social-comments-safe-identifiers-v1',
       ownershipPatch,
+      tiktokPatch,
+      importJobPatch,
     ]);
     expect(mockPatched.mock.invocationCallOrder[4]).toBeLessThan(
       mockActivities.logWorkflowExecutionActivity.mock.invocationCallOrder[0]
@@ -190,5 +197,163 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
     });
     expect(mockStartChild).toHaveBeenCalledTimes(1);
     expect(mockActivities.importOutstandPostsActivity).not.toHaveBeenCalled();
+  });
+
+  it('persists uniquely owned TikTok posts without attempting comment requests', async () => {
+    mockPatched.mockReturnValue(true);
+    const tikTok = { id: 'yTdoj', network: 'tiktok', isActive: true };
+    const tikTokSite = { site_id: 'site-1', social_media: [tikTok] };
+    mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([tikTokSite]);
+    mockActivities.fetchOutstandPostsActivity.mockResolvedValue([{
+      id: 'video-1', publishedAt: new Date(now).toISOString(),
+      containers: [{ content: 'A video' }],
+      socialAccounts: [{ ...tikTok, status: 'published', platformPostId: 'tiktok-video-1' }],
+    }]);
+
+    await expect(pollSocialCommentsWorkflow()).resolves.toEqual({
+      success: true, processedPosts: 1, processedComments: 0,
+    });
+    expect(mockActivities.upsertContentFromOutstandPostActivity).toHaveBeenCalledTimes(1);
+    expect(mockActivities.fetchOutstandPostRepliesActivity).not.toHaveBeenCalled();
+    expect(mockStartChild).not.toHaveBeenCalled();
+  });
+
+  it('imports each owned social account at most once, even if the legacy site marker exists', async () => {
+    mockPatched.mockImplementation((id: string) => id !== importJobPatch);
+    const tiktok = { id: 'yTdoj', network: 'tiktok', isActive: true };
+    const instagram = { id: 'Lm3jV', network: 'instagram', isActive: true };
+    mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([
+      { site_id: 'site-1', social_media: [tiktok, instagram] },
+    ]);
+    mockActivities.fetchOutstandAccountsActivity.mockResolvedValue([tiktok, instagram]);
+    mockActivities.checkIfImportTriggeredActivity.mockImplementation(async (_siteId, accountId) =>
+      accountId === 'yTdoj'
+    );
+
+    await pollSocialCommentsWorkflow();
+    expect(mockActivities.checkIfImportTriggeredActivity.mock.calls).toEqual([
+      ['site-1', 'yTdoj'], ['site-1', 'Lm3jV'],
+    ]);
+    expect(mockActivities.importOutstandPostsActivity).toHaveBeenCalledTimes(1);
+    expect(mockActivities.importOutstandPostsActivity).toHaveBeenCalledWith('site-1', 'Lm3jV');
+    expect(mockActivities.markImportTriggeredActivity).toHaveBeenCalledWith('site-1', 'Lm3jV');
+  });
+
+  it('does not mark a failed account as imported and retries it on a later run', async () => {
+    mockPatched.mockImplementation((id: string) => id !== importJobPatch);
+    const tiktok = { id: 'yTdoj', network: 'tiktok', isActive: true };
+    mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([
+      { site_id: 'site-1', social_media: [tiktok] },
+    ]);
+    mockActivities.fetchOutstandAccountsActivity.mockResolvedValue([tiktok]);
+    mockActivities.importOutstandPostsActivity.mockRejectedValue(new Error('Provider unavailable'));
+
+    await pollSocialCommentsWorkflow();
+    expect(mockActivities.importOutstandPostsActivity).toHaveBeenCalledWith('site-1', 'yTdoj');
+    expect(mockActivities.markImportTriggeredActivity).not.toHaveBeenCalled();
+  });
+
+  it('imports a newly connected account even if other accounts already have posts', async () => {
+    mockPatched.mockImplementation((id: string) => id !== importJobPatch);
+    const tiktok = { id: 'yTdoj', network: 'tiktok', isActive: true };
+    const instagram = { id: 'Lm3jV', network: 'instagram', isActive: true };
+    mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([
+      { site_id: 'site-1', social_media: [tiktok, instagram] },
+    ]);
+    mockActivities.fetchOutstandPostsActivity.mockResolvedValue([{
+      id: 'post-1', publishedAt: new Date(now).toISOString(),
+      socialAccounts: [{ ...instagram, status: 'published', platformPostId: 'instagram-post-1' }],
+    }]);
+    mockActivities.fetchOutstandAccountsActivity.mockResolvedValue([tiktok, instagram]);
+    mockActivities.checkIfImportTriggeredActivity.mockImplementation(async (_siteId, accountId) =>
+      accountId === 'Lm3jV'
+    );
+
+    await pollSocialCommentsWorkflow();
+    expect(mockActivities.importOutstandPostsActivity).toHaveBeenCalledTimes(1);
+    expect(mockActivities.importOutstandPostsActivity).toHaveBeenCalledWith('site-1', 'yTdoj');
+    expect(mockActivities.markImportTriggeredActivity).toHaveBeenCalledWith('site-1', 'yTdoj');
+  });
+
+  it('never automatically starts a billable import, even when the provider has no jobs', async () => {
+    mockPatched.mockReturnValue(true);
+    mockActivities.fetchOutstandImportJobsActivity.mockResolvedValue([]);
+    await pollSocialCommentsWorkflow();
+    expect(mockActivities.fetchOutstandImportJobsActivity).toHaveBeenCalledWith('site-1', account.id);
+    expect(mockActivities.importOutstandPostsActivity).not.toHaveBeenCalled();
+    expect(mockActivities.markImportTriggeredActivity).not.toHaveBeenCalled();
+  });
+
+  it('does not mark queued or failed import jobs complete or enqueue another', async () => {
+    mockPatched.mockReturnValue(true);
+    for (const job of [
+      { id: 'queued', status: 'queued', imported: 0, failed: 0 },
+      { id: 'failed', status: 'failed', imported: 0, failed: 1, error: 'Platform unavailable' },
+      { id: 'empty', status: 'completed', imported: 0, failed: 0 },
+    ]) {
+      mockActivities.fetchOutstandImportJobsActivity.mockResolvedValueOnce([job]);
+      await pollSocialCommentsWorkflow();
+    }
+    expect(mockActivities.importOutstandPostsActivity).not.toHaveBeenCalled();
+    expect(mockActivities.markImportTriggeredActivity).not.toHaveBeenCalled();
+  });
+
+  it('recognizes a finished provider job without creating a billable import or premature marker', async () => {
+    mockPatched.mockReturnValue(true);
+    mockActivities.fetchOutstandImportJobsActivity.mockResolvedValue([
+      { id: 'job-1', status: 'completed', imported: 6, failed: 0 },
+    ]);
+    await pollSocialCommentsWorkflow();
+    await pollSocialCommentsWorkflow();
+    expect(mockActivities.markImportTriggeredActivity).not.toHaveBeenCalled();
+    expect(mockActivities.importOutstandPostsActivity).not.toHaveBeenCalled();
+  });
+
+  it('persists imported posts older than thirty days but never fetches their comments', async () => {
+    mockPatched.mockReturnValue(true);
+    mockActivities.fetchOutstandPostsActivity.mockResolvedValue([{
+      id: 'historical-post',
+      publishedAt: new Date(now - 100 * 24 * 60 * 60 * 1000).toISOString(),
+      socialAccounts: [{ ...account, status: 'published', platformPostId: 'old-id' }],
+      containers: [{ content: 'Old published post' }],
+    }]);
+    await expect(pollSocialCommentsWorkflow()).resolves.toEqual({
+      success: true, processedPosts: 1, processedComments: 0,
+    });
+    expect(mockActivities.upsertContentFromOutstandPostActivity).toHaveBeenCalledTimes(1);
+    expect(mockActivities.fetchOutstandPostRepliesActivity).not.toHaveBeenCalled();
+  });
+
+  it('does not count an Outstand post as processed when content persistence fails', async () => {
+    mockPatched.mockReturnValue(true);
+    mockActivities.fetchOutstandPostsActivity.mockResolvedValue([{
+      id: 'post-1', publishedAt: new Date(now).toISOString(),
+      socialAccounts: [{ ...account, status: 'published', platformPostId: 'post-1' }],
+      containers: [{ content: 'Published post' }],
+    }]);
+    mockActivities.upsertContentFromOutstandPostActivity.mockResolvedValue(null);
+    await expect(pollSocialCommentsWorkflow()).resolves.toEqual({
+      success: true, processedPosts: 0, processedComments: 0,
+    });
+    expect(mockActivities.fetchOutstandPostRepliesActivity).not.toHaveBeenCalled();
+  });
+
+  it('continues past the first 100 posts when the API wrapper drops pagination', async () => {
+    mockPatched.mockReturnValue(true);
+    const old = new Date(now - 100 * 24 * 60 * 60 * 1000).toISOString();
+    const post = (id: string) => ({
+      id, publishedAt: old,
+      socialAccounts: [{ ...account, status: 'published', platformPostId: id }],
+      containers: [{ content: id }],
+    });
+    mockActivities.fetchOutstandPostsActivity
+      .mockResolvedValueOnce(Array.from({ length: 100 }, (_, index) => post(`post-${index}`)))
+      .mockResolvedValueOnce([post('post-100')]);
+    await expect(pollSocialCommentsWorkflow()).resolves.toEqual({
+      success: true, processedPosts: 101, processedComments: 0,
+    });
+    expect(mockActivities.fetchOutstandPostsActivity.mock.calls).toEqual([
+      ['site-1', 100, 0], ['site-1', 100, 100],
+    ]);
   });
 });

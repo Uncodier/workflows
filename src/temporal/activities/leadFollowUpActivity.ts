@@ -1,6 +1,7 @@
 import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
 import { createLeadFollowUpApiFailure } from './leadFollowUpFailure';
+import { assertOutboundChannelAvailable, isOutboundChannelUnavailable } from './daily-prospection/outboundGate';
 
 export interface LeadFollowUpRequest {
   lead_id: string;
@@ -30,6 +31,14 @@ export async function leadFollowUpActivity(
   console.log(`📞 Executing lead follow-up for lead: ${request.lead_id}, site: ${request.site_id}`);
 
   try {
+    try {
+      await assertOutboundChannelAvailable(request.site_id);
+    } catch (error) {
+      if (isOutboundChannelUnavailable(error)) {
+        throw ApplicationFailure.nonRetryable('No available outbound channel', 'OUTBOUND_CHANNEL_UNAVAILABLE');
+      }
+      throw error;
+    }
     const requestBody = {
       leadId: request.lead_id,
       siteId: request.site_id,

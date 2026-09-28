@@ -8,6 +8,13 @@ export const SUPPORTED_COMMENT_NETWORKS = [
   'youtube',
 ] as const;
 
+// TikTok posts can be synced and analyzed even though comment ingestion is
+// not supported by this integration.
+export const SUPPORTED_SOCIAL_POST_NETWORKS = [
+  ...SUPPORTED_COMMENT_NETWORKS,
+  'tiktok',
+] as const;
+
 const ACCOUNT_ID_FIELDS = [
   'id',
   'accountId',
@@ -130,29 +137,35 @@ function isActiveConnectedAccount(account: any): boolean {
   return active && (accountIdentifiers(account).length > 0 || connectedPageIds(account).length > 0);
 }
 
-export function getConnectedCommentAccounts(
-  socialMedia: unknown
+function getConnectedAccounts(
+  socialMedia: unknown,
+  supportedNetworks: readonly string[]
 ): ConnectedCommentAccount[] {
   if (!Array.isArray(socialMedia)) return [];
 
   return socialMedia.flatMap((account: any) => {
     const network = normalizeOutstandNetwork(account?.network || account?.platform);
-    if (
-      !network ||
-      !SUPPORTED_COMMENT_NETWORKS.includes(
-        network as (typeof SUPPORTED_COMMENT_NETWORKS)[number]
-      ) ||
-      !isActiveConnectedAccount(account)
-    ) {
+    if (!network || !supportedNetworks.includes(network) || !isActiveConnectedAccount(account)) {
       return [];
     }
-
     return [{
       network,
       identifiers: accountIdentifiers(account),
       pageIds: connectedPageIds(account),
     }];
   });
+}
+
+export function getConnectedCommentAccounts(
+  socialMedia: unknown
+): ConnectedCommentAccount[] {
+  return getConnectedAccounts(socialMedia, SUPPORTED_COMMENT_NETWORKS);
+}
+
+export function getConnectedSocialPostAccounts(
+  socialMedia: unknown
+): ConnectedCommentAccount[] {
+  return getConnectedAccounts(socialMedia, SUPPORTED_SOCIAL_POST_NETWORKS);
 }
 
 /** Only import history for accounts actually connected to this site. The
@@ -168,7 +181,7 @@ export function isImportAccountOwnedBySite(
   const pages = connectedPageIds(account);
   if (!network || !normalizedIdentifier(account.id)) return false;
 
-  return getConnectedCommentAccounts(socialMedia).some((connected) =>
+  return getConnectedSocialPostAccounts(socialMedia).some((connected) =>
     connected.network === network && (
       connected.identifiers.some((identifier) => ids.includes(identifier)) ||
       connected.pageIds.some((pageId) => pages.includes(pageId))
@@ -227,6 +240,21 @@ export function getOwnedPublishedCommentAccounts(
   );
 }
 
+export function getOwnedPublishedSocialPostAccounts(
+  post: any,
+  socialMedia: unknown
+): any[] {
+  const connectedAccounts = getConnectedSocialPostAccounts(socialMedia);
+  if (connectedAccounts.length === 0) return [];
+
+  return (post?.socialAccounts || []).filter((account: any) =>
+    account?.network &&
+    SUPPORTED_SOCIAL_POST_NETWORKS.includes(account.network.toLowerCase()) &&
+    isAccountPublished(account) &&
+    isPostAccountOwnedBySite(account, connectedAccounts)
+  );
+}
+
 // Preserve the pre-patch mapping for Temporal histories without the strict
 // ownership marker. Changing this branch changes their activity sequence.
 export function getPostSiteOwnerships(
@@ -256,6 +284,23 @@ export function getUnambiguousPostSiteOwnerships(
     if (!account?.network || !isAccountPublished(account)) continue;
     const owners = sites.filter((site) =>
       getOwnedPublishedCommentAccounts({ socialAccounts: [account] }, site.social_media).length > 0
+    );
+    if (owners.length !== 1) continue;
+    const siteId = owners[0].site_id;
+    ownedAccounts.set(siteId, [...(ownedAccounts.get(siteId) || []), account]);
+  }
+  return [...ownedAccounts].map(([siteId, socialAccounts]) => ({ siteId, socialAccounts }));
+}
+
+export function getUnambiguousSocialPostSiteOwnerships(
+  post: any,
+  sites: SiteSocialMediaSettings[]
+): PostSiteOwnership[] {
+  const ownedAccounts = new Map<string, any[]>();
+  for (const account of post?.socialAccounts || []) {
+    if (!account?.network || !isAccountPublished(account)) continue;
+    const owners = sites.filter((site) =>
+      getOwnedPublishedSocialPostAccounts({ socialAccounts: [account] }, site.social_media).length > 0
     );
     if (owners.length !== 1) continue;
     const siteId = owners[0].site_id;
@@ -316,13 +361,12 @@ export function shouldPollPostForAnalytics(
   const ONE_DAY = 24 * 60 * 60 * 1000;
   const ageInDays = ageMs / ONE_DAY;
 
-  // Stop polling posts older than 30 days
-  if (ageInDays > 30) {
-    return false;
-  }
-
-  // If we never fetched, fetch it
+  // Persist an initial analytics snapshot for imported historical posts, even
+  // when their publication date is over 30 days ago. Stop refreshing them later.
   if (!lastFetchedAtStr) return true;
+
+  // Stop polling posts older than 30 days after the first snapshot.
+  if (ageInDays > 30) return false;
   
   const lastFetchedAt = new Date(lastFetchedAtStr).getTime();
   const hoursSinceLastFetch = (nowMs - lastFetchedAt) / (60 * 60 * 1000);

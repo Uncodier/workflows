@@ -6,11 +6,14 @@ import {
   isAccountPublished,
   isOutstandDraftPost,
   getConnectedCommentAccounts,
+  getConnectedSocialPostAccounts,
   isImportAccountOwnedBySite,
   getOwnedPublishedCommentAccounts,
   getPostSiteOwnerships,
   getUnambiguousPostSiteOwnerships,
+  getUnambiguousSocialPostSiteOwnerships,
   getPublishedCommentNetworks,
+  getOwnedPublishedSocialPostAccounts,
   buildOutstandCommentsPath,
   isPublishedContentForAnalytics,
   isOutstandClientError,
@@ -96,6 +99,33 @@ describe('outstandPoll helpers', () => {
       expect(isAccountPublished({ status: 'failed' })).toBe(false);
       expect(isAccountPublished(null)).toBe(false);
       expect(isAccountPublished({})).toBe(false);
+    });
+  });
+
+  describe('TikTok post ownership without TikTok comment ingestion', () => {
+    const tiktok = { id: 'yTdoj', network: 'tiktok', isActive: true };
+    const instagram = { id: 'Lm3jV', network: 'instagram', isActive: true };
+
+    it('includes active TikTok accounts for posts but not comments', () => {
+      expect(getConnectedSocialPostAccounts([tiktok, instagram]).map(account => account.network))
+        .toEqual(['tiktok', 'instagram']);
+      expect(getConnectedCommentAccounts([tiktok, instagram]).map(account => account.network))
+        .toEqual(['instagram']);
+    });
+
+    it('only assigns a published TikTok post to the uniquely connected site', () => {
+      const postAccount = { id: 'yTdoj', network: 'tiktok', status: 'published', platformPostId: 'video-1' };
+      const post = { socialAccounts: [postAccount] };
+      expect(getOwnedPublishedSocialPostAccounts(post, [tiktok])).toEqual([postAccount]);
+      expect(getUnambiguousSocialPostSiteOwnerships(post, [
+        { site_id: 'pigs', social_media: [tiktok] },
+        { site_id: 'other', social_media: [{ ...tiktok, id: 'foreign-account' }] },
+      ])).toEqual([{ siteId: 'pigs', socialAccounts: [postAccount] }]);
+      expect(getUnambiguousSocialPostSiteOwnerships(post, [
+        { site_id: 'pigs', social_media: [tiktok] },
+        { site_id: 'other', social_media: [tiktok] },
+      ])).toEqual([]);
+      expect(getOwnedPublishedSocialPostAccounts(post, [{ ...tiktok, isActive: false }])).toEqual([]);
     });
   });
 
@@ -325,6 +355,12 @@ describe('outstandPoll helpers', () => {
           new Date(now - 6 * 60 * 60 * 1000).toISOString()
         )
       ).toBe(true);
+    });
+
+    it('fetches imported posts older than thirty days exactly once', () => {
+      const published = new Date(now - 90 * 24 * 60 * 60 * 1000).toISOString();
+      expect(shouldPollPostForAnalytics(published, now, null)).toBe(true);
+      expect(shouldPollPostForAnalytics(published, now, new Date(now - 30 * 60 * 60 * 1000).toISOString())).toBe(false);
     });
   });
 

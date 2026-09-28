@@ -144,6 +144,21 @@ export async function leadFollowUpWorkflow(
       
       console.log(`✅ Retrieved lead information: ${leadInfo.name || leadInfo.email}`);
 
+      // New runs must not spend verification credits or AI tokens when the
+      // site has no recently working outbound channel. Older histories keep
+      // their original Activity sequence via Temporal patching.
+      if (patched('lead-follow-up-pre-verification-channel-health-v1')) {
+        const outbound = await validateCommunicationChannelsActivity({
+          site_id, requireHealthyOutbound: true,
+        });
+        if (!outbound.success || !outbound.hasAnyChannel) {
+          throw ApplicationFailure.nonRetryable(
+            'No recently healthy outbound channel for lead follow-up',
+            'OUTBOUND_CHANNEL_UNAVAILABLE'
+          );
+        }
+      }
+
       // Pass activities proxy to helper function
       const activitiesProxy = {
           validateContactInformation,

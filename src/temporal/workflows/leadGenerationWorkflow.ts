@@ -1,4 +1,4 @@
-import { proxyActivities, startChild, workflowInfo, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
+import { patched, proxyActivities, startChild, workflowInfo, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { deepResearchWorkflow, type DeepResearchOptions } from './deepResearchWorkflow';
 import { leadGenerationDomainSearchWorkflow, type LeadGenerationDomainSearchOptions } from './leadGenerationDomainSearchWorkflow';
@@ -16,6 +16,7 @@ const {
   saveCronStatusActivity,
   validateAndCleanStuckCronStatusActivity,
   getSiteActivity,
+  validateCommunicationChannelsActivity,
 
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
@@ -556,6 +557,28 @@ export async function leadGenerationWorkflow(
   let siteUrl = '';
 
   try {
+    if (patched('lead-generation-outbound-health-gate-v1')) {
+      const channels = await validateCommunicationChannelsActivity({
+        site_id, requireHealthyOutbound: true,
+      });
+      if (!channels.success || !channels.hasAnyChannel) {
+        const reason = 'No available outbound channel for lead generation';
+        await saveCronStatusActivity({
+          siteId: site_id, workflowId, scheduleId,
+          activityName: 'leadGenerationWorkflow', status: 'COMPLETED',
+          lastRun: new Date().toISOString(), errorMessage: reason,
+        });
+        await logWorkflowExecutionActivity({
+          workflowId, workflowType: 'leadGenerationWorkflow',
+          status: 'BLOCKED', input: options, error: reason,
+        });
+        return {
+          success: false, siteId: site_id, errors: [reason],
+          completedAt: new Date().toISOString(),
+          executionTime: `${Date.now() - startTime}ms`,
+        };
+      }
+    }
     console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
     
     // Get site information to obtain site details

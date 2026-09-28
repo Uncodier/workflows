@@ -1,6 +1,7 @@
 import { apiService } from '../../services/apiService';
 import { getSupabaseService } from '../../services/supabaseService';
 import { ProspectionLead } from './types';
+import { assertOutboundChannelAvailable, isOutboundChannelUnavailable } from './outboundGate';
 
 /**
  * Activity to send leads to sales agent for lead selection and prioritization
@@ -33,6 +34,15 @@ export async function sendLeadsToSalesAgentActivity(
         selectedLeads: [],
         response: { message: 'No leads provided' }
       };
+    }
+
+    try {
+      await assertOutboundChannelAvailable(site_id);
+    } catch (error) {
+      if (isOutboundChannelUnavailable(error)) {
+        return { success: false, selectedLeads: [], error: 'No available outbound channel' };
+      }
+      throw error;
     }
 
     // Prepare request body for the sales agent API
