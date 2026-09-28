@@ -80,7 +80,7 @@ export async function validateContactInformation(request: {
   const { email, hasEmailMessage, hasWhatsAppMessage, leadId, phone, leadMetadata } = request;
   
   console.log(`🔍 Contact Information Validation Activity Started`);
-  console.log(`📋 Context: lead=${leadId}, email=${email}, phone=${!!phone}`);
+  console.log(`📋 Context: lead=${leadId}, hasEmail=${!!email}, phone=${!!phone}`);
   console.log(`📨 Messages: email=${!!hasEmailMessage}, whatsapp=${!!hasWhatsAppMessage}`);
   console.log(`📦 Metadata emailVerified: ${leadMetadata?.emailVerified || false}`);
   
@@ -143,8 +143,8 @@ export async function validateContactInformation(request: {
   // Proceed with email validation
   const timestamp = new Date().toISOString();
   const callId = Math.random().toString(36).substring(7);
-  console.log(`📧 [${callId}] Validating email: ${email} at ${timestamp}`);
-  console.log(`📧 [${callId}] Called from leadId: ${leadId}`);
+  console.log(`📧 [${callId}] Validating email at ${timestamp}`);
+  console.log(`📧 [${callId}] Validation requested for lead`);
   
   try {
     const response = await validateEmail({ email });
@@ -169,8 +169,7 @@ export async function validateContactInformation(request: {
       emailData = (emailData as any).data;
     }
 
-    console.log(`✅ [${callId}] Email validation response (normalized):`, emailData);
-    console.log(`🔍 [${callId}] Full API response structure:`, JSON.stringify(response, null, 2));
+    console.log(`✅ [${callId}] Email validation result:`, emailData?.result);
     
     // Check both isValid AND deliverable for proper email validation
     const isValid = emailData?.isValid || false;
@@ -208,15 +207,15 @@ export async function validateContactInformation(request: {
     };
     
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`❌ Exception during email validation: ${errorMessage}`);
+    // Errors from HTTP clients may contain request URLs with API credentials.
+    console.error('❌ Exception during email validation');
     
     return {
       success: false,
       isValid: false,
       shouldProceed: true, // Proceed anyway when exception occurs
       validationType: 'email',
-      error: errorMessage,
+      error: 'Email validation failed unexpectedly',
       reason: 'Validation exception, proceeding with send'
     };
   }

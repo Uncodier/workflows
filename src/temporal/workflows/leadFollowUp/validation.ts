@@ -1,5 +1,7 @@
 import {
   ApplicationFailure,
+  patched,
+  workflowInfo,
   startChild,
   ParentClosePolicy,
 } from '@temporalio/workflow';
@@ -105,7 +107,6 @@ export async function performEarlyValidation({
 
   console.log(`📊 Early validation completed: type=${earlyValidationResult.validationType}, shouldProceed=${earlyValidationResult.shouldProceed}`);
   console.log(`📋 Reason: ${earlyValidationResult.reason}`);
-  console.log(`📊 Full validation result:`, JSON.stringify(earlyValidationResult, null, 2));
 
   // Handle specific early validation results that require immediate action
   if (earlyValidationResult.validationType === 'email' && !earlyValidationResult.isValid && earlyValidationResult.success) {
@@ -236,19 +237,25 @@ export async function performEarlyValidation({
     }
   }
 
-  // Validation service failures explicitly marked as safe to bypass must not
-  // contradict the activity contract by failing the workflow.
+  // A validation outage or an inconclusive result is not permission to send.
+  // No patch marker exists in the old histories. Preserve both historical
+  // paths: before September 19 the workflow recorded FAILED activities; after
+  // that the fail-open branch returned without producing those commands.
+  // Only executions carrying the new marker may reject immediately.
   if (!earlyValidationResult.success && earlyValidationResult.shouldProceed) {
-    const validationWarning =
-      `Contact validation unavailable: ${earlyValidationResult.error || earlyValidationResult.reason}`;
-    console.warn(`⚠️ ${validationWarning}. Continuing with available channels.`);
-    errors.push(validationWarning);
-
-    return {
-      shouldReturn: false,
-      emailInvalidatedInEarlyValidation,
-      errors,
-    };
+    if (patched('lead-follow-up-contact-validation-fail-closed-v1')) {
+      throw ApplicationFailure.nonRetryable(
+        `Contact validation unavailable: ${earlyValidationResult.error || earlyValidationResult.reason}`,
+        'CONTACT_VALIDATION_UNAVAILABLE'
+      );
+    }
+    if (workflowInfo().startTime.getTime() >= Date.parse('2026-09-19T00:00:00Z')) {
+      return {
+        shouldReturn: false,
+        emailInvalidatedInEarlyValidation,
+        errors,
+      };
+    }
   }
 
   // Check if the validation API itself failed and did not allow fail-open behavior.
@@ -272,10 +279,7 @@ export async function performEarlyValidation({
         errorMessage: apiFailureError
       });
     } catch (statusError) {
-      console.error(
-        'Failed to save cron status for contact validation rejection:',
-        statusError
-      );
+      console.error('Failed to save cron status for contact validation rejection');
     }
 
     try {
@@ -287,10 +291,7 @@ export async function performEarlyValidation({
         error: apiFailureError,
       });
     } catch (loggingError) {
-      console.error(
-        'Failed to log contact validation rejection:',
-        loggingError
-      );
+      console.error('Failed to log contact validation rejection');
     }
 
     throw ApplicationFailure.nonRetryable(

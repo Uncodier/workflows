@@ -1,5 +1,10 @@
 # Email Validation Implementation - validateEmail Tool Integration
 
+> **Histórico (no aplica al despliegue AKS actual):** esta guía describe la
+> antigua integración con endpoint de agentes/NeverBounce. Consulte
+> [REOON_AKS_INCIDENT.md](./REOON_AKS_INCIDENT.md) para el código y la política
+> de validación de Reoon activos.
+
 ## Resumen
 
 Se ha implementado una nueva funcionalidad que valida emails usando la herramienta `/api/agents/tools/validateEmail` antes de enviar correos en el `leadFollowUpWorkflow`. Esta implementación incluye lógica inteligente para manejar diferentes escenarios de invalidación basados en los métodos de contacto alternativos disponibles.

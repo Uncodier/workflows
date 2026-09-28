@@ -1,8 +1,5 @@
 import axios from 'axios';
-import {
-  isValidEmailFormat,
-  extractDomain
-} from '../../lib/email-validation';
+import { isValidEmailFormat } from '../../lib/email-validation';
 
 /**
  * Activity: Dummy connectivity check to avoid breaking existing workflow structure
@@ -57,6 +54,37 @@ export interface ValidateEmailOutput {
   };
 }
 
+// Prevent repeat verifications while the provider confirms there are no
+// available credits. The cache is per key and per process; it expires after a
+// minute, including after a key rotation.
+const noCreditsUntil = new Map<string, number>();
+const balanceChecks = new Map<string, Promise<boolean>>();
+
+async function noReoonCredits(apiKey: string): Promise<boolean> {
+  if (Date.now() < (noCreditsUntil.get(apiKey) || 0)) return true;
+  let balanceCheck = balanceChecks.get(apiKey);
+  if (!balanceCheck) {
+    balanceCheck = (async () => {
+      try {
+        const response = await axios.get('https://emailverifier.reoon.com/api/v1/check-account-balance/', {
+          params: { key: apiKey },
+          timeout: 10000
+        });
+        const balance = response.data;
+        const exhausted = balance?.status === 'success' && balance?.api_status === 'active' &&
+          balance?.remaining_daily_credits === 0 && balance?.remaining_instant_credits === 0;
+        if (exhausted) noCreditsUntil.set(apiKey, Date.now() + 60_000);
+        return exhausted;
+      } catch {
+        // Never log this request or its exception: both may contain the key.
+        return false;
+      }
+    })().finally(() => { balanceChecks.delete(apiKey); });
+    balanceChecks.set(apiKey, balanceCheck);
+  }
+  return balanceCheck;
+}
+
 /**
  * Validates an email address using Reoon Email Verifier API
  */
@@ -80,7 +108,7 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
       };
     }
     
-    console.log(`[VALIDATE_EMAIL] 📧 Validating email: ${email}`);
+    console.log('[VALIDATE_EMAIL] Validating email');
     
     // Basic format validation
     if (!isValidEmailFormat(email)) {
@@ -108,9 +136,6 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
       };
     }
 
-    const domain = extractDomain(email);
-    console.log(`[VALIDATE_EMAIL] 🌐 Domain extracted: ${domain}`);
-
     // Call Reoon API
     const apiKey = process.env.REOON_API_KEY;
     
@@ -126,58 +151,83 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
       };
     }
 
+    if (Date.now() < (noCreditsUntil.get(apiKey) || 0)) {
+      return {
+        success: false,
+        error: {
+          code: 'NO_CREDITS',
+          message: 'Reoon has no available verification credits',
+          details: 'Add verification credits before retrying'
+        }
+      };
+    }
+
     // Call Reoon using axios
-    console.log(`[VALIDATE_EMAIL] 📡 Requesting validation from Reoon API...`);
+    console.log('[VALIDATE_EMAIL] Requesting validation from Reoon API');
     const reoonResponse = await axios.get(`https://emailverifier.reoon.com/api/v1/verify`, {
       params: {
         email,
         key: apiKey,
         mode: 'power' // Deep SMTP validation
       },
-      timeout: 15000 // 15 seconds timeout
+      // Power mode can take over a minute for some mail servers.
+      timeout: 90000
     });
 
     const data = reoonResponse.data;
     const executionTime = Date.now() - startTime;
     
-    console.log(`[VALIDATE_EMAIL] 📥 Reoon API response:`, JSON.stringify(data));
+    const providerStatus = typeof data?.status === 'string' ? data.status : 'unrecognized';
+    const documentedStatuses = [
+      'safe', 'role', 'role_account', 'catch_all', 'inbox_full',
+      'invalid', 'disabled', 'disposable', 'spamtrap', 'unknown', 'error'
+    ];
+    console.log('[VALIDATE_EMAIL] Reoon result category:', documentedStatuses.includes(providerStatus) ? providerStatus : 'unrecognized');
 
-    if (data.status === 'error') {
+    if (providerStatus === 'error') {
       return {
         success: false,
         error: {
           code: 'API_ERROR',
-          message: data.reason || 'Unknown API error',
-          details: 'Reoon API returned an error'
+          message: 'Reoon API returned an error',
+          details: 'Reoon reported an API error; review the provider dashboard'
         }
       };
     }
 
     // Map Reoon statuses to our internal format
-    // Reoon statuses: safe, role, catch_all, disposable, spamtrap, invalid, unknown
+    // Power mode statuses: safe, role_account, catch_all, disposable,
+    // spamtrap, invalid, disabled, inbox_full, unknown.
     let isValid = false;
     let deliverable = false;
     let result: 'valid' | 'invalid' | 'unknown' | 'disposable' | 'catchall' | 'risky' = 'unknown';
     let bounceRisk: 'low' | 'medium' | 'high' = 'high';
     
-    switch (data.status) {
+    switch (providerStatus) {
       case 'safe':
-        isValid = true;
-        deliverable = true;
+        isValid = data.is_deliverable === true;
+        deliverable = isValid;
         result = 'valid';
         bounceRisk = 'low';
         break;
       case 'role':
-        isValid = true;
-        deliverable = true; // Technically deliverable, but risky for cold outreach
+      case 'role_account':
+        isValid = data.is_deliverable === true;
+        deliverable = isValid; // Deliverable shared inbox, not a personal mailbox
         result = 'valid';
         bounceRisk = 'medium';
         break;
       case 'catch_all':
-        isValid = true;
-        deliverable = true; 
+        isValid = false;
+        deliverable = false; // The individual mailbox cannot be confirmed
         result = 'catchall';
         bounceRisk = 'medium'; // Could be higher risk
+        break;
+      case 'inbox_full':
+        isValid = false;
+        deliverable = false; // Temporary condition: do not invalidate the lead
+        result = 'risky';
+        bounceRisk = 'high';
         break;
       case 'disposable':
         isValid = false;
@@ -187,6 +237,7 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
         break;
       case 'spamtrap':
       case 'invalid':
+      case 'disabled':
         isValid = false;
         deliverable = false;
         result = 'invalid';
@@ -201,16 +252,16 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
         break;
     }
 
-    // For unknown status, return success:false so fallback logic in other systems might trigger
-    if (result === 'unknown') {
-       return {
-         success: false,
-         error: {
-            code: 'UNKNOWN_STATUS',
-            message: 'Email verifier returned unknown status',
-            details: 'Credit was automatically refunded by provider'
-         }
-       };
+    // A contradictory safe/deliverable response must not invalidate a lead.
+    if (result === 'unknown' || result === 'catchall' || result === 'risky' || (result === 'valid' && !deliverable)) {
+      return {
+        success: false,
+        error: {
+          code: result === 'unknown' ? 'UNKNOWN_STATUS' : 'INCONCLUSIVE_STATUS',
+          message: result === 'unknown' ? 'Email verifier returned unknown status' : 'Email verification inconclusive',
+          details: 'Email deliverability could not be confirmed'
+        }
+      };
     }
 
     return {
@@ -220,32 +271,49 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
         isValid,
         deliverable,
         result,
-        flags: [data.status],
+        flags: [providerStatus],
         suggested_correction: null, // Reoon doesn't provide this in simple mode
         execution_time: executionTime,
-        message: `Validation completed with status: ${data.status}`,
+        message: `Validation completed with status: ${providerStatus}`,
         timestamp: new Date().toISOString(),
         bounceRisk,
         reputationFlags: [],
-        riskFactors: data.status !== 'safe' ? [data.status] : [],
+        riskFactors: providerStatus !== 'safe' ? [providerStatus] : [],
         confidence: result === 'valid' ? 95 : (result === 'invalid' ? 95 : 50),
         confidenceLevel: result === 'valid' ? 'very_high' : (result === 'invalid' ? 'very_high' : 'medium'),
-        reasoning: [`Reoon API status: ${data.status}`],
+        reasoning: [`Reoon API status: ${providerStatus}`],
         aggressiveMode
       }
     };
 
-  } catch (error: any) {
-    console.error(`[VALIDATE_EMAIL] ❌ Unexpected error during validation:`, error);
+  } catch (error: unknown) {
+    // Never log the Axios error object or message: its request URL includes the
+    // email and the Reoon API key in query parameters.
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+    const errorCode = axios.isAxiosError(error) ? error.code : undefined;
+    const safeCode = errorCode && /^(ECONNABORTED|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN)$/.test(errorCode)
+      ? errorCode : undefined;
+    console.error('[VALIDATE_EMAIL] Request failed', { status, code: safeCode });
     
     // Handle Axios timeout or network errors
-    if (error.code === 'ECONNABORTED' || error.response?.status === 504) {
+    if (errorCode === 'ECONNABORTED' || status === 504) {
       return {
         success: false,
         error: {
           code: 'API_TIMEOUT',
           message: 'Email verification API timed out',
-          details: error.message
+          details: 'Reoon verification request timed out'
+        }
+      };
+    }
+
+    if (status === 403 && process.env.REOON_API_KEY && await noReoonCredits(process.env.REOON_API_KEY)) {
+      return {
+        success: false,
+        error: {
+          code: 'NO_CREDITS',
+          message: 'Reoon has no available verification credits',
+          details: 'Add verification credits before retrying'
         }
       };
     }
@@ -253,9 +321,9 @@ export async function validateEmail(input: ValidateEmailInput): Promise<Validate
     return {
       success: false,
       error: {
-        code: 'VALIDATION_ERROR',
-        message: 'An unexpected error occurred during validation',
-        details: error instanceof Error ? error.message : String(error)
+        code: status ? `HTTP_${status}` : (safeCode || 'VALIDATION_ERROR'),
+        message: status ? `Email verification request returned HTTP ${status}` : 'An unexpected error occurred during validation',
+        details: 'Reoon verification request failed; no email was verified'
       }
     };
   }

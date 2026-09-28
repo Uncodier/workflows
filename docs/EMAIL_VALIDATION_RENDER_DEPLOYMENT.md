@@ -1,5 +1,8 @@
 # Email Validation Workflow - Render Deployment Guide
 
+> Historical Render/SMTP documentation. For the current Azure worker and
+> Reoon implementation see [REOON_AKS_INCIDENT.md](./REOON_AKS_INCIDENT.md).
+
 ## Overview
 
 This document describes the email validation workflow that runs on Render to bypass Vercel's port 25 restrictions. The workflow provides comprehensive SMTP email validation using the same battle-tested code from the main API project.
