@@ -1,5 +1,9 @@
 # One-time Outstand historical import, per account
 
+For comment ingestion after posts have been imported, see
+[Durable social comment synchronization](SOCIAL_COMMENT_SYNC.md). Post imports
+and comment sync checkpoints are independent and must not reset each other.
+
 The `poll-social-comments-schedule` (configured every five minutes in Temporal)
 will start **at most one historical import per supported connected account**
 after this change is deployed. The request sets `limit: 100`, without a date

@@ -30,6 +30,8 @@ export * from './webhookActivities';
 export * from './finderActivities';
 export * from './activityControlActivities';
 export * from './messageActivities';
+export * from './outreachDeliveryActivities';
+export * from './outreachConfigurationActivity';
 export * from './icypeasActivities';
 export * from './billingActivities';
 export * from './reservationActivities';
@@ -40,6 +42,7 @@ export * from './channelGuidanceActivities';
 export * from './outstandActivities';
 export * from './outstandContentActivities';
 export * from './syncedObjectActivities';
+export * from './socialCommentSyncActivities';
 export * from './sessionRecordingMaintenanceActivities';
 
 // Bundle all activities for the worker
@@ -74,6 +77,8 @@ import * as webhookActivities from './webhookActivities';
 import * as finderActivities from './finderActivities';
 import * as activityControlActivities from './activityControlActivities';
 import * as messageActivities from './messageActivities';
+import * as outreachDeliveryActivities from './outreachDeliveryActivities';
+import * as outreachConfigurationActivities from './outreachConfigurationActivity';
 import * as icypeasActivities from './icypeasActivities';
 import * as billingActivities from './billingActivities';
 import * as reservationActivities from './reservationActivities';
@@ -84,6 +89,7 @@ import * as channelGuidanceActivities from './channelGuidanceActivities';
 import * as outstandActivities from './outstandActivities';
 import * as outstandContentActivities from './outstandContentActivities';
 import * as syncedObjectActivities from './syncedObjectActivities';
+import * as socialCommentSyncActivities from './socialCommentSyncActivities';
 import * as sessionRecordingMaintenanceActivities from './sessionRecordingMaintenanceActivities';
 
 export const activities = {
@@ -118,6 +124,8 @@ export const activities = {
   ...finderActivities,
   ...activityControlActivities,
   ...messageActivities,
+  ...outreachDeliveryActivities,
+  ...outreachConfigurationActivities,
   ...icypeasActivities,
   ...billingActivities,
   ...reservationActivities,
@@ -128,6 +136,7 @@ export const activities = {
   ...outstandActivities,
   ...outstandContentActivities,
   ...syncedObjectActivities,
+  ...socialCommentSyncActivities,
   ...sessionRecordingMaintenanceActivities
 };
 

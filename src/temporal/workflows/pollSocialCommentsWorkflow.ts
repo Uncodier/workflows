@@ -1,5 +1,6 @@
 import {
   ParentClosePolicy,
+  isCancellation,
   patched,
   proxyActivities,
   startChild,
@@ -8,7 +9,6 @@ import type { Activities } from '../activities';
 import { ingestSocialCommentWorkflow } from './ingestSocialCommentWorkflow';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import {
-  buildSocialCommentExternalId,
   buildSocialCommentWorkflowId,
   getPostSiteOwnerships,
   getUnambiguousPostSiteOwnerships,
@@ -21,6 +21,8 @@ import {
   shouldPollPostForComments,
 } from './helpers/outstandPoll';
 import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
+import { socialCommentCandidates } from './helpers/socialCommentPayload';
+import { shouldSyncSocialComments } from './helpers/socialCommentCadence';
 
 const {
   fetchSitesWithSocialCommentsActivity,
@@ -38,6 +40,9 @@ const {
   claimSyncedObjectActivity,
   claimSyncedObjectsBatchActivity,
   finishSyncedObjectClaimActivity,
+  getSocialCommentSyncStatesActivity,
+  recordSocialCommentSyncSuccessActivity,
+  verifySocialCommentIngestionActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.NETWORK,
   retry: RETRY_POLICIES.NETWORK, // Handle API flakiness properly, don't retry forever on 400s
@@ -55,6 +60,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
   const useSocialPostNetworks = patched('poll-social-comments-tiktok-posts-v1');
   const useImportJobStatus = patched('poll-social-comments-import-job-status-v1');
   const useAutomaticInitialImport = patched('poll-social-comments-auto-initial-import-v1');
+  const useDurableCommentSync = patched('poll-social-comments-durable-sync-v1');
   
   await logWorkflowExecutionActivity({
     workflowId,
@@ -65,6 +71,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
   
   let processedPosts = 0;
   let processedComments = 0;
+  let failedCommentSyncs = 0;
 
   try {
     const sites = await fetchSitesWithSocialCommentsActivity();
@@ -83,6 +90,9 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           const result = await fetchOutstandPostsActivity(siteId, limit, offset);
           
           const posts = Array.isArray(result) ? result : (result?.posts || result?.data || []);
+          const syncStates = useDurableCommentSync
+            ? await getSocialCommentSyncStatesActivity(siteId, posts.map((post: any) => post.id))
+            : [];
           // Older activity histories may contain only an array with no total.
           // Only the new branch continues on full pages; preserve the command
           // sequence for older Temporal histories.
@@ -208,7 +218,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
               continue;
             }
 
-            if (useAgeFiltering && !(useSocialPostNetworks && useImportJobStatus)) {
+            if (!useDurableCommentSync && useAgeFiltering && !(useSocialPostNetworks && useImportJobStatus)) {
               const { shouldPoll, isTooOld } = shouldPollPostForComments(
                 post,
                 nowMs,
@@ -228,19 +238,23 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
               );
               if (useSocialPostNetworks && useImportJobStatus && !contentId) {
                 console.error(`Outstand post ${post.id} could not be persisted for site ${siteId}`);
+                if (useDurableCommentSync) failedCommentSyncs++;
                 continue;
               }
               processedPosts++;
 
-              // Historical posts must be persisted even when they are too old
-              // to fetch replies. Never create conversations for old imports.
+              // Preserve legacy cadence for replay. New runs always perform an
+              // initial sync, including historical posts, before reducing frequency.
               const pollReplies = !useAgeFiltering || shouldPollPostForComments(
                 post, nowMs, useBucketCadence
               ).shouldPoll;
 
               // 2. Fetch replies for each valid published network
               for (const network of uniqueNetworks) {
-                if (useSocialPostNetworks && useImportJobStatus && !pollReplies) continue;
+                if (useDurableCommentSync) {
+                  const state = syncStates.find((entry) => entry.postId === post.id && entry.network === network);
+                  if (!shouldSyncSocialComments(post.publishedAt || post.createdAt, state?.lastSuccessAt, nowMs)) continue;
+                } else if (useSocialPostNetworks && useImportJobStatus && !pollReplies) continue;
                 const socialAccount = ownedSocialAccounts.find((account: any) =>
                   normalizeOutstandNetwork(account.network) === network
                 );
@@ -251,73 +265,11 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                   const comments = Array.isArray(repliesResult) ? repliesResult : (repliesResult?.comments || repliesResult?.data || []);
                   
                   if (comments.length === 0) {
+                    if (useDurableCommentSync) await recordSocialCommentSyncSuccessActivity(siteId, post.id, network);
                     continue;
                   }
 
-                  const commentCandidates = new Map<string, {
-                    comment: any;
-                    commentId: string;
-                    commentText: string;
-                    origin: string;
-                    stableCommentId: string;
-                    externalId: string;
-                    handle: string;
-                    authorId: string;
-                    profileUrl: string;
-                    platformCommentId: unknown;
-                  }>();
-
-                  for (const comment of comments) {
-                    const commentText = comment.text || comment.message || '';
-                    const commentId = comment.id || comment.reply_id;
-                    if (!commentText || !commentId) {
-                      continue;
-                    }
-
-                    const commentNetwork = (comment.network || comment.account?.network || network || 'social').toLowerCase();
-                    if (normalizeOutstandNetwork(commentNetwork) !== network) {
-                      console.warn(
-                        `Skipping comment ${commentId}: returned network ${commentNetwork} does not match owned network ${network}`
-                      );
-                      continue;
-                    }
-                    
-                    const authorObj = (typeof comment.author === 'object' && comment.author) || 
-                                      (typeof comment.from === 'object' && comment.from) || 
-                                      (typeof comment.user === 'object' && comment.user) || {};
-                    
-                    const rawAuthorId = typeof comment.author === 'string' ? comment.author : 
-                                        typeof comment.from === 'string' ? comment.from : '';
-
-                    const handle = comment.username || 
-                                   comment.authorName || 
-                                   authorObj.username || 
-                                   authorObj.name || 
-                                   comment.accountUsername || 
-                                   rawAuthorId || 
-                                   '';
-                    
-                    const authorId = String(comment.author_id || comment.authorId || authorObj.id || rawAuthorId || '');
-                    const profileUrl = comment.author_url || comment.authorUrl || authorObj.url || authorObj.profileUrl || authorObj.profile_url || '';
-                    const platformCommentId = comment.platform_specific?.commentUrn || comment.platform_specific?.id;
-                    
-                    const origin = commentNetwork === 'twitter' ? 'x' : commentNetwork;
-                    const stableCommentId = String(platformCommentId || commentId);
-                    const externalId = buildSocialCommentExternalId(origin, stableCommentId);
-
-                    commentCandidates.set(externalId, {
-                      comment,
-                      commentId: String(commentId),
-                      commentText,
-                      origin,
-                      stableCommentId,
-                      externalId,
-                      handle,
-                      authorId,
-                      profileUrl,
-                      platformCommentId,
-                    });
-                  }
+                  const commentCandidates = socialCommentCandidates(comments, network, useDurableCommentSync);
 
                   if (commentCandidates.size === 0) {
                     continue;
@@ -347,6 +299,8 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                   const claimsByExternalId = new Map(
                     claims.map((claim) => [claim.externalId, claim])
                   );
+                  const ingestionResults: Array<Promise<boolean>> = [];
+                  let startFailed = false;
 
                   for (const candidate of commentCandidates.values()) {
                     const {
@@ -358,6 +312,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                       externalId,
                       handle,
                       authorId,
+                      authorName,
                       profileUrl,
                       platformCommentId,
                     } = candidate;
@@ -369,7 +324,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                     const messageData = {
                       site_id: siteId,
                       message: commentText,
-                      name: handle || 'Social User',
+                      name: authorName || handle || 'Social User',
                       origin,
                       origin_message_id: externalId,
                       channel_delivery: true,
@@ -387,11 +342,12 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                         outstand_post_id: post.id,
                         content_id: contentId,
                         source: 'comment',
+                        ...(useDurableCommentSync ? { author_name: authorName, channel: origin } : {}),
                       },
                     };
 
                     try {
-                      await startChild(ingestSocialCommentWorkflow, {
+                      const child = await startChild(ingestSocialCommentWorkflow, {
                         workflowId: buildSocialCommentWorkflowId(siteId, origin, stableCommentId),
                         args: [{
                           siteId,
@@ -405,7 +361,14 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                         }],
                         parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
                       });
+                      // Attach rejection handling immediately while starting the
+                      // remaining children, then wait before advancing last success.
+                      if (useDurableCommentSync) ingestionResults.push(child.result().then(
+                        (value) => value.success === true, () => false
+                      ));
                     } catch (startError) {
+                      if (useDurableCommentSync && isCancellation(startError)) throw startError;
+                      startFailed = true;
                       await finishSyncedObjectClaimActivity({
                         siteId,
                         objectType: 'social_comment',
@@ -426,11 +389,21 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                     
                     processedComments++;
                   }
+                  if (useDurableCommentSync) {
+                    const ingested = await Promise.all(ingestionResults);
+                    if (startFailed || ingested.some((success) => !success)) throw new Error('Some social comment workflows did not complete');
+                    await verifySocialCommentIngestionActivity(siteId, [...commentCandidates.keys()]);
+                    await recordSocialCommentSyncSuccessActivity(siteId, post.id, network);
+                  }
                 } catch (networkError) {
+                  if (useDurableCommentSync && isCancellation(networkError)) throw networkError;
+                  if (useDurableCommentSync) failedCommentSyncs++;
                   console.error(`Failed to process replies for post ${post.id} on network ${network}:`, networkError);
                 }
               }
             } catch (postError) {
+              if (useDurableCommentSync && isCancellation(postError)) throw postError;
+              if (useDurableCommentSync) failedCommentSyncs++;
               // Log but continue with other posts
               console.error(`Failed to process post ${post.id}:`, postError);
             }
@@ -447,11 +420,16 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           }
         }
       } catch (siteError) {
+        if (useDurableCommentSync && isCancellation(siteError)) throw siteError;
+        if (useDurableCommentSync) failedCommentSyncs++;
         // Log but continue with other sites
         console.error(`Failed to process site ${site.site_id}:`, siteError);
       }
     }
     
+    if (useDurableCommentSync && failedCommentSyncs > 0) {
+      throw new Error(`${failedCommentSyncs} social comment syncs failed; unsuccessful posts remain due`);
+    }
     await logWorkflowExecutionActivity({
       workflowId,
       workflowType: 'pollSocialCommentsWorkflow',

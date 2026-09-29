@@ -2,6 +2,7 @@ import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
 import { supabaseServiceRole as supabaseAdmin } from '../../lib/supabase/client';
 import { handleOutstandApiError } from './outstandHelpers';
+import { extractSocialCommentResponse } from './socialCommentResponse';
 import {
   buildOutstandCommentsPath,
   getConnectedSocialPostAccounts,
@@ -295,7 +296,7 @@ export async function fetchOutstandPostRepliesActivity(siteId: string, postId: s
   if (!response.success) {
     throw handleOutstandApiError(`fetchOutstandPostReplies for post ${postId}`, response.error?.message);
   }
-  return response.data;
+  return extractSocialCommentResponse(response);
 }
 
 export async function submitCustomerSupportMessageActivity(payload: any): Promise<any> {

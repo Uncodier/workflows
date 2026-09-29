@@ -15,6 +15,9 @@ import { getSupabaseService } from '../services/supabaseService';
 import { extractSearchAttributesFromInput } from '../utils/searchAttributes';
 import { computeDelayedWorkflowRunTimeout } from '../utils/delayedExecutionTimeout';
 import { generateDailyWorkflowId, DAILY_WORKFLOW_REUSE_POLICY } from '../utils/workflowIdHelper';
+import { getOutreachConfigurationActivity } from './outreachConfigurationActivity';
+import { localOutreachDay, nextOutreachRun } from '../utils/outreachConfiguration';
+import { shouldScheduleWorkflow } from '../utils/activityOptIn';
 
 export interface ScheduleWorkflowResult {
   workflowId: string;
@@ -31,38 +34,6 @@ export interface ScheduleWorkflowResult {
  * @param activityKey - Key from settings.activities (e.g., 'daily_resume_and_stand_up')
  * @returns true if workflow should be scheduled, false otherwise
  */
-function shouldScheduleWorkflow(site: any, activityKey: string): boolean {
-  // Define activities that are opt-in (require explicit 'active' status to run)
-  const optInActivities = ['supervise_conversations', 'assign_leads_to_team', 'local_lead_generation', 'icp_lead_generation', 'daily_resume_and_stand_up'];
-  const isOptIn = optInActivities.includes(activityKey);
-
-  // If settings.activities doesn't exist, handle based on opt-in status
-  if (!site.settings || !site.settings.activities) {
-    return !isOptIn; // Schedule by default if not opt-in
-  }
-
-  const activityConfig = site.settings.activities[activityKey];
-  
-  // If the activity doesn't exist in settings.activities, handle based on opt-in status
-  if (!activityConfig) {
-    return !isOptIn; // Schedule by default if not opt-in
-  }
-
-  // If the activity status is explicitly 'active', schedule it
-  if (activityConfig.status === 'active') {
-    return true;
-  }
-
-  // If the activity status is 'inactive', do NOT schedule
-  if (activityConfig.status === 'inactive') {
-    return false;
-  }
-
-  // For 'default' or any other status:
-  // Opt-in activities default to inactive, others default to active
-  return !isOptIn;
-}
-
 /**
  * Schedule a single email sync workflow for a specific site
  * Uses Temporal client to create actual workflow schedules
@@ -2648,8 +2619,10 @@ export async function executeDailyProspectionWorkflowsActivity(
           site.settings.activities = options.activitiesMap[site.id];
         }
 
-        // Check if this workflow should be scheduled based on settings.activities
-        if (!shouldScheduleWorkflow(site, 'leads_initial_cold_outreach')) {
+        const outreachConfig = await getOutreachConfigurationActivity({
+          site_id: site.id, activity_key: 'leads_initial_cold_outreach', check_day: false,
+        });
+        if (!outreachConfig.shouldExecute) {
           console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach' is inactive in site settings`);
           skipped++;
           continue;
@@ -2892,9 +2865,10 @@ export async function scheduleIndividualDailyProspectionActivity(
         }
         
         // Check if this workflow should be scheduled based on settings.activities
-        const activityStatus = site?.settings?.activities?.leads_initial_cold_outreach?.status;
-        console.log(`   🔎 Activities check → leads_initial_cold_outreach.status: ${activityStatus ?? 'undefined'}`);
-        if (!shouldScheduleWorkflow(site, 'leads_initial_cold_outreach')) {
+        const outreachConfig = await getOutreachConfigurationActivity({
+          site_id: site.id, activity_key: 'leads_initial_cold_outreach', check_day: false,
+        });
+        if (!outreachConfig.shouldExecute) {
           console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach' is inactive in site settings`);
           skipped++;
           continue;
@@ -3115,7 +3089,7 @@ export async function scheduleIndividualDailyProspectionActivity(
 
 /**
  * Schedule Lead Qualification Workflows for individual sites using TIMERS
- * Runs specifically on Tuesday, Wednesday and Thursday at 09:00 local time
+ * Runs on configured follow-up weekdays at 09:00 local time
  * Uses business_hours timezone when available; otherwise falls back to provided timezone
  */
 export async function scheduleLeadQualificationActivity(
@@ -3164,9 +3138,6 @@ export async function scheduleLeadQualificationActivity(
       });
     }
 
-    // Valid days: Tue=2, Wed=3, Thu=4
-    const validDays = new Set([2, 3, 4]);
-
     for (const site of allSites as any[]) {
       try {
         console.log(`\n📆 Processing site for Lead Qualification: ${site.name || 'Unnamed'} (${site.id})`);
@@ -3179,50 +3150,27 @@ export async function scheduleLeadQualificationActivity(
           site.settings.activities = options.activitiesMap[site.id];
         }
 
-        // Check if this workflow should be scheduled based on settings.activities
-        if (!shouldScheduleWorkflow(site, 'leads_follow_up')) {
+        const outreachConfig = await getOutreachConfigurationActivity({
+          site_id: site.id, activity_key: 'leads_follow_up', check_day: false,
+        });
+        if (!outreachConfig.shouldExecute) {
           console.log(`   ⏭️ SKIPPING - 'leads_follow_up' is inactive in site settings`);
           skipped++;
           continue;
         }
 
         const businessHours = sitesWithBusinessHours.get(site.id);
-        const siteTimezone = businessHours?.timezone || timezone;
+        const siteTimezone = outreachConfig.timezone;
         const scheduledTime = '09:00';
-        const [targetHour, targetMinute] = scheduledTime.split(':').map(Number);
-
-        // Calculate current time in site's timezone (simple offset model as used elsewhere)
-        const nowUTC = new Date();
-        const timezoneOffset = siteTimezone === 'America/Mexico_City' ? 6 : 0;
-        const nowLocal = new Date(nowUTC.getTime() - (timezoneOffset * 60 * 60 * 1000));
-
-        // Find the next Tue/Wed/Thu at 09:00 local (including today if not passed)
-        let finalTargetLocal: Date | null = null;
-        for (let i = 0; i <= 7; i++) {
-          const candidate = new Date(nowLocal);
-          candidate.setUTCDate(candidate.getUTCDate() + i);
-          const day = candidate.getDay();
-          if (!validDays.has(day)) continue;
-
-          // Set candidate time to 09:00 local
-          candidate.setUTCHours(targetHour, targetMinute, 0, 0);
-
-          if (i > 0 || candidate > nowLocal) {
-            finalTargetLocal = candidate;
-            break;
-          }
-        }
-
-        if (!finalTargetLocal) {
+        const finalTargetUTC = nextOutreachRun(new Date(), siteTimezone, outreachConfig.weekdays);
+        if (!finalTargetUTC) {
           console.log(`   ⚠️ Could not determine next valid schedule time; skipping site`);
           skipped++;
           continue;
         }
 
-        const finalLocalDateStr = finalTargetLocal.toISOString().split('T')[0];
-        const finalTargetUTC = new Date(finalTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
-
-        console.log(`   - Next run (local): ${finalTargetLocal.getUTCHours().toString().padStart(2, '0')}:${finalTargetLocal.getUTCMinutes().toString().padStart(2, '0')} ${siteTimezone} on ${finalLocalDateStr}`);
+        const finalLocalDateStr = localOutreachDay(finalTargetUTC, siteTimezone).date;
+        console.log(`   - Next run (local): ${scheduledTime} ${siteTimezone} on ${finalLocalDateStr}`);
         console.log(`   - Next run (UTC): ${finalTargetUTC.toISOString()}`);
 
         const delayMs = finalTargetUTC.getTime() - Date.now();
@@ -3241,6 +3189,7 @@ export async function scheduleLeadQualificationActivity(
           maxLeads,
           additionalData: {
             scheduledBy: 'activityPrioritizationEngine-leadQualification',
+            outreach_activity: 'leads_follow_up',
             executeReason: `lead-qualification-${scheduledTime}`,
             scheduleType: 'lead-qualification-recurring',
             scheduleTime: `${scheduledTime} ${siteTimezone}`,
@@ -3274,7 +3223,8 @@ export async function scheduleLeadQualificationActivity(
           taskQueue: temporalConfig.taskQueue,
           workflowId,
           workflowIdReusePolicy: DAILY_WORKFLOW_REUSE_POLICY as any,
-          workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
+          // A selected weekly day can be 169h away across the autumn DST change.
+          workflowRunTimeout: Math.max(48 * 3600000, Math.max(0, delayMs) + 2 * 3600000),
         });
 
         console.log(`✅ Scheduled Lead Qualification via TIMER for ${site.name || site.id}`);

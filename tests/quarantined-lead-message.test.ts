@@ -11,7 +11,7 @@ jest.mock('../src/lib/supabase/client', () => ({
     from: (table: string) => {
       if (table === 'messages') {
         return { select: () => ({
-          eq: () => ({ order: () => ({ limit: mockMessagesLimit }) }),
+          eq: () => ({ or: () => ({ order: () => ({ limit: mockMessagesLimit }) }) }),
         }) };
       }
       if (table === 'conversations') return { select: () => ({ in: mockConversationsIn }) };

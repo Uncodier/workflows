@@ -13,6 +13,12 @@ const oldPatches = [
   'poll-social-comments-safe-identifiers-v1',
 ];
 const workflowId = 'pollSocialCommentsWorkflow';
+const durableSyncPatch = 'poll-social-comments-durable-sync-v1';
+const recentPatches = [
+  'poll-social-comments-tiktok-posts-v1',
+  'poll-social-comments-import-job-status-v1',
+  'poll-social-comments-auto-initial-import-v1',
+];
 const account = { id: 'account-1', network: 'linkedin', isActive: true };
 const site = { site_id: 'site-1', social_media: [account] };
 const payloads = (...values: unknown[]) => ({
@@ -24,7 +30,7 @@ class HistoryFixture {
   private completedTaskId = 0;
   private activitySequence = 0;
 
-  constructor(strictOwnership: boolean) {
+  constructor(strictOwnership: boolean, additionalPatches: string[] = []) {
     const runId = '11111111-1111-4111-8111-111111111111';
     this.event('WorkflowExecutionStarted', {
       workflowType: { name: workflowId }, taskQueue: { name: 'replay' },
@@ -32,7 +38,7 @@ class HistoryFixture {
       originalExecutionRunId: runId, firstExecutionRunId: runId, attempt: 1,
     });
     this.workflowTask();
-    for (const id of strictOwnership ? [...oldPatches, ownershipPatch] : oldPatches) {
+    for (const id of [...(strictOwnership ? [...oldPatches, ownershipPatch] : oldPatches), ...additionalPatches]) {
       this.event('MarkerRecorded', {
         markerName: 'core_patch',
         details: { 'patch-data': payloads({ id, deprecated: false }) },
@@ -134,6 +140,20 @@ function ambiguousPostHistory(strictOwnership: boolean, filterPosts = strictOwne
   return fixture.complete(filterPosts ? 0 : 2);
 }
 
+function durableSyncHistory(enabled: boolean, historical: boolean) {
+  const fixture = new HistoryFixture(true, [...recentPatches, ...(enabled ? [durableSyncPatch] : [])]);
+  const post = { id: 'post-1', publishedAt: historical ? '2026-09-04T18:57:00.000Z' : '2026-09-26T12:00:00.000Z',
+    socialAccounts: [{ ...account, status: 'published', platformPostId: 'platform-post-1' }] };
+  fixture.activity('fetchSitesWithSocialCommentsActivity', [], [site]);
+  fixture.activity('fetchOutstandPostsActivity', [site.site_id, 100, 0], [post]);
+  if (enabled) fixture.activity('getSocialCommentSyncStatesActivity', [site.site_id, ['post-1']], []);
+  fixture.activity('fetchOutstandAccountsActivity', [site.site_id], []);
+  fixture.activity('upsertContentFromOutstandPostActivity', [site.site_id, post, site.social_media], 'content-1');
+  if (enabled || !historical) fixture.activity('fetchOutstandPostRepliesActivity', [site.site_id, 'post-1', 'linkedin'], []);
+  if (enabled) fixture.activity('recordSocialCommentSyncSuccessActivity', [site.site_id, 'post-1', 'linkedin'], null);
+  return fixture.complete(1);
+}
+
 describe('pollSocialCommentsWorkflow Temporal replay', () => {
   let workflowBundle: Awaited<ReturnType<typeof bundleWorkflowCode>>;
 
@@ -161,6 +181,10 @@ describe('pollSocialCommentsWorkflow Temporal replay', () => {
 
   it.each([false, true])('replays historical imports with ownership marker = %s', async strictOwnership => {
     await Worker.runReplayHistory({ workflowBundle }, importHistory(strictOwnership), 'import-replay');
+  });
+
+  it.each([[false, false], [false, true], [true, false], [true, true]])('replays durable sync marker = %s, historical import = %s', async (enabled, historical) => {
+    await Worker.runReplayHistory({ workflowBundle }, durableSyncHistory(enabled, historical), 'durable-sync-replay');
   });
 
   it.each([false, true])('replays ambiguous posts with ownership marker = %s', async strictOwnership => {

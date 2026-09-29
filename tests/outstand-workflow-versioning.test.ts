@@ -31,6 +31,7 @@ jest.mock('../src/temporal/workflows/ingestSocialCommentWorkflow', () => ({
 
 import { pollSocialCommentsWorkflow } from '../src/temporal/workflows/pollSocialCommentsWorkflow';
 
+const durableSyncPatch = 'poll-social-comments-durable-sync-v1';
 const ownershipPatch = 'poll-social-comments-strict-site-ownership-v1';
 const tiktokPatch = 'poll-social-comments-tiktok-posts-v1';
 const importJobPatch = 'poll-social-comments-import-job-status-v1';
@@ -41,7 +42,7 @@ const now = Date.UTC(2026, 8, 26, 12);
 
 function useOwnershipPatch(enabled: boolean) {
   mockPatched.mockImplementation((id: string) => id === ownershipPatch ? enabled :
-    id === tiktokPatch || id === importJobPatch || id === automaticImportPatch ? false : true);
+    id === tiktokPatch || id === importJobPatch || id === automaticImportPatch || id === durableSyncPatch ? false : true);
 }
 
 function commandNames(): string[] {
@@ -99,6 +100,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
       tiktokPatch,
       importJobPatch,
       automaticImportPatch,
+      durableSyncPatch,
     ]);
     expect(mockPatched.mock.invocationCallOrder[4]).toBeLessThan(
       mockActivities.logWorkflowExecutionActivity.mock.invocationCallOrder[0]
@@ -206,7 +208,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('persists uniquely owned TikTok posts without attempting comment requests', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     const tikTok = { id: 'yTdoj', network: 'tiktok', isActive: true };
     const tikTokSite = { site_id: 'site-1', social_media: [tikTok] };
     mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([tikTokSite]);
@@ -225,7 +227,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('persists a Bluesky post without calling unsupported comment endpoints', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     const bluesky = { id: 'bluesky-1', network: 'bluesky', isActive: true };
     mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([
       { site_id: 'site-1', social_media: [bluesky] },
@@ -242,7 +244,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('imports each owned social account at most once, even if the legacy site marker exists', async () => {
-    mockPatched.mockImplementation((id: string) => id !== importJobPatch);
+    mockPatched.mockImplementation((id: string) => id !== importJobPatch && id !== durableSyncPatch);
     const tiktok = { id: 'yTdoj', network: 'tiktok', isActive: true };
     const instagram = { id: 'Lm3jV', network: 'instagram', isActive: true };
     mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([
@@ -263,7 +265,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('does not mark a failed account as imported and retries it on a later run', async () => {
-    mockPatched.mockImplementation((id: string) => id !== importJobPatch);
+    mockPatched.mockImplementation((id: string) => id !== importJobPatch && id !== durableSyncPatch);
     const tiktok = { id: 'yTdoj', network: 'tiktok', isActive: true };
     mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([
       { site_id: 'site-1', social_media: [tiktok] },
@@ -277,7 +279,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('imports a newly connected account even if other accounts already have posts', async () => {
-    mockPatched.mockImplementation((id: string) => id !== importJobPatch);
+    mockPatched.mockImplementation((id: string) => id !== importJobPatch && id !== durableSyncPatch);
     const tiktok = { id: 'yTdoj', network: 'tiktok', isActive: true };
     const instagram = { id: 'Lm3jV', network: 'instagram', isActive: true };
     mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([
@@ -299,7 +301,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('starts a bounded initial import for an owned account with no provider jobs', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     mockActivities.fetchOutstandImportJobsActivity.mockResolvedValue([]);
     await pollSocialCommentsWorkflow();
     expect(mockActivities.fetchOutstandImportJobsActivity).toHaveBeenCalledWith('site-1', account.id);
@@ -309,7 +311,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('does not mark queued or failed import jobs complete or enqueue another', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     for (const job of [
       { id: 'queued', status: 'queued', imported: 0, failed: 0 },
       { id: 'failed', status: 'failed', imported: 0, failed: 1, error: 'Platform unavailable' },
@@ -324,7 +326,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('recognizes a finished provider job without creating a billable import or premature marker', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     mockActivities.fetchOutstandImportJobsActivity.mockResolvedValue([
       { id: 'job-1', status: 'completed', imported: 6, failed: 0 },
     ]);
@@ -338,7 +340,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('adopts the oldest existing job as the initial import for an account', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     const initial = { id: 'first-job', status: 'completed', imported: 6, failed: 0 };
     mockActivities.fetchOutstandImportJobsActivity.mockResolvedValue([
       { id: 'later-job', status: 'failed', imported: 0, failed: 1 }, initial,
@@ -349,7 +351,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('checks every owned account even when the site already has posts', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     mockActivities.fetchOutstandPostsActivity.mockResolvedValue([{
       id: 'other-post', publishedAt: new Date(now).toISOString(),
       socialAccounts: [{ ...account, status: 'published', platformPostId: 'old-post' }],
@@ -360,21 +362,21 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('does not start a new import if two sites own the same account', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([site, { ...site, site_id: 'site-2' }]);
     await pollSocialCommentsWorkflow();
     expect(mockActivities.startInitialOutstandImportActivity).not.toHaveBeenCalled();
   });
 
   it('does not queue a billable import when provider job history is unavailable', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     mockActivities.fetchOutstandImportJobsActivity.mockRejectedValue(new Error('Outstand unavailable'));
     await pollSocialCommentsWorkflow();
     expect(mockActivities.startInitialOutstandImportActivity).not.toHaveBeenCalled();
   });
 
   it('fails closed for provider jobs bound to another account', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     mockActivities.fetchOutstandImportJobsActivity.mockResolvedValue([
       { id: 'job-foreign', socialAccountId: 'another-account', status: 'completed', imported: 6 },
     ]);
@@ -384,7 +386,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('persists imported posts older than thirty days but never fetches their comments', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     mockActivities.fetchOutstandPostsActivity.mockResolvedValue([{
       id: 'historical-post',
       publishedAt: new Date(now - 100 * 24 * 60 * 60 * 1000).toISOString(),
@@ -399,7 +401,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('does not count an Outstand post as processed when content persistence fails', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     mockActivities.fetchOutstandPostsActivity.mockResolvedValue([{
       id: 'post-1', publishedAt: new Date(now).toISOString(),
       socialAccounts: [{ ...account, status: 'published', platformPostId: 'post-1' }],
@@ -413,7 +415,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
   });
 
   it('continues past the first 100 posts when the API wrapper drops pagination', async () => {
-    mockPatched.mockReturnValue(true);
+    mockPatched.mockImplementation((id: string) => id !== durableSyncPatch);
     const old = new Date(now - 100 * 24 * 60 * 60 * 1000).toISOString();
     const post = (id: string) => ({
       id, publishedAt: old,

@@ -1,6 +1,7 @@
 import { getSupabaseService } from '../../services/supabaseService';
 import { logger } from '../../../lib/logger';
 import { DailyProspectionOptions, GetProspectionLeadsResult, ProspectionLead } from './types';
+import { selectOutreachLeads } from '../outreachLeadSelection';
 
 /**
  * Activity to get leads for daily prospection
@@ -13,6 +14,12 @@ export async function getProspectionLeadsActivity(
   options: DailyProspectionOptions
 ): Promise<GetProspectionLeadsResult> {
   const { site_id, hoursThreshold = 48, maxLeads, page = 0, pageSize = 30 } = options;
+  if (options.outreach_activity) {
+    const result = await selectOutreachLeads({ site_id, activity: options.outreach_activity,
+      page, pageSize, cursor: options.outreach_cursor, waitMs: hoursThreshold * 60 * 60 * 1000 });
+    return { success: true, leads: result.leads, total: result.leads.length, hasMorePages: result.hasMorePages,
+      totalCandidatesFound: result.totalCandidatesFound, currentPage: page, pageSize: result.pageSize, nextCursor: result.nextCursor };
+  }
   
   console.log(`🔍 Getting prospection leads for site: ${site_id}`);
   console.log(`   - Hours threshold: ${hoursThreshold} hours`);

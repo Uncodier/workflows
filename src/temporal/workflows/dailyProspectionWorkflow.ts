@@ -1,5 +1,6 @@
 import { patched, proxyActivities, workflowInfo, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
+import type { OutreachActivityKey } from '../utils/outreachActivity';
 
 // Import specific daily prospection activities
 const {
@@ -31,6 +32,7 @@ const {
   validateAndCleanStuckCronStatusActivity,
   validateWorkflowConfigActivity,
   countPendingMessagesActivity,
+  getOutreachConfigurationActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -163,7 +165,7 @@ function filterLeadsByAvailableChannels(
   const { hasEmailChannel, hasWhatsappChannel } = channelsValidation;
   const warnings: string[] = [];
   
-  if (!hasEmailChannel && !hasWhatsappChannel) {
+  if (!hasEmailChannel && !hasWhatsappChannel && !channelsValidation.availableChannels?.length) {
     return {
       filteredLeads: [],
       filteringInfo: {
@@ -204,7 +206,10 @@ function filterLeadsByAvailableChannels(
     const canContactViaEmail = hasEmail && hasEmailChannel;
     const canContactViaWhatsapp = hasPhone && hasWhatsappChannel;
     
-    const shouldInclude = canContactViaEmail || canContactViaWhatsapp;
+    const hasSelectedOtherChannel = Array.isArray(lead.outreach_channels) && lead.outreach_channels.some(
+      (channel: string) => channelsValidation.availableChannels?.includes(channel)
+    );
+    const shouldInclude = canContactViaEmail || canContactViaWhatsapp || hasSelectedOtherChannel;
     
     if (!shouldInclude) {
       leadsFilteredOut++;
@@ -265,7 +270,8 @@ async function searchLeadsWithPagination(
   maxPages: number,
   minLeadsRequired: number,
   channelsValidation: any,
-  site: any
+  site: any,
+  outreachActivity?: OutreachActivityKey
 ): Promise<{
   allLeads: any[];
   totalPagesSearched: number;
@@ -279,6 +285,7 @@ async function searchLeadsWithPagination(
   let currentPage = 0;
   let totalCandidatesFound = 0;
   let hasMorePages = true;
+  let outreachCursor: { createdAt: string; id: string } | undefined;
   
   console.log(`🔄 Starting paginated lead search:`);
   console.log(`   - Max pages to search: ${maxPages}`);
@@ -296,6 +303,8 @@ async function searchLeadsWithPagination(
         hoursThreshold: hoursThreshold,
         page: currentPage,
         pageSize: 30,
+        ...(outreachActivity ? { outreach_activity: outreachActivity } : {}),
+        ...(outreachCursor ? { outreach_cursor: outreachCursor } : {}),
         additionalData: {
           siteName: site.name,
           siteUrl: site.url,
@@ -311,6 +320,7 @@ async function searchLeadsWithPagination(
       }
       
       const rawLeads = prospectionLeadsResult.leads || [];
+      if (outreachActivity) outreachCursor = prospectionLeadsResult.nextCursor;
       hasMorePages = prospectionLeadsResult.hasMorePages || false;
       totalCandidatesFound = prospectionLeadsResult.totalCandidatesFound || 0;
       
@@ -507,6 +517,24 @@ export async function dailyProspectionWorkflow(
   
   console.log(`✅ Configuration validated: ${configValidation.reason}`);
 
+  const outreachActivity = patched('outreach-activity-configuration-v1')
+    ? 'leads_initial_cold_outreach' as const : undefined;
+  const outreachConfiguration = outreachActivity
+    ? await getOutreachConfigurationActivity({ site_id, activity_key: outreachActivity }) : undefined;
+  if (outreachConfiguration && !outreachConfiguration.shouldExecute) {
+    await logWorkflowExecutionActivity({
+      workflowId: realWorkflowId, workflowType: 'dailyProspectionWorkflow', status: 'BLOCKED',
+      input: options, error: outreachConfiguration.reason,
+    });
+    return {
+      success: false, siteId: site_id, leadsFound: 0, leadsProcessed: 0, tasksCreated: 0,
+      statusUpdated: 0, prospectionResults: [], errors: [outreachConfiguration.reason],
+      executionTime: `${Date.now() - startTime}ms`, completedAt: new Date().toISOString(),
+    };
+  }
+  const effectiveMaxLeads = outreachConfiguration
+    ? Math.min(maxLeads || outreachConfiguration.dailyMessageLimit, outreachConfiguration.dailyMessageLimit) : maxLeads;
+
   // Log workflow execution start
   await logWorkflowExecutionActivity({
     workflowId: realWorkflowId,
@@ -558,7 +586,8 @@ export async function dailyProspectionWorkflow(
     // Validate that the site has email or WhatsApp channels configured
     const requireHealthyOutbound = patched('outbound-channel-health-gate-v1');
     const channelsValidation = await validateCommunicationChannelsActivity(
-      requireHealthyOutbound ? { site_id, requireHealthyOutbound: true } : { site_id }
+      outreachActivity ? { site_id, requireHealthyOutbound: true, outreach_activity: outreachActivity }
+        : requireHealthyOutbound ? { site_id, requireHealthyOutbound: true } : { site_id }
     );
     
     if (!channelsValidation.success) {
@@ -569,7 +598,7 @@ export async function dailyProspectionWorkflow(
     }
     
     if (!channelsValidation.hasAnyChannel) {
-      const errorMsg = `No communication channels (email or WhatsApp) are configured and enabled for site ${site_id}. Prospection requires at least one communication channel to send follow-up messages.`;
+      const errorMsg = `No selected communication channels are configured and enabled for site ${site_id}. Prospection requires at least one available channel.`;
       console.error(`❌ ${errorMsg}`);
       errors.push(errorMsg);
       
@@ -674,9 +703,10 @@ export async function dailyProspectionWorkflow(
       paginationResults = await searchLeadsWithPagination(
         options,
         maxPages,
-        minLeadsRequired,
+        outreachConfiguration ? Math.min(minLeadsRequired, outreachConfiguration.dailyMessageLimit) : minLeadsRequired,
         channelsValidation,
-        site
+        site,
+        outreachActivity
       );
       
       // Extract results from pagination
@@ -756,6 +786,7 @@ export async function dailyProspectionWorkflow(
         leads: leads,
         userId: options.userId || site.user_id,
         additionalData: {
+          ...(outreachActivity ? { outreach_activity: outreachActivity } : {}),
           // Only include essential data to avoid 414 errors
           siteName: siteName,
           siteUrl: siteUrl,
@@ -889,10 +920,15 @@ export async function dailyProspectionWorkflow(
     }
 
     // Use selected leads from sales agent, or fall back to all leads if no selection
-    const leadsToSelect = selectedLeads.length > 0 ? selectedLeads : leads;
+    const selectionCandidates = selectedLeads.length > 0 ? selectedLeads : leads;
+    // AI ranking cannot introduce a lead outside the site/segment-filtered candidate set.
+    const leadsById = new Map(leads.map((lead: any) => [lead.id, lead]));
+    const leadsToSelect = outreachActivity
+      ? selectionCandidates.map((lead: any) => leadsById.get(typeof lead === 'string' ? lead : lead.id || lead.lead_id)).filter(Boolean)
+      : selectionCandidates;
     
     // Limit the number of leads to process if specified
-    const leadsToProcess = maxLeads ? leadsToSelect.slice(0, maxLeads) : leadsToSelect;
+    const leadsToProcess = effectiveMaxLeads ? leadsToSelect.slice(0, effectiveMaxLeads) : leadsToSelect;
     leadsProcessed = leadsToProcess.length;
     
     if (maxLeads && leadsToSelect.length > maxLeads) {
@@ -1081,6 +1117,10 @@ export async function dailyProspectionWorkflow(
             workflowId: `lead-follow-up-${lead.id}-${site_id}-${workflowInfo().runId}`,
             additionalData: {
               triggeredBy: 'dailyProspectionWorkflow',
+              ...(outreachActivity ? { outreach_activity: outreachActivity,
+                outreach_unanswered_count: lead.outreach_unanswered_count,
+                ...(lead.outreach_unanswered_count > 0 ? { sequence_stage: lead.sequence_stage } : {}),
+              } : {}),
               reason: 'lead_not_assigned_to_human',
               prospectionDate: new Date().toISOString(),
               originalWorkflowId: realWorkflowId,

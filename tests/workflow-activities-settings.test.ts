@@ -2,39 +2,9 @@
  * Tests for workflow activities settings logic
  */
 
+import { shouldScheduleWorkflow } from '../src/temporal/utils/activityOptIn';
+
 describe('shouldScheduleWorkflow logic', () => {
-  // Replicate the helper function for testing
-  function shouldScheduleWorkflow(site: any, activityKey: string): boolean {
-    // Define activities that are opt-in (require explicit 'active' status to run)
-    const optInActivities = ['supervise_conversations', 'assign_leads_to_team', 'local_lead_generation', 'icp_lead_generation', 'daily_resume_and_stand_up'];
-    const isOptIn = optInActivities.includes(activityKey);
-
-    // If settings.activities doesn't exist, handle based on opt-in status
-    if (!site.settings || !site.settings.activities) {
-      return !isOptIn; // Schedule by default if not opt-in
-    }
-
-    const activityConfig = site.settings.activities[activityKey];
-    
-    // If the activity doesn't exist in settings.activities, handle based on opt-in status
-    if (!activityConfig) {
-      return !isOptIn; // Schedule by default if not opt-in
-    }
-
-    // If the activity status is explicitly 'active', schedule it
-    if (activityConfig.status === 'active') {
-      return true;
-    }
-
-    // If the activity status is 'inactive', do NOT schedule
-    if (activityConfig.status === 'inactive') {
-      return false;
-    }
-
-    // For 'default' or any other status:
-    // Opt-in activities default to inactive, others default to active
-    return !isOptIn;
-  }
 
   describe('Backward compatibility', () => {
     it('should schedule non opt-in activities and NOT schedule opt-in activities when site has no settings', () => {
@@ -141,7 +111,7 @@ describe('shouldScheduleWorkflow logic', () => {
 
       // Should schedule these
       expect(shouldScheduleWorkflow(site, 'daily_resume_and_stand_up')).toBe(true);
-      expect(shouldScheduleWorkflow(site, 'leads_follow_up')).toBe(true);
+      expect(shouldScheduleWorkflow(site, 'leads_follow_up')).toBe(false);
 
       // Should NOT schedule these
       expect(shouldScheduleWorkflow(site, 'icp_lead_generation')).toBe(false);

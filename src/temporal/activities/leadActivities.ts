@@ -537,6 +537,7 @@ export async function saveLeadFollowUpLogsActivity(request: {
   leadId: string;
   userId: string;
   message_status?: string;
+  outreach_activity?: import('../utils/outreachActivity').OutreachActivityKey;
   data: any;
 }): Promise<{ 
   success: boolean; 
@@ -550,11 +551,12 @@ export async function saveLeadFollowUpLogsActivity(request: {
   try {
     // Flatten the data fields directly to root level
     const requestBody = {
+      ...request.data,
       siteId: request.siteId,
       leadId: request.leadId,
       userId: request.userId,
       message_status: request.message_status,
-      ...request.data  // Flatten the data fields (messages, lead, command_ids) directly to root
+      ...(request.outreach_activity ? { outreach_activity: request.outreach_activity } : {}),
     };
     
     console.log('📤 Sending lead follow-up logs:', JSON.stringify(requestBody, null, 2));

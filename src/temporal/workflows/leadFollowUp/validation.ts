@@ -16,7 +16,9 @@ export async function performEarlyValidation({
   site,
   activities,
   startTime,
-  workflowId
+  workflowId,
+  selectedChannels,
+  alternativeChannels,
 }: {
   lead_id: string;
   site_id: string;
@@ -26,6 +28,8 @@ export async function performEarlyValidation({
   activities: any;
   startTime: number;
   workflowId: string;
+  selectedChannels?: { email: boolean; whatsapp: boolean };
+  alternativeChannels?: string[];
 }): Promise<{
   shouldReturn: boolean;
   result?: LeadFollowUpResult;
@@ -46,8 +50,14 @@ export async function performEarlyValidation({
   console.log(`🔍 Step 2.1: Early validation of contact information before research to save resources...`);
 
   // Extract contact information for early validation
-  const leadEmail = leadInfo.email;
-  const leadPhone = leadInfo.phone || leadInfo.phone_number;
+  const leadEmail = selectedChannels?.email === false ? undefined : leadInfo.email;
+  const leadPhone = selectedChannels?.whatsapp === false ? undefined : leadInfo.phone || leadInfo.phone_number;
+  const hasAlternativeChannel = !!alternativeChannels?.length;
+  if (!leadEmail && !leadPhone && hasAlternativeChannel) {
+    // SMS, voice and channel IDs have already been checked server-side. Do not
+    // reject a Telegram-only contact just because it has no email or WhatsApp.
+    return { shouldReturn: false, emailInvalidatedInEarlyValidation: false, errors };
+  }
 
   console.log(`📋 Contact info for early validation:`);
   console.log(`   - Email: ${leadEmail || 'undefined'}`);
@@ -98,8 +108,8 @@ export async function performEarlyValidation({
   // Perform early contact validation (without messages, just contact info)
   const earlyValidationResult = await validateContactInformation({
     email: leadEmail,
-    hasEmailMessage: true, // Assume we will have messages for now
-    hasWhatsAppMessage: true, // Assume we will have messages for now
+    hasEmailMessage: selectedChannels?.email ?? true,
+    hasWhatsAppMessage: selectedChannels?.whatsapp ?? true,
     leadId: lead_id,
     phone: leadPhone,
     leadMetadata: leadInfo.metadata // Pass lead metadata to check emailVerified flag
@@ -110,6 +120,13 @@ export async function performEarlyValidation({
 
   // Handle specific early validation results that require immediate action
   if (earlyValidationResult.validationType === 'email' && !earlyValidationResult.isValid && earlyValidationResult.success) {
+    if (hasAlternativeChannel) {
+      if (leadEmail) {
+        const invalidation = await invalidateEmailOnlyActivity({ lead_id, failed_email: leadEmail, userId: options.userId || site.user_id });
+        if (!invalidation.success) throw new Error(invalidation.error || 'Could not invalidate failed email');
+      }
+      return { shouldReturn: false, emailInvalidatedInEarlyValidation: true, errors };
+    }
     console.log(`🚫 Email validation failed in early validation (invalid or not deliverable)`);
     console.log(`📧 Email value: ${leadEmail || 'null/undefined'}`);
     console.log(`📋 Reason: ${earlyValidationResult.reason}`);
@@ -302,6 +319,9 @@ export async function performEarlyValidation({
 
   // If API worked but we shouldn't proceed, complete successfully after invalidation
   if (!earlyValidationResult.shouldProceed) {
+    if (hasAlternativeChannel) {
+      return { shouldReturn: false, emailInvalidatedInEarlyValidation, errors };
+    }
     console.log(`✅ Contact validation API worked but email is invalid or not deliverable - completing workflow after successful invalidation`);
     console.log(`📋 Validation details:`);
     console.log(`   - Type: ${earlyValidationResult.validationType}`);

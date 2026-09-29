@@ -1,6 +1,7 @@
 import { getSupabaseService } from '../../services/supabaseService';
 import { ValidateCommunicationChannelsParams, ValidateCommunicationChannelsResult } from './types';
 import { availableOutboundChannels } from './outboundHealth';
+import { getOutreachConfigurationActivity } from '../outreachConfigurationActivity';
 
 /**
  * Activity to validate communication channels (email or WhatsApp) are configured for a site
@@ -11,6 +12,32 @@ export async function validateCommunicationChannelsActivity(
   console.log(`📡 Validating communication channels for site: ${params.site_id}`);
   
   try {
+    if (params.outreach_activity) {
+      const config = await getOutreachConfigurationActivity({ site_id: params.site_id, activity_key: params.outreach_activity });
+      let email = config.shouldExecute && config.hasEmailChannel;
+      let whatsapp = config.shouldExecute && config.hasWhatsappChannel;
+      if (params.requireHealthyOutbound && config.shouldExecute) {
+        // Keep the legacy health gate for direct accounts. A connected Zavu
+        // account is not governed by another provider's site-wide SMTP/Twilio row.
+        const directEmail = config.channelAccounts.email.every(id => ['email', 'agent_email'].includes(id));
+        const directWhatsapp = config.channelAccounts.whatsapp.every(id => ['whatsapp', 'agent_whatsapp'].includes(id));
+        if ((email && directEmail) || (whatsapp && directWhatsapp)) {
+          const { supabaseServiceRole } = await import('../../../lib/supabase/client');
+          const { data, error } = await supabaseServiceRole.from('channel_health')
+            .select('channel, status, updated_at, last_success_at, last_failure_at, reset_at')
+            .eq('site_id', params.site_id).eq('direction', 'outbound');
+          if (error) throw new Error('Outbound channel health unavailable');
+          const healthy = availableOutboundChannels({ email, whatsapp }, data || []);
+          if (directEmail) email = healthy.email;
+          if (directWhatsapp) whatsapp = healthy.whatsapp;
+        }
+      }
+      const availableChannels = config.shouldExecute ? config.availableChannels.filter(channel =>
+        channel === 'email' ? email : channel === 'whatsapp' ? whatsapp : true) : [];
+      return { success: true, hasEmailChannel: email,
+        hasWhatsappChannel: whatsapp, hasAnyChannel: availableChannels.length > 0, availableChannels,
+        error: config.shouldExecute ? undefined : config.reason };
+    }
     const supabaseService = getSupabaseService();
     
     console.log('🔍 Checking database connection...');

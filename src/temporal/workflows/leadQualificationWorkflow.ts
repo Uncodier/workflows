@@ -33,6 +33,7 @@ const {
   validateWorkflowConfigActivity,
   countPendingMessagesActivity,
   validateCommunicationChannelsActivity,
+  getOutreachConfigurationActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -98,11 +99,20 @@ export async function leadQualificationWorkflow(
   
   console.log(`✅ Configuration validated: ${configValidation.reason}`);
 
+  const outreachActivity = patched('outreach-activity-configuration-v1') ? 'leads_follow_up' as const : undefined;
+  const outreachConfiguration = outreachActivity
+    ? await getOutreachConfigurationActivity({ site_id, activity_key: outreachActivity }) : undefined;
+  if (outreachConfiguration && !outreachConfiguration.shouldExecute) {
+    errors.push(outreachConfiguration.reason);
+    return finalize('COMPLETED');
+  }
+
   // STEP 0.5: Validate communication channels
   console.log(`📡 Step 0.5: Validating communication channels for ${site_id}...`);
   const requireHealthyOutbound = patched('outbound-channel-health-gate-v1');
   const channelsValidation = await validateCommunicationChannelsActivity(
-    requireHealthyOutbound ? { site_id, requireHealthyOutbound: true } : { site_id }
+    outreachActivity ? { site_id, requireHealthyOutbound: true, outreach_activity: outreachActivity }
+      : requireHealthyOutbound ? { site_id, requireHealthyOutbound: true } : { site_id }
   );
 
   if (!channelsValidation.success) {
@@ -124,6 +134,7 @@ export async function leadQualificationWorkflow(
   }
 
   console.log(`✅ Communication channels validated successfully:`);
+  console.log(`   - Selected channels: ${channelsValidation.availableChannels?.join(', ') || 'Legacy configuration'}`);
   console.log(`   - Email channel: ${channelsValidation.hasEmailChannel ? 'Available' : 'Not configured'}`);
   console.log(`   - WhatsApp channel: ${channelsValidation.hasWhatsappChannel ? 'Available' : 'Not configured'}`);
 
@@ -156,8 +167,9 @@ export async function leadQualificationWorkflow(
     const qualification = await getQualificationLeadsActivity({
       site_id,
       daysWithoutReply,
-      limit: maxLeads,
-      maxLeadsPerStage,
+      limit: outreachConfiguration ? Math.min(maxLeads, outreachConfiguration.dailyMessageLimit) : maxLeads,
+      maxLeadsPerStage: outreachConfiguration ? Math.min(maxLeadsPerStage, outreachConfiguration.dailyMessageLimit) : maxLeadsPerStage,
+      ...(outreachActivity ? { outreach_activity: outreachActivity } : {}),
     });
 
     thresholdDate = qualification.thresholdDate;
@@ -222,6 +234,7 @@ export async function leadQualificationWorkflow(
             thresholdDate,
             sequence_stage,
             ...options.additionalData,
+            ...(outreachActivity ? { outreach_activity: outreachActivity } : {}),
           },
         });
 

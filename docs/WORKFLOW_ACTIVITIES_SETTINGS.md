@@ -4,6 +4,10 @@
 
 This document describes the workflow scheduling control system using `settings.activities` in site configuration.
 
+For the account, audience, weekday, and daily delivery controls on Cold Outreach and
+Follow Up, see [Outreach configuration](./OUTREACH_CONFIGURATION.md). Both activities
+are opt-in: absent, `default`, or `inactive` status does not permit execution.
+
 ## Feature Description
 
 The system now checks `settings.activities` object in site settings to determine which workflows should be scheduled for each site. This allows granular control over which automated workflows run for specific sites.
@@ -42,7 +46,7 @@ The system now checks `settings.activities` object in site settings to determine
 | Activity Key | Workflow | Description |
 |--------------|----------|-------------|
 | `daily_resume_and_stand_up` | `dailyStandUpWorkflow` | Daily summary and stand-up meetings |
-| `leads_follow_up` | `leadQualificationWorkflow` | Lead qualification and follow-up (Tue/Wed/Thu) |
+| `leads_follow_up` | `leadQualificationWorkflow` | Follow-up on configured weekdays (initial selection: Tue/Wed/Thu) |
 | `icp_lead_generation` | `idealClientProfileMiningWorkflow` | ICP-based lead generation |
 | `leads_initial_cold_outreach` | `leadFollowUpWorkflow` (daily prospection) | Initial cold outreach to leads |
 | `email_sync` | `emailSyncWorkflow` | Email synchronization |
@@ -50,7 +54,8 @@ The system now checks `settings.activities` object in site settings to determine
 
 ## Status Values
 
-- **`default`**: Workflow is scheduled normally for this site
+- **`active`**: Explicitly enable the activity, subject to its configuration and safety checks
+- **`default`**: Uses the activity default; Cold Outreach and Follow Up default to inactive
 - **`inactive`**: Workflow is **NOT** scheduled for this site
 
 ## Behavior
@@ -58,16 +63,16 @@ The system now checks `settings.activities` object in site settings to determine
 ### Backward Compatibility
 
 If `settings.activities` object doesn't exist:
-- ✅ All workflows are scheduled as normal (legacy behavior)
-- Ensures existing sites continue working without changes
+- Opt-in workflows, including Cold Outreach and Follow Up, are not scheduled.
+- Other workflows retain their existing defaults.
 
 ### Active Control
 
 If `settings.activities` exists:
 1. Check each workflow's activity key
-2. If activity key doesn't exist → schedule by default
+2. If activity key doesn't exist → use its default (inactive for outreach)
 3. If `status === "inactive"` → **SKIP** scheduling for that site
-4. Otherwise → schedule normally
+4. `active` explicitly enables scheduling; `default` follows the activity default.
 
 ## Implementation Details
 
@@ -75,25 +80,15 @@ If `settings.activities` exists:
 
 ```typescript
 function shouldScheduleWorkflow(site: any, activityKey: string): boolean {
-  // If settings.activities doesn't exist, schedule as always (backward compatibility)
-  if (!site.settings || !site.settings.activities) {
-    return true;
-  }
-
-  const activityConfig = site.settings.activities[activityKey];
-  
-  // If the activity doesn't exist in settings.activities, schedule by default
-  if (!activityConfig) {
-    return true;
-  }
-
-  // If the activity status is 'inactive', do NOT schedule
-  if (activityConfig.status === 'inactive') {
-    return false;
-  }
-
-  // Otherwise (status is 'default' or any other value), schedule normally
-  return true;
+  const optIn = new Set([
+    'supervise_conversations', 'assign_leads_to_team', 'local_lead_generation',
+    'icp_lead_generation', 'daily_resume_and_stand_up',
+    'leads_initial_cold_outreach', 'leads_follow_up',
+  ]);
+  const status = site.settings?.activities?.[activityKey]?.status;
+  if (status === 'active') return true;
+  if (status === 'inactive') return false;
+  return !optIn.has(activityKey);
 }
 ```
 
@@ -115,7 +110,7 @@ The following scheduling activities now check `settings.activities`:
 
 4. **`scheduleLeadQualificationActivity`**
    - Checks: `leads_follow_up`
-   - Schedules lead qualification workflows (Tue/Wed/Thu only)
+   - Schedules lead qualification workflows on the selected weekdays
 
 5. **`executeDailyProspectionWorkflowsActivity`**
    - Checks: `leads_initial_cold_outreach`

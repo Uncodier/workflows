@@ -7,6 +7,7 @@ import { sendVoiceCallFromAgentWorkflow } from './sendVoiceCallFromAgentWorkflow
 import { resolveApprovedMessageDispatch } from './helpers/approvedMessageDispatch';
 import { resolveApprovedMessageContent } from './helpers/approvedMessageContent';
 import { settleInBatches } from './helpers/settleInBatches';
+import { resolveOutreachActivity } from '../utils/outreachActivity';
 
 const {
   getApprovedMessagesActivity,
@@ -17,13 +18,14 @@ const {
   updateMessageTimestampActivity,
   updateConversationStatusAfterFollowUpActivity,
   updateTaskStatusToCompletedActivity,
-  cleanupFailedFollowUpActivity
+  cleanupFailedFollowUpActivity,
+  deferOutreachMessageActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: RETRY_POLICIES.DATABASE,
 });
 
-const { sendEmailFromAgentActivity } = proxyActivities<Activities>({
+const { sendEmailFromAgentActivity, sendOutreachMessageActivity } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.EMAIL_OPERATIONS,
   retry: RETRY_POLICIES.NETWORK,
 });
@@ -31,6 +33,8 @@ const { sendEmailFromAgentActivity } = proxyActivities<Activities>({
 export async function sendApprovedMessagesWorkflow(): Promise<any> {
   console.log('🚀 Starting sendApprovedMessagesWorkflow...');
   const useBatchClaims = patched('send-approved-messages-batch-claims-v1');
+  const useConfiguredOutreach = patched('outreach-configured-delivery-v1');
+  let deferredCount = 0;
 
   const resetResult = await resetStuckSendingMessagesActivity();
   if (resetResult.resetCount > 0) {
@@ -83,7 +87,9 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     );
     const deliveryContent = resolvedMessage.content;
     const messageId = msg.message_id;
+    const managedOutreach = useConfiguredOutreach && (msg.custom_data?.outreach_activity !== undefined || !!resolveOutreachActivity(msg.custom_data));
     let sentMessageId: string | undefined;
+    let sentRecipient: string | undefined;
 
     const COMMENT_CHANNELS = ['facebook', 'instagram', 'threads', 'linkedin', 'x', 'twitter', 'youtube'];
 
@@ -93,7 +99,23 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
           `Unresolved delivery placeholders: ${resolvedMessage.unresolved.join(', ')}`
         );
       }
-      if (channel === 'email') {
+      if (managedOutreach) {
+        const result = await sendOutreachMessageActivity({ site_id: msg.site_id, message_id: messageId });
+        if (!result.success) {
+          await deferOutreachMessageActivity({
+            site_id: msg.site_id,
+            conversation_id: msg.conversation_id,
+            message_id: messageId,
+            reason: result.reason || 'Outreach delivery deferred',
+            retryAt: result.retryAt,
+          });
+          deferredCount++;
+          return false;
+        }
+        sent = true;
+        sentMessageId = result.messageId;
+        sentRecipient = result.recipient;
+      } else if (channel === 'email') {
         if (!msg.lead_email) {
           throw new Error('No email address for lead');
         }
@@ -249,7 +271,12 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         return true;
       }
 
-      if (sent && channel === 'email') {
+      if (sent && managedOutreach && channel === 'voice') {
+        // The tracked-call service and its webhooks own call status. A callback
+        // may already have recorded no-answer/failed; never overwrite it as sent.
+        return true;
+      }
+      if (sent && (managedOutreach || channel === 'email')) {
         await updateMessageStatusToSentActivity({
           message_id: messageId,
           conversation_id: msg.conversation_id,
@@ -258,7 +285,8 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
           delivery_channel: channel,
           delivery_success: true,
           delivery_details: {
-            recipient: channel === 'email' ? msg.lead_email : msg.lead_phone,
+            recipient: sentRecipient || (['email', 'whatsapp', 'sms', 'voice'].includes(channel)
+              ? channel === 'email' ? msg.lead_email : msg.lead_phone : undefined),
             message_id: sentMessageId,
             timestamp: new Date().toISOString()
           }
@@ -293,6 +321,17 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
       return false;
     } catch (error) {
       console.error(`❌ Failed to send message ${msg.message_id}:`, error);
+      if (managedOutreach && !sent) {
+        // Policy/cap/network failures must not invalidate contacts or trigger another provider.
+        await deferOutreachMessageActivity({
+          site_id: msg.site_id,
+          conversation_id: msg.conversation_id,
+          message_id: messageId,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        deferredCount++;
+        return false;
+      }
       if (!sent) {
         if (dispatch === 'voice-call-child' && voiceChildStarted) {
           return false;
@@ -364,6 +403,8 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
       || msg.channel
       || (msg.custom_data?.type === 'email' ? 'email' : 'whatsapp')
     ).toLowerCase();
+    if (useConfiguredOutreach && channel === 'voice'
+      && (msg.custom_data?.outreach_activity !== undefined || resolveOutreachActivity(msg.custom_data))) return true;
     return resolveApprovedMessageDispatch(
       channel,
       msg.custom_data?.voice_mode
@@ -388,7 +429,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
   const results = [...await regularResultsPromise, ...voiceCallResults];
 
   const successCount = results.filter((r) => r.status === 'fulfilled' && r.value === true).length;
-  const failedCount = results.filter((r) => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === false)).length;
+  const failedCount = results.filter((r) => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === false)).length - deferredCount;
 
-  return { processed: messages.length, success: successCount, failed: failedCount };
+  return { processed: messages.length, success: successCount, failed: failedCount, deferred: deferredCount };
 }

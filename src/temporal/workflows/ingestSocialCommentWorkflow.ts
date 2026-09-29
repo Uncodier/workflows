@@ -1,9 +1,10 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { patched, proxyActivities } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
+import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
 
-const { finishSyncedObjectClaimActivity } = proxyActivities<Activities>({
+const { finishSyncedObjectClaimActivity, assertSocialCommentPersistedActivity, hasSocialCommentPersistedActivity } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.DATABASE_OPERATIONS,
   retry: RETRY_POLICIES.DATABASE,
 });
@@ -22,11 +23,18 @@ export interface IngestSocialCommentParams {
 export async function ingestSocialCommentWorkflow(
   params: IngestSocialCommentParams
 ): Promise<{ success: boolean; data?: unknown; error?: string }> {
+  const verifyPersistence = patched('ingest-social-comment-confirm-persistence-v1');
   try {
-    const result = await customerSupportMessageWorkflow(
-      params.messageData,
-      params.baseParams
-    );
+    // A previous attempt may have saved the inbound comment before losing the
+    // API response. Do not create another draft just to recover its claim.
+    const alreadyPersisted = verifyPersistence && await hasSocialCommentPersistedActivity(params.siteId, params.externalId);
+    const result = alreadyPersisted
+      ? { success: true }
+      : await customerSupportMessageWorkflow(params.messageData, params.baseParams);
+    if (verifyPersistence) {
+      if (!result.success) throw new Error('Social comment ingestion did not succeed');
+      await assertSocialCommentPersistedActivity(params.siteId, params.externalId);
+    }
 
     await finishSyncedObjectClaimActivity({
       siteId: params.siteId,
@@ -54,6 +62,7 @@ export async function ingestSocialCommentWorkflow(
       );
     }
 
+    if (verifyPersistence) throw terminalWorkflowFailure(error, 'Social comment ingestion failed', 'SOCIAL_COMMENT_INGESTION_FAILED');
     throw error;
   }
 }

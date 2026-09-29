@@ -2,6 +2,8 @@ import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
 import { createLeadFollowUpApiFailure } from './leadFollowUpFailure';
 import { assertOutboundChannelAvailable, isOutboundChannelUnavailable } from './daily-prospection/outboundGate';
+import { validateCommunicationChannelsActivity } from './daily-prospection/validate';
+import { resolveOutreachActivity } from '../utils/outreachActivity';
 
 export interface LeadFollowUpRequest {
   lead_id: string;
@@ -32,7 +34,16 @@ export async function leadFollowUpActivity(
 
   try {
     try {
-      await assertOutboundChannelAvailable(request.site_id);
+      const outreachActivity = resolveOutreachActivity(request.additionalData);
+      if (outreachActivity) {
+        const validation = await validateCommunicationChannelsActivity({
+          site_id: request.site_id, outreach_activity: outreachActivity, requireHealthyOutbound: true,
+        });
+        if (!validation.success) throw new Error(validation.error || 'Outreach channels unavailable');
+        if (!validation.hasAnyChannel) throw ApplicationFailure.nonRetryable('No selected outbound channel', 'OUTBOUND_CHANNEL_UNAVAILABLE');
+      } else {
+        await assertOutboundChannelAvailable(request.site_id);
+      }
     } catch (error) {
       if (isOutboundChannelUnavailable(error)) {
         throw ApplicationFailure.nonRetryable('No available outbound channel', 'OUTBOUND_CHANNEL_UNAVAILABLE');
@@ -40,11 +51,11 @@ export async function leadFollowUpActivity(
       throw error;
     }
     const requestBody = {
+      ...request.additionalData,
       leadId: request.lead_id,
       siteId: request.site_id,
       userId: request.userId,
       message_status: request.message_status,
-      ...request.additionalData,
     };
 
     console.log('📤 Sending lead follow-up request:', JSON.stringify(requestBody, null, 2));

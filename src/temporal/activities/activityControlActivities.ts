@@ -18,7 +18,7 @@ export async function validateWorkflowConfigActivity(
   console.log(`🔐 Validating workflow configuration for site ${siteId}, activity: ${activityKey}`);
   
   // Define opt-in activities that require explicit activation
-  const optInActivities = ['supervise_conversations', 'assign_leads_to_team', 'local_lead_generation', 'icp_lead_generation'];
+  const optInActivities = ['supervise_conversations', 'assign_leads_to_team', 'local_lead_generation', 'icp_lead_generation', 'leads_initial_cold_outreach', 'leads_follow_up'];
   
   try {
     // Fetch activities configuration for the site
@@ -125,8 +125,8 @@ export async function validateWorkflowConfigActivity(
     
     // On error, allow execution to avoid breaking workflows
     return {
-      shouldExecute: true,
-      reason: `Error validating configuration - allowing execution to avoid breaking workflow`,
+      shouldExecute: !optInActivities.includes(activityKey),
+      reason: `Error validating configuration${optInActivities.includes(activityKey) ? ' - blocking opt-in activity' : ' - allowing legacy activity'}`,
       activityKey,
     };
   }

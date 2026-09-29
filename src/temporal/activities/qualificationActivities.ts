@@ -1,4 +1,5 @@
 import { getSupabaseService } from '../services/supabaseService';
+import { selectOutreachLeads } from './outreachLeadSelection';
 
 const STAGE_ORDER = ['reminder', 'provide_value', 'breakup'] as const;
 
@@ -15,6 +16,7 @@ function buildLeadsFromStages(
 }
 
 export interface GetQualificationLeadsParams {
+  outreach_activity?: import('../utils/outreachActivity').OutreachActivityKey;
   site_id: string;
   daysWithoutReply?: number; // legacy, default 7
   limit?: number; // legacy, default 30
@@ -59,6 +61,26 @@ export async function getQualificationLeadsActivity(
   // Use the provided daysWithoutReply for the threshold
   const threshold = new Date(Date.now() - daysWithoutReply * 24 * 60 * 60 * 1000);
   const thresholdIso = threshold.toISOString();
+  if (params.outreach_activity) {
+    const selected: any[] = [];
+    let cursor: { createdAt: string; id: string } | undefined;
+    let totalChecked = 0;
+    for (let page = 0; page < 100; page++) {
+      const result = await selectOutreachLeads({ site_id: siteId, activity: params.outreach_activity,
+        page, cursor, pageSize: Math.min(legacyLimit, 100), waitMs: daysWithoutReply * 86400000 });
+      cursor = result.nextCursor;
+      totalChecked += result.pageSize;
+      selected.push(...result.leads);
+      if (!result.hasMorePages || selected.length >= Math.min(legacyLimit, result.config.dailyMessageLimit)) {
+        const leads = selected.slice(0, Math.min(legacyLimit, result.config.dailyMessageLimit));
+        return { success: true, leads, leadsByStage: Object.fromEntries(STAGE_ORDER.map(stage =>
+          [stage, leads.filter(lead => lead.sequence_stage === stage)])), totalChecked,
+          considered: result.totalCandidatesFound, excludedByAssignee: 0, thresholdDate: thresholdIso };
+      }
+    }
+    return { success: true, leads: selected.slice(0, legacyLimit), leadsByStage: {}, totalChecked,
+      considered: totalChecked, excludedByAssignee: 0, thresholdDate: thresholdIso };
+  }
 
   const errors: string[] = [];
   const leadsByStage: Record<string, any[]> = {

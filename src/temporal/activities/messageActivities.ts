@@ -46,6 +46,7 @@ export async function getApprovedMessagesActivity(): Promise<any[]> {
       created_at
     `)
     .eq('custom_data->>status', 'accepted')
+    .or(`custom_data->>outreach_deferred_until.is.null,custom_data->>outreach_deferred_until.lte.${new Date().toISOString()}`)
     .order('created_at', { ascending: true })
     .limit(APPROVED_MESSAGE_BATCH_SIZE);
 

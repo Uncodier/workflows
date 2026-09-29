@@ -11,6 +11,7 @@ import { performEarlyValidation } from './leadFollowUp/validation';
 import { performResearch } from './leadFollowUp/research';
 import type { LeadFollowUpOptions, LeadFollowUpResult } from './leadFollowUp/types';
 import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
+import { resolveOutreachActivity } from '../utils/outreachActivity';
 export * from './leadFollowUp/types';
 
 // Define the activity interface and options
@@ -25,6 +26,7 @@ const {
   validateCommunicationChannelsActivity,
   invalidateEmailOnlyActivity,
   leadEmailRevalidationActivity,
+  getOutreachConfigurationActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '10 minutes',
   retry: {
@@ -71,6 +73,8 @@ export async function leadFollowUpWorkflow(
 
   const workflowId = workflowInfo().workflowId;
   const startTime = Date.now();
+  const outreachActivity = patched('outreach-activity-configuration-v1')
+    ? resolveOutreachActivity(options.additionalData) || 'leads_follow_up' : undefined;
   
   console.log(`📞 Starting lead follow-up workflow for lead ${lead_id} on site ${site_id}`);
   console.log(`📋 Workflow version: v0.3.0 - Decoupled message sending`);
@@ -103,6 +107,22 @@ export async function leadFollowUpWorkflow(
   let emailInvalidatedInEarlyValidation = false;
 
   try {
+    const outreachConfiguration = outreachActivity
+      ? await getOutreachConfigurationActivity({ site_id, lead_id, activity_key: outreachActivity }) : undefined;
+    if (outreachConfiguration && !outreachConfiguration.shouldExecute) {
+      await saveCronStatusActivity({
+        siteId: site_id, workflowId, scheduleId: `lead-follow-up-${lead_id}-${site_id}`,
+        activityName: 'leadFollowUpWorkflow', status: 'COMPLETED', lastRun: new Date().toISOString(),
+      });
+      await logWorkflowExecutionActivity({
+        workflowId, workflowType: 'leadFollowUpWorkflow', status: 'BLOCKED',
+        input: options, error: outreachConfiguration.reason,
+      });
+      return {
+        success: false, leadId: lead_id, siteId: site_id, errors: [outreachConfiguration.reason],
+        executionTime: `${Date.now() - startTime}ms`, completedAt: new Date().toISOString(),
+      };
+    }
     console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
     
     // Get site information to obtain site details
@@ -150,6 +170,7 @@ export async function leadFollowUpWorkflow(
       if (patched('lead-follow-up-pre-verification-channel-health-v1')) {
         const outbound = await validateCommunicationChannelsActivity({
           site_id, requireHealthyOutbound: true,
+          ...(outreachActivity ? { outreach_activity: outreachActivity } : {}),
         });
         if (!outbound.success || !outbound.hasAnyChannel) {
           throw ApplicationFailure.nonRetryable(
@@ -162,7 +183,8 @@ export async function leadFollowUpWorkflow(
       // Pass activities proxy to helper function
       const activitiesProxy = {
           validateContactInformation,
-          validateCommunicationChannelsActivity,
+          validateCommunicationChannelsActivity: (params: Parameters<typeof validateCommunicationChannelsActivity>[0]) =>
+            validateCommunicationChannelsActivity({ ...params, ...(outreachActivity ? { outreach_activity: outreachActivity } : {}) }),
           invalidateEmailOnlyActivity,
           saveCronStatusActivity,
           logWorkflowExecutionActivity
@@ -176,7 +198,11 @@ export async function leadFollowUpWorkflow(
         site,
         activities: activitiesProxy,
         startTime,
-        workflowId
+        workflowId,
+        selectedChannels: outreachConfiguration ? {
+          email: outreachConfiguration.hasEmailChannel, whatsapp: outreachConfiguration.hasWhatsappChannel,
+        } : undefined,
+        alternativeChannels: outreachConfiguration?.leadChannels?.filter(channel => !['email', 'whatsapp'].includes(channel)),
       });
 
       emailInvalidatedInEarlyValidation = validationResult.emailInvalidatedInEarlyValidation;
@@ -197,9 +223,8 @@ export async function leadFollowUpWorkflow(
       });
 
       // Before generating copy: ensure site has at least one channel; if none, end follow-up.
-      const channelsValidation = await validateCommunicationChannelsActivity({ site_id });
-      const hasAnyChannel = channelsValidation.success &&
-        (channelsValidation.hasEmailChannel || channelsValidation.hasWhatsappChannel);
+      const channelsValidation = await validateCommunicationChannelsActivity({ site_id, ...(outreachActivity ? { outreach_activity: outreachActivity } : {}) });
+      const hasAnyChannel = channelsValidation.success && channelsValidation.hasAnyChannel;
       if (!hasAnyChannel) {
         console.log(`🚫 No communication channel configured for site - ending lead follow-up`);
         const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
@@ -213,7 +238,7 @@ export async function leadFollowUpWorkflow(
           nextSteps: [],
           data: null,
           messageSent: undefined,
-          errors: [...errors, 'No communication channel (email or WhatsApp) configured for site'],
+          errors: [...errors, 'No selected communication channel is available for this site'],
           executionTime,
           completedAt: new Date().toISOString()
         };
@@ -277,9 +302,8 @@ export async function leadFollowUpWorkflow(
     } else {
       console.log(`⚠️ Running legacy path (v0) - skipping lead info check and research due to workflow versioning`);
       // Legacy path: still check channels before calling agent; if none, end follow-up.
-      const channelsValidationLegacy = await validateCommunicationChannelsActivity({ site_id });
-      const hasAnyChannelLegacy = channelsValidationLegacy.success &&
-        (channelsValidationLegacy.hasEmailChannel || channelsValidationLegacy.hasWhatsappChannel);
+      const channelsValidationLegacy = await validateCommunicationChannelsActivity({ site_id, ...(outreachActivity ? { outreach_activity: outreachActivity } : {}) });
+      const hasAnyChannelLegacy = channelsValidationLegacy.success && channelsValidationLegacy.hasAnyChannel;
       if (!hasAnyChannelLegacy) {
         console.log(`🚫 No communication channel configured for site - ending lead follow-up (legacy path)`);
         const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
@@ -293,7 +317,7 @@ export async function leadFollowUpWorkflow(
           nextSteps: [],
           data: null,
           messageSent: undefined,
-          errors: [...errors, 'No communication channel (email or WhatsApp) configured for site'],
+          errors: [...errors, 'No selected communication channel is available for this site'],
           executionTime,
           completedAt: new Date().toISOString()
         };
@@ -324,7 +348,8 @@ export async function leadFollowUpWorkflow(
       site_id: site_id,
       userId: options.userId || site.user_id,
       message_status: options.message_status,
-      additionalData: options.additionalData
+      additionalData: outreachActivity
+        ? { ...options.additionalData, outreach_activity: outreachActivity } : options.additionalData
     };
     
     // Execute lead follow-up
@@ -397,7 +422,8 @@ export async function leadFollowUpWorkflow(
         leadId: lead_id,
         userId: options.userId || site.user_id,
         message_status: options.message_status, // This should default to 'pending' in most cases
-        data: response
+        data: response,
+        ...(outreachActivity ? { outreach_activity: outreachActivity } : {})
       });
       
       if (!saveLogsResult.success) {

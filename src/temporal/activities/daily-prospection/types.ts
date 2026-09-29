@@ -17,6 +17,8 @@ export interface ProspectionLead {
 }
 
 export interface DailyProspectionOptions {
+  outreach_cursor?: { createdAt: string; id: string };
+  outreach_activity?: import('../../utils/outreachActivity').OutreachActivityKey;
   site_id: string;
   userId?: string;
   hoursThreshold?: number; // Default 48 hours
@@ -28,12 +30,14 @@ export interface DailyProspectionOptions {
 
 // New interfaces for communication channels validation
 export interface ValidateCommunicationChannelsParams {
+  outreach_activity?: import('../../utils/outreachActivity').OutreachActivityKey;
   site_id: string;
   /** Only for new outbound work; historical workflows keep configuration-only behavior. */
   requireHealthyOutbound?: boolean;
 }
 
 export interface ValidateCommunicationChannelsResult {
+  availableChannels?: string[];
   success: boolean;
   hasEmailChannel: boolean;
   hasWhatsappChannel: boolean;
@@ -46,6 +50,7 @@ export interface ValidateCommunicationChannelsResult {
 }
 
 export interface GetProspectionLeadsResult {
+  nextCursor?: { createdAt: string; id: string };
   success: boolean;
   leads: ProspectionLead[];
   total: number;
