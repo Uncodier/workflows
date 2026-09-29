@@ -1,8 +1,10 @@
-import { proxyActivities, executeChild, patched } from '@temporalio/workflow';
+import { proxyActivities, executeChild, patched, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { idealClientProfilePageSearchWorkflow } from './idealClientProfilePageSearchWorkflow';
 import { selectNextIcp } from './icpMining/selectIcp';
 import { processSingleIcp } from './icpMining/processSingle';
+import { processConfiguredIcp } from './icpMining/processConfigured';
+import { processOwnedIcp } from './icpMining/processOwned';
 import type {
   IdealClientProfilePageSearchOptions,
   IdealClientProfilePageSearchResult,
@@ -14,6 +16,9 @@ const {
   saveCronStatusActivity,
   validateWorkflowConfigActivity,
   validateCommunicationChannelsActivity,
+  getIcpMiningConfigurationActivity,
+  claimIcpMiningExecutionActivity,
+  checkpointIcpMiningExecutionActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: { maximumAttempts: 3 },
@@ -29,17 +34,20 @@ const {
   getSiteActivity,
 } = proxyActivities<{
   getIcpMiningByIdActivity: (id: string) => Promise<{ success: boolean; icp?: any; error?: string }>;
-  getPendingIcpMiningActivity: (o?: { limit?: number; site_id?: string }) => Promise<{ success: boolean; items?: any[]; error?: string }>;
+  getPendingIcpMiningActivity: (o?: { limit?: number; site_id?: string; icp_mining_ids?: string[] }) => Promise<{ success: boolean; items?: any[]; error?: string }>;
   markIcpMiningStartedActivity: (o: { id: string }) => Promise<{ success: boolean; error?: string }>;
   updateIcpMiningProgressActivity: (o: {
     id: string;
     deltaProcessed?: number;
     deltaFound?: number;
+    processedTargets?: number;
+    foundMatches?: number;
     status?: any;
     totalTargets?: number;
     last_error?: string | null;
     appendError?: string;
     currentPage?: number;
+    currentPageOffset?: number;
   }) => Promise<{ success: boolean; error?: string }>;
   markIcpMiningCompletedActivity: (o: { id: string; failed?: boolean; last_error?: string | null }) => Promise<{ success: boolean; error?: string }>;
   getSiteActivity: (siteId: string) => Promise<{ success: boolean; site?: any; error?: string }>;
@@ -52,9 +60,10 @@ export interface IdealClientProfileMiningOptions {
   icp_mining_id?: string; // id in icp_mining table; if missing or 'ALL', processes pending
   site_id: string;
   userId?: string;
-  maxPages?: number; // default 20
-  pageSize?: number; // default 20
-  targetLeadsWithEmail?: number; // default 40
+  maxPages?: number; // default 300
+  pageSize?: number; // Finder uses fixed pages of 10
+  targetLeadsWithEmail?: number; // overrides site target_leads (default 150)
+  researchEnabled?: boolean; // overrides site research_enabled (default false)
 }
 
 export interface IdealClientProfileMiningResult {
@@ -76,53 +85,61 @@ export async function idealClientProfileMiningWorkflow(
   const workflowId = `icp-mining-${options.icp_mining_id || 'batch'}`;
   const maxPages = options.maxPages ?? 300;
   const pageSize = options.pageSize ?? 20;
-  const targetLeadsWithEmail = options.targetLeadsWithEmail ?? 150;
+  let targetLeadsWithEmail = options.targetLeadsWithEmail ?? 150;
   const errors: string[] = [];
+  const configurableMining = patched('icp-mining-configurable-independent-v1');
+  const filterSelectedLists = configurableMining && patched('icp-mining-list-selection-v1');
+  let allLists = true;
+  let listIds: string[] = [];
+  let miningOptions = options;
+  const ownedExecution = configurableMining && patched('icp-mining-owned-checkpoints-v1');
+  const processIcp = (args: Parameters<typeof processSingleIcp>[0]) => ownedExecution
+    ? processOwnedIcp({ ...args, execution: { runId: workflowInfo().runId, workflowId: workflowInfo().workflowId },
+      claim: claimIcpMiningExecutionActivity, checkpoint: checkpointIcpMiningExecutionActivity })
+    : configurableMining ? processConfiguredIcp(args) : processSingleIcp(args);
 
-  // STEP 0: Validate workflow configuration
-  console.log('🔐 Step 0: Validating workflow configuration...');
-  const configValidation = await validateWorkflowConfigActivity(
-    options.site_id,
-    'icp_lead_generation'
-  );
-  
-  if (!configValidation.shouldExecute) {
-    console.log(`⛔ Workflow execution blocked: ${configValidation.reason}`);
-    
-    // Log blocked execution
-    await logWorkflowExecutionActivity({
-      workflowId,
-      workflowType: 'idealClientProfileMiningWorkflow',
-      status: 'BLOCKED',
-      input: options,
-      error: `Workflow is ${configValidation.activityStatus} in site settings`,
-    });
-
-    return {
-      success: false,
-      icp_mining_id: options.icp_mining_id || 'unknown',
-      processed: 0,
-      foundMatches: 0,
-      errors: [`Workflow is ${configValidation.activityStatus} in site settings`],
-    };
-  }
-
-  // ICP enrichment can spend credits before a lead exists. Only new histories
-  // add this Activity so old executions keep their recorded command sequence.
-  if (patched('icp-mining-outbound-health-gate-v1')) {
-    const outbound = await validateCommunicationChannelsActivity({
-      site_id: options.site_id, requireHealthyOutbound: true,
-    });
-    if (!outbound.success || !outbound.hasAnyChannel) {
+  // Preserve the recorded validation commands for histories started before decoupling.
+  if (!configurableMining) {
+    console.log('🔐 Step 0: Validating workflow configuration...');
+    const configValidation = await validateWorkflowConfigActivity(options.site_id, 'icp_lead_generation');
+    if (!configValidation.shouldExecute) {
+      console.log(`⛔ Workflow execution blocked: ${configValidation.reason}`);
+      await logWorkflowExecutionActivity({
+        workflowId, workflowType: 'idealClientProfileMiningWorkflow', status: 'BLOCKED', input: options,
+        error: `Workflow is ${configValidation.activityStatus} in site settings`,
+      });
       return {
-        success: false, icp_mining_id: options.icp_mining_id || 'batch',
+        success: false, icp_mining_id: options.icp_mining_id || 'unknown',
         processed: 0, foundMatches: 0,
-        errors: ['No recently healthy outbound channel for ICP mining'],
+        errors: [`Workflow is ${configValidation.activityStatus} in site settings`],
       };
     }
+    if (patched('icp-mining-outbound-health-gate-v1')) {
+      const outbound = await validateCommunicationChannelsActivity({
+        site_id: options.site_id, requireHealthyOutbound: true,
+      });
+      if (!outbound.success || !outbound.hasAnyChannel) {
+        return {
+          success: false, icp_mining_id: options.icp_mining_id || 'batch',
+          processed: 0, foundMatches: 0,
+          errors: ['No recently healthy outbound channel for ICP mining'],
+        };
+      }
+    }
+    console.log(`✅ Configuration validated: ${configValidation.reason}`);
+  } else {
+    const config = await getIcpMiningConfigurationActivity({
+      site_id: options.site_id,
+      targetLeadsWithEmail: options.targetLeadsWithEmail,
+      researchEnabled: options.researchEnabled,
+    });
+    targetLeadsWithEmail = config.targetLeads;
+    miningOptions = { ...options, researchEnabled: config.researchEnabled };
+    if (filterSelectedLists) {
+      allLists = config.allLists ?? true;
+      listIds = config.listIds ?? [];
+    }
   }
-  
-  console.log(`✅ Configuration validated: ${configValidation.reason}`);
 
   await logWorkflowExecutionActivity({
     workflowId,
@@ -171,12 +188,16 @@ export async function idealClientProfileMiningWorkflow(
   const isBatch = !options.icp_mining_id || options.icp_mining_id === 'ALL';
 
   if (!isBatch) {
+    if (filterSelectedLists && !allLists && !listIds.includes(options.icp_mining_id!.toLowerCase())) {
+      return { success: false, icp_mining_id: options.icp_mining_id!, processed: 0, foundMatches: 0,
+        errors: ['ICP mining list is not selected in AI Activities'] };
+    }
     // Single processing path
     const icpRes = await getIcpMiningByIdActivity(options.icp_mining_id as string);
-    if (!icpRes.success || !icpRes.icp) {
+    if (!icpRes.success || !icpRes.icp || (configurableMining && icpRes.icp.site_id !== options.site_id)) {
       const msg = icpRes.error || 'icp_mining not found';
       errors.push(msg);
-      await markIcpMiningCompletedActivity({
+      if (!configurableMining) await markIcpMiningCompletedActivity({
         id: options.icp_mining_id as string,
         failed: true,
         last_error: msg,
@@ -189,9 +210,13 @@ export async function idealClientProfileMiningWorkflow(
         errors,
       };
     }
-    const res = await processSingleIcp({
+    if (filterSelectedLists && !['pending', 'running'].includes(icpRes.icp.status)) {
+      return { success: false, icp_mining_id: options.icp_mining_id!, processed: 0, foundMatches: 0,
+        errors: ['ICP mining list is no longer pending or running'] };
+    }
+    const res = await processIcp({
       icp: icpRes.icp,
-      options,
+      options: miningOptions,
       workflowId,
       maxPages,
       pageSize,
@@ -210,6 +235,7 @@ export async function idealClientProfileMiningWorkflow(
         },
       },
     });
+    if ('errors' in res && Array.isArray(res.errors)) errors.push(...res.errors);
     return {
       success: errors.length === 0,
       icp_mining_id: options.icp_mining_id as string,
@@ -221,7 +247,9 @@ export async function idealClientProfileMiningWorkflow(
   }
 
   // Batch processing: fetch multiple pending records for this site_id
-  const pending = await getPendingIcpMiningActivity({ limit: 50, site_id: options.site_id });
+  const pending = await getPendingIcpMiningActivity({ limit: 50, site_id: options.site_id,
+    ...(filterSelectedLists && !allLists ? { icp_mining_ids: listIds } : {}),
+  });
   if (!pending.success) {
     const errorMsg = pending.error || 'failed to list pending';
     errors.push(errorMsg);
@@ -241,7 +269,9 @@ export async function idealClientProfileMiningWorkflow(
     };
   }
 
-  const items = pending.items || [];
+  const items = filterSelectedLists ? (pending.items || []).filter(item =>
+    item.site_id === options.site_id && ['pending', 'running'].includes(item.status)
+    && (allLists || listIds.includes(String(item.id).toLowerCase()))) : pending.items || [];
 
   await logWorkflowExecutionActivity({
     workflowId,
@@ -292,9 +322,9 @@ export async function idealClientProfileMiningWorkflow(
     },
   });
 
-  const res = await processSingleIcp({
+  const res = await processIcp({
     icp,
-    options,
+    options: miningOptions,
     workflowId,
     maxPages,
     pageSize,
@@ -313,6 +343,7 @@ export async function idealClientProfileMiningWorkflow(
       },
     },
   });
+  if ('errors' in res && Array.isArray(res.errors)) errors.push(...res.errors);
 
   return {
     success: errors.length === 0,

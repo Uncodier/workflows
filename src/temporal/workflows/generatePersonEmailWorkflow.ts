@@ -15,6 +15,7 @@ const {
 });
 
 export interface GeneratePersonEmailOptions {
+  reportOutcome?: boolean; // New callers distinguish no match from service failures.
   person_id?: string;           // Person UUID from database
   external_person_id?: string | number;  // External person ID
   external_role_id?: string | number;    // Optional: match role for domain selection
@@ -31,6 +32,7 @@ export interface GeneratePersonEmailOptions {
 
 export interface GeneratePersonEmailResult {
   success: boolean;
+  outcome?: 'matched' | 'no_match' | 'retryable_error';
   validatedEmail?: string;      // First valid email found
   generatedEmails?: string[];   // All generated emails
   validatedEmails?: string[];   // All validated emails
@@ -336,6 +338,7 @@ export async function generatePersonEmailWorkflow(
         domain,
         generatedEmails: [],
         validatedEmails: [],
+        ...(options.reportOutcome ? { outcome: 'no_match' as const } : {}),
       };
     }
 
@@ -343,6 +346,7 @@ export async function generatePersonEmailWorkflow(
     console.log(`✅ Step 4: Validating ${generatedEmails.length} generated email(s) using validateEmailWorkflow...`);
     const validatedEmails: string[] = [];
     let validatedEmail: string | null = null;
+    let validationUnavailable = false;
 
     for (const email of generatedEmails) {
       if (!email || email.trim() === '') continue;
@@ -374,6 +378,7 @@ export async function generatePersonEmailWorkflow(
         };
       }
 
+      if (!validationResult.success) validationUnavailable = true;
       if (validationResult.success && validationResult.data?.isValid && validationResult.data?.deliverable) {
         console.log(`✅ Valid email found: ${email}`);
         validatedEmails.push(email);
@@ -397,6 +402,7 @@ export async function generatePersonEmailWorkflow(
       const result: GeneratePersonEmailResult = {
         success: true,
         validatedEmail,
+        ...(options.reportOutcome ? { outcome: 'matched' as const } : {}),
         generatedEmails,
         validatedEmails,
         domain,
@@ -421,6 +427,7 @@ export async function generatePersonEmailWorkflow(
         generatedEmails,
         validatedEmails,
         domain,
+        ...(options.reportOutcome ? { outcome: validationUnavailable ? 'retryable_error' as const : 'no_match' as const } : {}),
       };
 
       await logWorkflowExecutionActivity({

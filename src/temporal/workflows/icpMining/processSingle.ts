@@ -7,11 +7,14 @@ type Deps = {
     id: string;
     deltaProcessed?: number;
     deltaFound?: number;
+    processedTargets?: number;
+    foundMatches?: number;
     status?: any;
     totalTargets?: number;
     last_error?: string | null;
     appendError?: string;
     currentPage?: number;
+    currentPageOffset?: number;
   }) => Promise<{ success: boolean; error?: string }>;
   markIcpMiningCompletedActivity: (o: { id: string; failed?: boolean; last_error?: string | null }) => Promise<{ success: boolean; error?: string }>;
   executePageSearch: (o: IdealClientProfilePageSearchOptions) => Promise<IdealClientProfilePageSearchResult>;

@@ -1,4 +1,4 @@
-import { executeChild, proxyActivities, workflowInfo } from '@temporalio/workflow';
+import { executeChild, patched, proxyActivities, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 const { 
@@ -52,6 +52,7 @@ function extractScheduleId(info: any): string {
  * WEEKEND RESTRICTION: Only schedules sites with business_hours on weekends (Fri/Sat)
  * WEEKDAY FALLBACK: Sites without business_hours use 09:00 fallback (Sun-Thu)
  * AFTER DAILY STANDUPS: Executes dailyProspectionWorkflow for lead prospection
+ * Configured Daily Standup scheduling is independent of the general business-hours decision.
  */
 export async function activityPrioritizationEngineWorkflow(): Promise<{
   shouldExecute: boolean;
@@ -142,13 +143,14 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
       });
     }
     
-    // Check if daily standups should execute (only Monday and Friday)
+    // Retain the previous activity command ordering when replaying unpatched histories.
+    const configuredDailyStandups = patched('daily-standup-configuration-v1');
     const isMondayOrFriday = dayOfWeek === 1 || dayOfWeek === 5; // Monday = 1, Friday = 5
-    if (!isMondayOrFriday) {
+    if (!configuredDailyStandups && !isMondayOrFriday) {
       console.log(`📅 Daily standups restriction: Today is ${dayName}, standups only execute on Monday and Friday`);
       console.log(`   - Daily standups will be SKIPPED`);
       console.log(`   - Other operations (prospection, lead generation, etc.) will continue as normal`);
-    } else {
+    } else if (!configuredDailyStandups) {
       console.log(`📅 Daily standups allowed: Today is ${dayName}, standups will execute`);
     }
     
@@ -182,6 +184,22 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
 
     let operationsResult;
     let operationsExecuted = false;
+    let dailyStandUpScheduling;
+
+    // Explicit standup weekdays may include closed days, even when other operations are skipped.
+    if (configuredDailyStandups) {
+      try {
+        dailyStandUpScheduling = await scheduleIndividualDailyStandUpsActivity(businessHoursAnalysis, {
+          parentScheduleId: realScheduleId,
+        });
+      } catch (error) {
+        dailyStandUpScheduling = {
+          scheduled: 0, skipped: 0, failed: 1, results: [],
+          errors: [error instanceof Error ? error.message : String(error)],
+        };
+        console.error('❌ Error scheduling configured Daily Standups:', error);
+      }
+    }
 
     // Step 2: Execute operations based on timing decision
     if (timingDecision === 'execute_now') {
@@ -363,8 +381,15 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
       console.log('⏰ Step 2: SCHEDULING operations for later execution...');
       
       try {
-        // Only schedule daily standups on Monday and Friday
-        if (isMondayOrFriday) {
+        if (configuredDailyStandups) {
+          // Already scheduled once above; do not couple the new path to this timing branch.
+          operationsResult = {
+            scheduled: (dailyStandUpScheduling?.scheduled || 0) > 0,
+            individualSchedules: dailyStandUpScheduling?.scheduled || 0,
+            failedSchedules: dailyStandUpScheduling?.failed || 0,
+            approach: 'configured-daily-standup-schedules',
+          };
+        } else if (isMondayOrFriday) {
           console.log(`📅 Creating individual schedules for each site at their specific business hours`);
           
           // Use the new individual scheduling approach instead of global scheduling
@@ -599,6 +624,10 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
       }
     } else {
       console.log('⏭️ Step 2: Skipping daily operations (decision was SKIP)');
+    }
+
+    if (configuredDailyStandups) {
+      operationsResult = { ...operationsResult, dailyStandUpScheduling };
     }
 
     const endTime = new Date();

@@ -12,6 +12,7 @@ const mockActivities = {
   callRegionSearchApiActivity: jest.fn(),
   validateWorkflowConfigActivity: jest.fn(),
   getPendingIcpMiningActivity: jest.fn(),
+  getIcpMiningConfigurationActivity: jest.fn(),
 };
 
 jest.mock('@temporalio/workflow', () => ({
@@ -40,19 +41,19 @@ describe('outbound health boundary before billable search', () => {
     });
     mockActivities.validateWorkflowConfigActivity.mockResolvedValue({ shouldExecute: true, reason: 'ok' });
     mockActivities.callPersonRoleSearchActivity.mockResolvedValue({ success: true, hasMore: false });
+    mockActivities.getIcpMiningConfigurationActivity.mockResolvedValue({ targetLeads: 150, researchEnabled: false });
+    mockActivities.getPendingIcpMiningActivity.mockResolvedValue({ success: true, items: [] });
   });
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('blocks a direct ICP page before Finder when no outbound channel is healthy', async () => {
+  it('allows ICP pages independently of outbound health', async () => {
     const result = await idealClientProfilePageSearchWorkflow({
       role_query_id: 'query-1', page: 0, page_size: 20, site_id: 'site-1', userId: 'user-1',
     });
-    expect(result).toMatchObject({ success: false, processed: 0 });
-    expect(mockActivities.validateCommunicationChannelsActivity).toHaveBeenCalledWith({
-      site_id: 'site-1', requireHealthyOutbound: true,
-    });
-    expect(mockActivities.callPersonRoleSearchActivity).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ success: true, processed: 0 });
+    expect(mockActivities.validateCommunicationChannelsActivity).not.toHaveBeenCalled();
+    expect(mockActivities.callPersonRoleSearchActivity).toHaveBeenCalled();
   });
 
   it('blocks a direct domain page before Finder', async () => {
@@ -70,10 +71,20 @@ describe('outbound health boundary before billable search', () => {
     expect(mockActivities.getSiteActivity).not.toHaveBeenCalled();
   });
 
-  it('blocks ICP mining before fetching pending work', async () => {
+  it('fetches pending ICP work independently of status and outbound health', async () => {
     const result = await idealClientProfileMiningWorkflow({ site_id: 'site-1', userId: 'user-1' });
-    expect(result).toMatchObject({ success: false, processed: 0 });
-    expect(mockActivities.getPendingIcpMiningActivity).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ success: true, processed: 0 });
+    expect(mockActivities.getPendingIcpMiningActivity).toHaveBeenCalled();
+    expect(mockActivities.validateWorkflowConfigActivity).not.toHaveBeenCalled();
+    expect(mockActivities.validateCommunicationChannelsActivity).not.toHaveBeenCalled();
+  });
+
+  it('preserves the historical ICP outbound gate on pre-decoupling histories', async () => {
+    mockPatched.mockImplementation((key: string) => key.endsWith('outbound-health-gate-v1'));
+    const result = await idealClientProfileMiningWorkflow({ site_id: 'site-1', userId: 'user-1' });
+    expect(result.success).toBe(false);
+    expect(mockActivities.validateCommunicationChannelsActivity).toHaveBeenCalled();
+    expect(mockActivities.getIcpMiningConfigurationActivity).not.toHaveBeenCalled();
   });
 
   it('preserves the legacy page command sequence when the patch is absent', async () => {

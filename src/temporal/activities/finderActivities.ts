@@ -1,6 +1,10 @@
 import { apiService } from '../services/apiService';
 import { getSupabaseService } from '../services';
-import { selectRoleForEnrichment } from '../utils/personRoleUtils';
+import { normalizeIcpMiningListIds } from '../utils/icpMiningConfiguration';
+import {
+  FinderData, contactValues, domainOf, finderCompanyRecord, finderLeadProfile, finderPersonRecord,
+  finderResponseError, hasData, mergeFinderData, normalizeFinderPerson, personPersistencePayload, selectFinderRole,
+} from '../utils/finderData';
 
 // Finder API: person role search
 export async function callPersonRoleSearchActivity(options: {
@@ -45,8 +49,10 @@ export async function callPersonRoleSearchActivity(options: {
       return { success: false, error: response.error?.message || 'Finder person_role_search failed' };
     }
 
+    const providerError = finderResponseError(response.data);
+    if (providerError) return { success: false, error: providerError };
     const payload = response.data?.data || response.data;
-    const persons = payload?.persons || payload?.results || [];
+    const persons = payload?.persons || payload?.search_results || payload?.results || [];
     const meta = payload?.meta || {};
 
     // Normalize pagination metadata (do not coerce total when absent)
@@ -118,6 +124,8 @@ export async function callPersonWorkEmailsActivity(options: {
     }
 
     const payload = response.data?.data || response.data;
+    const providerError = finderResponseError(response.data);
+    if (providerError) return { success: false, error: providerError };
     // Return structured array format
     const emails = Array.isArray(payload) ? payload : (payload?.emails || payload?.work_emails || []);
     return { success: true, data: payload, emails };
@@ -167,6 +175,8 @@ export async function callPersonContactsLookupPhoneNumbersActivity(options: {
     const payload = response.data?.data || response.data;
     // Return structured array format
     const phoneNumbers = Array.isArray(payload) ? payload : (payload?.phone_numbers || payload?.phones || []);
+    const providerError = finderResponseError(response.data);
+    if (providerError) return { success: false, error: providerError };
     return { success: true, data: payload, phoneNumbers };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -213,6 +223,8 @@ export async function callPersonContactsLookupPersonalEmailsActivity(options: {
     const payload = response.data?.data || response.data;
     // Return structured array format
     const emails = Array.isArray(payload) ? payload : (payload?.emails || payload?.personal_emails || []);
+    const providerError = finderResponseError(response.data);
+    if (providerError) return { success: false, error: providerError };
     return { success: true, data: payload, emails };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -250,6 +262,8 @@ export async function callPersonContactsLookupDetailsActivity(options: {
       return { success: false, error: response.error?.message || 'Finder person_contacts_lookup/details failed' };
     }
 
+    const providerError = finderResponseError(response.data);
+    if (providerError) return { success: false, error: providerError };
     const personData = response.data?.data || response.data;
     if (!personData) {
       return { success: false, error: 'No data returned from API' };
@@ -258,7 +272,7 @@ export async function callPersonContactsLookupDetailsActivity(options: {
     console.log(`✅ Received person details data for person_id: ${personData.id}`);
 
     // Extract current role: match by company_name from context, or most recent start_date among is_current
-    const currentRole = selectRoleForEnrichment(personData.roles ?? [], {
+    const currentRole = selectFinderRole(personData, {
       company_name: options.company_name ?? undefined,
     }) ?? personData.roles?.[0];
     const currentOrganization = currentRole?.organization;
@@ -277,11 +291,12 @@ export async function callPersonContactsLookupDetailsActivity(options: {
       company_name: currentRole?.organization_name || currentOrganization?.name || null,
       start_date: currentRole?.start_date || null,
       end_date: currentRole?.end_date || null,
-      is_current: currentRole?.is_current || false,
+      is_current: currentRole?.is_current,
       location: personLocation,
       linkedin_profile: linkedinUrl,
-      emails: null, // Will be enriched later
-      phones: null, // Will be enriched later
+      emails: contactValues(personData.emails, personData.work_emails, currentRole?.emails),
+      personal_emails: contactValues(personData.personal_emails),
+      phones: contactValues(personData.phones, personData.phone_numbers, currentRole?.phones),
       raw_result: personData,
     };
 
@@ -329,19 +344,10 @@ export async function callPersonContactsLookupDetailsActivity(options: {
     
     for (const [key, org] of organizationsMap.entries()) {
       try {
-        const companyData: any = {
-          name: org.name || null,
-          website: org.domain || null,
-          linkedin_url: org.linkedin_info?.public_profile_url || null,
-        };
-
-        // Extract industry if available
-        if (org.linkedin_info?.industry?.name) {
-          companyData.industry = org.linkedin_info.industry.name;
-        }
-
-        if (companyData.name) {
-          const company = await supabaseService.upsertCompany(companyData);
+        if (org.name) {
+          const companyResult = await upsertFinderCompanyActivity({ organization: org });
+          if (!companyResult.success) return { success: false, error: companyResult.error };
+          const company = companyResult.company;
           companies.push(company);
           console.log(`✅ Company created/updated: ${company.name} (${company.id})`);
           
@@ -356,13 +362,13 @@ export async function callPersonContactsLookupDetailsActivity(options: {
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         console.error(`❌ Failed to create/update company ${org.name}: ${errorMsg}`);
-        // Continue with other companies
+        return { success: false, error: `Failed to save company ${org.name}: ${errorMsg}` };
       }
     }
 
     // Create/update lead if site_id is provided
     let lead: any = null;
-    if (options.site_id && createdPerson) {
+    if (options.site_id && createdPerson && contactValues(createdPerson.emails, createdPerson.personal_emails, createdPerson.phones).length) {
       console.log(`📋 Creating/updating lead for site: ${options.site_id}`);
       
       // Extract primary email and phone if available (from person data or roles)
@@ -373,12 +379,13 @@ export async function callPersonContactsLookupDetailsActivity(options: {
         person_id: createdPerson.id,
         site_id: options.site_id,
         name: personRecord.full_name || undefined,
-        email: undefined, // Will be enriched later
-        phone: undefined, // Will be enriched later
-        personal_email: undefined, // Will be enriched later
+        email: contactValues(createdPerson.emails)[0],
+        phone: contactValues(createdPerson.phones)[0],
+        personal_email: contactValues(createdPerson.personal_emails)[0],
         userId: options.userId,
         company_id: currentCompanyId, // Associate lead with current company
         linkedin_url: linkedinUrl || undefined,
+        profile: finderLeadProfile(createdPerson, currentRole),
       });
 
       if (leadResult.success) {
@@ -386,7 +393,7 @@ export async function callPersonContactsLookupDetailsActivity(options: {
         console.log(`✅ Lead created/updated: ${leadResult.leadId}`);
       } else {
         console.error(`❌ Failed to create/update lead: ${leadResult.error}`);
-        // Don't fail the whole operation if lead creation fails
+        return { success: false, error: `Failed to save lead: ${leadResult.error}` };
       }
     }
 
@@ -464,11 +471,14 @@ export async function updateIcpMiningProgressActivity(options: {
   id: string;
   deltaProcessed?: number;
   deltaFound?: number;
+  processedTargets?: number; // Absolute retry-safe checkpoint for configured mining
+  foundMatches?: number;
   status?: 'pending' | 'running' | 'completed' | 'failed';
   totalTargets?: number;
   last_error?: string | null;
   appendError?: string; // push into errors[]
   currentPage?: number;
+  currentPageOffset?: number;
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const supabaseService = getSupabaseService();
@@ -488,8 +498,8 @@ export async function updateIcpMiningProgressActivity(options: {
       return { success: false, error: fetchError.message };
     }
 
-    const newProcessed = (current?.processed_targets || 0) + (options.deltaProcessed || 0);
-    const newFound = (current?.found_matches || 0) + (options.deltaFound || 0);
+    const newProcessed = options.processedTargets ?? ((current?.processed_targets || 0) + (options.deltaProcessed || 0));
+    const newFound = options.foundMatches ?? ((current?.found_matches || 0) + (options.deltaFound || 0));
     const errors = Array.isArray(current?.errors) ? current.errors.slice() : [];
     if (options.appendError) {
       errors.push({ timestamp: new Date().toISOString(), message: options.appendError });
@@ -505,6 +515,7 @@ export async function updateIcpMiningProgressActivity(options: {
       ...(options.last_error !== undefined && { last_error: options.last_error }),
       errors,
       ...(options.currentPage !== undefined && { current_page: options.currentPage }),
+      ...(options.currentPageOffset !== undefined && { current_page_offset: options.currentPageOffset }),
     };
 
     const { error: updateError } = await supabaseServiceRole
@@ -561,18 +572,35 @@ export async function markIcpMiningCompletedActivity(options: { id: string; fail
 }
 
 // List pending ICP Mining rows (optionally limited and filtered by site_id)
-export async function getPendingIcpMiningActivity(options?: { limit?: number; site_id?: string }): Promise<{
+export async function getPendingIcpMiningActivity(options?: { limit?: number; site_id?: string; icp_mining_ids?: string[] }): Promise<{
   success: boolean;
   items?: any[];
   error?: string;
 }> {
   try {
+    const selectedIds = options?.icp_mining_ids === undefined ? undefined : normalizeIcpMiningListIds(options.icp_mining_ids);
+    if (selectedIds !== undefined && !options?.site_id) return { success: false, error: 'site_id is required for selected ICP lists' };
+    if (selectedIds?.length === 0) return { success: true, items: [] };
     const supabaseService = getSupabaseService();
     const isConnected = await supabaseService.getConnectionStatus();
     if (!isConnected) return { success: false, error: 'Database not available' };
     const { supabaseServiceRole } = await import('../../lib/supabase/client');
 
     const limit = options?.limit && options.limit > 0 ? options.limit : 50;
+    if (selectedIds) {
+      const items: any[] = [];
+      // Filter before LIMIT, with bounded URLs even for a large selection.
+      for (let offset = 0; offset < selectedIds.length; offset += 100) {
+        const { data, error } = await supabaseServiceRole.from('icp_mining').select('*')
+          .eq('site_id', options!.site_id!).in('status', ['running', 'pending'])
+          .in('id', selectedIds.slice(offset, offset + 100))
+          .order('created_at', { ascending: true }).order('id', { ascending: true }).limit(limit);
+        if (error) return { success: false, error: error.message };
+        items.push(...(data || []));
+      }
+      items.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)));
+      return { success: true, items: items.slice(0, limit) };
+    }
     let query = supabaseServiceRole
       .from('icp_mining')
       .select('*')
@@ -813,7 +841,7 @@ export async function checkExistingLeadForPersonActivity(options: {
     // Check if there's already a lead for this person
     const { data: existingLead, error } = await supabaseServiceRole
       .from('leads')
-      .select('id, name, email, phone, personal_email, status, created_at, company_id')
+      .select('id, name, email, phone, personal_email, status, created_at, company_id, metadata')
       .eq('site_id', options.site_id)
       .eq('person_id', options.person_id)
       .limit(1)
@@ -835,6 +863,7 @@ export async function checkExistingLeadForPersonActivity(options: {
 
 // Upsert person into persons table
 export async function upsertPersonActivity(person: {
+  id?: string;
   role_query_id?: string;
   external_person_id?: number | string | null;
   external_role_id?: number | string | null;
@@ -848,6 +877,7 @@ export async function upsertPersonActivity(person: {
   location?: string | null;
   linkedin_profile?: string | null;
   emails?: any | null;
+  personal_emails?: any | null;
   phones?: any | null;
   raw_result: any;
 }): Promise<{ success: boolean; person?: any; error?: string }> {
@@ -857,34 +887,24 @@ export async function upsertPersonActivity(person: {
     if (!isConnected) return { success: false, error: 'Database not available' };
     const { supabaseServiceRole } = await import('../../lib/supabase/client');
 
-    // Try to find existing by unique external ids if available
+    // Reuse the known local row first. Nullable role IDs must not create duplicates.
     let existing: any = null;
-    if (person.external_person_id && person.external_role_id) {
-      const { data: found } = await supabaseServiceRole
-        .from('persons')
-        .select('*')
-        .eq('external_person_id', person.external_person_id)
-        .eq('external_role_id', person.external_role_id)
-        .maybeSingle();
+    if (person.id || person.external_person_id != null) {
+      let query = supabaseServiceRole.from('persons').select('*');
+      if (person.id) query = query.eq('id', person.id);
+      else {
+        query = query.eq('external_person_id', person.external_person_id!);
+        if (person.external_role_id != null) query = query.eq('external_role_id', person.external_role_id);
+        else query = query.order('created_at', { ascending: false }).limit(1);
+      }
+      const { data: found, error } = await query.maybeSingle();
+      if (error) return { success: false, error: error.message };
+      if (person.id && !found) return { success: false, error: 'Person to update was not found' };
       existing = found || null;
     }
 
     const payload = {
-      role_query_id: person.role_query_id || null,
-      external_person_id: person.external_person_id ?? null,
-      external_role_id: person.external_role_id ?? null,
-      external_organization_id: person.external_organization_id ?? null,
-      full_name: person.full_name ?? null,
-      role_title: person.role_title ?? null,
-      company_name: person.company_name ?? null,
-      start_date: person.start_date ?? null,
-      end_date: person.end_date ?? null,
-      is_current: person.is_current ?? null,
-      location: person.location ?? null,
-      linkedin_profile: person.linkedin_profile ?? null,
-      emails: person.emails ?? null,
-      phones: person.phones ?? null,
-      raw_result: person.raw_result,
+      ...personPersistencePayload(existing, person),
       updated_at: new Date().toISOString(),
       ...(existing ? {} : { created_at: new Date().toISOString() }),
     } as any;
@@ -909,6 +929,7 @@ export async function upsertPersonActivity(person: {
       resultRow = data;
     }
 
+    if (!resultRow?.id) return { success: false, error: 'Person save returned no row' };
     return { success: true, person: resultRow };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -918,21 +939,8 @@ export async function upsertPersonActivity(person: {
 
 // Update person emails field
 export async function updatePersonEmailsActivity(options: { person_id: string; emails: string[] }): Promise<{ success: boolean; error?: string }> {
-  try {
-    const supabaseService = getSupabaseService();
-    const isConnected = await supabaseService.getConnectionStatus();
-    if (!isConnected) return { success: false, error: 'Database not available' };
-    const { supabaseServiceRole } = await import('../../lib/supabase/client');
-    const { error } = await supabaseServiceRole
-      .from('persons')
-      .update({ emails: options.emails, updated_at: new Date().toISOString() })
-      .eq('id', options.person_id);
-    if (error) return { success: false, error: error.message };
-    return { success: true };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { success: false, error: message };
-  }
+  const result = await upsertPersonActivity({ id: options.person_id, emails: options.emails, raw_result: {} });
+  return { success: result.success, ...(result.error ? { error: result.error } : {}) };
 }
 
 /**
@@ -990,6 +998,8 @@ export async function upsertLeadForPersonActivity(options: {
   segment_id?: string;
   person_emails?: string[]; // Optional: pass person emails to avoid DB query
   linkedin_url?: string; // LinkedIn profile URL from Person API
+  profile?: FinderData; // Schema-mapped provider data, merged with existing metadata/research
+  validated_contact_policy?: boolean;
 }): Promise<{
   success: boolean;
   lead?: any;
@@ -1010,19 +1020,20 @@ export async function upsertLeadForPersonActivity(options: {
       .eq('site_id', options.site_id)
       .maybeSingle();
 
-    if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is "not found" which is OK
+    if (checkError) {
       return { success: false, error: checkError.message };
     }
 
     // Get person data for name if not provided
     let leadName = options.name;
     if (!leadName) {
-      const { data: person } = await supabaseServiceRole
+      const { data: person, error } = await supabaseServiceRole
         .from('persons')
         .select('full_name')
         .eq('id', options.person_id)
         .single();
-      leadName = person?.full_name || 'Unknown';
+      if (error) return { success: false, error: error.message };
+      leadName = person?.full_name || existingLead?.name || 'Unknown';
     }
 
     // Validate that person has at least one contact method: work email, personal email, or phone
@@ -1031,15 +1042,16 @@ export async function upsertLeadForPersonActivity(options: {
     if (options.person_emails) {
       personEmails = Array.isArray(options.person_emails) ? options.person_emails : [];
     } else {
-      const { data: personData } = await supabaseServiceRole
+      const { data: personData, error } = await supabaseServiceRole
         .from('persons')
         .select('emails')
         .eq('id', options.person_id)
         .single();
-      personEmails = personData?.emails || [];
+      if (error) return { success: false, error: error.message };
+      personEmails = contactValues(personData?.emails);
     }
     
-    const hasPersonWorkEmail = Array.isArray(personEmails) && personEmails.length > 0 && personEmails[0]?.trim() !== '';
+    const hasPersonWorkEmail = contactValues(personEmails, options.email).length > 0;
     
     // Check if we have at least one contact method: work email, personal email, or phone
     const hasPersonalEmail = options.personal_email && options.personal_email.trim() !== '';
@@ -1050,10 +1062,10 @@ export async function upsertLeadForPersonActivity(options: {
     if (existingLead) {
       const existingPersonalEmail = existingLead.personal_email && existingLead.personal_email.trim() !== '';
       const existingPhone = existingLead.phone && existingLead.phone.trim() !== '';
-      hasExistingContact = existingPersonalEmail || existingPhone;
+      hasExistingContact = !!(hasData(existingLead.email) || existingPersonalEmail || existingPhone);
     }
     
-    const hasAtLeastOneContact = hasPersonWorkEmail || hasPersonalEmail || hasPhone || hasExistingContact;
+    const hasAtLeastOneContact = hasPersonWorkEmail || hasPersonalEmail || hasPhone || (!options.validated_contact_policy && hasExistingContact);
     
     if (!hasAtLeastOneContact) {
       return { success: false, error: 'Person must have at least 1 contact method (work email, personal email, or phone) to create/update lead' };
@@ -1065,18 +1077,36 @@ export async function upsertLeadForPersonActivity(options: {
       name: leadName,
       // If company_id is provided, it means lead will be enriched, so allow null/empty email
       // Otherwise, require email or phone for lead creation
-      email: options.email !== undefined ? (options.email || '') : (options.company_id ? null : ''),
-      phone: options.phone || null,
-      personal_email: options.personal_email || null,
+      // Provider refreshes may add alternatives but must never replace validated primaries.
+      email: options.validated_contact_policy ? options.email || '' : existingLead?.email || options.email || contactValues(personEmails)[0] || '',
+      phone: options.validated_contact_policy ? options.phone || null : existingLead?.phone || options.phone || null,
+      personal_email: options.validated_contact_policy ? options.personal_email || null : existingLead?.personal_email || options.personal_email || null,
       updated_at: new Date().toISOString(),
     };
+
+    for (const key of ['position', 'address', 'company', 'metadata', 'social_networks']) {
+      if (hasData(options.profile?.[key])) {
+        leadData[key] = mergeFinderData(existingLead?.[key], options.profile![key]);
+      }
+    }
+    if (options.profile?.metadata?.finder) {
+      // Keep both prior validated primaries and any new alternatives in structured metadata.
+      leadData.metadata = mergeFinderData(leadData.metadata || existingLead?.metadata, { finder: { contacts: {
+        emails: contactValues(existingLead?.email, options.email, personEmails),
+        personal_emails: contactValues(existingLead?.personal_email, options.personal_email),
+        phones: contactValues(existingLead?.phone, options.phone),
+      } } });
+    }
+    if (options.validated_contact_policy) {
+      leadData.metadata = { ...existingLead?.metadata, ...leadData.metadata, emailVerified: !!options.email };
+    }
 
     // Add social_networks.linkedin if provided (merge with existing to preserve other platforms)
     if (options.linkedin_url) {
       const existingSocial = existingLead?.social_networks && typeof existingLead.social_networks === 'object'
         ? existingLead.social_networks
         : {};
-      leadData.social_networks = { ...existingSocial, linkedin: options.linkedin_url };
+      leadData.social_networks = { ...existingSocial, ...leadData.social_networks, linkedin: options.linkedin_url };
     }
 
     // Add company_id if provided
@@ -1091,10 +1121,10 @@ export async function upsertLeadForPersonActivity(options: {
 
     // Append notes if provided
     if (options.notes) {
-      if (existingLead?.notes) {
+      if (existingLead?.notes && !existingLead.notes.includes(options.notes)) {
         leadData.notes = `${existingLead.notes}\n${options.notes}`;
       } else {
-        leadData.notes = options.notes;
+        leadData.notes = existingLead?.notes || options.notes;
       }
     }
 
@@ -1119,12 +1149,13 @@ export async function upsertLeadForPersonActivity(options: {
       // Create new lead
       if (!options.userId) {
         // Try to get user_id from site
-        const { data: site } = await supabaseServiceRole
+        const { data: site, error } = await supabaseServiceRole
           .from('sites')
           .select('user_id')
           .eq('id', options.site_id)
           .single();
         
+        if (error) return { success: false, error: error.message };
         if (site?.user_id) {
           leadData.user_id = site.user_id;
         } else {
@@ -1146,6 +1177,7 @@ export async function upsertLeadForPersonActivity(options: {
       resultLead = data;
     }
 
+    if (!resultLead?.id) return { success: false, error: 'Lead save returned no row' };
     return { success: true, lead: resultLead, leadId: resultLead.id };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1153,4 +1185,158 @@ export async function upsertLeadForPersonActivity(options: {
   }
 }
 
+/** Finder-specific company persistence. Do not add provider IDs/unknown fields to companies.
+ * Name alone is not sufficient when provider identities conflict.
+ */
+export async function upsertFinderCompanyActivity(options: { organization: FinderData; company_id?: string }): Promise<{
+  success: boolean; company?: any; error?: string;
+}> {
+  try {
+    if (!await getSupabaseService().getConnectionStatus()) return { success: false, error: 'Database not available' };
+    const { supabaseServiceRole: db } = await import('../../lib/supabase/client');
+    const payload = finderCompanyRecord(options.organization);
+    if (!payload.name) return { success: false, error: 'Organization name is required' };
+    const domain = domainOf(payload.website);
+    const linkedin = (value: any) => typeof value === 'string' ? value.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '') : '';
+    const profile = linkedin(payload.linkedin_url);
+    let existing: any;
+    // Only trusted callers may pass a local ID (e.g. an existing lead.company_id).
+    // A stale ID is a failure, never a reason to create an unrelated company.
+    if (options.company_id) {
+      const { data, error } = await db.from('companies').select('*').eq('id', options.company_id).maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error('Company to update was not found');
+      existing = data;
+    }
+    const choose = (rows: any[]) => {
+      const matches = rows.filter(row => {
+        const rowDomain = domainOf(row.website);
+        const rowProfile = linkedin(row.linkedin_url);
+        return !(domain && rowDomain && domain !== rowDomain) && !(profile && rowProfile && profile !== rowProfile);
+      });
+      if (matches.length > 1) throw new Error(`Ambiguous organization identity: ${payload.name}`);
+      return matches[0];
+    };
+    if (!existing && domain) {
+      // Wildcard results are filtered by exact parsed hostname before selecting a company.
+      const { data, error } = await db.from('companies').select('*').ilike('website', `%${domain}%`).limit(50);
+      if (error) throw new Error(error.message);
+      existing = choose((data || []).filter(row => domainOf(row.website) === domain));
+    }
+    if (!existing && profile) {
+      const { data, error } = await db.from('companies').select('*').ilike('linkedin_url', `%${profile.replace(/[%_]/g, '')}%`).limit(50);
+      if (error) throw new Error(error.message);
+      existing = choose((data || []).filter(row => linkedin(row.linkedin_url) === profile));
+    }
+    if (!existing) {
+      // Escape LIKE wildcards so provider names are literals.
+      const namePattern = String(payload.name).replace(/[\\%_]/g, '\\$&');
+      const { data, error } = await db.from('companies').select('*').ilike('name', namePattern).limit(50);
+      if (error) throw new Error(error.message);
+      existing = choose(data || []);
+      if (!existing && (data || []).length && !domain && !profile) throw new Error(`Cannot resolve organization identity: ${payload.name}`);
+    }
+    for (const key of Object.keys(payload)) {
+      if (existing?.[key] && typeof payload[key] === 'object') payload[key] = mergeFinderData(existing[key], payload[key]);
+    }
+    payload.updated_at = new Date().toISOString();
+    const write = existing
+      ? db.from('companies').update(payload).eq('id', existing.id)
+      : db.from('companies').insert(payload);
+    const { data, error } = await write.select().single();
+    if (error) throw new Error(error.message);
+    if (!data?.id) throw new Error('Company save returned no row');
+    return { success: true, company: data };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Source-aware preparation is one activity so optional lookup errors cannot bypass persistence.
+ * Full snapshots survive sparse details refreshes and contacts are never blanked here.
+ */
+export async function prepareFinderPersonActivity(options: {
+  person_id?: string; linkedin_profile?: string; site_id: string; company_name?: string; source_search_result: FinderData;
+}): Promise<{ success: boolean; person?: any; role?: any; companyId?: string; errors: string[]; error?: string }> {
+  const errors: string[] = [];
+  try {
+    if (!await getSupabaseService().getConnectionStatus()) throw new Error('Database not available');
+    const { supabaseServiceRole: db } = await import('../../lib/supabase/client');
+    const source = options.source_search_result;
+    const sourcePerson = source.person || source;
+    const sourceId = sourcePerson.id ?? sourcePerson.external_person_id ?? sourcePerson.person_id;
+    const externalId = sourceId ?? options.person_id;
+    const localIdProvided = options.person_id && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(options.person_id);
+    let query = db.from('persons').select('*');
+    if (localIdProvided) query = query.eq('id', options.person_id!);
+    else if (externalId != null) {
+      query = query.eq('external_person_id', externalId);
+      if (source.person && source.id != null) query = query.eq('external_role_id', source.id);
+      query = query.order('created_at', { ascending: false }).limit(1);
+    } else if (options.linkedin_profile) query = query.eq('linkedin_profile', options.linkedin_profile).limit(1);
+    else throw new Error('Finder person identity is required');
+    const { data: existing, error: readError } = await query.maybeSingle();
+    if (readError) throw new Error(readError.message);
+    if (localIdProvided && !existing) throw new Error('Person to enrich was not found');
+    if (sourceId != null && existing?.external_person_id != null && String(sourceId) !== String(existing.external_person_id)) {
+      throw new Error('Source person identity does not match existing person');
+    }
+
+    let details: any;
+    const today = new Date().toISOString().slice(0, 10);
+    if (!existing || String(existing.updated_at || existing.created_at || '').slice(0, 10) < today) {
+      try {
+        const personId = existing?.external_person_id ?? externalId;
+        const request: FinderData = { site_id: options.site_id };
+        if (personId != null && /^\d+$/.test(String(personId))) request.person_id = personId;
+        else {
+          const url = options.linkedin_profile || sourcePerson.linkedin_info?.public_profile_url;
+          const identifier = typeof url === 'string' ? url.match(/linkedin\.com\/in\/([^/?#]+)/i)?.[1] : undefined;
+          if (!identifier) throw new Error('No external person ID or LinkedIn identifier for details lookup');
+          request.linkedin_public_identifier = identifier;
+        }
+        const response = await apiService.post('/api/finder/person_contacts_lookup/details', request);
+        const responseError = response.error?.message || finderResponseError(response.data);
+        if (!response.success || responseError) throw new Error(responseError || 'Details lookup failed');
+        details = response.data?.data || response.data;
+        if (!details || typeof details !== 'object' || Array.isArray(details)) throw new Error('Details lookup returned invalid person data');
+        const detailPersonId = details.person?.id ?? details.id;
+        if (detailPersonId != null && sourceId != null && String(detailPersonId) !== String(sourceId)) {
+          details = undefined;
+          throw new Error('Details lookup returned a different person identity');
+        }
+      } catch (error) { errors.push(`Details lookup: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    const raw = normalizeFinderPerson(source, details, existing?.raw_result);
+    const role = selectFinderRole(raw, { source, company_name: options.company_name, external_role_id: existing?.external_role_id });
+    const personRecord = finderPersonRecord(raw, role);
+    if (!/^\d+$/.test(String(personRecord.external_person_id))) personRecord.external_person_id = existing?.external_person_id;
+    if (!personRecord.external_person_id && /^\d+$/.test(String(externalId))) personRecord.external_person_id = externalId;
+    // persons are per-role: do not mutate a different role's local row (and its lead links).
+    const sameRole = existing?.external_role_id == null || personRecord.external_role_id == null
+      || String(existing.external_role_id) === String(personRecord.external_role_id);
+    const saved = await upsertPersonActivity({ ...personRecord, id: sameRole ? existing?.id : undefined, raw_result: raw });
+    if (!saved.success || !saved.person?.id) throw new Error(saved.error || 'Person was not saved');
+
+    const organizations: FinderData[] = [];
+    for (const entry of [...(raw.roles || []), ...(raw.educations || [])]) {
+      const org = entry.organization || (entry.organization_name ? { name: entry.organization_name } : undefined);
+      if (org?.name && !organizations.some(o => org.id != null ? String(o.id) === String(org.id) : o.name === org.name)) organizations.push(org);
+    }
+    if (raw.organization?.name && !organizations.some(o => o.name === raw.organization.name)) organizations.push(raw.organization);
+    let companyId: string | undefined;
+    for (const org of organizations) {
+      const result = await upsertFinderCompanyActivity({ organization: org });
+      if (!result.success || !result.company?.id) throw new Error(result.error || `Company ${org.name} was not saved`);
+      const selected = role?.organization;
+      if ((selected?.id != null && String(selected.id) === String(org.id))
+        || (selected?.id == null && (selected?.name || role?.organization_name) === org.name)
+        || (!role && raw.organization === org)) companyId = result.company.id;
+    }
+    return { success: true, person: saved.person, role, companyId, errors };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message, errors: [...errors, message] };
+  }
+}
 

@@ -1,4 +1,4 @@
-import { proxyActivities, upsertSearchAttributes, workflowInfo } from '@temporalio/workflow';
+import { patched, proxyActivities, upsertSearchAttributes, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 // Define the activity interface and options
@@ -7,6 +7,7 @@ const {
   saveCronStatusActivity,
   validateAndCleanStuckCronStatusActivity,
   validateWorkflowConfigActivity,
+  getDailyStandUpConfigurationActivity,
   cmoWrapUpActivity,
   sendDailyStandUpNotificationActivity,
 } = proxyActivities<Activities>({
@@ -38,6 +39,8 @@ export interface DailyStandUpResult {
   growthAnalysis?: any;              // Results from growth analysis
   finalSummary?: string;             // Final summary from wrap up
   notificationSent?: boolean;        // Whether notification was sent successfully
+  skipped?: boolean;
+  skipReason?: string;
   data?: any;                        // All collected data
   errors: string[];
   executionTime: string;
@@ -45,22 +48,8 @@ export interface DailyStandUpResult {
 }
 
 /**
- * Workflow to execute CMO daily stand up
- * 
- * Este workflow:
- * 1. Obtiene información del sitio
- * 2. Ejecuta análisis del sistema (settings, billing, aspectos básicos) - CRÍTICO: debe generar command_id
- * 3. Ejecuta análisis de ventas (resumen del agente de ventas)
- * 4. Ejecuta análisis de soporte (tareas y conversaciones recientes)
- * 5. Ejecuta análisis de crecimiento (contenidos y experimentos)
- * 6. Ejecuta wrap up (junta todas las memorias y hace resumen final)
- * 
- * IMPORTANTE: Si el system analysis falla o no genera command_id, el workflow falla
- * porque los análisis posteriores requieren continuidad de memoria.
- * 
- * Todas las etapas (excepto wrap up) pueden ejecutarse en paralelo si runParallel = true
- * 
- * @param options - Configuration options for daily stand up
+ * Generate and deliver a wrap-up using the site's current weekday and section preferences.
+ * Revalidate before delivery; existing Temporal histories retain their original activity sequence.
  */
 export async function dailyStandUpWorkflow(
   options: DailyStandUpOptions
@@ -100,9 +89,11 @@ export async function dailyStandUpWorkflow(
 
   // STEP 0: Validate workflow configuration
   console.log('🔐 Step 0: Validating workflow configuration...');
-  const configValidation = await validateWorkflowConfigActivity(
-    site_id,
-    'daily_resume_and_stand_up'
+  const configurableStandup = patched('daily-standup-configuration-v1');
+  const configuration = configurableStandup
+    ? await getDailyStandUpConfigurationActivity({ site_id }) : null;
+  const configValidation = configuration ?? await validateWorkflowConfigActivity(
+    site_id, 'daily_resume_and_stand_up',
   );
   
   if (!configValidation.shouldExecute) {
@@ -114,13 +105,16 @@ export async function dailyStandUpWorkflow(
       workflowType: 'dailyStandUpWorkflow',
       status: 'BLOCKED',
       input: options,
-      error: `Workflow is ${configValidation.activityStatus} in site settings`,
+      error: configValidation.reason,
     });
 
     return {
       success: false,
       siteId: site_id,
-      errors: [`Workflow is ${configValidation.activityStatus} in site settings`],
+      errors: [configValidation.reason],
+      skipped: true,
+      skipReason: configValidation.reason,
+      notificationSent: false,
       executionTime: `${Date.now() - startTime}ms`,
       completedAt: new Date().toISOString(),
     };
@@ -184,6 +178,7 @@ export async function dailyStandUpWorkflow(
     const baseRequest = {
       site_id: site_id,
       userId: options.userId,
+      ...(configuration ? { report_sections: configuration.reportSections } : {}),
       additionalData: {
         ...options.additionalData,
         workflowId: workflowId
@@ -213,6 +208,36 @@ export async function dailyStandUpWorkflow(
       throw new Error(errorMsg);
     }
 
+    if (configuration) {
+      // Do not send a generic legacy response from an API deployment that ignores section selection.
+      if (!Array.isArray(wrapUpResult.report_sections)
+        || wrapUpResult.report_sections.length !== configuration.reportSections.length
+        || configuration.reportSections.some(section => !wrapUpResult.report_sections.includes(section))
+        || typeof wrapUpResult.message !== 'string' || !wrapUpResult.message.trim()) {
+        throw new Error('Wrap up response does not match the selected Daily Standup report sections');
+      }
+      finalCommandId = wrapUpResult.command_id || finalCommandId;
+      const current = await getDailyStandUpConfigurationActivity({ site_id });
+      const skipReason = !current.shouldExecute ? current.reason
+        : current.reportSections.join(',') !== configuration.reportSections.join(',')
+          ? 'Daily Standup report sections changed during generation; outdated report was not sent'
+          : undefined;
+      if (skipReason) {
+        const result: DailyStandUpResult = {
+          success: false, siteId: site_id, skipped: true, skipReason, notificationSent: false,
+          errors: [skipReason], executionTime: `${Date.now() - startTime}ms`, completedAt: new Date().toISOString(),
+        };
+        await saveCronStatusActivity({
+          siteId: site_id, workflowId, scheduleId, activityName: 'dailyStandUpWorkflow',
+          status: 'COMPLETED', lastRun: new Date().toISOString(),
+        });
+        await logWorkflowExecutionActivity({
+          workflowId, workflowType: 'dailyStandUpWorkflow', status: 'BLOCKED', input: options, output: result,
+        });
+        return result;
+      }
+    }
+
     // Prepare notification payload with safe fallbacks to avoid re-calling wrap-up
     const safeSubject = wrapUpResult.subject || `Daily Stand Up - Site ${site_id}`;
     const safeMessage = wrapUpResult.message || wrapUpResult.summary || 'No message generated by wrap-up. Please review the summary and health data.';
@@ -230,7 +255,8 @@ export async function dailyStandUpWorkflow(
         site_id: site_id,
         subject: safeSubject,
         message: safeMessage,
-        health: wrapUpResult.health
+        ...(configuration ? { report_sections: configuration.reportSections } : {}),
+        health: configuration ? undefined : wrapUpResult.health
       });
       notificationSent = true;
       console.log(`✅ Daily stand up notification sent successfully`);
@@ -248,7 +274,7 @@ export async function dailyStandUpWorkflow(
       success: true,
       siteId: site_id,
       command_id: finalCommandId,
-      finalSummary: wrapUpResult?.summary,
+      finalSummary: wrapUpResult?.summary || (configuration ? wrapUpResult?.message : undefined),
       notificationSent,
       data: { wrapUp: wrapUpResult },
       errors,

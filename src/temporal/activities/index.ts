@@ -19,6 +19,7 @@ export * from './updateMessageStatusActivity';
 export * from './interventionActivities';
 export * from './dataAnalystActivities';
 export * from './cmoActivities';
+export * from './dailyStandUpConfigurationActivity';
 export * from './leadGenerationActivities';
 export * from './uxActivities';
 export * from './newsletterActivities';
@@ -29,6 +30,9 @@ export * from './validateEmailActivities';
 export * from './webhookActivities';
 export * from './finderActivities';
 export * from './activityControlActivities';
+export * from './icpMiningConfigurationActivity';
+export * from './icpMiningExecutionActivities';
+export * from './leadResearchStateActivity';
 export * from './messageActivities';
 export * from './outreachDeliveryActivities';
 export * from './outreachConfigurationActivity';
@@ -66,6 +70,7 @@ import * as updateMessageStatusActivity from './updateMessageStatusActivity';
 import * as interventionActivities from './interventionActivities';
 import * as dataAnalystActivities from './dataAnalystActivities';
 import * as cmoActivities from './cmoActivities';
+import * as dailyStandUpConfigurationActivities from './dailyStandUpConfigurationActivity';
 import * as leadGenerationActivities from './leadGenerationActivities';
 import * as uxActivities from './uxActivities';
 import * as newsletterActivities from './newsletterActivities';
@@ -76,6 +81,9 @@ import * as validateEmailActivities from './validateEmailActivities';
 import * as webhookActivities from './webhookActivities';
 import * as finderActivities from './finderActivities';
 import * as activityControlActivities from './activityControlActivities';
+import * as icpMiningConfigurationActivities from './icpMiningConfigurationActivity';
+import * as icpMiningExecutionActivities from './icpMiningExecutionActivities';
+import * as leadResearchStateActivities from './leadResearchStateActivity';
 import * as messageActivities from './messageActivities';
 import * as outreachDeliveryActivities from './outreachDeliveryActivities';
 import * as outreachConfigurationActivities from './outreachConfigurationActivity';
@@ -113,6 +121,7 @@ export const activities = {
   ...interventionActivities,
   ...dataAnalystActivities,
   ...cmoActivities,
+  ...dailyStandUpConfigurationActivities,
   ...leadGenerationActivities,
   ...uxActivities,
   ...newsletterActivities,
@@ -123,6 +132,9 @@ export const activities = {
   ...webhookActivities,
   ...finderActivities,
   ...activityControlActivities,
+  ...icpMiningConfigurationActivities,
+  ...icpMiningExecutionActivities,
+  ...leadResearchStateActivities,
   ...messageActivities,
   ...outreachDeliveryActivities,
   ...outreachConfigurationActivities,

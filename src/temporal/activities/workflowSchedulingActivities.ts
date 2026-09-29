@@ -18,6 +18,8 @@ import { generateDailyWorkflowId, DAILY_WORKFLOW_REUSE_POLICY } from '../utils/w
 import { getOutreachConfigurationActivity } from './outreachConfigurationActivity';
 import { localOutreachDay, nextOutreachRun } from '../utils/outreachConfiguration';
 import { shouldScheduleWorkflow } from '../utils/activityOptIn';
+import { resolveDailyStandUpConfiguration } from '../utils/dailyStandUpConfiguration';
+import { nextDailyStandUpRun } from '../utils/dailyStandUpScheduling';
 
 export interface ScheduleWorkflowResult {
   workflowId: string;
@@ -780,12 +782,12 @@ function getNextRunTime(cronExpression: string): Date {
 }
 
 /**
- * Execute daily stand up workflows for sites with active business hours
+ * Execute Daily Standup for sites whose current settings select today's local weekday.
  * 
  * @param options.dryRun - If true, only simulates execution without running real workflows
  * @param options.testMode - If true, adds safety checks and limits to prevent production issues
  * @param options.maxSites - Maximum number of sites to process (useful for testing)
- * @param options.businessHoursAnalysis - Business hours analysis from prioritization engine for filtering sites
+ * @param options.businessHoursAnalysis - Optional diagnostic context; never overrides standup preferences
  */
 export async function executeDailyStandUpWorkflowsActivity(
   options: { 
@@ -806,15 +808,7 @@ export async function executeDailyStandUpWorkflowsActivity(
   
   const { businessHoursAnalysis } = options;
   
-  if (businessHoursAnalysis) {
-    console.log('📋 BUSINESS HOURS FILTERING ENABLED:');
-    console.log(`   - Sites with business_hours: ${businessHoursAnalysis.sitesWithBusinessHours}`);
-    console.log(`   - Sites open today: ${businessHoursAnalysis.sitesOpenToday}`);
-    console.log(`   - Will execute for filtered sites only`);
-  } else {
-    console.log('📋 FALLBACK MODE - No business hours filtering:');
-    console.log('   - Will execute for all sites (legacy behavior)');
-  }
+  console.log('📋 Daily Standup eligibility uses persisted settings and each site’s local weekday');
   
   // Safety checks for test mode
   if (options.testMode) {
@@ -834,7 +828,8 @@ export async function executeDailyStandUpWorkflowsActivity(
   const testInfo: any = {
     mode: options.dryRun ? 'DRY_RUN' : 'PRODUCTION',
     testMode: options.testMode,
-    businessHoursFiltering: !!businessHoursAnalysis,
+    businessHoursFiltering: false,
+    configurationFiltering: true,
     startTime: new Date().toISOString(),
     endTime: '',
     duration: '',
@@ -852,31 +847,8 @@ export async function executeDailyStandUpWorkflowsActivity(
       throw new Error('Database not available for workflow execution');
     }
 
-    let sitesToProcess: any[] = [];
-
-    if (businessHoursAnalysis && businessHoursAnalysis.openSites.length > 0) {
-      // FILTERED MODE: Only process sites with active business hours
-      console.log('🔍 Using business hours filtering...');
-      
-      const allSites = await supabaseService.fetchSites();
-      const openSiteIds = businessHoursAnalysis.openSites.map((site: any) => site.siteId);
-      
-      sitesToProcess = allSites.filter(site => openSiteIds.includes(site.id));
-      
-      console.log(`✅ Found ${allSites.length} total sites, filtered to ${sitesToProcess.length} sites with active business hours`);
-      
-      if (businessHoursAnalysis.openSites.length > 0) {
-        console.log('📊 Sites to process:');
-        businessHoursAnalysis.openSites.forEach((site: any) => {
-          console.log(`   • Site ${site.siteId}: ${site.businessHours.open} - ${site.businessHours.close}`);
-        });
-      }
-    } else {
-      // FALLBACK MODE: Process all sites (legacy behavior)
-      console.log('⏮️ Using fallback mode - processing all sites...');
-      sitesToProcess = await supabaseService.fetchSites();
-      console.log(`✅ Found ${sitesToProcess.length} sites total (fallback mode)`);
-    }
+    // fetchSites does not join settings; neither embedded settings nor openSites is authoritative.
+    let sitesToProcess = await supabaseService.fetchSites();
 
     // Apply maxSites limit if specified
     if (options.maxSites && options.maxSites > 0) {
@@ -898,10 +870,20 @@ export async function executeDailyStandUpWorkflowsActivity(
 
     testInfo.totalSites = sitesToProcess.length;
     testInfo.siteNames = sitesToProcess.map(s => s.name);
+    const settings = await supabaseService.fetchCompleteSettings(sitesToProcess.map(site => site.id));
+    const settingsBySite = new Map(settings.map(setting => [setting.site_id, setting]));
+    let skipped = 0;
 
-    // Execute daily stand up workflow for each filtered site
+    // Resolve at the point of dispatch so a local day rollover cannot bypass the day check.
     for (const site of sitesToProcess) {
       try {
+        const now = new Date();
+        const configuration = resolveDailyStandUpConfiguration(settingsBySite.get(site.id), now);
+        if (!configuration.shouldExecute) {
+          console.log(`⏭️ Skipping Daily Standup for ${site.id}: ${configuration.reason}`);
+          skipped++;
+          continue;
+        }
         console.log(`\n📋 Executing Daily Stand Up for site: ${site.name} (${site.id})`);
 
         if (options.dryRun) {
@@ -910,15 +892,11 @@ export async function executeDailyStandUpWorkflowsActivity(
           continue;
         }
 
-        // Determine execution mode based on business hours analysis
-        const hasBusinessHours = businessHoursAnalysis && businessHoursAnalysis.openSites.length > 0;
-        const executeReason = hasBusinessHours ? 'business-hours-scheduled' : 'fallback-execution';
-        const scheduleType = hasBusinessHours ? 'business-hours' : 'immediate';
-        
-        // Execute the daily stand up workflow with proper scheduling mode
         const workflowResult = await executeDailyStandUpWorkflow(site, {
-          executeReason,
-          scheduleType,
+          executeReason: 'configured-local-weekday',
+          scheduleType: 'immediate',
+          timezone: configuration.timezone,
+          localDate: localOutreachDay(now, configuration.timezone).date,
           businessHoursAnalysis,
           scheduledBy: 'activityPrioritizationEngine'
         });
@@ -948,15 +926,15 @@ export async function executeDailyStandUpWorkflowsActivity(
     
     console.log(`\n📊 Daily Stand Up execution completed:`);
     console.log(`   ✅ Executed: ${scheduled} sites`);
-    console.log(`   ⏭️ Skipped: 0 sites`);
+    console.log(`   ⏭️ Skipped: ${skipped} sites`);
     console.log(`   ❌ Failed: ${failed} sites`);
-    console.log(`   🔍 Business hours filtering: ${businessHoursAnalysis ? 'ENABLED' : 'DISABLED'}`);
+    console.log('   🔍 Daily Standup configuration filtering: ENABLED');
     
     if (options.dryRun) {
       console.log(`⏰ This was a dry run - no actual workflows were executed`);
     }
     
-    return { scheduled, skipped: 0, failed, results, errors, testInfo };
+    return { scheduled, skipped, failed, results, errors, testInfo };
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -985,9 +963,11 @@ async function executeDailyStandUpWorkflow(
     businessHoursAnalysis?: any;
     scheduledBy: string;
     parentScheduleId?: string;
+    timezone: string;
+    localDate: string;
   }
 ): Promise<ScheduleWorkflowResult> {
-  const finalLocalDateStr = new Date().toISOString().split('T')[0];
+  const finalLocalDateStr = executionOptions.localDate;
   const workflowId = generateDailyWorkflowId({
     workflowType: 'daily-standup',
     siteId: site.id,
@@ -1010,8 +990,8 @@ async function executeDailyStandUpWorkflow(
         executeReason: executionOptions.executeReason,
         scheduleType: executionOptions.scheduleType,
         scheduleTime: executionOptions.scheduleType === 'business-hours' ? 'business-hours-based' : 'immediate',
-        executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-        timezone: 'UTC',
+        executionDay: finalLocalDateStr,
+        timezone: executionOptions.timezone,
         executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
         businessHoursAnalysis: executionOptions.businessHoursAnalysis,
         parentScheduleId: executionOptions.parentScheduleId,
@@ -1197,173 +1177,56 @@ export async function scheduleDailyOperationsWorkflowActivity(
 }
 
 /**
- * Schedule Daily Stand Up Workflows for individual sites using TIMERS
- * Creates delayed workflow executions for sites with business_hours OR weekday fallback
- * Uses Temporal timers instead of schedules for one-time executions
- * WEEKEND RESTRICTION: sites without business_hours are skipped on weekends (Fri/Sat)
- * WEEKDAY FALLBACK: sites without business_hours use 09:00 fallback (Sun-Thu)
+ * Schedule each site's next configured local Daily Standup using a one-time timer.
+ * Business-hours analysis and activitiesMap remain accepted for historical callers,
+ * but only freshly loaded complete settings determine eligibility and opening times.
  */
 export async function scheduleIndividualDailyStandUpsActivity(
   businessHoursAnalysis: any,
   options: { timezone?: string; parentScheduleId?: string; activitiesMap?: Record<string, any> } = {}
 ): Promise<{
   scheduled: number;
+  skipped: number;
   failed: number;
   results: ScheduleWorkflowResult[];
   errors: string[];
 }> {
-  const { timezone = 'America/Mexico_City' } = options;
-  
-  // Safety check: Only allow daily standups on Monday (1) and Friday (5)
-  const today = new Date();
-  const dayOfWeek = today.getDay(); // 0=Sunday, 1=Monday, etc.
-  const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek];
-  const isMondayOrFriday = dayOfWeek === 1 || dayOfWeek === 5;
-  
-  if (!isMondayOrFriday) {
-    console.log(`⏭️ Daily standups restriction: Today is ${dayName} (${dayOfWeek}), standups only execute on Monday and Friday`);
-    console.log(`   - Skipping daily standups scheduling`);
-    return {
-      scheduled: 0,
-      failed: 0,
-      results: [],
-      errors: [`Daily standups only execute on Monday and Friday (today is ${dayName})`]
-    };
-  }
-  
-  console.log(`📅 Scheduling individual Daily Stand Up workflows using TIMERS`);
-  console.log(`   - Default timezone: ${timezone}`);
-  console.log(`   - Sites with business_hours: ${businessHoursAnalysis.openSites?.length || 0}`);
-  console.log(`   - Day check passed: ${dayName} (${dayOfWeek}) - standups allowed`);
-  
   const results: ScheduleWorkflowResult[] = [];
   const errors: string[] = [];
   let scheduled = 0;
+  let skipped = 0;
   let failed = 0;
 
   try {
-    const client = await getTemporalClient();
     const supabaseService = getSupabaseService();
-    
-    // Get ALL sites from database
     const allSites = await supabaseService.fetchSites();
-    console.log(`   - Total sites in database: ${allSites.length}`);
-    
-    if (!allSites || allSites.length === 0) {
-      console.log('⚠️ No sites found in database');
-      return { scheduled: 0, failed: 0, results: [], errors: [] };
-    }
+    if (!allSites.length) return { scheduled, skipped, failed, results, errors };
 
-    // Create a map of sites with business hours for quick lookup
-    const sitesWithBusinessHours = new Map();
-    if (businessHoursAnalysis.openSites) {
-      businessHoursAnalysis.openSites.forEach((site: any) => {
-        sitesWithBusinessHours.set(site.siteId, site.businessHours);
-      });
-    }
-    
-    // Determine if fallback should be used based on day of week
-    const currentDay = new Date().getDay(); // 0=Sunday, 1=Monday, etc.
-    const isWeekend = currentDay === 0 || currentDay === 6; // Sunday = 0, Saturday = 6
-    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][currentDay];
-    
-    console.log(`   - Current day: ${dayName} (${currentDay})`);
-    console.log(`   - Is weekend: ${isWeekend}`);
-    console.log(`   - Fallback policy: ${isWeekend ? 'NO FALLBACK (weekend)' : 'FALLBACK ALLOWED (weekday)'}`);
-    
-    // Process sites with different logic for weekends vs weekdays
-    for (const site of allSites as any[]) {
+    // Site rows and the caller's analysis may contain stale or incomplete configuration.
+    const settings = await supabaseService.fetchCompleteSettings(allSites.map(site => site.id));
+    const settingsBySite = new Map(settings.map(setting => [setting.site_id, setting]));
+    for (const site of allSites) {
       try {
-        console.log(`\n📋 Processing site: ${site.name || 'Unnamed'} (${site.id})`);
-
-        // If an activitiesMap is provided, hydrate site.settings.activities from it
-        if (options.activitiesMap && options.activitiesMap[site.id]) {
-          if (!site.settings || typeof site.settings !== 'object') {
-            site.settings = {} as any;
-          }
-          site.settings.activities = options.activitiesMap[site.id];
-        }
-        
-        // Check if this workflow should be scheduled based on settings.activities
-        if (!shouldScheduleWorkflow(site, 'daily_resume_and_stand_up')) {
-          console.log(`   ⏭️ SKIPPING - 'daily_resume_and_stand_up' is inactive in site settings`);
-          continue;
-        }
-        
-        // Check if this site has business_hours
-        const businessHours = sitesWithBusinessHours.get(site.id);
-        
-        let scheduledTime: string;
-        let siteTimezone: string;
-        let businessHoursSource: string;
-        
-        if (businessHours) {
-          // Site HAS business_hours - use them
-          scheduledTime = businessHours.open; // e.g., "09:00"
-          siteTimezone = businessHours.timezone || timezone;
-          businessHoursSource = 'database-configured';
-          console.log(`   ✅ Has business_hours: ${businessHours.open} - ${businessHours.close} ${siteTimezone}`);
-        } else if (!isWeekend) {
-          // Site DOES NOT have business_hours - use fallback ONLY on weekdays
-          scheduledTime = "09:00"; // Default fallback time
-          siteTimezone = timezone; // Default timezone
-          businessHoursSource = 'fallback-weekday';
-          console.log(`   ⚠️ No business_hours found - using WEEKDAY FALLBACK: ${scheduledTime} ${siteTimezone}`);
-        } else {
-          // Weekend: NO fallback for sites without business_hours
-          console.log(`   ⏭️ SKIPPING - No business_hours configured and weekend (no fallback)`);
-          continue;
-        }
-        
-        console.log(`   - Scheduled time: ${scheduledTime}`);
-        console.log(`   - Timezone: ${siteTimezone}`);
-        console.log(`   - Business hours source: ${businessHoursSource}`);
-        
-        // Parse the target time
-        const [hours, minutes] = scheduledTime.split(':').map(Number);
-        
-        const nowUTC = new Date();
-        const timezoneOffset = siteTimezone === 'America/Mexico_City' ? 6 : 0;
-        
-        // Calculate current time in site's timezone
-        const nowLocal = new Date(nowUTC.getTime() - (timezoneOffset * 60 * 60 * 1000));
-        
-        // Create target time for "today" in site's timezone
-        const targetLocalToday = new Date(nowLocal);
-        targetLocalToday.setUTCHours(hours, minutes, 0, 0);
-        
-        // Check if target time already passed in site's timezone
-        const targetAlreadyPassed = targetLocalToday <= nowLocal;
-        
-        // Determine final target date (today or tomorrow in site's timezone)
-        let finalTargetLocal: Date;
-        
-        if (targetAlreadyPassed) {
-          finalTargetLocal = new Date(targetLocalToday);
-          finalTargetLocal.setUTCDate(finalTargetLocal.getUTCDate() + 1);
-          console.log(`   ⏰ Target time already passed, scheduling for TOMORROW`);
-        } else {
-          finalTargetLocal = targetLocalToday;
-          console.log(`   ⏰ Target time hasn't passed, scheduling for TODAY`);
-        }
-        
-        const finalLocalDateStr = finalTargetLocal.toISOString().split('T')[0];
-        const finalTargetUTC = new Date(finalTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
-        
-        console.log(`   - Final target: ${finalTargetLocal.getUTCHours().toString().padStart(2, '0')}:${finalTargetLocal.getUTCMinutes().toString().padStart(2, '0')} ${siteTimezone} on ${finalLocalDateStr}`);
-        console.log(`   - Final target UTC: ${finalTargetUTC.toISOString()}`);
-        
-        // Calculate delay in milliseconds from now
         const now = new Date();
-        const delayMs = finalTargetUTC.getTime() - now.getTime();
-        
-        if (delayMs <= 0) {
-          console.log(`   ⚠️ Target time is in the past, executing immediately`);
-        } else {
-          const delayHours = delayMs / (1000 * 60 * 60);
-          console.log(`   ⏰ Will execute in ${delayHours.toFixed(2)} hours`);
+        const setting = settingsBySite.get(site.id);
+        const configuration = resolveDailyStandUpConfiguration(setting, now, false);
+        if (!configuration.shouldExecute) {
+          console.log(`⏭️ Skipping Daily Standup for ${site.id}: ${configuration.reason}`);
+          skipped++;
+          continue;
         }
-        
+        const nextRun = nextDailyStandUpRun(setting, now);
+        if (!nextRun) throw new Error('No valid Daily Standup opening time found');
+        const { targetTime: finalTargetUTC, localDate: finalLocalDateStr,
+          timezone: siteTimezone, scheduledTime, fallbackUsed } = nextRun;
+        const businessHoursSource = fallbackUsed ? 'configured-day-fallback' : 'database-configured';
+        const delayMs = Math.max(0, finalTargetUTC.getTime() - now.getTime());
+        // A weekly selection across DST can exceed the shared helper's seven-day cap.
+        const workflowRunTimeout = `${Math.max(
+          parseInt(computeDelayedWorkflowRunTimeout(delayMs), 10),
+          Math.ceil(delayMs / 3600000) + 2,
+        )}h`;
+
         // Create unique workflow ID for this site with better uniqueness
         const dateSpecificId = generateDailyWorkflowId({
           workflowType: 'daily-standup',
@@ -1388,18 +1251,11 @@ export async function scheduleIndividualDailyStandUpsActivity(
             executionDay: finalLocalDateStr,
             timezone: siteTimezone,
             executionMode: 'timer-delayed',
-            businessHours: businessHours || { 
-              open: scheduledTime, 
-              close: '18:00', 
-              enabled: true, 
-              timezone: siteTimezone, 
-              source: businessHoursSource 
-            },
             siteName: site.name || `Site ${site.id.substring(0, 8)}`,
-            fallbackUsed: !businessHours,
+            fallbackUsed,
             delayMs,
             targetTimeUTC: finalTargetUTC.toISOString(),
-            workflowVersion: '2.0', // Add version tracking
+            workflowVersion: 'daily-standup-configuration-v1',
             createdAt: new Date().toISOString(),
             parentScheduleId: options.parentScheduleId,
             dailyOperationsScheduleId: options.parentScheduleId // Also add as alias for clarity
@@ -1408,6 +1264,7 @@ export async function scheduleIndividualDailyStandUpsActivity(
 
         // Start the DELAYED workflow and capture the actual handle returned by Temporal
         try {
+          const client = await getTemporalClient();
           const workflowHandle = await client.workflow.start('delayedExecutionWorkflow', {
             args: [{
               delayMs: Math.max(delayMs, 0), // Ensure non-negative delay
@@ -1420,7 +1277,7 @@ export async function scheduleIndividualDailyStandUpsActivity(
           taskQueue: temporalConfig.taskQueue,
           workflowId: dateSpecificId,
           workflowIdReusePolicy: DAILY_WORKFLOW_REUSE_POLICY as any,
-          workflowRunTimeout: computeDelayedWorkflowRunTimeout(delayMs),
+          workflowRunTimeout,
           });
 
           // Get the actual workflow ID from Temporal
@@ -1502,7 +1359,7 @@ export async function scheduleIndividualDailyStandUpsActivity(
     console.log(`   🎯 Using TIMER-based approach for reliable one-time execution`);
     console.log(`   📅 Each site will execute at their specific business hours`);
 
-    return { scheduled, failed, results, errors };
+    return { scheduled, skipped, failed, results, errors };
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1510,6 +1367,7 @@ export async function scheduleIndividualDailyStandUpsActivity(
     
     return {
       scheduled: 0,
+      skipped: 0,
       failed: 1,
       results: [],
       errors: [errorMessage]
@@ -2278,6 +2136,7 @@ export async function scheduleIndividualLeadGenerationActivity(
             nextRun: icpTargetUTC.toISOString(),
           };
           await saveCronStatusActivity(icpCronUpdate);
+          scheduled++;
 
           results.push({
             workflowId: icpWorkflowId,
@@ -2291,6 +2150,8 @@ export async function scheduleIndividualLeadGenerationActivity(
         // ===================================================================
         // NEW: Schedule dailyStrategicAccountsWorkflow 2 hours after Lead Gen
         // ===================================================================
+        // Enabling standalone mining must not implicitly enable strategic-account research.
+        if (!runLocalLeadGen) continue;
         
         // Calculate strategic accounts time (2 hours after lead generation)
         let strategicHour = leadGenHour + 2;

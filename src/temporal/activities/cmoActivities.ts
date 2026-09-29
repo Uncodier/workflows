@@ -1,4 +1,5 @@
 import { apiService } from '../services/apiService';
+import type { DailyStandUpReportSection } from '../utils/dailyStandUpConfiguration';
 
 /**
  * CMO Daily Stand Up Activities
@@ -7,6 +8,7 @@ import { apiService } from '../services/apiService';
 
 export interface DailyStandUpRequest {
   site_id: string;
+  report_sections?: DailyStandUpReportSection[];
   userId?: string;
   additionalData?: any;
 }
@@ -14,6 +16,9 @@ export interface DailyStandUpRequest {
 export interface DailyStandUpResponse {
   success: boolean;
   command_id?: string;
+  report_sections?: DailyStandUpReportSection[];
+  subject?: string;
+  message?: string;
   summary?: string;
   data?: any;
   error?: string;

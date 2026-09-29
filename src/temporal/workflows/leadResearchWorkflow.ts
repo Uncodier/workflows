@@ -1,6 +1,8 @@
-import { proxyActivities, startChild, workflowInfo, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
+import { proxyActivities, startChild, workflowInfo, ParentClosePolicy, upsertSearchAttributes, patched } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { deepResearchWorkflow, type DeepResearchOptions } from './deepResearchWorkflow';
+import { hasDeepResearchOutput, hasLegacyDeepResearchOutput, inspectDeepResearchOutput } from '../utils/leadResearchState';
+import { isProtectedResearchField, withoutResearchIdentity } from '../utils/researchData';
 
 // Define the activity interface and options
 const { 
@@ -14,6 +16,8 @@ const {
   validateContactInformation,
   leadContactGenerationActivity,
   updateLeadEmailVerificationActivity,
+  saveLeadResearchStateActivity,
+  saveLeadResearchCompanyActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes', // Reasonable timeout for lead research
   retry: {
@@ -800,6 +804,14 @@ export async function leadResearchWorkflow(
   let siteName = '';
   let siteUrl = '';
   let researchQuery = '';
+  const persistResearchState = patched('lead-research-persist-completion-v1');
+  const verifiedResearch = persistResearchState && patched('lead-research-identity-completion-v2');
+  const hasOutput = verifiedResearch ? hasDeepResearchOutput : hasLegacyDeepResearchOutput;
+  let trustedCompanyId: string | null = null;
+  let researchCompleted = false;
+  const updateResearchLead = (request: Parameters<typeof updateLeadActivity>[0]) => updateLeadActivity({
+    ...request, ...(persistResearchState ? { site_id, preserveExistingData: true } : {}),
+  });
 
   try {
     console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
@@ -833,6 +845,18 @@ export async function leadResearchWorkflow(
     }
     
     leadInfo = leadResult.lead!;
+    if (persistResearchState && leadInfo.site_id !== site_id) throw new Error('Lead does not belong to research site');
+    trustedCompanyId = leadInfo.company_id || null;
+    if (persistResearchState) {
+      // Persist before any legacy-shaped metadata writes so interrupted attempts
+      // cannot later be mistaken for completed historical research.
+      const attempt = { status: 'running', workflow_id: workflowId, attempted_at: new Date().toISOString() };
+      const started = await updateResearchLead({ lead_id, safeUpdate: true, updateData: {
+        metadata: { deep_research: attempt },
+      }, ...(verifiedResearch ? { recordResearchAttempt: true } : {}) });
+      if (!started.success) throw new Error(`Research attempt could not be recorded: ${started.error}`);
+      leadInfo = { ...leadInfo, metadata: { ...leadInfo.metadata, deep_research: attempt } };
+    }
     
     console.log(`✅ Retrieved lead information: ${leadInfo.name || leadInfo.email} from ${leadInfo.company || leadInfo.company_name || 'Unknown Company'}`);
     console.log(`📋 Lead details:`);
@@ -871,6 +895,8 @@ export async function leadResearchWorkflow(
       // Continue with research even if email validation throws an error
     }
 
+    // Contact generation/validation is optional and cannot invalidate saved research.
+    const researchErrorsStart = verifiedResearch ? errors.length : 0;
     console.log(`🔍 Step 3: Generating research query from lead information...`);
     
     // Debug: Log lead info structure before generating query
@@ -896,6 +922,7 @@ export async function leadResearchWorkflow(
       deliverables: leadDeliverables,
       scheduleId: realScheduleId, // Pass the schedule ID from parent workflow
       parentWorkflowType: 'leadResearchWorkflow', // Identify the parent workflow type
+      ...(verifiedResearch ? { companyPersistence: 'parent' as const } : {}),
       additionalData: {
         ...options.additionalData,
         leadId: lead_id,
@@ -919,7 +946,7 @@ export async function leadResearchWorkflow(
       // Debug: Log complete deep research result structure
       console.log(`🔍 Deep research result structure:`, JSON.stringify(deepResearchResult, null, 2));
       
-      if (deepResearchResult.success) {
+      if (persistResearchState ? hasOutput(deepResearchResult) : deepResearchResult.success) {
         console.log(`✅ Deep research completed successfully`);
         console.log(`📊 Deep research results:`);
         console.log(`   - Operations in main level: ${deepResearchResult.operations?.length || 0}`);
@@ -958,6 +985,12 @@ export async function leadResearchWorkflow(
           analysisForMetadata = deepResearchResult.analysis;
           console.log(`🔍 Found analysis in main level`);
         }
+        if (verifiedResearch) {
+          const output = inspectDeepResearchOutput(deepResearchResult);
+          leadDeliverablesToUpdate = output.deliverables?.lead || null;
+          companyDeliverablesToUpdate = output.deliverables?.company || null;
+          analysisForMetadata = Object.keys(output.analysis).length ? output.analysis : null;
+        }
         
         // Step 5a: Update lead if we have lead deliverables or analysis
         if (leadDeliverablesToUpdate || analysisForMetadata) {
@@ -991,8 +1024,16 @@ export async function leadResearchWorkflow(
               const metadataFields: any = {};
               
               Object.keys(rawLeadDeliverables).forEach(key => {
+                if (verifiedResearch && (isProtectedResearchField(key) || ['deep_research', 'deep_research_result',
+                  'research_company_link', 'emailVerified', 'finder'].includes(key))) return;
                 if (validLeadFields.includes(key)) {
                   safeLeadDeliverables[key] = rawLeadDeliverables[key];
+                  if (verifiedResearch && key === 'company' && rawLeadDeliverables.company
+                    && typeof rawLeadDeliverables.company === 'object') {
+                    safeLeadDeliverables.company = withoutResearchIdentity(rawLeadDeliverables.company);
+                  }
+                  // Completion/verification namespaces are authored only by trusted activities.
+                  if (verifiedResearch && key === 'metadata') delete safeLeadDeliverables.metadata;
                   // Debug específico para social_networks
                   if (key === 'social_networks') {
                     console.log(`✅ Adding social_networks to safeLeadDeliverables:`, JSON.stringify(rawLeadDeliverables[key], null, 2));
@@ -1040,7 +1081,7 @@ export async function leadResearchWorkflow(
             }
             
             if (Object.keys(leadUpdateData).length > 0) {
-              const leadUpdateResult = await updateLeadActivity({
+              const leadUpdateResult = await updateResearchLead({
                 lead_id: lead_id,
                 updateData: leadUpdateData,
                 safeUpdate: true // Ensure email and phone are not overwritten
@@ -1066,7 +1107,7 @@ export async function leadResearchWorkflow(
         }
         
         // Step 5b: Update company if we have company deliverables
-        if (companyDeliverablesToUpdate && companyDeliverablesToUpdate.name) {
+        if (companyDeliverablesToUpdate && (companyDeliverablesToUpdate.name || (verifiedResearch && trustedCompanyId))) {
           console.log(`🔄 Step 5b: Updating company with research results...`);
           
           try {
@@ -1119,16 +1160,20 @@ export async function leadResearchWorkflow(
             console.log(`🏢 Upserting company: ${finalCleanCompanyData.name}`);
             console.log(`📊 Company fields to update: ${Object.keys(finalCleanCompanyData).join(', ')}`);
             
-            const companyUpsertResult = await upsertCompanyActivity(finalCleanCompanyData);
+            const companyUpsertResult = persistResearchState
+              ? await saveLeadResearchCompanyActivity({ lead_id, site_id, company: rawCompanyData,
+                ...(verifiedResearch ? { trustedCompanyId, workflow_id: realWorkflowId } : {}),
+              })
+              : await upsertCompanyActivity(finalCleanCompanyData);
             
             if (companyUpsertResult.success) {
               console.log(`✅ Company updated successfully: ${companyUpsertResult.company.name}`);
               console.log(`🆔 Company ID: ${companyUpsertResult.company.id}`);
               
               // Update lead with company_id if it wasn't set before
-              if (!leadInfo.company_id && companyUpsertResult.company.id) {
+              if (!verifiedResearch && !leadInfo.company_id && companyUpsertResult.company.id) {
                 try {
-                  const leadCompanyUpdateResult = await updateLeadActivity({
+                  const leadCompanyUpdateResult = await updateResearchLead({
                     lead_id: lead_id,
                     updateData: { company_id: companyUpsertResult.company.id },
                     safeUpdate: true
@@ -1147,7 +1192,7 @@ export async function leadResearchWorkflow(
               // Si hay campos adicionales, los guardamos en la metadata del lead ya que companies no tiene metadata
               if (Object.keys(metadataFields).length > 0) {
                 try {
-                  const leadMetadataUpdate = await updateLeadActivity({
+                  const leadMetadataUpdate = await updateResearchLead({
                     lead_id: lead_id,
                     updateData: {
                       metadata: {
@@ -1163,16 +1208,18 @@ export async function leadResearchWorkflow(
                     console.log(`✅ Additional company fields saved to lead metadata: ${Object.keys(metadataFields).join(', ')}`);
                   } else {
                     console.log(`⚠️ Failed to save additional company fields to lead metadata: ${leadMetadataUpdate.error}`);
+                    if (verifiedResearch) errors.push(`Company metadata persistence failed: ${leadMetadataUpdate.error}`);
                   }
                 } catch (metadataError) {
                   console.log(`⚠️ Exception saving additional company fields to lead metadata:`, metadataError);
+                  if (verifiedResearch) errors.push(`Company metadata persistence exception: ${String(metadataError)}`);
                 }
               }
               
               // Preservar información original de industria si fue mapeada
               if (rawCompanyData.industry && rawCompanyData.industry !== finalCleanCompanyData.industry) {
                 try {
-                  const originalIndustryUpdate = await updateLeadActivity({
+                  const originalIndustryUpdate = await updateResearchLead({
                     lead_id: lead_id,
                     updateData: {
                       metadata: {
@@ -1187,9 +1234,12 @@ export async function leadResearchWorkflow(
                   
                   if (originalIndustryUpdate.success) {
                     console.log(`✅ Original industry information preserved in lead metadata`);
+                  } else if (verifiedResearch) {
+                    errors.push(`Industry metadata persistence failed: ${originalIndustryUpdate.error}`);
                   }
                 } catch (industryError) {
                   console.log(`⚠️ Exception preserving original industry info:`, industryError);
+                  if (verifiedResearch) errors.push(`Industry metadata persistence exception: ${String(industryError)}`);
                 }
               }
             } else {
@@ -1226,13 +1276,26 @@ export async function leadResearchWorkflow(
         }
       } else {
         console.log(`⚠️ Deep research completed with errors: ${deepResearchResult.errors?.join(', ')}`);
-        errors.push(`Deep research errors: ${deepResearchResult.errors?.join(', ')}`);
+        errors.push(verifiedResearch ? inspectDeepResearchOutput(deepResearchResult).error || 'Deep research failed'
+          : `Deep research errors: ${deepResearchResult.errors?.join(', ')}`);
       }
     } catch (deepResearchError) {
       const errorMessage = deepResearchError instanceof Error ? deepResearchError.message : String(deepResearchError);
       console.error(`⚠️ Deep research workflow failed: ${errorMessage}`);
       errors.push(`Deep research workflow error: ${errorMessage}`);
       // No lanzamos error aquí para que continúe con los resultados parciales
+    }
+
+    if (persistResearchState) {
+      if (!hasOutput(deepResearchResult) && errors.length === researchErrorsStart) errors.push('Deep research returned no usable output');
+      const researchErrors = errors.slice(researchErrorsStart);
+      const persisted = await saveLeadResearchStateActivity({
+        lead_id, site_id, workflow_id: workflowId,
+        completed: hasOutput(deepResearchResult) && researchErrors.length === 0,
+        result: deepResearchResult, errors: researchErrors,
+        ...(verifiedResearch ? { validation: 'completed-analysis-v1' as const } : {}),
+      });
+      researchCompleted = persisted.completed;
     }
 
     // Step 6: Execute lead segmentation after research and updates are complete
@@ -1249,8 +1312,8 @@ export async function leadResearchWorkflow(
           leadInfo: leadInfo,
           siteName: siteName,
           siteUrl: siteUrl,
-          researchCompleted: true,
-          deepResearchCompleted: !!deepResearchResult,
+          researchCompleted: persistResearchState ? researchCompleted : true,
+          deepResearchCompleted: persistResearchState ? researchCompleted : !!deepResearchResult,
           workflowId: workflowId
         }
       });
@@ -1287,15 +1350,16 @@ export async function leadResearchWorkflow(
         recommendations: deepResearchResult.recommendations || [],
         errors: deepResearchResult.errors || [],
         executionTime: deepResearchResult.executionTime,
-        completedAt: deepResearchResult.completedAt
-        // Note: We're NOT including the raw 'data' field to avoid nesting
+        completedAt: deepResearchResult.completedAt,
+        ...(verifiedResearch ? { data: deepResearchResult.data } : {}),
+        // New runs keep validated analysis evidence; old histories keep their flattened shape.
       };
       
       console.log(`🧹 Cleaned result operations count: ${cleanedDeepResearchResult.operations.length}`);
     }
     
     const result: LeadResearchResult = {
-      success: true,
+      success: persistResearchState ? researchCompleted && (verifiedResearch || errors.length === 0) : true,
       leadId: lead_id,
       siteId: site_id,
       siteName,
@@ -1332,7 +1396,7 @@ export async function leadResearchWorkflow(
       workflowId,
       scheduleId: `lead-research-${lead_id}-${site_id}`,
       activityName: 'leadResearchWorkflow',
-      status: 'COMPLETED',
+      status: persistResearchState && !result.success ? 'FAILED' : 'COMPLETED',
       lastRun: new Date().toISOString()
     });
 
@@ -1340,7 +1404,7 @@ export async function leadResearchWorkflow(
     await logWorkflowExecutionActivity({
       workflowId,
       workflowType: 'leadResearchWorkflow',
-      status: 'COMPLETED',
+      status: persistResearchState && !result.success ? 'FAILED' : 'COMPLETED',
       input: options,
       output: result,
     });

@@ -113,8 +113,8 @@ describe('shouldScheduleWorkflow logic', () => {
       expect(shouldScheduleWorkflow(site, 'daily_resume_and_stand_up')).toBe(true);
       expect(shouldScheduleWorkflow(site, 'leads_follow_up')).toBe(false);
 
-      // Should NOT schedule these
-      expect(shouldScheduleWorkflow(site, 'icp_lead_generation')).toBe(false);
+      // Mining stays enabled; outreach remains opt-in.
+      expect(shouldScheduleWorkflow(site, 'icp_lead_generation')).toBe(true);
       expect(shouldScheduleWorkflow(site, 'leads_initial_cold_outreach')).toBe(false);
 
       // Should schedule activities not in the list (default behavior)
@@ -143,10 +143,10 @@ describe('shouldScheduleWorkflow logic', () => {
       
       // Opt-in activities should be false since they aren't explicitly active
       expect(shouldScheduleWorkflow(site, 'daily_resume_and_stand_up')).toBe(false);
-      expect(shouldScheduleWorkflow(site, 'icp_lead_generation')).toBe(false);
+      expect(shouldScheduleWorkflow(site, 'icp_lead_generation')).toBe(true);
     });
 
-    it('should keep only daily summaries when configured', () => {
+    it('keeps daily summaries and independent mining while outreach is disabled', () => {
       const site = { 
         id: '1', 
         name: 'Test Site',
@@ -162,7 +162,7 @@ describe('shouldScheduleWorkflow logic', () => {
 
       expect(shouldScheduleWorkflow(site, 'daily_resume_and_stand_up')).toBe(true);
       expect(shouldScheduleWorkflow(site, 'leads_follow_up')).toBe(false);
-      expect(shouldScheduleWorkflow(site, 'icp_lead_generation')).toBe(false);
+      expect(shouldScheduleWorkflow(site, 'icp_lead_generation')).toBe(true);
       expect(shouldScheduleWorkflow(site, 'leads_initial_cold_outreach')).toBe(false);
     });
   });

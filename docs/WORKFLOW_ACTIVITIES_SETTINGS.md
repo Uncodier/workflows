@@ -4,9 +4,19 @@
 
 This document describes the workflow scheduling control system using `settings.activities` in site configuration.
 
+Daily Standup supports selected delivery weekdays and report sections in AI
+Activities. See [Daily Standup configuration](./DAILY_STANDUP_CONFIGURATION.md)
+for defaults, validation, scheduling, and deployment details.
+
 For the account, audience, weekday, and daily delivery controls on Cold Outreach and
 Follow Up, see [Outreach configuration](./OUTREACH_CONFIGURATION.md). Both activities
 are opt-in: absent, `default`, or `inactive` status does not permit execution.
+
+ICP mining is the exception: it is always enabled, independent of outreach and
+outbound-channel health. AI Activities configures `target_leads` (1–3000, default
+150), `research_enabled` (default false), and the pending-list scope (`all_lists`
+defaults to true; otherwise use `list_ids`), not activation. See
+[ICP mining configuration](./ICP_MINING_CONFIGURATION.md) for deployment and cursor details.
 
 ## Feature Description
 
@@ -25,7 +35,11 @@ The system now checks `settings.activities` object in site settings to determine
         "status": "default"
       },
       "icp_lead_generation": {
-        "status": "default"
+        "status": "active",
+        "target_leads": 150,
+        "research_enabled": false,
+        "all_lists": true,
+        "list_ids": []
       },
       "local_lead_generation": {
         "status": "inactive"
@@ -56,7 +70,7 @@ The system now checks `settings.activities` object in site settings to determine
 
 - **`active`**: Explicitly enable the activity, subject to its configuration and safety checks
 - **`default`**: Uses the activity default; Cold Outreach and Follow Up default to inactive
-- **`inactive`**: Workflow is **NOT** scheduled for this site
+- **`inactive`**: Workflow is **NOT** scheduled for this site, except always-on ICP mining
 
 ## Behavior
 
@@ -80,9 +94,10 @@ If `settings.activities` exists:
 
 ```typescript
 function shouldScheduleWorkflow(site: any, activityKey: string): boolean {
+  if (activityKey === 'icp_lead_generation') return true;
   const optIn = new Set([
     'supervise_conversations', 'assign_leads_to_team', 'local_lead_generation',
-    'icp_lead_generation', 'daily_resume_and_stand_up',
+    'daily_resume_and_stand_up',
     'leads_initial_cold_outreach', 'leads_follow_up',
   ]);
   const status = site.settings?.activities?.[activityKey]?.status;
@@ -101,8 +116,8 @@ The following scheduling activities now check `settings.activities`:
    - Schedules daily stand-up workflows
 
 2. **`scheduleIndividualLeadGenerationActivity`**
-   - Checks: `icp_lead_generation`
-   - Schedules ICP lead generation workflows
+   - Schedules ICP mining independently of activation/outreach; reads its parameters at execution time
+   - Local lead generation retains its existing activation check
 
 3. **`scheduleIndividualDailyProspectionActivity`**
    - Checks: `leads_initial_cold_outreach`
@@ -127,7 +142,7 @@ When a workflow is skipped due to inactive status:
 Example:
 ```
 📋 Processing site: Example Site (abc-123)
-   ⏭️ SKIPPING - 'icp_lead_generation' is inactive in site settings
+   ⏭️ SKIPPING - 'local_lead_generation' is inactive in site settings
 ```
 
 ## Database Requirements
@@ -144,14 +159,16 @@ const sites = await supabaseService.fetchSites(); // Uses SELECT *
 
 ## Use Cases
 
-### Disable ICP Lead Generation for Specific Site
+### Configure ICP Lead Generation for a Specific Site
 
 ```json
 {
   "settings": {
     "activities": {
       "icp_lead_generation": {
-        "status": "inactive"
+        "status": "active",
+        "target_leads": 25,
+        "research_enabled": true
       }
     }
   }
@@ -175,20 +192,20 @@ const sites = await supabaseService.fetchSites(); // Uses SELECT *
 }
 ```
 
-### Keep Only Daily Summaries
+### Keep Daily Summaries and Mining Without Outreach
 
 ```json
 {
   "settings": {
     "activities": {
       "daily_resume_and_stand_up": {
-        "status": "default"
+        "status": "active"
       },
       "leads_follow_up": {
         "status": "inactive"
       },
       "icp_lead_generation": {
-        "status": "inactive"
+        "status": "active"
       },
       "leads_initial_cold_outreach": {
         "status": "inactive"
@@ -204,15 +221,13 @@ To test this feature:
 
 1. Update a site's settings in the database:
 ```sql
-UPDATE sites 
-SET settings = jsonb_set(
-  COALESCE(settings, '{}'::jsonb),
-  '{activities}',
-  '{
-    "icp_lead_generation": {"status": "inactive"}
-  }'::jsonb
+UPDATE settings
+SET activities = jsonb_set(
+  COALESCE(activities, '{}'::jsonb),
+  '{local_lead_generation}',
+  '{"status": "inactive"}'::jsonb
 )
-WHERE id = 'your-site-id';
+WHERE site_id = 'your-site-id';
 ```
 
 2. Trigger the activity prioritization engine
@@ -232,9 +247,9 @@ Example:
 ```json
 {
   "icp_lead_generation": {
-    "status": "default",
+    "status": "active",
     "priority": "high",
-    "max_items": 50,
+    "target_leads": 50,
     "schedule": "10:00"
   }
 }

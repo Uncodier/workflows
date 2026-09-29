@@ -1,5 +1,6 @@
 import { apiService } from '../services/apiService';
 import { validateEmail } from './validateEmailActivities';
+import type { DailyStandUpReportSection } from '../utils/dailyStandUpConfiguration';
 
 /**
  * Activity to fetch data from the API
@@ -418,16 +419,18 @@ export async function sendDailyStandUpNotificationActivity(params: {
   site_id: string;
   subject: string;
   message: string;
+  report_sections?: DailyStandUpReportSection[];
   systemAnalysis?: any; // Optional system analysis data
   health?: any; // Optional health status structure from wrap up
 }): Promise<any> {
-  const { site_id, subject, message, systemAnalysis, health } = params;
+  const { site_id, subject, message, systemAnalysis, health, report_sections } = params;
   
   const response = await apiService.post('/api/notifications/dailyStandUp', {
     site_id,
     subject,
     message,
     systemAnalysis,
+    ...(report_sections ? { report_sections } : {}),
     health
   });
   

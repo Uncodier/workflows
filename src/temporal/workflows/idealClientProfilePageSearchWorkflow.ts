@@ -1,6 +1,14 @@
-import { proxyActivities, executeChild, patched } from '@temporalio/workflow';
+import { proxyActivities, executeChild, patched, workflowInfo } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { enrichLeadWorkflow } from './enrichLeadWorkflow';
+import { leadResearchWorkflow } from './leadResearchWorkflow';
+import { needsLeadDeepResearch } from '../utils/leadResearchState';
+import { processPageSafely } from './icpMining/processPageSafely';
+import type { IcpPageSnapshot } from '../activities/icpMiningExecutionActivities';
+
+const { getLeadActivity, checkpointIcpMiningExecutionActivity } = proxyActivities<Activities>({
+  startToCloseTimeout: '5 minutes', retry: { maximumAttempts: 3 },
+});
 
 // Finder + DB activities for ICP mining (page-level only; per-person handled by enrichLeadWorkflow)
 const {
@@ -11,7 +19,7 @@ const {
   validateCommunicationChannelsActivity,
 } = proxyActivities<{
   getRoleQueryByIdActivity: (id: string) => Promise<{ success: boolean; roleQuery?: any; error?: string }>;
-  callPersonRoleSearchActivity: (o: { role_query_id?: string; query?: any; page: number; page_size?: number; site_id?: string; userId?: string }) => Promise<{ success: boolean; persons?: any[]; total?: number; page?: number; pageSize?: number; hasMore?: boolean; error?: string }>;
+  callPersonRoleSearchActivity: Activities['callPersonRoleSearchActivity'];
   getSegmentIdFromRoleQueryActivity: (roleQueryId: string) => Promise<{ success: boolean; segmentId?: string; error?: string }>;
   logWorkflowExecutionActivity: (params: any) => Promise<void>;
   validateCommunicationChannelsActivity: (params: { site_id: string; requireHealthyOutbound?: boolean }) => Promise<{ success: boolean; hasAnyChannel: boolean }>;
@@ -27,6 +35,11 @@ export interface IdealClientProfilePageSearchOptions {
   site_id: string;
   userId: string;
   icp_mining_id?: string; // for logging and metadata
+  start_index?: number;
+  max_matches?: number;
+  research_enabled?: boolean;
+  execution?: { run_id: string; version: number; processed: number; found: number };
+  snapshot?: IcpPageSnapshot | null;
 }
 
 export interface IdealClientProfilePageSearchResult {
@@ -37,6 +50,9 @@ export interface IdealClientProfilePageSearchResult {
   hasMore: boolean; // if there are more pages
   total?: number; // total targets (only from page 0)
   errors: string[];
+  pageCompleted?: boolean; // false when the per-run target interrupts a page
+  retryableFailure?: boolean;
+  checkpoint?: { version: number; processed: number; found: number; page: number; offset: number; snapshot: IcpPageSnapshot | null };
 }
 
 /**
@@ -46,12 +62,31 @@ export interface IdealClientProfilePageSearchResult {
 export async function idealClientProfilePageSearchWorkflow(
   options: IdealClientProfilePageSearchOptions
 ): Promise<IdealClientProfilePageSearchResult> {
+  if (options.execution) {
+    return processPageSafely(options, {
+      getRoleQueryByIdActivity, callPersonRoleSearchActivity, getSegmentIdFromRoleQueryActivity,
+      getLeadActivity, checkpointIcpMiningExecutionActivity,
+      enrich: (params, index) => executeChild(enrichLeadWorkflow, {
+        workflowId: `icp-enrich-${options.icp_mining_id}-${options.execution!.run_id}-${options.page}-${index}`, args: [params],
+      }),
+      research: params => executeChild(leadResearchWorkflow, {
+        workflowId: `icp-research-${params.lead_id}-${workflowInfo().runId}`, args: [params],
+      }),
+    });
+  }
   const { role_query_id, page, page_size, site_id, userId, icp_mining_id } = options;
   const workflowId = `icp-page-search-${icp_mining_id || role_query_id}-page${page}`;
   const errors: string[] = [];
   let processed = 0;
   let foundMatches = 0;
   const leadsCreated: string[] = [];
+  const configuredMining = patched('icp-page-configurable-independent-v1');
+  const startIndex = configuredMining ? options.start_index ?? 0 : 0;
+  const maxMatches = configuredMining ? options.max_matches ?? 3000 : Infinity;
+  if (configuredMining && (!Number.isInteger(startIndex) || startIndex < 0 || startIndex >= 10
+    || !Number.isInteger(maxMatches) || maxMatches < 1 || maxMatches > 3000)) {
+    throw new Error('Invalid ICP page offset or lead target');
+  }
 
   await logWorkflowExecutionActivity({
     workflowId,
@@ -89,7 +124,7 @@ export async function idealClientProfilePageSearchWorkflow(
   });
 
   // Call Finder API for this specific page
-  if (patched('icp-page-outbound-health-gate-v1')) {
+  if (!configuredMining && patched('icp-page-outbound-health-gate-v1')) {
     const outbound = await validateCommunicationChannelsActivity({
       site_id, requireHealthyOutbound: true,
     });
@@ -104,7 +139,7 @@ export async function idealClientProfilePageSearchWorkflow(
   const pageRes = await callPersonRoleSearchActivity({
     query: roleQuery.query,
     page,
-    page_size,
+    page_size: configuredMining ? 10 : page_size,
     site_id,
     userId,
   });
@@ -139,7 +174,8 @@ export async function idealClientProfilePageSearchWorkflow(
   });
 
   // Extract persons from API response
-  const searchResults = (pageRes as any).data?.search_results || (pageRes as any).data?.results || [];
+  const searchResults = (pageRes as any).data?.search_results || (pageRes as any).data?.results
+    || (configuredMining ? (pageRes.persons || []).map((person: any) => person.person ? person : { person, organization: person.organization }) : []);
   const persons = searchResults.map((result: any) => ({
     ...result.person,
     organization: result.organization,
@@ -175,7 +211,8 @@ export async function idealClientProfilePageSearchWorkflow(
   } catch {}
 
   // Process each person via enrichLeadWorkflow child
-  for (const p of persons) {
+  for (const p of persons.slice(startIndex)) {
+    if (foundMatches >= maxMatches) break;
     const external_person_id = p.external_person_id ?? p.person_id ?? p.id ?? null;
     const full_name = p.full_name || p.name || null;
     const company_name = p.company_name || p.organization_name || p.company || null;
@@ -204,14 +241,39 @@ export async function idealClientProfilePageSearchWorkflow(
           userId,
           company_name: company_name || undefined,
           segment_id: segmentId,
+          ...(configuredMining ? { source_search_result: p.raw_result } : {}),
         }],
       });
 
       processed += 1;
+      if (configuredMining && result.success && result.errors?.length) {
+        errors.push(...result.errors.map(error => `Enrichment warning for ${external_person_id}: ${error}`));
+      }
 
       if (result.success && result.leadId) {
+        if (configuredMining && leadsCreated.includes(result.leadId)) continue;
         leadsCreated.push(result.leadId);
         foundMatches += 1;
+        if (configuredMining && options.research_enabled) {
+          try {
+            const leadResult = await getLeadActivity(result.leadId);
+            if (!leadResult.success || !leadResult.lead || leadResult.lead.site_id !== site_id) {
+              throw new Error(leadResult.error || 'Lead unavailable for research in this site');
+            }
+            if (needsLeadDeepResearch(leadResult.lead)) {
+              const research = await executeChild(leadResearchWorkflow, {
+                workflowId: `lead-research-icp-${result.leadId}-${workflowInfo().runId}`,
+                args: [{ lead_id: result.leadId, site_id, userId,
+                  additionalData: { executedDuringIcpMining: true, icpMiningId: icp_mining_id } }],
+              });
+              if (!research.success) errors.push(`Research failed for ${result.leadId}: ${research.errors.join(', ')}`);
+            }
+          } catch (error) {
+            errors.push(`Research failed for ${result.leadId}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      } else if (configuredMining && !result.success) {
+        errors.push(`Enrichment failed for ${external_person_id}: ${result.errors.join(', ')}`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -242,6 +304,7 @@ export async function idealClientProfilePageSearchWorkflow(
     hasMore,
     total,
     errors,
+    ...(configuredMining ? { pageCompleted: startIndex + processed >= persons.length } : {}),
   };
 }
 

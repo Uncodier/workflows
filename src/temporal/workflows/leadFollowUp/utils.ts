@@ -1,3 +1,5 @@
+import { hasCompletedLeadResearch, needsLeadDeepResearch } from '../../utils/leadResearchState';
+
 /**
  * Sanitize phone numbers without inferring/adding country codes.
  * Let Twilio/backend resolve the region/country.
@@ -23,7 +25,12 @@ export function formatPhoneNumber(phone: string): string {
  * Checks if lead needs research based on notes and metadata
  * Criteria: No notes AND no metadata
  */
-export function shouldExecuteLeadResearch(leadInfo: any): boolean {
+export function shouldExecuteLeadResearch(leadInfo: any, useResearchState = false): boolean {
+  if (useResearchState) {
+    const mined = ['lead_generation_workflow', 'lead_enrichment_workflow', 'icp_mining', 'icp_mining_workflow'].includes(leadInfo?.origin)
+      || !!leadInfo?.metadata?.finder;
+    return mined && needsLeadDeepResearch(leadInfo);
+  }
   // Check if origin is lead_generation_workflow
   if (leadInfo.origin !== 'lead_generation_workflow') {
     return false;
@@ -44,7 +51,8 @@ export function shouldExecuteLeadResearch(leadInfo: any): boolean {
  * Checks if lead needs company website research
  * Criteria: No notes AND has website/domain
  */
-export function shouldExecuteCompanyResearch(leadInfo: any): boolean {
+export function shouldExecuteCompanyResearch(leadInfo: any, useResearchState = false): boolean {
+  if (useResearchState && (hasCompletedLeadResearch(leadInfo) || leadInfo?.metadata?.company_research_completed === true)) return false;
   const hasNotes = leadInfo.notes && typeof leadInfo.notes === 'string' && leadInfo.notes.trim() !== '';
   
   if (hasNotes) {

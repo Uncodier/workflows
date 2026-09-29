@@ -2,6 +2,8 @@ import { proxyActivities, executeChild, upsertSearchAttributes } from '@temporal
 import type { Activities } from '../activities';
 import { selectRoleForEnrichment } from '../utils/personRoleUtils';
 import { generatePersonEmailWorkflow } from './generatePersonEmailWorkflow';
+import { contactValues, finderLeadProfile, mergeFinderData, selectFinderRole } from '../utils/finderData';
+import { enrichWithValidatedContacts } from './icpMining/enrichWithValidatedContacts';
 
 // Configure activity options
 const {
@@ -18,6 +20,7 @@ const {
   validateContactInformation,
   logWorkflowExecutionActivity,
   lookEmailOnIcyPeas,
+  prepareFinderPersonActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: {
@@ -32,10 +35,13 @@ export interface EnrichLeadOptions {
   userId?: string;            // Optional: User ID
   company_name?: string;      // Optional: target company (matches role org for domain/email lookup)
   segment_id?: string;        // Optional: segment_id for ICP parity (assigned to lead)
+  source_search_result?: Record<string, any>; // Full Finder role search candidate, not just person IDs
+  validated_contact_policy?: boolean;
 }
 
 export interface EnrichLeadResult {
   success: boolean;
+  outcome?: 'matched' | 'no_match';
   personId?: string;
   leadId?: string;
   enrichedData?: {
@@ -98,6 +104,19 @@ export async function enrichLeadWorkflow(
     input: options,
   });
 
+  if (options.validated_contact_policy && options.source_search_result) {
+    const result = await enrichWithValidatedContacts(options, { prepareFinderPersonActivity, checkExistingLeadForPersonActivity,
+      validateContactInformation, lookEmailOnIcyPeas, callPersonWorkEmailsActivity, callPersonContactsLookupPersonalEmailsActivity,
+      callPersonContactsLookupPhoneNumbersActivity, upsertPersonActivity, upsertLeadForPersonActivity,
+      generateEmail: params => executeChild(generatePersonEmailWorkflow, {
+        workflowId: `generate-email-icp-${params.person_id}-${site_id}`, args: [params],
+      }),
+    });
+    await logWorkflowExecutionActivity({ workflowId, workflowType: 'enrichLeadWorkflow',
+      status: result.success ? 'COMPLETED' : 'FAILED', output: result });
+    return result;
+  }
+
   try {
     // Step 1: Validate input - at least one of linkedin_profile or person_id required
     if (!linkedin_profile && !person_id) {
@@ -124,7 +143,17 @@ export async function enrichLeadWorkflow(
       throw new Error(errorMsg);
     }
 
-    if (!personCheck.hasExistingPerson) {
+    // Optional input is the replay boundary: historical executions keep their activity sequence.
+    if (options.source_search_result) {
+      const prepared = await prepareFinderPersonActivity({
+        person_id, linkedin_profile, site_id, company_name: optionsCompanyName,
+        source_search_result: options.source_search_result,
+      });
+      errors.push(...prepared.errors);
+      if (!prepared.success || !prepared.person?.id) throw new Error(prepared.error || 'Finder person was not saved');
+      person = prepared.person;
+      detailsResultData = prepared;
+    } else if (!personCheck.hasExistingPerson) {
       // Person doesn't exist - try to create it from details API
       console.log(`👤 Person not found, attempting to create from details API...`);
       
@@ -219,8 +248,8 @@ export async function enrichLeadWorkflow(
     }
 
     // Check what data the person already has
-    const existingPersonEmails = person.emails || [];
-    const existingPersonPhones = person.phones || [];
+    const existingPersonEmails = options.source_search_result ? contactValues(person.emails) : person.emails || [];
+    const existingPersonPhones = options.source_search_result ? contactValues(person.phones) : person.phones || [];
     const hasPersonEmail = Array.isArray(existingPersonEmails) && existingPersonEmails.length > 0 && existingPersonEmails[0]?.trim() !== '';
     const hasPersonPhone = Array.isArray(existingPersonPhones) && existingPersonPhones.length > 0 && existingPersonPhones[0]?.trim() !== '';
 
@@ -288,7 +317,9 @@ export async function enrichLeadWorkflow(
     let domain = '';
     let companyWebsite = '';
     let selectedRole: any = null;
-    if (person.raw_result?.roles && Array.isArray(person.raw_result.roles)) {
+    if (options.source_search_result) {
+      selectedRole = detailsResultData?.role || selectFinderRole(person.raw_result || {}, { source: options.source_search_result, company_name: optionsCompanyName });
+    } else if (person.raw_result?.roles && Array.isArray(person.raw_result.roles)) {
       selectedRole = selectRoleForEnrichment(person.raw_result.roles, {
         company_name: optionsCompanyName ?? undefined,
         external_role_id: person.external_role_id ?? undefined,
@@ -296,6 +327,10 @@ export async function enrichLeadWorkflow(
     }
 
     try {
+      if (options.source_search_result && selectedRole?.organization) {
+        companyWebsite = selectedRole.organization.website || selectedRole.organization.domain || '';
+        domain = getDomainFromUrl(companyWebsite);
+      }
       // Priority 1: detailsResultData companies
       if (detailsResultData?.companies?.[0]) {
         const company = detailsResultData.companies[0];
@@ -366,7 +401,7 @@ export async function enrichLeadWorkflow(
       const fallbackCompanyName = (selectedRole?.organization?.name ?? selectedRole?.organization_name)
         ?? optionsCompanyName
         ?? person.company_name;
-      if (!domain && fallbackCompanyName) {
+      if (!domain && fallbackCompanyName && !options.source_search_result) {
         domain = (fallbackCompanyName as string).toLowerCase().replace(/\s+/g, '') + '.com';
         console.log(`⚠️ Using fallback domain from company_name: ${domain}`);
       }
@@ -378,12 +413,16 @@ export async function enrichLeadWorkflow(
     console.log(`📞 Step 4: Calling enrichment APIs sequentially...`);
     
     // Results containers
-    let workEmails: any[] = [];
-    let phoneNumbers: any[] = [];
-    let personalEmails: any[] = [];
+    let workEmails: any[] = options.source_search_result ? contactValues(person.emails).map(email => ({ email })) : [];
+    let phoneNumbers: any[] = options.source_search_result ? contactValues(person.phones).map(phone_number => ({ phone_number })) : [];
+    let personalEmails: any[] = options.source_search_result ? contactValues(person.personal_emails).map(email => ({ email })) : [];
 
     // Cascading state
-    let hasResult = false;
+    let hasResult = !!options.source_search_result && !!(workEmails.length || phoneNumbers.length || personalEmails.length || hasLeadEmail || hasLeadPhone || hasLeadPersonalEmail);
+    const providerResponses: Record<string, any> = {};
+    const reportLookupFailure = (label: string, error: any) => {
+      if (options.source_search_result) errors.push(`${label}: ${error instanceof Error ? error.message : String(error || 'Lookup failed')}`);
+    };
 
     // Prepare API request parameters
     const apiParams: any = { site_id };
@@ -428,6 +467,8 @@ export async function enrichLeadWorkflow(
           firstname,
           lastname,
         });
+        if (options.source_search_result) providerResponses.icypeas = icypeasResult;
+        if (!icypeasResult.success) reportLookupFailure('IcyPeas', icypeasResult.error);
 
         if (icypeasResult.success && icypeasResult.data?.email) {
           console.log(`✅ IcyPeas found email: ${icypeasResult.data.email}`);
@@ -441,6 +482,7 @@ export async function enrichLeadWorkflow(
           console.log(`ℹ️ IcyPeas found no email`);
         }
       } catch (e) {
+        reportLookupFailure('IcyPeas', e);
         console.warn(`⚠️ IcyPeas call failed:`, e);
       }
     }
@@ -450,6 +492,8 @@ export async function enrichLeadWorkflow(
       console.log(`📧 Cascading Step 2: Calling Personal Emails Lookup...`);
       try {
         const personalEmailsResult = await callPersonContactsLookupPersonalEmailsActivity(apiParams);
+        if (options.source_search_result) providerResponses.personal_emails = personalEmailsResult;
+        if (!personalEmailsResult.success) reportLookupFailure('Personal emails', personalEmailsResult.error);
         if (personalEmailsResult.success && personalEmailsResult.emails && personalEmailsResult.emails.length > 0) {
           console.log(`✅ Personal emails found: ${personalEmailsResult.emails.length}`);
           personalEmails = personalEmailsResult.emails;
@@ -458,6 +502,7 @@ export async function enrichLeadWorkflow(
           console.log(`ℹ️ No personal emails found`);
         }
       } catch (e) {
+        reportLookupFailure('Personal emails', e);
         console.warn(`⚠️ Personal emails call failed:`, e);
       }
     }
@@ -467,6 +512,8 @@ export async function enrichLeadWorkflow(
       console.log(`📧 Cascading Step 3: Calling Finder Work Emails...`);
       try {
         const workEmailsResult = await callPersonWorkEmailsActivity(apiParams);
+        if (options.source_search_result) providerResponses.work_emails = workEmailsResult;
+        if (!workEmailsResult.success) reportLookupFailure('Work emails', workEmailsResult.error);
         if (workEmailsResult.success && workEmailsResult.emails && workEmailsResult.emails.length > 0) {
           console.log(`✅ Work emails found: ${workEmailsResult.emails.length}`);
           workEmails = workEmailsResult.emails;
@@ -475,6 +522,7 @@ export async function enrichLeadWorkflow(
           console.log(`ℹ️ No work emails found`);
         }
       } catch (e) {
+        reportLookupFailure('Work emails', e);
         console.warn(`⚠️ Work emails call failed:`, e);
       }
     }
@@ -484,6 +532,8 @@ export async function enrichLeadWorkflow(
       console.log(`📞 Cascading Step 4: Calling Finder Phone Numbers...`);
       try {
         const phoneNumbersResult = await callPersonContactsLookupPhoneNumbersActivity(apiParams);
+        if (options.source_search_result) providerResponses.phone_numbers = phoneNumbersResult;
+        if (!phoneNumbersResult.success) reportLookupFailure('Phone numbers', phoneNumbersResult.error);
         if (phoneNumbersResult.success && phoneNumbersResult.phoneNumbers && phoneNumbersResult.phoneNumbers.length > 0) {
           console.log(`✅ Phone numbers found: ${phoneNumbersResult.phoneNumbers.length}`);
           phoneNumbers = phoneNumbersResult.phoneNumbers;
@@ -492,6 +542,7 @@ export async function enrichLeadWorkflow(
           console.log(`ℹ️ No phone numbers found`);
         }
       } catch (e) {
+        reportLookupFailure('Phone numbers', e);
         console.warn(`⚠️ Phone numbers call failed:`, e);
       }
     }
@@ -563,9 +614,11 @@ export async function enrichLeadWorkflow(
             workEmails = [{ email: fallbackResult.validatedEmail }];
             console.log(`📧 Updated workEmails with fallback email`);
           } else {
+            if (fallbackResult.error) reportLookupFailure('Email generation', fallbackResult.error);
             console.log(`⚠️ ICP mining fallback did not find a valid email: ${fallbackResult.error || 'No valid email found'}`);
           }
         } catch (fallbackError) {
+          reportLookupFailure('Email generation', fallbackError);
           const errorMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
           console.error(`❌ ICP mining fallback failed: ${errorMsg}`);
           // Continue with normal flow - don't throw, just log the error
@@ -663,6 +716,7 @@ export async function enrichLeadWorkflow(
 
     // Update person IMMEDIATELY with enriched data
     const personUpdate = await upsertPersonActivity({
+      ...(options.source_search_result ? { id: person.id, personal_emails: personalEmails } : {}),
       external_person_id: person.external_person_id,
       external_role_id: person.external_role_id,
       external_organization_id: person.external_organization_id,
@@ -676,10 +730,12 @@ export async function enrichLeadWorkflow(
       linkedin_profile: linkedinUrlForUpdate,
       emails: personEmails.length > 0 ? personEmails : null,
       phones: personPhones.length > 0 ? personPhones : null,
-      raw_result: person.raw_result,
+      raw_result: options.source_search_result
+        ? mergeFinderData(person.raw_result, { finder_contact_enrichment: providerResponses })
+        : person.raw_result,
     });
 
-    if (!personUpdate.success) {
+    if (!personUpdate.success || !personUpdate.person?.id) {
       const errorMsg = `Failed to update person: ${personUpdate.error}`;
       console.error(`❌ ${errorMsg}`);
       errors.push(errorMsg);
@@ -694,8 +750,8 @@ export async function enrichLeadWorkflow(
     console.log(`📋 Step 7: Updating/creating lead...`);
 
     // Resolve company_id: selected role org > details result (matching org) > existing lead
-    let leadCompanyId: string | undefined = undefined;
-    if (selectedRole?.organization) {
+    let leadCompanyId: string | undefined = options.source_search_result ? detailsResultData?.companyId : undefined;
+    if (!options.source_search_result && selectedRole?.organization) {
       const org = selectedRole.organization;
       const orgName = org.name || selectedRole.organization_name;
       if (orgName) {
@@ -726,7 +782,7 @@ export async function enrichLeadWorkflow(
     // Check if we have any valid contact info from cascading steps
     const hasAnyContact = primaryWorkEmail || primaryPhone || primaryPersonalEmail;
     
-    if (!hasAnyContact) {
+    if (!hasAnyContact && !options.source_search_result) {
       console.log(`⚠️ No contact info found - skipping lead creation`);
       leadUpdate = { success: true, leadId: undefined };
     } else {
@@ -745,9 +801,10 @@ export async function enrichLeadWorkflow(
         segment_id: segment_id || undefined,
         person_emails: personEmails, // Pass updated emails to avoid DB query
         linkedin_url: linkedinUrlForUpdate || undefined,
+        ...(options.source_search_result ? { profile: finderLeadProfile(person, selectedRole) } : {}),
       } as any); // Type assertion needed because Activities type is auto-generated
 
-    if (!leadUpdate.success) {
+    if (!leadUpdate.success || (options.source_search_result && !leadUpdate.leadId)) {
       const errorMsg = `Failed to update/create lead: ${leadUpdate.error}`;
       console.error(`❌ ${errorMsg}`);
       errors.push(errorMsg);
@@ -793,7 +850,7 @@ export async function enrichLeadWorkflow(
     const executionTime = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
     const result: EnrichLeadResult = {
       success: false,
-      errors: [...errors, errorMessage],
+      errors: Array.from(new Set([...errors, errorMessage])),
       executionTime,
       completedAt: new Date().toISOString(),
     };

@@ -1,5 +1,7 @@
-import { proxyActivities, workflowInfo, upsertSearchAttributes } from '@temporalio/workflow';
+import { proxyActivities, workflowInfo, upsertSearchAttributes, patched } from '@temporalio/workflow';
 import type { Activities } from '../activities';
+import { inspectDeepResearchOutput, hasDeepResearchOutput } from '../utils/leadResearchState';
+import { finderCompanyRecord } from '../utils/finderData';
 
 // Define the activity interface and options
 const { 
@@ -26,6 +28,7 @@ export interface DeepResearchOptions {
   deliverables?: any;                 // Optional: Expected deliverables structure for lead updates
   scheduleId?: string;                // Optional: Schedule ID from parent workflow (for tracking)
   parentWorkflowType?: string;        // Optional: Type of parent workflow (for tracking)
+  companyPersistence?: 'parent';      // Parent owns authorized, identity-preserving company writes.
 }
 
 export interface DeepResearchResponse {
@@ -253,6 +256,8 @@ export async function deepResearchWorkflow(
   let siteUrl = '';
   let companyInfo: any = null;
   let enhancedDeliverables: any = null; // Initialize at workflow level
+  const validateAnalysis = patched('deep-research-validated-analysis-v1');
+  let rawAnalysisResult: any;
 
   try {
     console.log(`🏢 Step 1: Getting site information for ${site_id}...`);
@@ -572,6 +577,9 @@ export async function deepResearchWorkflow(
         }
         
         const analysisResult = await dataAnalysisActivity(analysisRequest);
+        rawAnalysisResult = analysisResult;
+        const verifiedAnalysis = validateAnalysis ? inspectDeepResearchOutput(analysisResult, enhancedDeliverables) : null;
+        if (verifiedAnalysis && !verifiedAnalysis.completed) throw new Error(verifiedAnalysis.error);
         
         if (!analysisResult.success) {
           const errorMsg = `Failed to perform data analysis: ${analysisResult.error}`;
@@ -657,6 +665,14 @@ export async function deepResearchWorkflow(
             })
           };
           
+          if (verifiedAnalysis) {
+            // Never substitute the locally generated request template for discovered output.
+            research_analysis = { ...research_analysis, status: 'completed',
+              deliverables: verifiedAnalysis.deliverables || {}, analysis: verifiedAnalysis.analysis };
+            insights = verifiedAnalysis.analysis.insights || verifiedAnalysis.analysis.key_findings || [];
+            recommendations = verifiedAnalysis.analysis.recommendations || [];
+          }
+
           if (insights.length > 0) {
             console.log(`🔍 Generated ${insights.length} insights`);
           }
@@ -666,7 +682,8 @@ export async function deepResearchWorkflow(
           }
           
           // Step 4.5: Process company information if present in analysis result
-          if (analysisResult.data?.company && analysisResult.data.company.name) {
+          if (!(validateAnalysis && options.companyPersistence === 'parent')
+            && analysisResult.data?.company && analysisResult.data.company.name) {
             console.log(`🏢 Step 4.5: Processing company information from analysis results...`);
             
             try {
@@ -675,7 +692,8 @@ export async function deepResearchWorkflow(
               
               // Clean up the company data (remove metadata fields)
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              const { _preserve_fields, _research_timestamp, _research_source, ...cleanCompanyData } = companyDataFromAnalysis;
+              const { _preserve_fields, _research_timestamp, _research_source, ...legacyCompanyData } = companyDataFromAnalysis;
+              const cleanCompanyData = validateAnalysis ? finderCompanyRecord(companyDataFromAnalysis) : legacyCompanyData;
               
               // If we have existing company info, merge with new data
               if (companyInfo && companyInfo.id) {
@@ -709,6 +727,7 @@ export async function deepResearchWorkflow(
         research_analysis = {
           success: false,
           error: errorMessage,
+          ...(validateAnalysis ? { status: inspectDeepResearchOutput(rawAnalysisResult).status || 'failed' } : {}),
           site_id: site_id,
           research_topic: research_topic,
           deliverables: enhancedDeliverables,
@@ -760,8 +779,10 @@ export async function deepResearchWorkflow(
       // Add fallback information
       workflow_fallback_mode: workflowFallbackMode,
       fallback_operations: operationResults.filter(result => result.fallback).length,
-      api_status: workflowFallbackMode ? 'fallback' : 'normal'
+      api_status: workflowFallbackMode ? 'fallback' : 'normal',
+      ...(validateAnalysis ? { raw_analysis_response: rawAnalysisResult || null } : {})
     };
+    const completedAnalysis = !validateAnalysis || (errors.length === 0 && hasDeepResearchOutput({ success: true, data: resultData }));
 
     const statusMessage = workflowFallbackMode ? 
       `completed in fallback mode (API unavailable)` : 
@@ -790,7 +811,7 @@ export async function deepResearchWorkflow(
       workflowId: realWorkflowId,
       scheduleId: realScheduleId,
       activityName: 'deepResearchWorkflow',
-      status: 'COMPLETED',
+      status: completedAnalysis ? 'COMPLETED' : 'FAILED',
       lastRun: new Date().toISOString(),
       ...(workflowFallbackMode && {
         errorMessage: 'Completed in fallback mode - API services unavailable',
@@ -802,7 +823,7 @@ export async function deepResearchWorkflow(
     await logWorkflowExecutionActivity({
       workflowId: realWorkflowId,
       workflowType: 'deepResearchWorkflow',
-      status: 'COMPLETED',
+      status: completedAnalysis ? 'COMPLETED' : 'FAILED',
       input: options,
       output: {
         siteId: site_id,
@@ -821,7 +842,7 @@ export async function deepResearchWorkflow(
     });
 
     return {
-      success: true,
+      success: completedAnalysis,
       data: resultData,
       error: errors.length > 0 ? (workflowFallbackMode ? 'Completed in fallback mode' : errors) : null
     };

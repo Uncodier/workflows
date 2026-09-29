@@ -9,6 +9,8 @@ import { getTemporalClient } from '../client';
 import { temporalConfig } from '../../config/config';
 import { extractSearchAttributesFromInput } from '../utils/searchAttributes';
 import { upsertSearchAttributes } from '@temporalio/workflow';
+import { mergeFinderData, isRecord } from '../utils/finderData';
+import { isProtectedResearchField, withoutResearchIdentity } from '../utils/researchData';
 
 // Lead interfaces
 export interface Lead {
@@ -602,6 +604,9 @@ export interface UpdateLeadRequest {
   lead_id: string;
   updateData: any;
   safeUpdate?: boolean; // If true, will not update email or phone
+  site_id?: string;
+  preserveExistingData?: boolean;
+  recordResearchAttempt?: boolean; // Trusted workflow call only; never copied from model deliverables.
 }
 
 export interface UpdateLeadResult {
@@ -647,6 +652,36 @@ export async function updateLeadActivity(request: UpdateLeadRequest): Promise<Up
       }
     }
     
+    if (request.preserveExistingData) {
+      const current = await supabaseService.fetchLead(request.lead_id);
+      if (!current || !request.site_id || current.site_id !== request.site_id) {
+        throw new Error('Lead does not belong to research site');
+      }
+      if (isRecord(updateData.company)) updateData.company = withoutResearchIdentity(updateData.company);
+      if (isRecord(updateData.metadata)) {
+        const attempt = updateData.metadata.deep_research;
+        const metadata = { ...updateData.metadata };
+        for (const key of ['deep_research', 'deep_research_result', 'research_company_link', 'finder',
+          'emailVerified', 'email_verification', 'email_verification_status']) delete metadata[key];
+        if (request.recordResearchAttempt && attempt?.status === 'running'
+          && typeof attempt.workflow_id === 'string' && typeof attempt.attempted_at === 'string') {
+          metadata.deep_research = { status: 'running', workflow_id: attempt.workflow_id, attempted_at: attempt.attempted_at };
+        }
+        updateData.metadata = metadata;
+      }
+      for (const key of ['metadata', 'company', 'social_networks', 'address']) {
+        if (isRecord(updateData[key])) {
+          const analysisSnapshot = key === 'metadata' ? updateData[key].research_analysis : undefined;
+          updateData[key] = mergeFinderData(current[key], updateData[key]);
+          if (analysisSnapshot !== undefined) updateData[key].research_analysis = analysisSnapshot;
+        }
+      }
+      if (typeof updateData.notes === 'string' && current.notes?.trim()
+        && !updateData.notes.includes(current.notes)) updateData.notes = `${current.notes}\n\n${updateData.notes}`;
+      // Research augments profiles; it must not transfer ownership or workflow state.
+      for (const key of Object.keys(updateData)) if (isProtectedResearchField(key)) delete updateData[key];
+      updateData = Object.fromEntries(Object.entries(updateData).filter(([, value]) => value != null && value !== ''));
+    }
     const updatedLead = await supabaseService.updateLead(request.lead_id, updateData);
 
     console.log(`✅ Successfully updated lead information for ${request.lead_id}`);
