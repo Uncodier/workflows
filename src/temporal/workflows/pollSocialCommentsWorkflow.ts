@@ -16,6 +16,8 @@ import {
   isImportAccountOwnedBySite,
   isOutstandDraftPost,
   normalizeOutstandNetwork,
+  SUPPORTED_COMMENT_NETWORKS,
+  supportsHistoricalImport,
   shouldPollPostForComments,
 } from './helpers/outstandPoll';
 import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
@@ -29,6 +31,8 @@ const {
   fetchOutstandAccountsActivity,
   importOutstandPostsActivity,
   fetchOutstandImportJobsActivity,
+  startInitialOutstandImportActivity,
+  recordInitialOutstandImportActivity,
   checkIfImportTriggeredActivity,
   markImportTriggeredActivity,
   claimSyncedObjectActivity,
@@ -50,6 +54,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
   const useStrictSiteOwnership = patched('poll-social-comments-strict-site-ownership-v1');
   const useSocialPostNetworks = patched('poll-social-comments-tiktok-posts-v1');
   const useImportJobStatus = patched('poll-social-comments-import-job-status-v1');
+  const useAutomaticInitialImport = patched('poll-social-comments-auto-initial-import-v1');
   
   await logWorkflowExecutionActivity({
     workflowId,
@@ -88,7 +93,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
             : (result?.pagination || { total: posts.length });
           
           if (offset === 0 && (useSocialPostNetworks && useImportJobStatus
-            ? posts.length === 0
+            ? useAutomaticInitialImport || posts.length === 0
             : useSocialPostNetworks || posts.length === 0)) {
             try {
               const alreadyTriggered = useSocialPostNetworks
@@ -109,14 +114,31 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                     try {
                       if (useImportJobStatus && useSocialPostNetworks) {
                         const jobs = await fetchOutstandImportJobsActivity(siteId, account.id);
-                        const latestJob = jobs[0]; // Outstand returns newest first.
+                        // Prefer the oldest job for an account that predates
+                        // this ledger; it is the initial historical import.
+                        const latestJob = useAutomaticInitialImport
+                          ? jobs[jobs.length - 1]
+                          : jobs[0]; // Legacy branch keeps its old command flow.
                         if (latestJob) {
+                          if (useAutomaticInitialImport && latestJob.socialAccountId &&
+                            latestJob.socialAccountId !== account.id) {
+                            console.error(`Outstand import job ${latestJob.id} belongs to another account; skipping ${account.id}`);
+                            continue;
+                          }
+                          if (useAutomaticInitialImport && latestJob.id &&
+                            ['queued', 'running', 'completed', 'partial', 'failed'].includes(latestJob.status)) {
+                            await recordInitialOutstandImportActivity(siteId, account.id, latestJob);
+                          }
                           if (latestJob.status === 'failed' || latestJob.status === 'partial') {
                             console.error(`Outstand import for account ${account.id} failed: ${latestJob.error || 'Unknown error'}`);
                           }
+                        } else if (useAutomaticInitialImport) {
+                          if (supportsHistoricalImport(account.network)) {
+                            await startInitialOutstandImportActivity(siteId, account.id);
+                          }
                         }
-                        // Importing is billable. A poll must never enqueue a new
-                        // job, whether the previous one failed or no job exists.
+                        // A durable per-account claim keeps a bounded initial
+                        // import from repeating after failures or lost replies.
                         continue;
                       } else if (useSocialPostNetworks && await checkIfImportTriggeredActivity(siteId, account.id)) {
                         continue;
@@ -176,7 +198,9 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
               ...new Set(
                 ownedSocialAccounts
                   .map((account: any) => normalizeOutstandNetwork(account.network))
-                  .filter((network) => Boolean(network) && (!useSocialPostNetworks || network !== 'tiktok'))
+                  .filter((network) => Boolean(network) && (useAutomaticInitialImport
+                    ? SUPPORTED_COMMENT_NETWORKS.some((supported) => supported === network)
+                    : !useSocialPostNetworks || network !== 'tiktok'))
               ),
             ];
             

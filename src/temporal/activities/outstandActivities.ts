@@ -7,6 +7,8 @@ import {
   getConnectedSocialPostAccounts,
   isImportAccountOwnedBySite,
   isOutstandClientError,
+  normalizeOutstandNetwork,
+  supportsHistoricalImport,
   shouldPollPostForAnalytics,
 } from '../workflows/helpers/outstandPoll';
 
@@ -145,8 +147,71 @@ export async function importOutstandPostsActivity(siteId: string, accountId: str
   );
 }
 
+export const INITIAL_OUTSTAND_IMPORT_LIMIT = 100;
+
+/** Only the newly versioned workflow may call this. The legacy activity above
+ * remains non-billable, including retries of existing Temporal histories. */
+export async function startInitialOutstandImportActivity(siteId: string, accountId: string): Promise<boolean> {
+  if (!/^[a-zA-Z0-9_-]{1,80}$/.test(accountId)) {
+    throw ApplicationFailure.nonRetryable('Invalid Outstand account ID', 'OUTSTAND_IMPORT_INVALID_INPUT');
+  }
+  const { data: settings, error: settingsError } = await supabaseAdmin.schema(tenantSchema())
+    .from('settings').select('social_media').eq('site_id', siteId).maybeSingle();
+  if (settingsError) throw new Error(`Unable to verify initial import ownership: ${settingsError.message}`);
+  const account = Array.isArray(settings?.social_media)
+    ? settings.social_media.find((entry: any) => entry?.id === accountId &&
+      (entry.isActive === true || entry.isActive === 1)) : null;
+  const network = normalizeOutstandNetwork(account?.network || account?.platform);
+  if (!account || !isImportAccountOwnedBySite(account, settings?.social_media) || !supportsHistoricalImport(network)) {
+    return false;
+  }
+
+
+  // The API atomically claims the account before its billable POST, so this
+  // activity can safely be retried even if the HTTP response was lost.
+  const response = await apiService.post(
+    `/api/integrations/outstand/social-accounts/${encodeURIComponent(accountId)}/imports?tenant_id=${encodeURIComponent(siteId)}`,
+    { confirm: true, limit: INITIAL_OUTSTAND_IMPORT_LIMIT }
+  );
+  if (!response.success) {
+    throw ApplicationFailure.nonRetryable(
+      `Unable to confirm initial import for account ${accountId}: check provider jobs; request may have been accepted`,
+      'OUTSTAND_IMPORT_UNCERTAIN'
+    );
+  }
+  // ApiService unwraps { success, data } into response.data.
+  if (!response.data?.id || response.data?.status !== 'queued') {
+    throw ApplicationFailure.nonRetryable(
+      `Unexpected Outstand import response for account ${accountId}`,
+      'OUTSTAND_IMPORT_UNCERTAIN'
+    );
+  }
+  return true;
+}
+
+export async function recordInitialOutstandImportActivity(
+  siteId: string, accountId: string, job: OutstandImportJob
+): Promise<boolean> {
+  if (!/^[a-zA-Z0-9_-]{1,80}$/.test(accountId) || !job?.id ||
+      !['queued', 'running', 'completed', 'partial', 'failed'].includes(job.status) ||
+      (job.socialAccountId && job.socialAccountId !== accountId)) {
+    throw ApplicationFailure.nonRetryable('Invalid Outstand import job', 'OUTSTAND_IMPORT_INVALID_INPUT');
+  }
+  const { data, error } = await supabaseAdmin.schema(tenantSchema()).rpc('record_outstand_initial_import', {
+    p_site_id: siteId, p_account_id: accountId, p_status: job.status, p_job_id: job.id,
+    p_imported: Number.isInteger(job.imported) ? job.imported : null,
+    p_failed: Number.isInteger(job.failed) ? job.failed : null,
+  });
+  if (error) throw new Error(`Failed to record import job ${job.id}: ${error.message}`);
+  if (data !== true) {
+    console.warn(`Outstand import job ${job.id} was not recorded for account ${accountId}; check account ownership or job identity`);
+  }
+  return data === true;
+}
+
 export interface OutstandImportJob {
   id: string;
+  socialAccountId?: string;
   status: 'queued' | 'running' | 'completed' | 'partial' | 'failed';
   imported: number;
   skipped: number;

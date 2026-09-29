@@ -8,12 +8,28 @@ export const SUPPORTED_COMMENT_NETWORKS = [
   'youtube',
 ] as const;
 
-// TikTok posts can be synced and analyzed even though comment ingestion is
-// not supported by this integration.
+// Other networks can publish/import posts but do not expose comment polling
+// through this integration. X posts may already exist in Outstand, but X's
+// timeline import is unsupported; the start activity rejects it separately.
 export const SUPPORTED_SOCIAL_POST_NETWORKS = [
   ...SUPPORTED_COMMENT_NETWORKS,
   'tiktok',
+  'bluesky',
+  'pinterest',
+  'google_business',
+  'reddit',
 ] as const;
+
+// Supported by Outstand's historical-import endpoint. X can still appear in
+// its post catalog, but the current API tier cannot import an X timeline.
+export const SUPPORTED_HISTORICAL_IMPORT_NETWORKS = [
+  'instagram', 'facebook', 'threads', 'linkedin', 'tiktok', 'youtube',
+  'bluesky', 'pinterest', 'google_business', 'reddit',
+] as const;
+
+export function supportsHistoricalImport(network: string): boolean {
+  return SUPPORTED_HISTORICAL_IMPORT_NETWORKS.some((supported) => supported === normalizeOutstandNetwork(network));
+}
 
 const ACCOUNT_ID_FIELDS = [
   'id',

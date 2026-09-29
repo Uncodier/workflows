@@ -113,6 +113,15 @@ describe('outstandPoll helpers', () => {
         .toEqual(['instagram']);
     });
 
+    it('includes supported non-comment networks for posts and one-time imports', () => {
+      for (const network of ['bluesky', 'pinterest', 'google_business', 'reddit']) {
+        const connected = { id: `${network}-1`, network, isActive: true };
+        expect(getConnectedSocialPostAccounts([connected])).toHaveLength(1);
+        expect(getConnectedCommentAccounts([connected])).toEqual([]);
+        expect(isImportAccountOwnedBySite(connected, [connected])).toBe(true);
+      }
+    });
+
     it('only assigns a published TikTok post to the uniquely connected site', () => {
       const postAccount = { id: 'yTdoj', network: 'tiktok', status: 'published', platformPostId: 'video-1' };
       const post = { socialAccounts: [postAccount] };

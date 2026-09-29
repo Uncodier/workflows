@@ -1,12 +1,14 @@
 const mockGet = jest.fn();
+const mockPost = jest.fn();
+const mockRpc = jest.fn();
 const mockEq = jest.fn();
 const mockNot = jest.fn();
 const mockSelect = jest.fn(() => ({ not: mockNot, eq: mockEq }));
 const mockFrom = jest.fn(() => ({ select: mockSelect, upsert: jest.fn().mockResolvedValue({ error: null }) }));
-const mockSchema = jest.fn(() => ({ from: mockFrom }));
+const mockSchema = jest.fn(() => ({ from: mockFrom, rpc: mockRpc }));
 
 jest.mock('../src/temporal/services/apiService', () => ({
-  apiService: { get: mockGet },
+  apiService: { get: mockGet, post: mockPost },
 }));
 jest.mock('../src/lib/supabase/client', () => ({
   supabaseServiceRole: { schema: mockSchema },
@@ -20,6 +22,8 @@ import {
   fetchOutstandPostsActivity,
   importOutstandPostsActivity,
   markImportTriggeredActivity,
+  startInitialOutstandImportActivity,
+  recordInitialOutstandImportActivity,
 } from '../src/temporal/activities/outstandActivities';
 
 const account = { id: 'account-1', network: 'linkedin', isActive: true };
@@ -29,6 +33,7 @@ describe('importOutstandPostsActivity historical ID contract', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGet.mockResolvedValue({ success: true, data: { accounts: [account] } });
+    mockRpc.mockResolvedValue({ data: true, error: null });
   });
 
   it('rejects old automatic imports before any network or database side effect', async () => {
@@ -116,5 +121,50 @@ describe('importOutstandPostsActivity historical ID contract', () => {
       expect.objectContaining({ activity_name: 'outstand_historical_import_yTdoj' }),
       { onConflict: 'site_id,activity_name', ignoreDuplicates: false },
     );
+  });
+
+  it('only posts for a currently connected, unclaimed account', async () => {
+    const settingsMaybe = jest.fn().mockResolvedValue({ data: { social_media: [account] }, error: null });
+    const ledgerMaybe = jest.fn().mockResolvedValue({ data: null, error: null });
+    mockFrom.mockImplementation((name) => ({
+      select: () => ({ eq: () => ({ maybeSingle: name === 'settings' ? settingsMaybe : ledgerMaybe }) }),
+    }));
+    mockPost.mockResolvedValue({ success: true, data: { id: 'job-1', status: 'queued' } });
+    await expect(startInitialOutstandImportActivity('site-1', account.id)).resolves.toBe(true);
+    expect(mockPost).toHaveBeenCalledWith(
+      '/api/integrations/outstand/social-accounts/account-1/imports?tenant_id=site-1',
+      { confirm: true, limit: 100 }
+    );
+  });
+
+  it('does not queue an unsupported X import', async () => {
+    mockFrom.mockImplementation(() => ({ select: () => ({ eq: () => ({
+      maybeSingle: jest.fn().mockResolvedValue({
+        data: { social_media: [{ id: 'x-1', network: 'x', isActive: true }] }, error: null,
+      }),
+    }) }) }));
+    await expect(startInitialOutstandImportActivity('site-1', 'x-1')).resolves.toBe(false);
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('skips an inactive account before calling the billable route', async () => {
+    mockFrom.mockImplementation(() => ({ select: () => ({ eq: () => ({
+      maybeSingle: jest.fn().mockResolvedValue({
+        data: { social_media: [{ ...account, isActive: false }] }, error: null,
+      }),
+    }) }) }));
+    await expect(startInitialOutstandImportActivity('site-1', account.id)).resolves.toBe(false);
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('records a terminal provider job once, without posting', async () => {
+    await expect(recordInitialOutstandImportActivity('site-1', account.id, {
+      id: 'job-1', status: 'completed', imported: 6, skipped: 0, failed: 0,
+    })).resolves.toBe(true);
+    expect(mockRpc).toHaveBeenCalledWith('record_outstand_initial_import', {
+      p_site_id: 'site-1', p_account_id: account.id,
+      p_status: 'completed', p_job_id: 'job-1', p_imported: 6, p_failed: 0,
+    });
+    expect(mockPost).not.toHaveBeenCalled();
   });
 });
