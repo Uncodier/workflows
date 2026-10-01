@@ -18,6 +18,7 @@ jest.mock('../src/temporal/workflows/leadFollowUp/validation', () => ({ performE
 jest.mock('../src/temporal/workflows/leadFollowUp/research', () => ({ performResearch: jest.fn() }));
 
 import { dailyStandUpWorkflow } from '../src/temporal/workflows/dailyStandUpWorkflow';
+import { dailyProspectionWorkflow } from '../src/temporal/workflows/dailyProspectionWorkflow';
 import { leadQualificationWorkflow } from '../src/temporal/workflows/leadQualificationWorkflow';
 import { leadFollowUpWorkflow } from '../src/temporal/workflows/leadFollowUpWorkflow';
 import { delayedExecutionWorkflow } from '../src/temporal/workflows/delayedExecutionWorkflow';
@@ -26,16 +27,18 @@ import { resolveOutreachConfiguration } from '../src/temporal/utils/outreachConf
 
 const daily = 'daily_resume_and_stand_up';
 const followUp = 'leads_follow_up';
+const cold = 'leads_initial_cold_outreach';
 const initialSettings = () => ({
   business_hours: [{ timezone: 'America/Mexico_City' }],
   channels: { email: { status: 'synced', email: 'sender@example.org' } },
   activities: {
     [daily]: { status: 'active', weekdays: [2], report_sections: ['sales'] },
     [followUp]: { status: 'active', weekdays: [2], all_segments: true, channel_accounts: { email: ['email'] } },
+    [cold]: { status: 'active', all_segments: true, channel_accounts: { email: ['email'] } },
   },
 });
 
-describe('Daily Standup and Follow Up start-time runtime guards', () => {
+describe('scheduled activity start-time runtime guards', () => {
   let persisted: any;
   beforeEach(() => {
     jest.resetAllMocks();
@@ -56,12 +59,13 @@ describe('Daily Standup and Follow Up start-time runtime guards', () => {
     mockActivities.getQualificationLeadsActivity.mockResolvedValue({ success: true, leads: [], thresholdDate: '2026-09-22' });
     mockActivities.countPendingMessagesActivity.mockResolvedValue({ success: true, count: 0 });
     mockExecuteChild.mockImplementation(async (workflow, { args }) => workflow === 'dailyStandUpWorkflow'
-      ? dailyStandUpWorkflow(args[0]) : leadQualificationWorkflow(args[0]));
+      ? dailyStandUpWorkflow(args[0]) : workflow === 'dailyProspectionWorkflow'
+        ? dailyProspectionWorkflow(args[0]) : leadQualificationWorkflow(args[0]));
   });
   afterEach(() => { jest.useRealTimers(); jest.restoreAllMocks(); });
 
   it.each([
-    [daily, 'dailyStandUpWorkflow'], [followUp, 'leadQualificationWorkflow'],
+    [daily, 'dailyStandUpWorkflow'], [followUp, 'leadQualificationWorkflow'], [cold, 'dailyProspectionWorkflow'],
   ])('%s re-reads a later start edited while the original timer sleeps', async (key, targetWorkflow) => {
     persisted.activities[key].start_time = '09:00';
     mockSleep.mockImplementation(async delay => {
@@ -79,6 +83,26 @@ describe('Daily Standup and Follow Up start-time runtime guards', () => {
     expect(mockActivities.sendDailyStandUpNotificationActivity).not.toHaveBeenCalled();
     expect(mockActivities.getQualificationLeadsActivity).not.toHaveBeenCalled();
     expect(mockActivities.startLeadFollowUpWorkflowActivity).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [daily, 'dailyStandUpWorkflow'], [followUp, 'leadQualificationWorkflow'], [cold, 'dailyProspectionWorkflow'],
+  ])('%s re-reads opening mode selected while a custom-time timer sleeps', async (key, targetWorkflow) => {
+    Object.assign(persisted.activities[key], { start_time_mode: 'custom', start_time: '09:00' });
+    persisted.business_hours[0].days = { tuesday: { enabled: true, start: '11:00' } };
+    mockSleep.mockImplementation(async delay => {
+      // Simulates merge persistence: the old 09:00 remains stored but must be ignored.
+      persisted.activities[key].start_time_mode = 'business_opening';
+      jest.setSystemTime(Date.now() + delay);
+    });
+    const result = await delayedExecutionWorkflow({ delayMs: 3600000, targetWorkflow,
+      targetArgs: [{ site_id: 'site', additionalData: { scheduleTime: '09:00' } }],
+    });
+    expect(result.targetResult).toMatchObject({ success: false, errors: [expect.stringContaining('Before configured')] });
+    expect(mockActivities.cmoWrapUpActivity).not.toHaveBeenCalled();
+    expect(mockActivities.sendDailyStandUpNotificationActivity).not.toHaveBeenCalled();
+    expect(mockActivities.getQualificationLeadsActivity).not.toHaveBeenCalled();
+    expect(mockActivities.getSiteActivity).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -121,6 +145,15 @@ describe('Daily Standup and Follow Up start-time runtime guards', () => {
   it.each(['11:00', null, '', '24:00'])('single-lead Follow Up blocks early or invalid start before paid work: %j', async start_time => {
     persisted.activities[followUp].start_time = start_time;
     expect(await leadFollowUpWorkflow({ site_id: 'site', lead_id: 'lead' })).toMatchObject({ success: false });
+    expect(mockActivities.getSiteActivity).not.toHaveBeenCalled();
+    expect(mockActivities.leadEmailRevalidationActivity).not.toHaveBeenCalled();
+    expect(mockActivities.leadFollowUpActivity).not.toHaveBeenCalled();
+  });
+
+  it.each(['11:00', null, '', '24:00'])('single-lead Cold Outreach blocks early or invalid start before paid work: %j', async start_time => {
+    persisted.activities[cold].start_time = start_time;
+    expect(await leadFollowUpWorkflow({ site_id: 'site', lead_id: 'lead',
+      additionalData: { outreach_activity: cold } })).toMatchObject({ success: false });
     expect(mockActivities.getSiteActivity).not.toHaveBeenCalled();
     expect(mockActivities.leadEmailRevalidationActivity).not.toHaveBeenCalled();
     expect(mockActivities.leadFollowUpActivity).not.toHaveBeenCalled();

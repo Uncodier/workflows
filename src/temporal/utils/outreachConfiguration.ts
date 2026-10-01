@@ -1,5 +1,6 @@
 import type { OutreachActivityKey } from './outreachActivity';
-import { isBeforeActivityStartTime, isValidActivityStartTime } from './activityStartTime';
+import { isBeforeActivityStartTime, isValidActivityStartTime, resolveActivityStartTime, type ActivityStartTimeMode } from './activityStartTime';
+import { activityStartTimes, nextActivityRun, type ActivityStartTimes, type ActivityRun } from './activityScheduling';
 
 export interface OutreachConfiguration {
   shouldExecute: boolean;
@@ -17,13 +18,15 @@ export interface OutreachConfiguration {
   hasWhatsappChannel: boolean;
   hasAnyChannel: boolean;
   timezone: string;
-  /** Follow Up only; missing preserves legacy scheduling and runtime behavior. */
+  startTimeMode?: ActivityStartTimeMode;
+  startTimesByWeekday?: ActivityStartTimes;
+  /** Custom time for either outreach activity; absent mode/time preserves legacy behavior. */
   startTime?: string;
 }
 
 export function outreachTimezone(settings: any): string {
   const hours = Array.isArray(settings?.business_hours) ? settings.business_hours[0] : settings?.business_hours;
-  return hours?.timezone || 'America/Mexico_City';
+  return hours?.timezone ?? 'America/Mexico_City';
 }
 
 export function localOutreachDay(now: Date, timezone: string): { date: string; weekday: number } {
@@ -37,36 +40,16 @@ export function localOutreachDay(now: Date, timezone: string): { date: string; w
 /** Search UTC minutes instead of assuming a fixed offset (DST and half-hour zones). */
 export function nextOutreachRun(now: Date, timezone: string, weekdays: number[], startTime = '09:00'): Date | null {
   if (!weekdays.length || !isValidActivityStartTime(startTime)) return null;
-  const [hour, minute] = startTime.split(':').map(Number);
-  const targetMinute = hour * 60 + minute;
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hourCycle: 'h23', weekday: 'short',
+  return nextActivityRun(now, timezone, activityStartTimes({}, weekdays, { mode: 'custom', startTime }))?.targetTime ?? null;
+}
+
+/** Configuration activity results contain the persisted per-day openings, not stale analysis. */
+export function nextConfiguredOutreachRun(now: Date, configuration: OutreachConfiguration): ActivityRun | null {
+  if (!configuration.shouldExecute) return null;
+  const times = configuration.startTimesByWeekday ?? activityStartTimes({}, configuration.weekdays, {
+    mode: 'custom', startTime: configuration.startTime ?? '09:00',
   });
-  const local = (time: number) => {
-    const parts = formatter.formatToParts(time);
-    const get = (key: string) => parts.find(part => part.type === key)!.value;
-    return {
-      date: `${get('year')}-${get('month')}-${get('day')}`,
-      weekday: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(get('weekday')),
-      minuteOfDay: Number(get('hour')) * 60 + Number(get('minute')),
-    };
-  };
-  const start = Math.ceil(now.getTime() / 60000) * 60000;
-  let previous = local(start - 60000);
-  for (let time = start; time <= start + 8 * 86400000; time += 60000) {
-    const current = local(time);
-    // Match nextDailyStandUpRun: nonexistent spring-forward times use the first valid minute.
-    // Repeated fall-back times use the first occurrence not earlier than now.
-    // A forward date change can skip midnight; ordinary minute-0 rollover is not a gap.
-    const crossesGap = current.minuteOfDay > targetMinute
-      && (previous.date === current.date
-        ? previous.minuteOfDay < targetMinute
-        : previous.date < current.date);
-    if (weekdays.includes(current.weekday) && (current.minuteOfDay === targetMinute || crossesGap)) return new Date(time);
-    previous = current;
-  }
-  return null;
+  return nextActivityRun(now, configuration.timezone, times);
 }
 
 const strings = (value: unknown): string[] => Array.isArray(value)
@@ -108,6 +91,9 @@ export function selectedAccountIds(settings: any, selected: string[], channel: s
 /** checkDay=false validates future scheduling without applying today's weekday/start-time guard. */
 export function resolveOutreachConfiguration(settings: any, activityKey: OutreachActivityKey, now = new Date(), checkDay = true): OutreachConfiguration {
   const raw = settings?.activities?.[activityKey] || {};
+  const timing = resolveActivityStartTime(raw);
+  const isFollowUp = activityKey === 'leads_follow_up';
+  const label = isFollowUp ? 'follow-up' : 'cold outreach';
   const invalidSelection = raw.channel_accounts != null && (typeof raw.channel_accounts !== 'object'
     || Array.isArray(raw.channel_accounts) || Object.keys(raw.channel_accounts).some(key => !isOutreachChannelKey(key)));
   const keys = [...new Set(['email', 'whatsapp', ...Object.keys(raw.channel_accounts || {})])].filter(isOutreachChannelKey);
@@ -122,7 +108,8 @@ export function resolveOutreachConfiguration(settings: any, activityKey: Outreac
     hasEmailChannel: channelAccounts.email.length > 0, hasWhatsappChannel: channelAccounts.whatsapp.length > 0,
     hasAnyChannel: availableChannels.length > 0,
     timezone: outreachTimezone(settings),
-    ...(activityKey === 'leads_follow_up' && isValidActivityStartTime(raw.start_time) ? { startTime: raw.start_time } : {}),
+    ...(timing.mode ? { startTimeMode: timing.mode } : {}),
+    ...(timing.startTime ? { startTime: timing.startTime } : {}),
   };
   if (raw.status !== 'active') result.reason = 'Outreach is inactive; explicit activation is required';
   else if (invalidSelection) result.reason = 'Invalid outreach channel selection';
@@ -132,13 +119,18 @@ export function resolveOutreachConfiguration(settings: any, activityKey: Outreac
   else if (!result.allSegments && !result.segmentIds.length) result.reason = 'Select segments or explicitly enable all segments';
   else if (activityKey === 'leads_follow_up' && (!Array.isArray(result.weekdays) || !result.weekdays.length
     || result.weekdays.some(day => !Number.isInteger(day) || day < 0 || day > 6))) result.reason = 'Select valid follow-up weekdays';
-  else if (activityKey === 'leads_follow_up' && raw.start_time !== undefined && !isValidActivityStartTime(raw.start_time)) result.reason = 'Invalid follow-up start time; expected HH:mm';
+  else if (timing.error) result.reason = timing.error.replace('Invalid start time', `Invalid ${label} start time`);
   else {
     try {
+      if (typeof result.timezone !== 'string' || !result.timezone.trim()) throw new Error('Invalid timezone');
       const day = localOutreachDay(now, result.timezone);
+      if (timing.mode) result.startTimesByWeekday = activityStartTimes(settings,
+        isFollowUp ? result.weekdays : [0, 1, 2, 3, 4, 5, 6], timing, { businessDaysOnly: !isFollowUp });
+      const start = result.startTimesByWeekday?.[day.weekday];
       if (checkDay && activityKey === 'leads_follow_up' && !result.weekdays.includes(day.weekday)) result.reason = 'Not a selected follow-up weekday';
-      else if (checkDay && result.startTime !== undefined && isBeforeActivityStartTime(now, result.timezone, result.startTime)) {
-        result.reason = 'Before configured follow-up start time';
+      else if (checkDay && timing.mode && !start) result.reason = `Business is closed on this ${label} weekday`;
+      else if (checkDay && start && isBeforeActivityStartTime(now, result.timezone, start.scheduledTime)) {
+        result.reason = `Before configured ${label} start time`;
       }
     } catch { result.reason = 'Invalid site timezone'; }
   }

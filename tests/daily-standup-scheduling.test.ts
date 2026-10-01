@@ -28,10 +28,11 @@ import { DAILY_WORKFLOW_REUSE_POLICY } from '../src/temporal/utils/workflowIdHel
 
 const key = 'daily_resume_and_stand_up';
 const site = { id: 'site-1', name: 'Test site', user_id: 'user-1' };
-const settings = (weekdays: number[] = [2], timezone = 'UTC', days: any = {}, start_time?: unknown) => ({
+const settings = (weekdays: number[] = [2], timezone = 'UTC', days: any = {}, start_time?: unknown, start_time_mode?: unknown) => ({
   site_id: site.id,
   activities: { [key]: { status: 'active', weekdays, report_sections: ['sales', 'orders'],
-    ...(start_time !== undefined ? { start_time } : {}) } },
+    ...(start_time !== undefined ? { start_time } : {}),
+    ...(start_time_mode !== undefined ? { start_time_mode } : {}) } },
   business_hours: [{ timezone, days }],
 });
 
@@ -202,8 +203,8 @@ describe('Daily Standup scheduling activities', () => {
     expect(mockSaveCronStatus.mock.calls[0][0].nextRun).toBe('2026-09-28T19:00:00.000Z');
   });
 
-  it('uses a persisted start override for timer ID, delay and metadata despite stale inputs', async () => {
-    mockFetchCompleteSettings.mockResolvedValue([settings([2], 'Asia/Kathmandu', { tuesday: { start: '09:00' } }, '16:15')]);
+  it.each([undefined, 'custom'])('uses a persisted start override (mode %s) for timer ID, delay and metadata despite stale inputs', async start_time_mode => {
+    mockFetchCompleteSettings.mockResolvedValue([settings([2], 'Asia/Kathmandu', { tuesday: { start: '09:00' } }, '16:15', start_time_mode)]);
     expect(await scheduleIndividualDailyStandUpsActivity({ openSites: [] }, {
       activitiesMap: { [site.id]: { [key]: { status: 'active', start_time: '09:00' } } }, timezone: 'UTC',
     })).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
@@ -213,6 +214,51 @@ describe('Daily Standup scheduling activities', () => {
       targetArgs: [{ site_id: site.id, additionalData: { scheduleType: 'activity-start-time',
         fallbackUsed: false, targetTimeUTC: '2026-09-29T10:30:00.000Z' } }] });
     expect(mockSaveCronStatus).toHaveBeenCalledWith(expect.objectContaining({ nextRun: '2026-09-29T10:30:00.000Z' }));
+  });
+
+  it.each(['16:15', 'invalid-stale-time', null])('resets to the next selected opening and ignores stale custom time %j', async start_time => {
+    mockFetchCompleteSettings.mockResolvedValue([settings([2, 5], 'America/New_York', {
+      tuesday: { enabled: false, start: '10:30' }, friday: { enabled: true, open: '11:15' },
+    }, start_time, 'business_opening')]);
+    const staleAnalysis = { openSites: [{ siteId: site.id, businessHours: { open: '04:00', timezone: 'UTC' } }] };
+    expect(await scheduleIndividualDailyStandUpsActivity(staleAnalysis, {
+      timezone: 'UTC', activitiesMap: { [site.id]: { [key]: { status: 'active', start_time_mode: 'custom', start_time: '04:00' } } },
+    })).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    expect(mockStartWorkflow.mock.calls[0][1]).toMatchObject({ workflowId: 'daily-standup-timer-site-1-2026-10-02-1115',
+      args: [{ delayMs: Date.parse('2026-10-02T15:15:00Z') - Date.now(), scheduledTime: '11:15 America/New_York',
+        targetArgs: [{ additionalData: { scheduleType: 'database-configured', fallbackUsed: false,
+          executionDay: '2026-10-02', targetTimeUTC: '2026-10-02T15:15:00.000Z', timezone: 'America/New_York' } }] }],
+    });
+    expect(mockSaveCronStatus).toHaveBeenCalledWith(expect.objectContaining({ nextRun: '2026-10-02T15:15:00.000Z' }));
+  });
+
+  it('uses explicit opening fallback metadata when the selected day has no valid opening', async () => {
+    mockFetchCompleteSettings.mockResolvedValue([settings([2], 'UTC', { tuesday: { start: 'invalid' } }, '16:15', 'business_opening')]);
+    expect(await scheduleIndividualDailyStandUpsActivity(undefined)).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    expect(mockStartWorkflow.mock.calls[0][1].args[0]).toMatchObject({ scheduledTime: '09:00 UTC', targetArgs: [{ additionalData: {
+      scheduleType: 'configured-day-fallback', fallbackUsed: true, targetTimeUTC: '2026-09-29T09:00:00.000Z',
+    } }] });
+  });
+
+  it.each(['business_opening', 'custom'])('preserves the weekly DST timeout for explicit %s timing', async start_time_mode => {
+    jest.setSystemTime(new Date('2026-10-25T13:00:00.001Z'));
+    mockFetchCompleteSettings.mockResolvedValue([settings([0], 'America/New_York', {
+      sunday: { enabled: true, start: '09:00' },
+    }, '09:00', start_time_mode)]);
+    expect(await scheduleIndividualDailyStandUpsActivity(undefined)).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    const options = mockStartWorkflow.mock.calls[0][1];
+    expect(options.workflowRunTimeout).toBe('171h');
+    expect(options.args[0].delayMs).toBe(Date.parse('2026-11-01T14:00:00Z') - Date.now());
+    expect(parseInt(options.workflowRunTimeout) * 3600000).toBeGreaterThanOrEqual(options.args[0].delayMs + 2 * 3600000);
+  });
+
+  it.each(['direct', 'dry-run'])('gates %s opening mode on the fresh opening after a custom reset', async mode => {
+    mockFetchCompleteSettings.mockResolvedValue([settings([2], 'UTC', { tuesday: { enabled: true, start: '10:30' } }, '05:00', 'business_opening')]);
+    const options = { dryRun: mode === 'dry-run', businessHoursAnalysis: { openSites: [{ siteId: site.id, businessHours: { open: '04:00' } }] } };
+    expect(await executeDailyStandUpWorkflowsActivity(options)).toMatchObject({ scheduled: 0, skipped: 1, failed: 0 });
+    expect(mockStartWorkflow).not.toHaveBeenCalled();
+    jest.setSystemTime(new Date('2026-09-29T10:30:00Z'));
+    expect(await executeDailyStandUpWorkflowsActivity(options)).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
   });
 
   it.each(['direct', 'dry-run'])('blocks %s before configured start, but permits the exact local boundary', async mode => {
@@ -258,11 +304,23 @@ describe('Daily Standup scheduling activities', () => {
       ['invalid start', { status: 'active', weekdays: [2], start_time: '24:00' }],
       ['empty start', { status: 'active', weekdays: [2], start_time: '' }],
       ['null start', { status: 'active', weekdays: [2], start_time: null }],
+      ['custom missing start', { status: 'active', weekdays: [2], start_time_mode: 'custom' }],
+      ['invalid mode', { status: 'active', weekdays: [2], start_time_mode: 'invalid', start_time: '09:00' }],
+      ['null mode', { status: 'active', weekdays: [2], start_time_mode: null }],
     ])('fails closed for %s despite embedded active settings', async (_label, config) => {
       mockFetchSites.mockResolvedValue([{ ...site, settings: settings() }]);
       mockFetchCompleteSettings.mockResolvedValue([{ ...settings(), activities: { [key]: config } }]);
       expect(await run()).toMatchObject({ scheduled: 0, skipped: 1, failed: 0 });
       expect(mockStartWorkflow).not.toHaveBeenCalled();
+    });
+
+    it('skips rather than fails when every selected opening is explicitly closed', async () => {
+      mockFetchCompleteSettings.mockResolvedValue([settings([2, 5], 'UTC', {
+        tuesday: { enabled: false, start: '08:00' }, friday: { enabled: false, start: '11:00' },
+      }, '16:15', 'business_opening')]);
+      expect(await run()).toMatchObject({ scheduled: 0, skipped: 1, failed: 0, errors: [], results: [] });
+      expect(mockStartWorkflow).not.toHaveBeenCalled();
+      expect(mockSaveCronStatus).not.toHaveBeenCalled();
     });
 
     it('fails closed for missing settings', async () => {

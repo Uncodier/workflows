@@ -78,6 +78,94 @@ both an old local-date timer and a new UTC-date timer. Existing ICP ownership an
 checkpoints still guard concurrent work on the same request. No live timers or
 production data are modified by this repository change.
 
+### API admission limits and retries
+
+The API has a separate `service-expensive` budget for verified internal service
+credentials: **600 requests/minute**, configurable with
+`SERVICE_EXPENSIVE_REQUESTS_PER_MINUTE`. This is shared by all internal workers,
+not 600 per site or pod. It still consumes the shared expensive API global budget
+(2,000/minute by default) and the service-key budget (5,000/minute). Public/ordinary
+API credentials retain their existing limits; sending `x-api-key-data` cannot opt
+into the service budget. Deploy the corresponding API middleware change as well
+as the Workflows worker; changing only the worker does not raise admission capacity.
+
+ICP role search, contact lookup (details/work emails/personal emails/phones) and
+lead email generation retry **pre-handler** HTTP 429 `RATE_LIMITED` responses in
+the same activity. The API client waits for the later of `Retry-After` (seconds or
+HTTP date) and `error.retry_after`, plus 250–1,000 ms jitter. Missing/invalid hints
+use 60 seconds. There are at most three retries, and their waits count against the
+original request timeout (five minutes by default). A longer cooldown is not
+shortened to squeeze in a request. Exhausted retries retain the existing pending
+checkpoint and error behavior.
+
+Only the rejected HTTP operation is repeated: earlier lookups, completed candidates,
+page snapshots and credit-bearing accepted operations are not replayed by this
+retry loop. It adds no workflow commands or Temporal patch/migration requirement.
+Provider 429s, HTTP 402, 5xx, network failures and unknown error envelopes are **not**
+automatically replayed. Finder handlers currently debit credits before the upstream
+call; safely retrying provider failures requires separate idempotent billing work.
+The new IcyPeas `/resolve` endpoint below is an exception: its durable submission
+record makes repeating that resolver safe after transport/read failures. It still
+never blindly repeats the underlying provider submission.
+This change does not restart previously finished failed executions or reconcile
+old timers.
+
+Forager's [published OpenAPI specification](https://docs.forager.ai/_bundle/openapi.yaml)
+and [work-email lookup contract](https://docs.forager.ai/openapi/people/datastorage_person_contacts_lookup_work_emails_create.md)
+(checked 2026-10-01) accept a scalar `person_id` or `linkedin_public_identifier` for
+work emails, personal emails and phone numbers, not a batch of people. No compatible
+bulk contacts endpoint is documented, so this change does not invent one or launch
+parallel billable lookups. Existing page snapshots and short-circuiting after a
+usable contact remain intact. The 600/minute budget is **our API's admission limit**,
+not a claim about Forager's account quota; verify provider capacity before raising it
+further. Provider billing is separately documented in
+[Forager API Credit Pricing](https://docs.forager.ai/api-overview/credit-pricing).
+
+### IcyPeas asynchronous email discovery
+
+IcyPeas is the first email-discovery provider in the contact cascade. Its
+`/email-search` response accepts a job (`item._id`), **not** an email. The worker
+now calls the tenant-scoped API `/api/integrations/icypeas/email-search/resolve`.
+That endpoint durably records the search before submission, saves the returned
+provider ID, and subsequently reads `/bulk-single-searchs/read` for that ID.
+Repeating the same normalized name/domain/site input resumes the existing job,
+including after an activity failure or a later mining execution. It never starts
+another provider search just because polling was interrupted.
+
+- `NONE`, `SCHEDULED`, `IN_PROGRESS`: keep waiting, never report an empty success.
+- `FOUND`, `DEBITED`: return `results.emails`, retain certainty metadata and run
+  the normal contact validation before saving a lead. Certainty is not a bypass.
+- `NOT_FOUND`, `DEBITED_NOT_FOUND`: confirmed no-match; allow the Finder fallback.
+- `BAD_INPUT`, `INSUFFICIENT_FUNDS`, `ABORTED`, malformed/unknown responses: expose
+  an error, not no-match. An ambiguous initial submission remains fail-closed for
+  manual reconciliation, rather than risking a second paid search.
+
+Each activity polls no faster than every 15 seconds (longer server hints win),
+stops before four minutes, and is cancellation-aware. Still-pending ICP candidates
+remain at their existing checkpoint without purchasing fallback searches. The API
+enforces shared admission at 5 submissions/second and 15 result reads/minute,
+leaving fixed-window burst headroom below the documented 10/second and 30 reads/minute;
+the middleware's 600/minute service quota is a
+separate ceiling, not permission to exceed IcyPeas's provider limits.
+
+**Rollout:** apply the API repository migration
+`supabase/migrations/20261002000000_icypeas_email_searches.sql`, deploy that API,
+then deploy the worker. The table is service-role-only with RLS. The Temporal
+patch `icypeas-durable-email-search-v1` adds `site_id` to new enrichment activity
+inputs while preserving recorded histories. Already-recorded successful empty
+results cannot be changed by replay; legacy pending activity inputs without a
+site fail closed and require a fresh workflow execution. No old search IDs can
+be recovered automatically from the former activity, which discarded them.
+
+IcyPeas [does support bulk search](https://api-doc.icypeas.com/find-emails/bulk-search)
+(up to 5,000 rows), unlike the documented Forager contact endpoints. This repair
+deliberately preserves the existing per-candidate spend/target boundary instead
+of pre-enriching entire pages. Bulk orchestration needs a separate durable
+page-to-job mapping and budget-aware selection; it is not enabled by this change.
+Contracts: [read results](https://api-doc.icypeas.com/fetch-results/search-item),
+[statuses](https://api-doc.icypeas.com/how-works/search_statuses),
+[rate limits](https://api-doc.icypeas.com/how-works/rate_limits).
+
 ## Pagination and persistence
 
 Finder pages contain 10 candidates; the safety cap remains 300 pages per run.

@@ -1,11 +1,13 @@
 const mockActivities: Record<string, jest.Mock> = {};
 const mockExecuteChild = jest.fn();
+const mockPatched = jest.fn();
 jest.mock('@temporalio/workflow', () => ({
   proxyActivities: () => new Proxy({}, { get: (_target, name: string) => {
     if (!mockActivities[name]) mockActivities[name] = jest.fn();
     return mockActivities[name];
   } }),
   upsertSearchAttributes: jest.fn(), executeChild: (...args: any[]) => mockExecuteChild(...args),
+  patched: (...args: any[]) => mockPatched(...args),
 }));
 jest.mock('../src/temporal/workflows/generatePersonEmailWorkflow', () => ({ generatePersonEmailWorkflow: jest.fn() }));
 
@@ -19,6 +21,7 @@ const person = { id: 'local-person', external_person_id: 11, external_role_id: 2
 describe('enrichLeadWorkflow source-aware persistence', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockPatched.mockReturnValue(true);
     jest.spyOn(console, 'log').mockImplementation(() => undefined);
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -91,5 +94,26 @@ describe('enrichLeadWorkflow source-aware persistence', () => {
     const result = await enrichLeadWorkflow({ person_id: '11', site_id: 'site' });
     expect(mockActivities.prepareFinderPersonActivity).not.toHaveBeenCalled();
     expect(result.success).toBe(true);
+  });
+
+  it.each([false, true])('preserves legacy IcyPeas payloads and adds tenant context only with the patch (%s)', async enabled => {
+    mockPatched.mockReturnValue(enabled);
+    const empty = { ...person, emails: [], phones: [], personal_emails: [] };
+    mockActivities.prepareFinderPersonActivity.mockResolvedValue({ success: true, person: empty, companyId: 'company', errors: [] });
+    await enrichLeadWorkflow({ person_id: '11', site_id: 'site', source_search_result: source });
+    expect(mockPatched).toHaveBeenCalledWith('icypeas-durable-email-search-v1');
+    expect(mockActivities.lookEmailOnIcyPeas).toHaveBeenCalledWith({ domainOrCompany: 'acme.test',
+      firstname: 'Ada', lastname: undefined, ...(enabled ? { site_id: 'site' } : {}) });
+  });
+
+  it('also stops non-validated enrichment while IcyPeas is pending', async () => {
+    mockActivities.prepareFinderPersonActivity.mockResolvedValue({ success: true,
+      person: { ...person, emails: [], phones: [], personal_emails: [] }, companyId: 'company', errors: [] });
+    mockActivities.lookEmailOnIcyPeas.mockResolvedValue({ success: false, outcome: 'pending', error: 'Still pending' });
+    expect(await enrichLeadWorkflow({ person_id: '11', site_id: 'site', source_search_result: source }))
+      .toMatchObject({ success: false, errors: ['IcyPeas: Still pending'] });
+    expect(mockActivities.callPersonWorkEmailsActivity).not.toHaveBeenCalled();
+    expect(mockActivities.callPersonContactsLookupPersonalEmailsActivity).not.toHaveBeenCalled();
+    expect(mockActivities.callPersonContactsLookupPhoneNumbersActivity).not.toHaveBeenCalled();
   });
 });

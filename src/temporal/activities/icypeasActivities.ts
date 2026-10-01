@@ -1,21 +1,26 @@
 import { apiService } from '../services/apiService';
+import { Context } from '@temporalio/activity';
+import { resolveIcyPeasEmail } from './icypeas/resolveEmail';
 
 export interface LookEmailOnIcyPeasOptions {
   domainOrCompany: string;
   firstname?: string;
   lastname?: string;
   customobject?: any;
+  site_id?: string;
 }
 
 export interface LookEmailOnIcyPeasResult {
   success: boolean;
   data?: {
     email: string;
-    confidence: number;
+    confidence?: number;
     status: string;
     [key: string]: any;
   };
   error?: string;
+  searchId?: string;
+  outcome?: 'matched' | 'no_match' | 'pending' | 'failed';
 }
 
 /**
@@ -24,48 +29,14 @@ export interface LookEmailOnIcyPeasResult {
 export async function lookEmailOnIcyPeas(
   options: LookEmailOnIcyPeasOptions
 ): Promise<LookEmailOnIcyPeasResult> {
-  const { domainOrCompany, firstname, lastname, customobject } = options;
-
-  try {
-    if (!domainOrCompany) {
-      return { success: false, error: 'domainOrCompany is required' };
-    }
-
-    if (!firstname && !lastname) {
-      return { success: false, error: 'Either firstname or lastname is required' };
-    }
-
-    const requestBody = {
-      domainOrCompany,
-      firstname,
-      lastname,
-      customobject,
-    };
-
-    console.log(`🔍 Calling IcyPeas email search for: ${firstname} ${lastname} @ ${domainOrCompany}`);
-
-    const response = await apiService.post('/api/integrations/icypeas/email-search', requestBody);
-
-    if (!response.success) {
-      return { 
-        success: false, 
-        error: response.error?.message || 'IcyPeas email search failed' 
-      };
-    }
-
-    const payload = response.data?.data || response.data;
-
-    if (!payload || !payload.email) {
-      return { success: true, data: undefined };
-    }
-
-    return { 
-      success: true, 
-      data: payload 
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`❌ Error in lookEmailOnIcyPeas: ${message}`);
-    return { success: false, error: message };
-  }
+  let context: Context | undefined;
+  try { context = Context.current(); } catch { /* Also callable in offline tests. */ }
+  return resolveIcyPeasEmail(options, {
+    request: (body, timeout) => apiService.request('/api/integrations/icypeas/email-search/resolve', {
+      method: 'POST', body, timeout, signal: context?.cancellationSignal,
+    }),
+    sleep: ms => context ? context.sleep(ms) : new Promise(resolve => setTimeout(resolve, ms)),
+    now: Date.now,
+    signal: context?.cancellationSignal,
+  });
 }

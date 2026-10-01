@@ -59,4 +59,26 @@ describe('ICP validated contact policy', () => {
     expect(await enrichWithValidatedContacts(f.options, f.deps)).toMatchObject({ success: true, outcome: 'matched' });
     expect(f.deps.upsertLeadForPersonActivity.mock.calls[0][0]).toMatchObject({ phone: '+14155551234' });
   });
+
+  it('does not spend on fallback providers while the durable IcyPeas search is pending', async () => {
+    const f = fixture();
+    f.deps.lookEmailOnIcyPeas.mockResolvedValue({ success: false, outcome: 'pending', searchId: 'search', error: 'Still pending' });
+    expect(await enrichWithValidatedContacts(f.options, f.deps)).toMatchObject({ success: false, errors: ['Still pending'] });
+    expect(f.deps.callPersonWorkEmailsActivity).not.toHaveBeenCalled();
+    expect(f.deps.callPersonContactsLookupPersonalEmailsActivity).not.toHaveBeenCalled();
+    expect(f.deps.callPersonContactsLookupPhoneNumbersActivity).not.toHaveBeenCalled();
+    expect(f.deps.upsertLeadForPersonActivity).not.toHaveBeenCalled();
+  });
+
+  it('validates all completed IcyPeas alternatives instead of treating certainty as verified', async () => {
+    const f = fixture();
+    f.deps.lookEmailOnIcyPeas.mockResolvedValue({ success: true, outcome: 'matched', searchId: 'search',
+      data: { email: 'first@acme.test', emails: [{ email: 'first@acme.test', certainty: 'ultra_sure' }, { email: 'valid@acme.test', certainty: 'probable' }] } });
+    f.deps.validateContactInformation.mockResolvedValueOnce({ success: true, isValid: false })
+      .mockResolvedValueOnce({ success: true, isValid: true });
+    expect(await enrichWithValidatedContacts(f.options, f.deps)).toMatchObject({ success: true, leadId: 'lead' });
+    expect(f.deps.validateContactInformation).toHaveBeenCalledTimes(2);
+    expect(f.deps.upsertLeadForPersonActivity).toHaveBeenCalledWith(expect.objectContaining({ email: 'valid@acme.test' }));
+    expect(f.deps.callPersonWorkEmailsActivity).not.toHaveBeenCalled();
+  });
 });

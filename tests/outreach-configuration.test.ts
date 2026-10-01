@@ -78,10 +78,10 @@ describe('outreach configuration', () => {
     expect(result).not.toHaveProperty('startTime');
   });
 
-  it.each(['23:59', null, 'invalid'])('does not change Cold Outreach timing (%j)', start_time => {
+  it.each(['23:59', null, 'invalid'])('blocks early or invalid Cold Outreach timing (%j)', start_time => {
     const result = resolveOutreachConfiguration(settings({ start_time }), cold, now);
-    expect(result.shouldExecute).toBe(true);
-    expect(result).not.toHaveProperty('startTime');
+    expect(result.shouldExecute).toBe(false);
+    expect(result.reason).toContain('cold outreach start time');
   });
 });
 

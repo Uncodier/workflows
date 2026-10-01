@@ -67,7 +67,10 @@ export async function enrichWithValidatedContacts(options: EnrichLeadOptions, de
     if (!available() && domain && person.full_name) {
       const [firstname, ...last] = person.full_name.split(/\s+/);
       await lookup('icypeas', () => deps.lookEmailOnIcyPeas({ domainOrCompany: domain, firstname, lastname: last.join(' ') }),
-        result => validate([result.data?.email], work));
+        result => validate([result.data?.emails || result.data?.email], work));
+      // A queued paid search is not a no-match. Leave this candidate at its
+      // checkpoint; its durable search will be resumed instead of buying fallbacks.
+      if (responses.icypeas?.outcome === 'pending') return finish({ personId: person.id });
     }
     if (!available()) await lookup('work_emails', () => deps.callPersonWorkEmailsActivity(params), result => validate([result.emails], work));
     if (!available()) await lookup('personal_emails', () => deps.callPersonContactsLookupPersonalEmailsActivity(params), result => validate([result.emails], personal));

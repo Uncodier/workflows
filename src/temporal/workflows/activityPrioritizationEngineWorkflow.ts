@@ -53,7 +53,7 @@ function extractScheduleId(info: any): string {
  * WEEKEND RESTRICTION: Only schedules sites with business_hours on weekends (Fri/Sat)
  * WEEKDAY FALLBACK: Sites without business_hours use 09:00 fallback (Sun-Thu)
  * AFTER DAILY STANDUPS: Executes dailyProspectionWorkflow for lead prospection
- * Configured Daily Standup scheduling is independent of the general business-hours decision.
+ * Configured standup/cold outreach and followup scheduling are independent of the general business-hours decision.
  */
 export async function activityPrioritizationEngineWorkflow(): Promise<{
   shouldExecute: boolean;
@@ -187,6 +187,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
     let operationsExecuted = false;
     let dailyStandUpScheduling;
     let icpMiningScheduling;
+    let configuredDailyProspectionScheduling;
+    let leadQualificationScheduling;
 
     // Mining has no outbound messaging: spread it over 24h even when daily operations are closed.
     // Keep the new activity command out of pre-change workflow histories.
@@ -215,6 +217,43 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           errors: [error instanceof Error ? error.message : String(error)],
         };
         console.error('❌ Error scheduling configured Daily Standups:', error);
+      }
+    }
+
+    // Configured outreach owns its local start time, not the global business-hours decision.
+    // Keep this marker after the existing independent schedulers so pre-patch histories
+    // (including histories with only some older markers) retain their command ordering.
+    const configuredOutreachScheduling = patched('configured-outreach-scheduling-v1');
+    if (configuredOutreachScheduling) {
+      // Each scheduler loads current settings for all sites; do not restrict it to openSites
+      // or couple the independent schedulers through a shared activities-map fetch.
+      try {
+        configuredDailyProspectionScheduling = await scheduleIndividualDailyProspectionActivity(businessHoursAnalysis, {
+          hoursThreshold: 48,
+          maxLeads: 100,
+          parentScheduleId: realScheduleId,
+          timingFilter: 'configured',
+        });
+      } catch (error) {
+        configuredDailyProspectionScheduling = {
+          scheduled: 0, skipped: 0, failed: 1, results: [],
+          errors: [error instanceof Error ? error.message : String(error)],
+        };
+        console.error('❌ Error scheduling configured daily prospection:', error);
+      }
+
+      try {
+        leadQualificationScheduling = await scheduleLeadQualificationActivity(businessHoursAnalysis, {
+          daysWithoutReply: 7,
+          maxLeads: 100,
+          parentScheduleId: realScheduleId,
+        });
+      } catch (error) {
+        leadQualificationScheduling = {
+          scheduled: 0, skipped: 0, failed: 1, results: [],
+          errors: [error instanceof Error ? error.message : String(error)],
+        };
+        console.error('❌ Error scheduling independent lead qualification:', error);
       }
     }
 
@@ -247,7 +286,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
             hoursThreshold: 48, // Look for leads older than 48 hours
             maxLeads: 100, // Limit to 100 leads per site
             parentScheduleId: realScheduleId, // PASS parent schedule ID for proper tracking
-            activitiesMap
+            activitiesMap,
+            ...(configuredOutreachScheduling ? { timingFilter: 'legacy' as const } : {}),
           });
           
           console.log(`🎯 Daily prospection workflows execution completed:`);
@@ -360,32 +400,35 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           };
         }
         
-        // Step 2.4: Schedule lead qualification (Tue/Wed/Thu at 09:00)
-        console.log('📆 Step 2.4: Scheduling lead qualification (Tue/Wed/Thu at 09:00)...');
-        try {
-          const candidateSiteIds = (businessHoursAnalysis?.openSites || []).map((s: any) => s.siteId);
-          const activitiesMap = await fetchActivitiesMapActivity(candidateSiteIds);
+        // Retain the old followup command sequence (including its map fetch) only on replay.
+        if (!configuredOutreachScheduling) {
+          // Step 2.4: Schedule lead qualification (Tue/Wed/Thu at 09:00)
+          console.log('📆 Step 2.4: Scheduling lead qualification (Tue/Wed/Thu at 09:00)...');
+          try {
+            const candidateSiteIds = (businessHoursAnalysis?.openSites || []).map((s: any) => s.siteId);
+            const activitiesMap = await fetchActivitiesMapActivity(candidateSiteIds);
 
-          const leadQualificationResult = await scheduleLeadQualificationActivity(
-            businessHoursAnalysis,
-            {
-              timezone: 'America/Mexico_City',
-              daysWithoutReply: 7,
-              maxLeads: 100,
-              parentScheduleId: realScheduleId,
-              activitiesMap
-            }
-          );
-          (operationsResult as any).leadQualificationScheduling = leadQualificationResult;
-        } catch (leadQualificationError) {
-          console.error('❌ Error scheduling lead qualification:', leadQualificationError);
-          (operationsResult as any).leadQualificationScheduling = {
-            scheduled: 0,
-            skipped: 0,
-            failed: 1,
-            results: [],
-            errors: [leadQualificationError instanceof Error ? leadQualificationError.message : String(leadQualificationError)]
-          };
+            const leadQualificationResult = await scheduleLeadQualificationActivity(
+              businessHoursAnalysis,
+              {
+                timezone: 'America/Mexico_City',
+                daysWithoutReply: 7,
+                maxLeads: 100,
+                parentScheduleId: realScheduleId,
+                activitiesMap
+              }
+            );
+            (operationsResult as any).leadQualificationScheduling = leadQualificationResult;
+          } catch (leadQualificationError) {
+            console.error('❌ Error scheduling lead qualification:', leadQualificationError);
+            (operationsResult as any).leadQualificationScheduling = {
+              scheduled: 0,
+              skipped: 0,
+              failed: 1,
+              results: [],
+              errors: [leadQualificationError instanceof Error ? leadQualificationError.message : String(leadQualificationError)]
+            };
+          }
         }
 
       } catch (operationsError) {
@@ -477,7 +520,8 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
               hoursThreshold: 48, // Look for leads older than 48 hours
               maxLeads: 100, // Limit to 100 leads per site
               parentScheduleId: realScheduleId, // PASS parent schedule ID for proper tracking
-              activitiesMap
+              activitiesMap,
+              ...(configuredOutreachScheduling ? { timingFilter: 'legacy' as const } : {}),
             }
           );
           
@@ -506,28 +550,31 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
           };
         }
         
-        // Step 2.1.bis: Schedule lead qualification (Tue/Wed/Thu at 09:00)
-        console.log('📆 Step 2.1.bis: Scheduling lead qualification (Tue/Wed/Thu at 09:00)...');
-        try {
-          const leadQualificationResult = await scheduleLeadQualificationActivity(
-            businessHoursAnalysis,
-            {
-              timezone: 'America/Mexico_City',
-              daysWithoutReply: 7,
-              maxLeads: 100,
-              parentScheduleId: realScheduleId
-            }
-          );
-          (operationsResult as any).leadQualificationScheduling = leadQualificationResult;
-        } catch (leadQualificationError) {
-          console.error('❌ Error scheduling lead qualification:', leadQualificationError);
-          (operationsResult as any).leadQualificationScheduling = {
-            scheduled: 0,
-            skipped: 0,
-            failed: 1,
-            results: [],
-            errors: [leadQualificationError instanceof Error ? leadQualificationError.message : String(leadQualificationError)]
-          };
+        // Patched runs already scheduled all followups independently above.
+        if (!configuredOutreachScheduling) {
+          // Step 2.1.bis: Schedule lead qualification (Tue/Wed/Thu at 09:00)
+          console.log('📆 Step 2.1.bis: Scheduling lead qualification (Tue/Wed/Thu at 09:00)...');
+          try {
+            const leadQualificationResult = await scheduleLeadQualificationActivity(
+              businessHoursAnalysis,
+              {
+                timezone: 'America/Mexico_City',
+                daysWithoutReply: 7,
+                maxLeads: 100,
+                parentScheduleId: realScheduleId
+              }
+            );
+            (operationsResult as any).leadQualificationScheduling = leadQualificationResult;
+          } catch (leadQualificationError) {
+            console.error('❌ Error scheduling lead qualification:', leadQualificationError);
+            (operationsResult as any).leadQualificationScheduling = {
+              scheduled: 0,
+              skipped: 0,
+              failed: 1,
+              results: [],
+              errors: [leadQualificationError instanceof Error ? leadQualificationError.message : String(leadQualificationError)]
+            };
+          }
         }
 
         // Step 2.2: Now schedule site analysis since daily standups are also scheduled for later
@@ -648,6 +695,11 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
     }
     if (distributedIcpMining) {
       operationsResult = { ...operationsResult, icpMiningScheduling };
+    }
+    if (configuredOutreachScheduling) {
+      // Keep configured cold separate from legacy branch results, and retain both early
+      // scheduler outcomes even if the monitoring child or later scheduling fails.
+      operationsResult = { ...operationsResult, configuredDailyProspectionScheduling, leadQualificationScheduling };
     }
 
     const endTime = new Date();

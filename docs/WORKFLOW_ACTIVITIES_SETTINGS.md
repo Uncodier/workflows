@@ -4,8 +4,8 @@
 
 This document describes the workflow scheduling control system using `settings.activities` in site configuration.
 
-Daily Standup supports selected delivery weekdays, an optional `start_time`
-(`HH:mm` in the site's timezone), and report sections in AI
+Daily Standup supports selected delivery weekdays, opening/custom execution time
+(`start_time_mode` and custom `start_time` in the site's timezone), and report sections in AI
 Activities. See [Daily Standup configuration](./DAILY_STANDUP_CONFIGURATION.md)
 for defaults, validation, scheduling, and deployment details.
 
@@ -19,10 +19,10 @@ outbound-channel health. AI Activities configures `target_leads` (1–3000, defa
 defaults to true; otherwise use `list_ids`), not activation. See
 [ICP mining configuration](./ICP_MINING_CONFIGURATION.md) for deployment and cursor details.
 Daily mining is distributed per site across 24 hours, independently of business
-hours; it has no fixed-time control. Standup and Follow Up support optional
-`start_time` alongside weekdays. Missing times preserve their previous behavior
-(Standup opening time/09:00 fallback, Follow Up 09:00); invalid supplied times block
-execution rather than falling back silently.
+hours; it has no fixed-time control. Standup, Follow Up and Initial Cold Outreach
+support a `start_time_mode` selector: business opening or custom `start_time`.
+See [Activity execution times](./ACTIVITY_EXECUTION_TIMES.md) for the shared contract,
+legacy compatibility, operating-day rules and runtime enforcement.
 
 ## Feature Description
 

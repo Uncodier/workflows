@@ -16,7 +16,7 @@ import { extractSearchAttributesFromInput } from '../utils/searchAttributes';
 import { computeDelayedWorkflowRunTimeout } from '../utils/delayedExecutionTimeout';
 import { generateDailyWorkflowId, DAILY_WORKFLOW_REUSE_POLICY } from '../utils/workflowIdHelper';
 import { getOutreachConfigurationActivity } from './outreachConfigurationActivity';
-import { localOutreachDay, nextOutreachRun } from '../utils/outreachConfiguration';
+import { localOutreachDay, nextConfiguredOutreachRun } from '../utils/outreachConfiguration';
 import { shouldScheduleWorkflow } from '../utils/activityOptIn';
 import { resolveDailyStandUpConfiguration } from '../utils/dailyStandUpConfiguration';
 import { nextDailyStandUpRun } from '../utils/dailyStandUpScheduling';
@@ -1216,7 +1216,11 @@ export async function scheduleIndividualDailyStandUpsActivity(
           continue;
         }
         const nextRun = nextDailyStandUpRun(setting, now);
-        if (!nextRun) throw new Error('No valid Daily Standup start time found');
+        if (!nextRun) {
+          console.log(`⏭️ Skipping Daily Standup for ${site.id}: no eligible configured opening`);
+          skipped++;
+          continue;
+        }
         const { targetTime: finalTargetUTC, localDate: finalLocalDateStr,
           timezone: siteTimezone, scheduledTime, fallbackUsed } = nextRun;
         const businessHoursSource = configuration.startTime !== undefined ? 'activity-start-time'
@@ -1249,6 +1253,7 @@ export async function scheduleIndividualDailyStandUpsActivity(
             executeReason: `${businessHoursSource}-${scheduledTime}`,
             scheduleType: businessHoursSource,
             scheduleTime: `${scheduledTime} ${siteTimezone}`,
+            startTimeMode: configuration.startTimeMode,
             executionDay: finalLocalDateStr,
             timezone: siteTimezone,
             executionMode: 'timer-delayed',
@@ -2223,6 +2228,8 @@ export async function executeDailyProspectionWorkflowsActivity(
     maxLeads?: number;
     parentScheduleId?: string;
     activitiesMap?: Record<string, any>;
+    /** Partition configured schedules from the engine's historical business-hours path. */
+    timingFilter?: 'configured' | 'legacy';
   } = {}
 ): Promise<{
   scheduled: number;
@@ -2323,33 +2330,11 @@ export async function executeDailyProspectionWorkflowsActivity(
 
     console.log(`📋 Found ${allSites.length} total sites`);
 
-    // Filter sites based on business hours analysis if available
-    let sitesToProcess = allSites;
-    
-    if (businessHoursAnalysis && businessHoursAnalysis.openSites && businessHoursAnalysis.openSites.length > 0) {
-      const openSiteIds = businessHoursAnalysis.openSites.map((site: any) => site.siteId);
-      sitesToProcess = allSites.filter(site => openSiteIds.includes(site.id));
-      
-      console.log(`🔍 Business hours filtering applied:`);
-      console.log(`   - Total sites: ${allSites.length}`);
-      console.log(`   - Sites with active business hours today: ${sitesToProcess.length}`);
-      console.log(`   - Skipped sites (outside business hours): ${allSites.length - sitesToProcess.length}`);
-      
-      skipped = allSites.length - sitesToProcess.length;
-    } else {
-      console.log(`📋 No business hours filtering - processing all ${allSites.length} sites`);
-    }
-
-    if (sitesToProcess.length === 0) {
-      console.log('ℹ️ No sites to process after business hours filtering');
-      return {
-        scheduled: 0,
-        skipped: allSites.length,
-        failed: 0,
-        results: [],
-        errors: []
-      };
-    }
+    // Only legacy sites use the caller's business-hours analysis. Configured timing must
+    // be checked against current persisted settings before any stale analysis can filter it.
+    const sitesToProcess = allSites;
+    const legacyOpenSiteIds = businessHoursAnalysis?.openSites?.length
+      ? new Set(businessHoursAnalysis.openSites.map((site: any) => site.siteId)) : undefined;
 
     console.log(`🚀 Processing ${sitesToProcess.length} sites for daily prospection...`);
 
@@ -2367,18 +2352,33 @@ export async function executeDailyProspectionWorkflowsActivity(
         }
 
         const outreachConfig = await getOutreachConfigurationActivity({
-          site_id: site.id, activity_key: 'leads_initial_cold_outreach', check_day: false,
+          site_id: site.id, activity_key: 'leads_initial_cold_outreach', check_day: true,
         });
         if (!outreachConfig.shouldExecute) {
-          console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach' is inactive in site settings`);
+          console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach': ${outreachConfig.reason}`);
+          skipped++;
+          continue;
+        }
+        const configuredTiming = outreachConfig.startTimesByWeekday !== undefined
+          || outreachConfig.startTimeMode !== undefined || outreachConfig.startTime !== undefined;
+        if ((options.timingFilter === 'configured' && !configuredTiming)
+          || (options.timingFilter === 'legacy' && configuredTiming)) {
+          skipped++;
+          continue;
+        }
+        if (!configuredTiming && legacyOpenSiteIds && !legacyOpenSiteIds.has(site.id)) {
           skipped++;
           continue;
         }
         
         const prospectionResult = await executeDailyProspectionWorkflow(site, {
-          executeReason: businessHoursAnalysis ? 'business-hours-triggered' : 'scheduled-execution',
-          scheduleType: businessHoursAnalysis ? 'business-hours' : 'standard',
-          businessHoursAnalysis: businessHoursAnalysis,
+          executeReason: configuredTiming ? 'configured-local-start' : businessHoursAnalysis ? 'business-hours-triggered' : 'scheduled-execution',
+          scheduleType: configuredTiming ? 'configured-timing' : businessHoursAnalysis ? 'business-hours' : 'standard',
+          businessHoursAnalysis: configuredTiming ? undefined : businessHoursAnalysis,
+          ...(configuredTiming ? {
+            timezone: outreachConfig.timezone,
+            localDate: localOutreachDay(new Date(), outreachConfig.timezone).date,
+          } : {}),
           scheduledBy: 'activityPrioritizationEngine',
           hoursThreshold,
           maxLeads,
@@ -2462,6 +2462,8 @@ async function executeDailyProspectionWorkflow(
     maxLeads?: number;
     dryRun?: boolean;
     parentScheduleId?: string;
+    timezone?: string;
+    localDate?: string;
   }
 ): Promise<ScheduleWorkflowResult> {
   const workflowId = `daily-prospection-${site.id}-${Date.now()}`;
@@ -2497,12 +2499,14 @@ async function executeDailyProspectionWorkflow(
         executeReason: executionOptions.executeReason,
         scheduleType: executionOptions.scheduleType,
         scheduleTime: executionOptions.scheduleType === 'business-hours' ? 'business-hours-based' : 'immediate',
-        executionDay: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-        timezone: 'UTC',
+        executionDay: executionOptions.localDate ?? new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+        timezone: executionOptions.timezone ?? 'UTC',
         executionMode: executionOptions.scheduleType === 'business-hours' ? 'scheduled' : 'direct',
         businessHoursAnalysis: executionOptions.businessHoursAnalysis,
         triggeredBy: 'activityPrioritizationEngine',
-        followsAfter: 'dailyStandUpWorkflow',
+        ...(executionOptions.scheduleType === 'configured-timing'
+          ? { outreach_activity: 'leads_initial_cold_outreach' }
+          : { followsAfter: 'dailyStandUpWorkflow' }),
         parentScheduleId: executionOptions.parentScheduleId,
         dailyOperationsScheduleId: executionOptions.parentScheduleId // Also add as alias for clarity
       }
@@ -2534,9 +2538,9 @@ async function executeDailyProspectionWorkflow(
  * Schedule Daily Prospection Workflows for individual sites using TIMERS
  * Creates delayed workflow executions for sites with business_hours OR weekday fallback
  * Uses Temporal timers instead of schedules for one-time executions
- * WEEKEND RESTRICTION: sites without business_hours are skipped on weekends (Fri/Sat)
- * WEEKDAY FALLBACK: sites without business_hours use 09:00 fallback (Sun-Thu)
- * EXECUTES 2 HOURS AFTER DAILY STANDUP to process leads after standup and lead generation
+ * WEEKEND RESTRICTION: legacy sites without business_hours are skipped on weekends (Sat/Sun)
+ * WEEKDAY FALLBACK: sites without business_hours use 09:00 fallback (Mon-Fri)
+ * Legacy sites execute 2 hours after opening; configured timing uses persisted per-day starts.
  */
 export async function scheduleIndividualDailyProspectionActivity(
   businessHoursAnalysis: any,
@@ -2546,6 +2550,8 @@ export async function scheduleIndividualDailyProspectionActivity(
     maxLeads?: number;
     parentScheduleId?: string;
     activitiesMap?: Record<string, any>;
+    /** Partition configured schedules from the engine's historical business-hours path. */
+    timingFilter?: 'configured' | 'legacy';
   } = {}
 ): Promise<{
   scheduled: number;
@@ -2558,7 +2564,7 @@ export async function scheduleIndividualDailyProspectionActivity(
   
   console.log(`🎯 Scheduling individual Daily Prospection workflows using TIMERS`);
   console.log(`   - Default timezone: ${timezone}`);
-  console.log(`   - Sites with business_hours: ${businessHoursAnalysis.openSites?.length || 0}`);
+  console.log(`   - Sites with business_hours: ${businessHoursAnalysis?.openSites?.length || 0}`);
   console.log(`   - Hours threshold: ${hoursThreshold} hours`);
   console.log(`   - Max leads per site: ${maxLeads}`);
   
@@ -2583,7 +2589,7 @@ export async function scheduleIndividualDailyProspectionActivity(
 
     // Create a map of sites with business hours for quick lookup
     const sitesWithBusinessHours = new Map();
-    if (businessHoursAnalysis.openSites) {
+    if (businessHoursAnalysis?.openSites) {
       businessHoursAnalysis.openSites.forEach((site: any) => {
         sitesWithBusinessHours.set(site.siteId, site.businessHours);
       });
@@ -2616,8 +2622,80 @@ export async function scheduleIndividualDailyProspectionActivity(
           site_id: site.id, activity_key: 'leads_initial_cold_outreach', check_day: false,
         });
         if (!outreachConfig.shouldExecute) {
-          console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach' is inactive in site settings`);
+          console.log(`   ⏭️ SKIPPING - 'leads_initial_cold_outreach': ${outreachConfig.reason}`);
           skipped++;
+          continue;
+        }
+
+        // Timing configuration replaces the legacy +2h offset and stale openSites data.
+        // In particular, an empty per-day map means closed, not legacy fallback.
+        const configuredTiming = outreachConfig.startTimesByWeekday !== undefined
+          || outreachConfig.startTimeMode !== undefined || outreachConfig.startTime !== undefined;
+        if ((options.timingFilter === 'configured' && !configuredTiming)
+          || (options.timingFilter === 'legacy' && configuredTiming)) {
+          skipped++;
+          continue;
+        }
+        if (configuredTiming) {
+          const now = new Date();
+          const nextRun = nextConfiguredOutreachRun(now, outreachConfig);
+          if (!nextRun) {
+            skipped++;
+            continue;
+          }
+          const { targetTime, localDate, timezone: siteTimezone, scheduledTime, fallbackUsed } = nextRun;
+          const delayMs = Math.max(0, targetTime.getTime() - now.getTime());
+          const source = outreachConfig.startTime !== undefined ? 'activity-start-time'
+            : fallbackUsed ? 'configured-day-fallback' : 'database-configured';
+          const workflowId = generateDailyWorkflowId({
+            workflowType: 'daily-prospection', siteId: site.id,
+            dateStr: localDate, timeStr: scheduledTime, isTimer: true,
+          });
+          await client.workflow.start('delayedExecutionWorkflow', {
+            args: [{
+              delayMs,
+              targetWorkflow: 'dailyProspectionWorkflow',
+              targetArgs: [{
+                site_id: site.id,
+                userId: site.user_id,
+                hoursThreshold,
+                maxLeads,
+                minLeadsRequired: 30,
+                updateStatus: false,
+                additionalData: {
+                  scheduledBy: 'activityPrioritizationEngine-dailyProspection',
+                  outreach_activity: 'leads_initial_cold_outreach',
+                  executeReason: `configured-daily-prospection-${source}-${scheduledTime}`,
+                  scheduleType: `daily-prospection-${source}`,
+                  scheduleTime: `${scheduledTime} ${siteTimezone}`,
+                  startTimeMode: outreachConfig.startTimeMode,
+                  executionDay: localDate,
+                  timezone: siteTimezone,
+                  executionMode: 'timer-delayed-daily-prospection',
+                  siteName: site.name || `Site ${site.id.substring(0, 8)}`,
+                  fallbackUsed,
+                  delayMs,
+                  targetTimeUTC: targetTime.toISOString(),
+                  prospectionType: 'configured-daily-prospection',
+                  prospectionExecutesTwoHoursLater: false,
+                  hoursThreshold,
+                  maxLeads,
+                  parentScheduleId: options.parentScheduleId,
+                  dailyOperationsScheduleId: options.parentScheduleId,
+                },
+              }],
+              siteName: site.name || 'Site',
+              scheduledTime: `${scheduledTime} ${siteTimezone}`,
+              executionType: 'timer-based-daily-prospection',
+            }],
+            taskQueue: temporalConfig.taskQueue,
+            workflowId,
+            workflowIdReusePolicy: DAILY_WORKFLOW_REUSE_POLICY as any,
+            // A single operating day can be more than seven days away across DST.
+            workflowRunTimeout: Math.max(48 * 3600000, delayMs + 2 * 3600000),
+          });
+          results.push({ workflowId, scheduleId: workflowId, success: true });
+          scheduled++;
           continue;
         }
         
@@ -2810,8 +2888,7 @@ export async function scheduleIndividualDailyProspectionActivity(
     console.log(`   ✅ Scheduled: ${scheduled} sites`);
     console.log(`   ❌ Failed: ${failed} sites`);
     console.log(`   🎯 Using TIMER-based approach for reliable one-time execution`);
-    console.log(`   📅 Each site will execute at their specific business hours PLUS 2 HOURS`);
-    console.log(`   🎯 EXECUTES 2 HOURS AFTER DAILY STANDUP to process leads after standup and lead generation`);
+    console.log(`   📅 Sites use configured local starts, or the legacy opening PLUS 2 HOURS`);
 
     return { scheduled, skipped, failed, results, errors };
 
@@ -2836,8 +2913,8 @@ export async function scheduleIndividualDailyProspectionActivity(
 
 /**
  * Schedule Lead Qualification Workflows for individual sites using TIMERS
- * Runs on configured follow-up weekdays at 09:00 local time
- * Uses business_hours timezone when available; otherwise falls back to provided timezone
+ * Runs on configured follow-up weekdays at the persisted local start (legacy default 09:00).
+ * Uses current persisted business_hours timezone, not the caller's analysis or timezone.
  */
 export async function scheduleLeadQualificationActivity(
   businessHoursAnalysis: any,
@@ -2856,7 +2933,7 @@ export async function scheduleLeadQualificationActivity(
   errors: string[];
 }> {
   const { timezone = 'America/Mexico_City', daysWithoutReply = 7, maxLeads = 100 } = options;
-  console.log(`📆 Scheduling Lead Qualification (Tue/Wed/Thu at 09:00)`);
+  console.log(`📆 Scheduling Lead Qualification at configured local starts`);
   console.log(`   - Default timezone: ${timezone}`);
   console.log(`   - Days without reply: ${daysWithoutReply}`);
   console.log(`   - Max leads per site: ${maxLeads}`);
@@ -2876,13 +2953,6 @@ export async function scheduleLeadQualificationActivity(
 
     if (!allSites || allSites.length === 0) {
       return { scheduled: 0, skipped: 0, failed: 0, results: [], errors: [] };
-    }
-
-    const sitesWithBusinessHours = new Map();
-    if (businessHoursAnalysis?.openSites) {
-      businessHoursAnalysis.openSites.forEach((site: any) => {
-        sitesWithBusinessHours.set(site.siteId, site.businessHours);
-      });
     }
 
     for (const site of allSites as any[]) {
@@ -2906,21 +2976,20 @@ export async function scheduleLeadQualificationActivity(
           continue;
         }
 
-        const businessHours = sitesWithBusinessHours.get(site.id);
-        const siteTimezone = outreachConfig.timezone;
-        const scheduledTime = outreachConfig.startTime ?? '09:00';
-        const finalTargetUTC = nextOutreachRun(new Date(), siteTimezone, outreachConfig.weekdays, scheduledTime);
-        if (!finalTargetUTC) {
+        const now = new Date();
+        const nextRun = nextConfiguredOutreachRun(now, outreachConfig);
+        if (!nextRun) {
           console.log(`   ⚠️ Could not determine next valid schedule time; skipping site`);
           skipped++;
           continue;
         }
 
-        const finalLocalDateStr = localOutreachDay(finalTargetUTC, siteTimezone).date;
+        const { targetTime: finalTargetUTC, localDate: finalLocalDateStr,
+          timezone: siteTimezone, scheduledTime, fallbackUsed } = nextRun;
         console.log(`   - Next run (local): ${scheduledTime} ${siteTimezone} on ${finalLocalDateStr}`);
         console.log(`   - Next run (UTC): ${finalTargetUTC.toISOString()}`);
 
-        const delayMs = finalTargetUTC.getTime() - Date.now();
+        const delayMs = Math.max(0, finalTargetUTC.getTime() - now.getTime());
         const workflowId = generateDailyWorkflowId({
           workflowType: 'lead-qualification',
           siteId: site.id,
@@ -2943,15 +3012,9 @@ export async function scheduleLeadQualificationActivity(
             executionDay: finalLocalDateStr,
             timezone: siteTimezone,
             executionMode: 'timer-delayed-lead-qualification',
-            businessHours: businessHours || {
-              open: scheduledTime,
-              close: '18:00',
-              enabled: true,
-              timezone: siteTimezone,
-              source: businessHours ? 'database-configured' : 'fallback-weekday'
-            },
+            startTimeMode: outreachConfig.startTimeMode,
             siteName: site.name || `Site ${site.id.substring(0, 8)}`,
-            fallbackUsed: !businessHours,
+            fallbackUsed,
             delayMs,
             targetTimeUTC: finalTargetUTC.toISOString(),
             parentScheduleId: options.parentScheduleId,

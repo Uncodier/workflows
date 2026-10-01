@@ -1,5 +1,6 @@
 import { localOutreachDay } from './outreachConfiguration';
-import { isBeforeActivityStartTime, isValidActivityStartTime } from './activityStartTime';
+import { isBeforeActivityStartTime, resolveActivityStartTime, type ActivityStartTimeMode } from './activityStartTime';
+import { activityStartTimes } from './activityScheduling';
 
 export const DAILY_STAND_UP_REPORT_SECTIONS = [
   'sales', 'tasks', 'requirements', 'social', 'channels',
@@ -15,7 +16,8 @@ export interface DailyStandUpConfiguration {
   weekdays: number[];
   reportSections: DailyStandUpReportSection[];
   timezone: string;
-  /** Missing retains the legacy per-day opening and imposes no new runtime time floor. */
+  startTimeMode?: ActivityStartTimeMode;
+  /** Custom time only; opening mode resolves the current local day's business hours. */
   startTime?: string;
 }
 
@@ -34,6 +36,7 @@ export function resolveDailyStandUpConfiguration(
   const sections = raw?.report_sections === undefined ? DAILY_STAND_UP_REPORT_SECTIONS : raw.report_sections;
   const hours = Array.isArray(settings?.business_hours) ? settings.business_hours[0] : settings?.business_hours;
   const timezone = hours?.timezone ?? 'America/Mexico_City';
+  const timing = resolveActivityStartTime(raw);
   const validDays = Array.isArray(weekdays) && weekdays.length > 0
     && weekdays.every(day => Number.isInteger(day) && day >= 0 && day <= 6);
   const validSections = Array.isArray(sections) && sections.length > 0
@@ -44,19 +47,22 @@ export function resolveDailyStandUpConfiguration(
     weekdays: validDays ? [...new Set<number>(weekdays)].sort((a, b) => a - b) : [],
     reportSections: validSections ? DAILY_STAND_UP_REPORT_SECTIONS.filter(section => sections.includes(section)) : [],
     timezone,
-    ...(isValidActivityStartTime(raw?.start_time) ? { startTime: raw.start_time } : {}),
+    ...(timing.mode ? { startTimeMode: timing.mode } : {}),
+    ...(timing.startTime ? { startTime: timing.startTime } : {}),
   };
 
   if (status !== 'active') result.reason = 'Daily Standup is inactive; explicit activation is required';
   else if (!validDays) result.reason = 'Select at least one valid Daily Standup weekday';
   else if (!validSections) result.reason = 'Select at least one valid Daily Standup report section';
-  else if (raw?.start_time !== undefined && !isValidActivityStartTime(raw.start_time)) result.reason = 'Invalid Daily Standup start time; expected HH:mm';
+  else if (timing.error) result.reason = timing.error.replace('Invalid start time', 'Invalid Daily Standup start time');
   else {
     try {
       if (typeof timezone !== 'string' || !timezone.trim()) throw new Error('Invalid timezone');
       const day = localOutreachDay(now, timezone);
+      const start = activityStartTimes(settings, result.weekdays, timing)[day.weekday];
       if (checkDay && !result.weekdays.includes(day.weekday)) result.reason = 'Not a selected Daily Standup weekday';
-      else if (checkDay && result.startTime !== undefined && isBeforeActivityStartTime(now, timezone, result.startTime)) {
+      else if (checkDay && timing.mode && !start) result.reason = 'Business is closed on this Daily Standup weekday';
+      else if (checkDay && timing.mode && start && isBeforeActivityStartTime(now, timezone, start.scheduledTime)) {
         result.reason = 'Before configured Daily Standup start time';
       }
     } catch {

@@ -38,12 +38,15 @@ const followup = 'leads_follow_up';
 const cold = 'leads_initial_cold_outreach';
 const site = { id: 'site-1', name: 'Test site', user_id: 'user-1' };
 const activeConfig = { status: 'active', all_segments: true, channel_accounts: { email: ['email'] }, weekdays: [0] };
-const settings = (config: Record<string, unknown> = activeConfig, timezone = 'America/New_York') => ({
+const settings = (config: Record<string, unknown> = activeConfig, timezone = 'America/New_York', days: Record<string, unknown> = {}) => ({
   site_id: site.id,
-  business_hours: [{ timezone }],
+  business_hours: [{ timezone, days }],
   channels: { email: { status: 'synced', email: 'sender@example.org' } },
   activities: { [followup]: config, [cold]: config },
 });
+const staleAnalysis = { openSites: [{ siteId: site.id, businessHours: { open: '04:00', close: '05:00', timezone: 'UTC' } }] };
+const closedWeek = Object.fromEntries(['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+  .map(day => [day, { enabled: false, start: '09:00' }]));
 
 describe('next outreach run at local 09:00', () => {
   it.each([
@@ -203,17 +206,51 @@ describe('outreach scheduling boundaries', () => {
     expect(timeoutMs).toBeGreaterThanOrEqual(options.args[0].delayMs + 2 * 60 * 60 * 1000);
   });
 
-  it('uses custom start for the timer ID, delay and metadata rather than 09:00 or opening hours', async () => {
-    mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time: '02:30' })]);
-    expect(await scheduleLeadQualificationActivity({ openSites: [] }, {
+  it.each([undefined, 'custom'])('uses custom start (mode %s) for the timer ID, delay and metadata rather than 09:00 or opening hours', async start_time_mode => {
+    mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time: '02:30', start_time_mode })]);
+    expect(await scheduleLeadQualificationActivity(staleAnalysis, {
       activitiesMap: { [site.id]: { [followup]: { ...activeConfig, start_time: '09:00' } } },
     })).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
     const options = mockStartWorkflow.mock.calls[0][1];
     expect(options.workflowId).toBe('lead-qualification-timer-site-1-2026-03-08-0230');
     expect(options.args[0]).toMatchObject({ delayMs: Date.parse('2026-03-08T07:00:00Z') - Date.now(),
       scheduledTime: '02:30 America/New_York', targetArgs: [{ additionalData: {
-        scheduleTime: '02:30 America/New_York', targetTimeUTC: '2026-03-08T07:00:00.000Z', executionDay: '2026-03-08',
+        scheduleTime: '02:30 America/New_York', targetTimeUTC: '2026-03-08T07:00:00.000Z', executionDay: '2026-03-08', fallbackUsed: false,
       } }] });
+  });
+
+  it.each(['16:15', 'invalid-stale-time', null])('resets follow-up to the next selected opening, ignoring stale time %j and a closed day', async start_time => {
+    jest.setSystemTime(new Date('2026-09-29T12:00:00Z'));
+    mockFetchCompleteSettings.mockResolvedValue([settings({
+      ...activeConfig, weekdays: [2, 5], start_time_mode: 'business_opening', start_time,
+    }, 'America/New_York', {
+      tuesday: { enabled: false, start: '10:30' }, friday: { enabled: true, open: '11:15' },
+    })]);
+    expect(await scheduleLeadQualificationActivity(staleAnalysis, {
+      timezone: 'UTC', activitiesMap: { [site.id]: { [followup]: { ...activeConfig, start_time: '04:00' } } },
+    })).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    const options = mockStartWorkflow.mock.calls[0][1];
+    expect(options.workflowId).toBe('lead-qualification-timer-site-1-2026-10-02-1115');
+    expect(options.args[0]).toMatchObject({
+      delayMs: Date.parse('2026-10-02T15:15:00Z') - Date.now(), scheduledTime: '11:15 America/New_York',
+      targetArgs: [{ additionalData: { targetTimeUTC: '2026-10-02T15:15:00.000Z', executionDay: '2026-10-02',
+        startTimeMode: 'business_opening', fallbackUsed: false } }],
+    });
+    expect(options.args[0].targetArgs[0].additionalData.businessHours).toBeUndefined();
+  });
+
+  it('keeps explicit opening fallback metadata separate from a custom start', async () => {
+    mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time_mode: 'business_opening' })]);
+    expect(await scheduleLeadQualificationActivity(staleAnalysis)).toMatchObject({ scheduled: 1, skipped: 0 });
+    expect(mockStartWorkflow.mock.calls[0][1].args[0]).toMatchObject({ scheduledTime: '09:00 America/New_York',
+      targetArgs: [{ additionalData: { fallbackUsed: true, targetTimeUTC: '2026-03-08T13:00:00.000Z' } }] });
+  });
+
+  it('skips follow-up when every selected opening is explicitly closed, without a fallback timer', async () => {
+    mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time_mode: 'business_opening' },
+      'America/New_York', closedWeek)]);
+    expect(await scheduleLeadQualificationActivity(staleAnalysis)).toMatchObject({ scheduled: 0, skipped: 1, failed: 0, errors: [] });
+    expect(mockStartWorkflow).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -225,6 +262,9 @@ describe('outreach scheduling boundaries', () => {
     ['invalid start', { ...activeConfig, start_time: '24:00' }],
     ['empty start', { ...activeConfig, start_time: '' }],
     ['null start', { ...activeConfig, start_time: null }],
+    ['custom missing start', { ...activeConfig, start_time_mode: 'custom' }],
+    ['invalid mode', { ...activeConfig, start_time_mode: 'invalid', start_time: '09:00' }],
+    ['null mode', { ...activeConfig, start_time_mode: null }],
     ['no selected account', { ...activeConfig, channel_accounts: {} }],
     ['missing selected account', { ...activeConfig, channel_accounts: { email: ['missing'] } }],
     ['no selected segments', { ...activeConfig, all_segments: false }],
@@ -278,9 +318,35 @@ describe('outreach scheduling boundaries', () => {
 
   describe.each(['timer', 'immediate'])('cold outreach %s scheduler', mode => {
     it.each([
+      ['configured', {}, false],
+      ['configured', { start_time_mode: 'business_opening' }, true],
+      ['configured', { start_time: '09:00' }, true],
+      ['legacy', {}, true],
+      ['legacy', { start_time_mode: 'business_opening' }, false],
+      ['legacy', { start_time: '09:00' }, false],
+    ] as const)('timing filter %s uses fresh config %j (dispatch %s)', async (timingFilter, timing, dispatch) => {
+      jest.setSystemTime(new Date('2026-09-28T12:00:00Z'));
+      mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, ...timing }, 'UTC')]);
+      const options = { timingFilter, activitiesMap: { [site.id]: { [cold]: { ...activeConfig,
+        ...(dispatch ? {} : { start_time_mode: 'custom', start_time: '23:59' }),
+      } } } };
+      const result = mode === 'timer'
+        ? await scheduleIndividualDailyProspectionActivity({ openSites: [] }, options)
+        : await executeDailyProspectionWorkflowsActivity(options);
+      expect(result).toMatchObject({ scheduled: dispatch ? 1 : 0, skipped: dispatch ? 0 : 1, failed: 0 });
+      expect(mockStartWorkflow).toHaveBeenCalledTimes(dispatch ? 1 : 0);
+    });
+
+    it.each([
       ['inactive persisted settings', { ...activeConfig, status: 'inactive' }],
       ['no selected account', { ...activeConfig, channel_accounts: {} }],
       ['no selected segments', { ...activeConfig, all_segments: false }],
+      ['invalid mode', { ...activeConfig, start_time_mode: 'invalid', start_time: '09:00' }],
+      ['null mode', { ...activeConfig, start_time_mode: null }],
+      ['custom missing start', { ...activeConfig, start_time_mode: 'custom' }],
+      ['invalid start', { ...activeConfig, start_time: '24:00' }],
+      ['empty start', { ...activeConfig, start_time: '' }],
+      ['null start', { ...activeConfig, start_time: null }],
     ])('does not queue with %s despite an active stale map', async (_label, config) => {
       jest.setSystemTime(new Date('2026-09-28T12:00:00Z'));
       mockFetchCompleteSettings.mockResolvedValue([settings(config)]);
@@ -292,5 +358,146 @@ describe('outreach scheduling boundaries', () => {
       expect(mockFetchCompleteSettings).toHaveBeenCalledWith([site.id]);
       expect(mockStartWorkflow).not.toHaveBeenCalled();
     });
+
+    it.each(['business_opening', 'custom'])('skips a fully closed week in %s mode without failing or dispatching', async start_time_mode => {
+      mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time_mode, start_time: '10:45' }, 'UTC', closedWeek)]);
+      const result = mode === 'timer'
+        ? await scheduleIndividualDailyProspectionActivity(staleAnalysis)
+        : await executeDailyProspectionWorkflowsActivity({ businessHoursAnalysis: staleAnalysis });
+      expect(result).toMatchObject({ scheduled: 0, skipped: 1, failed: 0, errors: [] });
+      expect(mockStartWorkflow).not.toHaveBeenCalled();
+    });
+
+    it('does not use stale analysis timezone when the persisted configured timezone is invalid', async () => {
+      mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time_mode: 'custom', start_time: '09:00' }, 'Invalid/Zone')]);
+      const result = mode === 'timer'
+        ? await scheduleIndividualDailyProspectionActivity(staleAnalysis, { timezone: 'UTC' })
+        : await executeDailyProspectionWorkflowsActivity({ businessHoursAnalysis: staleAnalysis });
+      expect(result).toMatchObject({ scheduled: 0, skipped: 1, failed: 0 });
+      expect(mockStartWorkflow).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([
+    ['custom', { start_time_mode: 'custom', start_time: '10:45' }, '10:45', '2026-09-28T14:45:00.000Z'],
+    ['legacy supplied time', { start_time: '10:45' }, '10:45', '2026-09-28T14:45:00.000Z'],
+    ['opening', { start_time_mode: 'business_opening' }, '10:30', '2026-09-28T14:30:00.000Z'],
+    ['reset from custom', { start_time_mode: 'business_opening', start_time: '23:59' }, '10:30', '2026-09-28T14:30:00.000Z'],
+    ['reset with invalid stale time', { start_time_mode: 'business_opening', start_time: null }, '10:30', '2026-09-28T14:30:00.000Z'],
+  ])('schedules cold %s from fresh persisted timing, not stale analysis or the +2h legacy offset', async (_label, timing, time, target) => {
+    jest.setSystemTime(new Date('2026-09-28T12:00:00Z'));
+    mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, ...timing }, 'America/New_York', {
+      monday: { enabled: true, start: '10:30' },
+    })]);
+    expect(await scheduleIndividualDailyProspectionActivity(staleAnalysis, {
+      timezone: 'UTC', hoursThreshold: 72, maxLeads: 15, parentScheduleId: 'parent',
+      activitiesMap: { [site.id]: { [cold]: { status: 'inactive', start_time: '04:00' } } },
+    })).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    expect(mockFetchCompleteSettings).toHaveBeenCalledWith([site.id]);
+    const [workflow, options] = mockStartWorkflow.mock.calls[0];
+    expect(workflow).toBe('delayedExecutionWorkflow');
+    expect(options.workflowId).toBe(`daily-prospection-timer-site-1-2026-09-28-${time.replace(':', '')}`);
+    expect(options.args[0]).toMatchObject({
+      delayMs: Date.parse(target) - Date.now(), scheduledTime: `${time} America/New_York`, targetWorkflow: 'dailyProspectionWorkflow',
+      targetArgs: [{ site_id: site.id, hoursThreshold: 72, maxLeads: 15, additionalData: {
+        outreach_activity: cold, scheduleTime: `${time} America/New_York`, targetTimeUTC: target,
+        executionDay: '2026-09-28', timezone: 'America/New_York', fallbackUsed: false,
+        prospectionExecutesTwoHoursLater: false, parentScheduleId: 'parent', dailyOperationsScheduleId: 'parent',
+      } }],
+    });
+    expect(options.args[0].targetArgs[0].additionalData.businessHours).toBeUndefined();
+    expect(options.args[0].targetArgs[0].additionalData.originalDailyStandupTime).toBeUndefined();
+  });
+
+  it('skips explicitly closed cold operating days and uses the next day’s opening, even outside stale openSites', async () => {
+    jest.setSystemTime(new Date('2026-09-28T08:00:00Z'));
+    mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time_mode: 'business_opening' }, 'UTC', {
+      monday: { enabled: false, start: '10:30' }, tuesday: { enabled: true, start: '12:15' },
+    })]);
+    expect(await scheduleIndividualDailyProspectionActivity({ openSites: [{ siteId: 'other-site' }] }))
+      .toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    expect(mockStartWorkflow.mock.calls[0][1].args[0]).toMatchObject({ scheduledTime: '12:15 UTC',
+      targetArgs: [{ additionalData: { executionDay: '2026-09-29', targetTimeUTC: '2026-09-29T12:15:00.000Z', fallbackUsed: false } }] });
+  });
+
+  it('uses Mon–Fri fallback for missing cold operating days rather than scheduling the weekend', async () => {
+    jest.setSystemTime(new Date('2026-10-03T08:00:00Z'));
+    mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time_mode: 'business_opening' }, 'UTC')]);
+    expect(await scheduleIndividualDailyProspectionActivity(undefined, { timezone: 'Asia/Tokyo' }))
+      .toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    expect(mockStartWorkflow.mock.calls[0][1]).toMatchObject({ workflowId: 'daily-prospection-timer-site-1-2026-10-05-0900',
+      args: [{ scheduledTime: '09:00 UTC', targetArgs: [{ additionalData: { fallbackUsed: true, targetTimeUTC: '2026-10-05T09:00:00.000Z' } }] }] });
+  });
+
+  it('keeps a configured cold timer alive beyond a weekly fall-back DST transition', async () => {
+    jest.setSystemTime(new Date('2026-10-25T13:00:00.001Z'));
+    mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time_mode: 'business_opening' }, 'America/New_York', {
+      ...closedWeek, sunday: { enabled: true, start: '09:00' },
+    })]);
+    expect(await scheduleIndividualDailyProspectionActivity(undefined)).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    const options = mockStartWorkflow.mock.calls[0][1];
+    expect(options.args[0].delayMs).toBe(Date.parse('2026-11-01T14:00:00Z') - Date.now());
+    expect(options.args[0].delayMs).toBeGreaterThan(168 * 3600000);
+    expect(options.workflowRunTimeout).toBeGreaterThanOrEqual(options.args[0].delayMs + 2 * 3600000);
+  });
+
+  it.each([
+    ['business_opening', '2026-03-08T05:00:00Z', '02:30', '2026-03-08T07:00:00.000Z'],
+    ['custom', '2026-03-08T05:00:00Z', '02:30', '2026-03-08T07:00:00.000Z'],
+    ['custom', '2026-11-01T05:30:00.001Z', '01:30', '2026-11-01T06:30:00.000Z'],
+  ])('uses actual DST instants for cold %s at %s', async (start_time_mode, now, start_time, targetTimeUTC) => {
+    jest.setSystemTime(new Date(now));
+    mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time_mode, start_time }, 'America/New_York', {
+      ...closedWeek, sunday: { enabled: true, start: start_time },
+    })]);
+    expect(await scheduleIndividualDailyProspectionActivity(staleAnalysis)).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    expect(mockStartWorkflow.mock.calls[0][1].args[0]).toMatchObject({
+      delayMs: Date.parse(targetTimeUTC) - Date.now(), scheduledTime: `${start_time} America/New_York`,
+      targetArgs: [{ additionalData: { targetTimeUTC, fallbackUsed: false } }],
+    });
+  });
+
+  it('uses the target local date for configured cold timers and includes the exact boundary', async () => {
+    jest.setSystemTime(new Date('2026-09-28T10:30:00Z'));
+    mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time_mode: 'custom', start_time: '00:30' }, 'Pacific/Kiritimati')]);
+    expect(await scheduleIndividualDailyProspectionActivity(undefined)).toMatchObject({ scheduled: 1, skipped: 0 });
+    expect(mockStartWorkflow.mock.calls[0][1]).toMatchObject({ workflowId: 'daily-prospection-timer-site-1-2026-09-29-0030',
+      args: [{ delayMs: 0, scheduledTime: '00:30 Pacific/Kiritimati', targetArgs: [{ additionalData: {
+        executionDay: '2026-09-29', targetTimeUTC: '2026-09-28T10:30:00.000Z',
+      } }] }] });
+  });
+
+  it.each(['business_opening', 'custom'])('gates direct cold %s on fresh timing and ignores stale closed-site analysis', async start_time_mode => {
+    jest.setSystemTime(new Date('2026-09-28T14:29:59Z'));
+    mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time_mode, start_time: '10:30' }, 'America/New_York', {
+      monday: { enabled: true, start: '10:30' },
+    })]);
+    const options = { businessHoursAnalysis: { openSites: [{ siteId: 'other-site' }] } };
+    expect(await executeDailyProspectionWorkflowsActivity(options)).toMatchObject({ scheduled: 0, skipped: 1, failed: 0 });
+    expect(mockStartWorkflow).not.toHaveBeenCalled();
+    jest.setSystemTime(new Date('2026-09-28T14:30:00Z'));
+    expect(await executeDailyProspectionWorkflowsActivity(options)).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    expect(mockStartWorkflow).toHaveBeenCalledWith('dailyProspectionWorkflow', expect.objectContaining({ args: [expect.objectContaining({
+      additionalData: expect.objectContaining({ executionDay: '2026-09-28', timezone: 'America/New_York', scheduleType: 'configured-timing' }),
+    })] }));
+  });
+
+  it('preserves cold legacy timer offsets and weekend skipping when no timing choice is saved', async () => {
+    jest.setSystemTime(new Date('2026-09-28T05:00:00Z'));
+    expect(await scheduleIndividualDailyProspectionActivity(staleAnalysis)).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    expect(mockStartWorkflow.mock.calls[0][1]).toMatchObject({ workflowId: 'daily-prospection-timer-site-1-2026-09-28-0600',
+      args: [{ delayMs: 3600000, scheduledTime: '06:00 UTC', targetArgs: [{ additionalData: {
+        originalDailyStandupTime: '04:00', prospectionExecutesTwoHoursLater: true,
+      } }] }] });
+    mockStartWorkflow.mockClear();
+    jest.setSystemTime(new Date('2026-10-03T08:00:00Z'));
+    expect(await scheduleIndividualDailyProspectionActivity({ openSites: [] })).toMatchObject({ scheduled: 0, skipped: 1, failed: 0 });
+    expect(mockStartWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('preserves legacy direct cold filtering by the openSites analysis', async () => {
+    expect(await executeDailyProspectionWorkflowsActivity({ businessHoursAnalysis: { openSites: [{ siteId: 'other-site' }] } }))
+      .toMatchObject({ scheduled: 0, skipped: 1, failed: 0 });
+    expect(mockStartWorkflow).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import { apiConfig } from '../../config/config';
 import { redactSensitiveHeaders } from './headerSecurity';
+import { admissionRetryAfterMs, canRetryIcpAdmission } from './apiAdmissionRetry';
 
 export { redactSensitiveHeaders } from './headerSecurity';
 
@@ -26,6 +27,7 @@ interface ApiRequestOptions {
   body?: any;
   headers?: Record<string, string>;
   timeout?: number;
+  signal?: AbortSignal;
 }
 
 interface ApiResponse<T = any> {
@@ -35,6 +37,8 @@ interface ApiResponse<T = any> {
     code: string;
     message: string;
     status?: number;
+    retryAfterMs?: number;
+    requestNotStarted?: boolean;
   };
 }
 
@@ -95,6 +99,38 @@ export class ApiService {
     endpoint: string, 
     options: ApiRequestOptions = {}
   ): Promise<ApiResponse<T>> {
+    if (!canRetryIcpAdmission(endpoint, options.method ?? 'GET')) {
+      return this.requestOnce<T>(endpoint, options);
+    }
+
+    // Retries live inside the activity: no new Temporal workflow commands or
+    // replay changes, and no re-enrichment of previously completed candidates.
+    const deadline = Date.now() + (options.timeout ?? 300000);
+    for (let attempt = 0; ; attempt++) {
+      const result = await this.requestOnce<T>(endpoint, {
+        ...options, timeout: Math.max(1, deadline - Date.now()),
+      });
+      if (result.success || result.error?.status !== 429 || !result.error.requestNotStarted
+        || !Number.isFinite(result.error.retryAfterMs) || attempt >= 3) return result;
+      const delayMs = result.error.retryAfterMs! + 250 + Math.floor(Math.random() * 751);
+      // Leave time for the next request; a long server cooldown is not shortened.
+      if (Date.now() + delayMs + 1000 >= deadline) return result;
+      console.warn(`⏳ ICP API admission limited: ${redactUrlForLogs(endpoint)}; retry ${attempt + 1}/3 in ${delayMs}ms`);
+      await new Promise<void>((resolve, reject) => {
+        const aborted = () => {
+          clearTimeout(timer);
+          options.signal?.removeEventListener('abort', aborted);
+          reject(options.signal?.reason || new Error('Request cancelled'));
+        };
+        const timer = setTimeout(() => { options.signal?.removeEventListener('abort', aborted); resolve(); }, delayMs);
+        options.signal?.addEventListener('abort', aborted, { once: true });
+        if (options.signal?.aborted) aborted();
+      });
+      if (Date.now() + 1000 >= deadline) return result;
+    }
+  }
+
+  private async requestOnce<T>(endpoint: string, options: ApiRequestOptions): Promise<ApiResponse<T>> {
     const { method = 'GET', body, headers = {}, timeout = 300000 } = options;
     
     const url = this.buildUrl(endpoint);
@@ -117,6 +153,9 @@ export class ApiService {
     }
 
     const controller = new AbortController();
+    const abortRequest = () => controller.abort(options.signal?.reason);
+    options.signal?.addEventListener('abort', abortRequest, { once: true });
+    if (options.signal?.aborted) abortRequest();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
@@ -143,7 +182,6 @@ export class ApiService {
       });
 
       console.log(`📡 Fetch completed, status: ${response.status} ${response.statusText}`);
-      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -185,10 +223,12 @@ export class ApiService {
           };
         }
         
+        const retryAfterMs = admissionRetryAfterMs(response.status, errorText, response.headers?.get('Retry-After') ?? null);
         const error = {
           code: `HTTP_${response.status}`,
           message: `API call failed: ${response.status} ${response.statusText}. ${errorText}`,
-          status: response.status
+          status: response.status,
+          ...(retryAfterMs !== undefined ? { retryAfterMs, requestNotStarted: true } : {}),
         };
         
         console.error(`❌ API Error: ${error.code} (${response.status})`);
@@ -259,6 +299,10 @@ export class ApiService {
         success: false,
         error: apiError
       };
+    } finally {
+      options.signal?.removeEventListener('abort', abortRequest);
+      // Cover response body reads as well as headers, including during retries.
+      clearTimeout(timeoutId);
     }
   }
 

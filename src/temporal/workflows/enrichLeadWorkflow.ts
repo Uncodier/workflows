@@ -1,4 +1,4 @@
-import { proxyActivities, executeChild, upsertSearchAttributes } from '@temporalio/workflow';
+import { proxyActivities, executeChild, upsertSearchAttributes, patched } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { selectRoleForEnrichment } from '../utils/personRoleUtils';
 import { generatePersonEmailWorkflow } from './generatePersonEmailWorkflow';
@@ -104,9 +104,16 @@ export async function enrichLeadWorkflow(
     input: options,
   });
 
+  // Historical activity payloads stay unchanged; fresh executions bind the
+  // durable provider search to its tenant before any billable submission.
+  const durableIcyPeas = patched('icypeas-durable-email-search-v1');
+  const lookupIcyPeas: Activities['lookEmailOnIcyPeas'] = params => lookEmailOnIcyPeas({
+    ...params, ...(durableIcyPeas ? { site_id } : {}),
+  });
+
   if (options.validated_contact_policy && options.source_search_result) {
     const result = await enrichWithValidatedContacts(options, { prepareFinderPersonActivity, checkExistingLeadForPersonActivity,
-      validateContactInformation, lookEmailOnIcyPeas, callPersonWorkEmailsActivity, callPersonContactsLookupPersonalEmailsActivity,
+      validateContactInformation, lookEmailOnIcyPeas: lookupIcyPeas, callPersonWorkEmailsActivity, callPersonContactsLookupPersonalEmailsActivity,
       callPersonContactsLookupPhoneNumbersActivity, upsertPersonActivity, upsertLeadForPersonActivity,
       generateEmail: params => executeChild(generatePersonEmailWorkflow, {
         workflowId: `generate-email-icp-${params.person_id}-${site_id}`, args: [params],
@@ -462,13 +469,21 @@ export async function enrichLeadWorkflow(
       const lastname = nameParts.slice(1).join(' ') || undefined;
 
       try {
-        const icypeasResult = await lookEmailOnIcyPeas({
+        const icypeasResult = await lookupIcyPeas({
           domainOrCompany: domain,
           firstname,
           lastname,
         });
         if (options.source_search_result) providerResponses.icypeas = icypeasResult;
         if (!icypeasResult.success) reportLookupFailure('IcyPeas', icypeasResult.error);
+
+        if (icypeasResult.outcome === 'pending') {
+          const pendingErrors = errors.length ? errors : [icypeasResult.error || 'IcyPeas search is still pending'];
+          const result: EnrichLeadResult = { success: false, personId: person.id, errors: pendingErrors,
+            executionTime: `${((Date.now() - startTime) / 1000).toFixed(2)}s`, completedAt: new Date().toISOString() };
+          await logWorkflowExecutionActivity({ workflowId, workflowType: 'enrichLeadWorkflow', status: 'FAILED', output: result });
+          return result;
+        }
 
         if (icypeasResult.success && icypeasResult.data?.email) {
           console.log(`✅ IcyPeas found email: ${icypeasResult.data.email}`);
