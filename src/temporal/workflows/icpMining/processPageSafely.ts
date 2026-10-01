@@ -18,6 +18,8 @@ export async function processPageSafely(options: IdealClientProfilePageSearchOpt
     throw new Error('Invalid owned ICP page cursor or target');
   }
   const { run_id } = options.execution;
+  if (options.max_candidates !== undefined && (!Number.isInteger(options.max_candidates)
+    || options.max_candidates < 1 || options.max_candidates > 10)) throw new Error('Invalid reserved ICP candidate budget');
   let { version, processed, found } = options.execution;
   let page = options.page;
   let offset = options.start_index || 0;
@@ -63,7 +65,8 @@ export async function processPageSafely(options: IdealClientProfilePageSearchOpt
     const candidates = snapshot.candidates;
     const segment = await deps.getSegmentIdFromRoleQueryActivity(options.role_query_id);
     if (!segment.success) throw new Error(segment.error || 'ICP segment lookup failed');
-    for (; offset < candidates.length && found - initialFound < (options.max_matches ?? 150);) {
+    for (; offset < candidates.length && found - initialFound < (options.max_matches ?? 150)
+      && processed - initialProcessed < (options.max_candidates ?? 10);) {
       const candidate = candidates[offset];
       const personId = candidate.person?.id ?? candidate.person?.external_person_id;
       if (!personId) { errors.push(`Candidate ${offset} has no provider identity`); retryableFailure = true; break; }

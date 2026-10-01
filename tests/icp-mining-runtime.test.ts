@@ -9,6 +9,7 @@ const mockActivities = {
   getIcpMiningConfigurationActivity: jest.fn(), getPendingIcpMiningActivity: jest.fn(),
   getIcpMiningByIdActivity: jest.fn(), getSiteActivity: jest.fn(),
   claimIcpMiningExecutionActivity: jest.fn(), checkpointIcpMiningExecutionActivity: jest.fn(),
+  isIcpDispatcherEnabledActivity: jest.fn(),
 };
 jest.mock('../src/lib/supabase/client', () => ({ supabaseServiceRole: {
   from: () => ({ select: () => ({ eq: () => ({ maybeSingle: mockSingle }) }) }),
@@ -39,6 +40,7 @@ describe('ICP execution-time settings and terminal status', () => {
     jest.spyOn(console, 'log').mockImplementation(() => undefined);
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     mockPatched.mockReturnValue(true);
+    mockActivities.isIcpDispatcherEnabledActivity.mockResolvedValue(false);
     mockWorkflowInfo.mockReturnValue({ workflowId: 'actual-mining-run', runId: 'run',
       parent: { workflowId: 'icp-timer' } });
     mockNonCancellable.mockImplementation(fn => fn());
@@ -52,6 +54,15 @@ describe('ICP execution-time settings and terminal status', () => {
         page: 0, offset: 3, snapshot: null } });
   });
   afterEach(() => jest.restoreAllMocks());
+
+  it('does not let old daily timers or manual runs bypass the dispatcher daily budget', async () => {
+    mockActivities.isIcpDispatcherEnabledActivity.mockResolvedValue(true);
+    expect(await idealClientProfileMiningWorkflow(options)).toMatchObject({ success: false, processed: 0,
+      errors: [expect.stringContaining('five-minute dispatcher')] });
+    expect(mockActivities.getIcpMiningConfigurationActivity).not.toHaveBeenCalled();
+    expect(mockActivities.claimIcpMiningExecutionActivity).not.toHaveBeenCalled();
+    expect(mockActivities.saveCronStatusActivity).not.toHaveBeenCalled();
+  });
 
   it('reads changed controls after an already-scheduled timer wakes, ignoring stale overrides', async () => {
     mockSingle.mockResolvedValue(settings({ target_leads: 150, research_enabled: true, all_lists: true }));

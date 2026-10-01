@@ -19,8 +19,9 @@ AI Activities stores the following object in `settings.activities`:
 - ICP mining is always enabled. Historical `inactive`, `default`, or missing status
   no longer blocks new executions. Outreach and channel-health checks still apply
   to messaging workflows, not to mining.
-- `target_leads` is an integer from 1 to 3000: the target number of successfully
-  enriched/saved lead matches per execution, **not** scanned candidates, and not a
+- `target_leads` is an integer from 1 to 3000: with the five-minute dispatcher it is
+  a **shared daily UTC target per site**, not a fresh allowance on every tick.
+  It counts successfully enriched/saved lead matches, **not** scanned candidates, and is not a
   guarantee that enough matching contacts are available. An existing lead can be
   enriched instead of creating a duplicate.
 - `research_enabled` requests additional lead deep research after enrichment. It
@@ -48,7 +49,8 @@ AI Activities stores the following object in `settings.activities`:
   Invalid controls or failed reads stop execution rather than silently spending
   against fallback settings. Saving settings does not restart an already-failed run
   or change the snapshot of a run that has already started mining.
-- Mining runs once daily per site, with deterministic per-site slots distributed
+- With the dispatcher enabled, mining uses the fair load-aware turns described below.
+  The legacy fallback (dispatcher explicitly disabled) runs once daily per site, with deterministic per-site slots distributed
   over all 24 hours (UTC). It no longer runs 30 minutes after lead generation and
   does not depend on business hours, weekends, Standup or outreach activation.
   Stable slots avoid moving pending work on scheduler retries; timer IDs contain
@@ -63,7 +65,84 @@ AI Activities stores the following object in `settings.activities`:
   immediate processing at request creation. A run selects one queued request; no
   queued request means no provider calls.
 
-### Distributed scheduling rollout
+### Five-minute fair dispatcher
+
+`icpDispatcherWorkflow` has its own native Temporal schedule `icp-dispatcher` every
+five minutes, 15-second jitter, overlap `SKIP`. It only admits work and does not
+rerun Standup, outreach, reports or the central daily engine. It starts at most the
+available capacity as `icpMiningSliceWorkflow` executions on the normal queue.
+
+Defaults live in service-only `icp_dispatch_config`:
+
+| Control | Default | Meaning |
+| --- | ---: | --- |
+| `enabled` | true | New coordinator owns ICP scheduling |
+| `max_concurrency` | 3 | Global outstanding reservations, including uncertain/blocked work |
+| `slice_candidates` | 10 | Maximum candidates in one turn, at most one provider page |
+| `daily_candidate_limit` | 3000 | Absolute per-site daily candidate reservation cap |
+
+The effective candidate cap is `min(daily_candidate_limit, target_leads * 10)`.
+For Makinari's target 150, that is at most 150 successful matches and 1,500 reserved
+candidate attempts per UTC day, shared across all lists/turns. These are **work
+budgets, not currency/credit guarantees**: provider and site credit checks remain
+in effect. Each turn consumes its full reserved candidate allowance even on a
+partial result/error, conservatively bounding repeated paid attempts. Unused match
+allowance is released only after acknowledged settlement. Reservations spanning
+midnight remain charged to their original UTC admission day; no concurrent new-day
+turn may start for the same site.
+
+Selection filters archived sites, saved list selection, pending/running lists,
+active sites, quotas and cooldowns. It favors least-recently-served sites, then
+unfinished page snapshots, lower fulfilled-target ratio and remaining required
+work, with stable ID ties. Within each site, lists rotate
+by least-recently-served first; unfinished snapshots break age ties, so a repeatedly
+blocked partial page cannot permanently starve the site's other selected lists.
+It reads all orchestration rows in bounded pages instead
+of silently omitting sites past a database row limit. SQL revalidates settings,
+selection, capacity and budgets atomically at reservation; a stale selection cannot
+overspend or admit an unselected list.
+
+Only one outstanding turn is allowed per site. Reserve/start retries reuse the
+same Temporal workflow ID; an ambiguous start never releases its reservation.
+The existing execution checkpoint RPC is fenced by the reserved candidate/match
+amounts before any progress write. A normal result releases ownership, settles
+actual found matches from database counters, then permits the next turn after at
+least five minutes. Repeated failures back off exponentially to six hours; missing
+credits, ambiguous company identities and unknown provider submissions start at
+six hours. Settlement publishes the authoritative earliest next eligible time to
+`cron_status.next_run`; that is an eligibility time, not guaranteed admission.
+
+**Crash safety:** thrown child/checkpoint failures retain the reservation and
+ownership. No timed lease steals it. These require explicit reconciliation after
+checking the exact workflow **and descendants** have ended; this release does not
+automatically reset them. A blocked site occupies global capacity intentionally
+until its paid-work state is known. No child workflow is started again with a new
+ID merely to recover an uncertain dispatch.
+
+**Rollout order:** drain/review old live mining executions; apply
+`supabase/migrations/20261002010000_icp_dispatcher.sql`; deploy the worker and register
+the new native schedule through the existing schedule bootstrap. If
+`INITIALIZE_TEMPORAL_SCHEDULES=false`, schedule registration must be done separately.
+Do not delete/recreate unrelated schedules. Missing migration/config fails closed.
+There is no historical daily-usage backfill: activate at a fresh UTC budget boundary
+or account for prior same-day mining before release. No production changes are
+performed by these source changes.
+
+Verification: `npm test -- --runInBand` includes dispatcher ranking/activity,
+slice, schedule, and offline Temporal replay regressions. The isolated SQL suite
+`tests/icp-dispatcher-sql.test.ts` uses the already-installed sibling
+`API/node_modules/@electric-sql/pglite` dependency; a standalone Workflows checkout
+must provide that fixture dependency to run this suite. It validates real SQL
+quotas, ACLs and locking contracts, but does not replace a multi-session production
+load test. It never connects to Supabase or a provider.
+
+The daily scheduling activity becomes a no-op while the dispatcher is enabled.
+Fresh legacy daily/manual mining workflows use patch
+`icp-dispatcher-replaces-daily-v1` to return without creating a second budget.
+Already-recorded histories keep their old command sequence, hence the drain step.
+Manual full-target mining is not an escape hatch while the coordinator is enabled.
+
+### Legacy distributed scheduling rollout (dispatcher disabled)
 
 `scheduleIcpMiningWorkflowsActivity` is registered with the worker and invoked by
 the prioritization engine independently of the business-hours decision. The

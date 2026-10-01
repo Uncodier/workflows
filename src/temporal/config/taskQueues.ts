@@ -94,6 +94,7 @@ export function getTaskQueueForWorkflow(
     case 'dailyStandUpWorkflow':
     case 'leadGenerationWorkflow':
     case 'dailyProspectionWorkflow':
+    case 'icpMiningSliceWorkflow':
       return TASK_QUEUES.NORMAL;
     
     // Low priority workflows
@@ -105,6 +106,7 @@ export function getTaskQueueForWorkflow(
     // Background workflows
     case 'dailyOperationsWorkflow':
     case 'scheduleActivitiesWorkflow':
+    case 'icpDispatcherWorkflow':
     case 'syncEmailsScheduleWorkflow':
       return TASK_QUEUES.BACKGROUND;
     

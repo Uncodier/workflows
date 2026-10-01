@@ -102,6 +102,14 @@ describe('ICP runtime settings/status Temporal replay', () => {
   it('replays a failed pending-list result with terminal FAILED status', async () => {
     await Worker.runReplayHistory({ workflowBundle }, emptyMiningHistory(true, true, true), 'mining-replay');
   });
+  it('replays a fresh legacy timer skipped by the five-minute dispatcher guard', async () => {
+    const history = new MiningHistory();
+    history.patch(runtimePatch);
+    history.patch('icp-dispatcher-replaces-daily-v1');
+    history.activity('isIcpDispatcherEnabledActivity', [], true);
+    await Worker.runReplayHistory({ workflowBundle }, history.complete({ success: false, icp_mining_id: 'batch',
+      processed: 0, foundMatches: 0, errors: ['ICP is managed by the five-minute dispatcher; legacy daily/manual execution skipped'] }), 'mining-replay');
+  });
   it('detects a terminal-status command incorrectly added to a pre-patch history', async () => {
     const results = [];
     for await (const result of Worker.runReplayHistories({ workflowBundle }, [

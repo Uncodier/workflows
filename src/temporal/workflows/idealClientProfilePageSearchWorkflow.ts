@@ -37,6 +37,7 @@ export interface IdealClientProfilePageSearchOptions {
   icp_mining_id?: string; // for logging and metadata
   start_index?: number;
   max_matches?: number;
+  max_candidates?: number; // Reserved candidate-attempt budget for a dispatcher slice.
   research_enabled?: boolean;
   execution?: { run_id: string; version: number; processed: number; found: number };
   snapshot?: IcpPageSnapshot | null;

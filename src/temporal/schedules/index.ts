@@ -5,6 +5,7 @@ import { createTemporalConnection, withTimeout } from './connection';
 // Define specific argument types for each workflow
 type WorkflowArgs = {
   scheduleActivitiesWorkflow: [];
+  icpDispatcherWorkflow: [];
   syncEmailsWorkflow: [];
   syncEmailsScheduleWorkflow: [];
   sendApprovedMessagesWorkflow: [];
@@ -36,6 +37,11 @@ export interface ScheduleSpec {
 
 // Central schedule that manages all other workflows
 export const defaultSchedules: ScheduleSpec[] = [
+  {
+    id: 'icp-dispatcher', workflowType: 'icpDispatcherWorkflow', intervalMinutes: 5,
+    args: [], description: 'Fair, load-aware ICP admission with shared daily budgets',
+    jitterMs: 15000, pauseOnFailure: false, catchupWindow: '5m', paused: false, overlap: 'SKIP',
+  },
   {
     id: 'central-schedule-activities',
     workflowType: 'scheduleActivitiesWorkflow',

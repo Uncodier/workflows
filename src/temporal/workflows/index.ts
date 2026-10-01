@@ -49,6 +49,8 @@ import { promptRobotWorkflow } from './promptRobotWorkflow';
 import { validateEmailWorkflow } from './validateEmailWorkflow';
 import { webhookDispatchWorkflow } from './webhookDispatchWorkflow';
 import { idealClientProfileMiningWorkflow } from './idealClientProfileMiningWorkflow';
+import { icpDispatcherWorkflow } from './icpDispatcherWorkflow';
+import { icpMiningSliceWorkflow } from './icpMiningSliceWorkflow';
 import { idealClientProfilePageSearchWorkflow } from './idealClientProfilePageSearchWorkflow';
 import { enrichLeadWorkflow } from './enrichLeadWorkflow';
 import { generatePersonEmailWorkflow } from './generatePersonEmailWorkflow';
@@ -165,6 +167,8 @@ export const workflows = {
   validateEmailWorkflow,
   webhookDispatchWorkflow,
   idealClientProfileMiningWorkflow,
+  icpDispatcherWorkflow,
+  icpMiningSliceWorkflow,
   idealClientProfilePageSearchWorkflow,
   enrichLeadWorkflow,
   generatePersonEmailWorkflow,
@@ -232,6 +236,8 @@ export const workflowNames = {
   validateEmailWorkflow: 'validateEmailWorkflow',
   webhookDispatchWorkflow: 'webhookDispatchWorkflow',
   idealClientProfileMiningWorkflow: 'idealClientProfileMiningWorkflow',
+  icpDispatcherWorkflow: 'icpDispatcherWorkflow',
+  icpMiningSliceWorkflow: 'icpMiningSliceWorkflow',
   idealClientProfilePageSearchWorkflow: 'idealClientProfilePageSearchWorkflow',
   enrichLeadWorkflow: 'enrichLeadWorkflow',
   generatePersonEmailWorkflow: 'generatePersonEmailWorkflow',

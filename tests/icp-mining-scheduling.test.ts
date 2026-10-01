@@ -2,6 +2,8 @@ const mockStart = jest.fn();
 const mockFetchSites = jest.fn();
 const mockFetchSettings = jest.fn();
 const mockSaveCron = jest.fn();
+const mockDispatcherEnabled = jest.fn();
+jest.mock('../src/temporal/activities/icpDispatcherActivities', () => ({ isIcpDispatcherEnabledActivity: mockDispatcherEnabled }));
 jest.mock('../src/temporal/client', () => ({ getTemporalClient: async () => ({ workflow: { start: mockStart } }) }));
 jest.mock('../src/config/config', () => ({ temporalConfig: { taskQueue: 'test' } }));
 jest.mock('../src/temporal/services', () => ({}));
@@ -20,6 +22,7 @@ import { DAILY_WORKFLOW_REUSE_POLICY } from '../src/temporal/utils/workflowIdHel
 describe('always-on ICP scheduling', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    mockDispatcherEnabled.mockResolvedValue(false);
     jest.useFakeTimers().setSystemTime(new Date('2026-09-29T15:00:00Z'));
     jest.spyOn(console, 'log').mockImplementation(() => undefined);
     mockFetchSites.mockResolvedValue([{ id: 'site', user_id: 'user', name: 'Test' }]);
@@ -48,6 +51,13 @@ describe('always-on ICP scheduling', () => {
     expect(miningArgs.scheduleId).toBe(timer.workflowId);
     expect(mockSaveCron).toHaveBeenCalledTimes(1);
     expect(mockSaveCron).toHaveBeenCalledWith(expect.objectContaining({ siteId: 'site', scheduleId: timer.workflowId }));
+  });
+
+  it('does not create daily ICP timers once the dedicated dispatcher owns scheduling', async () => {
+    mockDispatcherEnabled.mockResolvedValue(true);
+    expect(await scheduleIcpMiningWorkflowsActivity()).toMatchObject({ scheduled: 0, failed: 0 });
+    expect(mockFetchSites).not.toHaveBeenCalled();
+    expect(mockStart).not.toHaveBeenCalled();
   });
 
   it('runs on weekends without business hours and without reading outreach settings', async () => {

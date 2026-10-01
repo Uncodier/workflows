@@ -12,6 +12,14 @@ La lista `CRON_SCHEDULED_WORKFLOWS` de abajo es la allowlist usada por las activ
 
 ### 1. Schedules Principales (Definidos en `/src/temporal/schedules/index.ts`)
 
+#### `icpDispatcherWorkflow`
+- **Schedule ID**: `icp-dispatcher`
+- **Frecuencia**: Cada 5 minutos, jitter 15 segundos, overlap SKIP.
+- **Descripción**: Distribuye turnos de hasta 10 candidatos entre sitios según antigüedad, trabajo pendiente y presupuesto diario. Hasta 3 sitios simultáneos por defecto; una reserva por sitio.
+- **Trabajo real**: `icpMiningSliceWorkflow`, contabilizado como `idealClientProfileMiningWorkflow` en `cron_status` para conservar la visibilidad existente.
+- **Presupuesto**: `target_leads` compartido por sitio/día UTC, más límite conservador de candidatos; no 150 por cada tick.
+- **Detalle y despliegue**: [ICP mining](ICP_MINING_CONFIGURATION.md#five-minute-fair-dispatcher).
+
 #### `scheduleActivitiesWorkflow`
 - **Schedule ID**: `central-schedule-activities`
 - **Frecuencia**: Cada 24 horas
@@ -59,7 +67,7 @@ La lista `CRON_SCHEDULED_WORKFLOWS` de abajo es la allowlist usada por las activ
 - **Programa workflows mediante actividades**:
   - `dailyProspectionWorkflow` (vía `executeDailyProspectionWorkflowsActivity`)
   - `leadGenerationWorkflow` (vía `scheduleIndividualLeadGenerationActivity`)
-  - `idealClientProfileMiningWorkflow` (vía `scheduleIcpMiningWorkflowsActivity`, distribuido e independiente del horario comercial)
+  - `idealClientProfileMiningWorkflow` (solo fallback diario cuando el dispatcher está explícitamente desactivado; la actividad es no-op mientras esté activo)
   - `dailyStandUpWorkflow` (vía `scheduleIndividualDailyStandUpsActivity`)
   - `analyzeSiteWorkflow` (vía `scheduleIndividualSiteAnalysisActivity`)
 

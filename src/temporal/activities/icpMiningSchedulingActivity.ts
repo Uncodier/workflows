@@ -6,6 +6,7 @@ import { computeDelayedWorkflowRunTimeout } from '../utils/delayedExecutionTimeo
 import { generateDailyWorkflowId, DAILY_WORKFLOW_REUSE_POLICY } from '../utils/workflowIdHelper';
 import { nextDistributedIcpRun } from '../utils/icpMiningScheduling';
 import type { ScheduleWorkflowResult } from './workflowSchedulingActivities';
+import { isIcpDispatcherEnabledActivity } from './icpDispatcherActivities';
 
 /** Keep two daily slots ahead: central-scheduler jitter must not leave a day unplanned. */
 export async function scheduleIcpMiningWorkflowsActivity(options: { parentScheduleId?: string } = {}): Promise<{
@@ -13,6 +14,8 @@ export async function scheduleIcpMiningWorkflowsActivity(options: { parentSchedu
 }> {
   const summary = { scheduled: 0, skipped: 0, failed: 0, results: [] as ScheduleWorkflowResult[], errors: [] as string[] };
   try {
+    // Also covers an old engine activity retried on a newly deployed worker.
+    if (await isIcpDispatcherEnabledActivity()) return summary;
     const sites = await getSupabaseService().fetchSites();
     if (!sites?.length) return summary;
     const client = await getTemporalClient();

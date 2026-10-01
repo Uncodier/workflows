@@ -19,6 +19,7 @@ const {
   getIcpMiningConfigurationActivity,
   claimIcpMiningExecutionActivity,
   checkpointIcpMiningExecutionActivity,
+  isIcpDispatcherEnabledActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: { maximumAttempts: 3 },
@@ -93,6 +94,13 @@ export async function idealClientProfileMiningWorkflow(
 ): Promise<IdealClientProfileMiningResult> {
   // Preserve the command sequence of already-recorded executions.
   if (!patched('icp-mining-runtime-settings-status-v1')) return runIcpMining(options);
+
+  // Fresh old timers/manual calls must not open a second per-execution budget.
+  // Recorded histories without this patch retain their commands and must drain.
+  if (patched('icp-dispatcher-replaces-daily-v1') && await isIcpDispatcherEnabledActivity()) {
+    return { success: false, icp_mining_id: options.icp_mining_id || 'batch', processed: 0, foundMatches: 0,
+      errors: ['ICP is managed by the five-minute dispatcher; legacy daily/manual execution skipped'] };
+  }
 
   const info = workflowInfo();
   const scheduleCandidates = [
