@@ -28,9 +28,10 @@ import { DAILY_WORKFLOW_REUSE_POLICY } from '../src/temporal/utils/workflowIdHel
 
 const key = 'daily_resume_and_stand_up';
 const site = { id: 'site-1', name: 'Test site', user_id: 'user-1' };
-const settings = (weekdays: number[] = [2], timezone = 'UTC', days: any = {}) => ({
+const settings = (weekdays: number[] = [2], timezone = 'UTC', days: any = {}, start_time?: unknown) => ({
   site_id: site.id,
-  activities: { [key]: { status: 'active', weekdays, report_sections: ['sales', 'orders'] } },
+  activities: { [key]: { status: 'active', weekdays, report_sections: ['sales', 'orders'],
+    ...(start_time !== undefined ? { start_time } : {}) } },
   business_hours: [{ timezone, days }],
 });
 
@@ -86,6 +87,72 @@ describe('next configured local Daily Standup', () => {
     const config = settings([0], 'America/New_York', { sunday: { enabled: true, start: '02:30' } });
     expect(nextDailyStandUpRun(config, new Date('2026-03-08T05:00:00Z'))?.targetTime.toISOString()).toBe('2026-03-08T07:00:00.000Z');
   });
+
+  it.each([
+    ['earlier than opening', '2026-09-29T05:00:00Z', 'UTC', [2], '06:45', '2026-09-29T06:45:00.000Z'],
+    ['later than opening', '2026-09-29T09:01:00Z', 'UTC', [2], '16:15', '2026-09-29T16:15:00.000Z'],
+    ['next selected day', '2026-09-29T16:15:00.001Z', 'UTC', [2, 5], '16:15', '2026-10-02T16:15:00.000Z'],
+    ['local midnight', '2026-09-28T17:00:00Z', 'Asia/Kathmandu', [2], '00:00', '2026-09-28T18:15:00.000Z'],
+    ['last local minute', '2026-09-29T22:00:00Z', 'UTC', [2], '23:59', '2026-09-29T23:59:00.000Z'],
+    ['spring-forward gap', '2026-03-08T05:00:00Z', 'America/New_York', [0], '02:30', '2026-03-08T07:00:00.000Z'],
+    ['half-hour spring-forward gap', '2026-10-03T14:00:00Z', 'Australia/Lord_Howe', [0], '02:15', '2026-10-03T15:30:00.000Z'],
+    ['first fall-back occurrence', '2026-11-01T04:00:00Z', 'America/New_York', [0], '01:30', '2026-11-01T05:30:00.000Z'],
+    ['second fall-back occurrence', '2026-11-01T05:30:00.001Z', 'America/New_York', [0], '01:30', '2026-11-01T06:30:00.000Z'],
+  ])('uses configured start rather than business opening: %s', (_label, now, timezone, weekdays, start_time, expected) => {
+    const config = settings(weekdays, timezone, { tuesday: { start: '10:00' } }, start_time);
+    expect(nextDailyStandUpRun(config, new Date(now))).toMatchObject({
+      targetTime: new Date(expected), scheduledTime: start_time, fallbackUsed: false,
+    });
+  });
+
+  it.each([null, '', '9:00', '24:00', 900])('does not fall back to the opening for invalid start time: %j', start_time => {
+    expect(nextDailyStandUpRun(settings([2], 'UTC', { tuesday: { start: '10:00' } }, start_time),
+      new Date('2026-09-29T08:00:00Z'))).toBeNull();
+  });
+
+  it('uses a valid start override on an explicitly selected closed day', () => {
+    expect(nextDailyStandUpRun(settings([6], 'UTC', { saturday: { enabled: false, start: '10:00' } }, '07:45'),
+      new Date('2026-10-03T07:00:00Z'))).toMatchObject({
+      targetTime: new Date('2026-10-03T07:45:00Z'), scheduledTime: '07:45', fallbackUsed: false,
+    });
+  });
+
+  it.each([
+    ['missing 00:30', '2026-09-05T12:00:00Z', 'America/Santiago', '00:30', '2026-09-06T04:00:00.000Z'],
+    ['missing midnight', '2026-09-05T12:00:00Z', 'America/Santiago', '00:00', '2026-09-06T04:00:00.000Z'],
+    ['just before midnight gap', '2026-09-06T03:59:59.999Z', 'America/Santiago', '00:30', '2026-09-06T04:00:00.000Z'],
+    ['exact gap boundary', '2026-09-06T04:00:00Z', 'America/Santiago', '00:30', '2026-09-06T04:00:00.000Z'],
+    ['gap boundary just passed', '2026-09-06T04:00:00.001Z', 'America/Santiago', '00:30', '2026-09-13T03:30:00.000Z'],
+    ['missing midnight boundary just passed', '2026-09-06T04:00:00.001Z', 'America/Santiago', '00:00', '2026-09-13T03:00:00.000Z'],
+    ['ordinary midnight', '2026-09-05T12:00:00Z', 'UTC', '00:00', '2026-09-06T00:00:00.000Z'],
+    ['ordinary boundary does not replace 00:30', '2026-09-05T12:00:00Z', 'UTC', '00:30', '2026-09-06T00:30:00.000Z'],
+    ['ordinary Santiago midnight', '2026-09-12T12:00:00Z', 'America/Santiago', '00:00', '2026-09-13T03:00:00.000Z'],
+    ['ordinary Santiago boundary does not replace 00:30', '2026-09-12T12:00:00Z', 'America/Santiago', '00:30', '2026-09-13T03:30:00.000Z'],
+    ['ordinary midnight just passed', '2026-09-06T00:00:00.001Z', 'UTC', '00:00', '2026-09-13T00:00:00.000Z'],
+    ['passed target is not caught up at the next ordinary boundary', '2026-09-06T00:30:00.001Z', 'UTC', '00:30', '2026-09-13T00:30:00.000Z'],
+  ])('handles local date crossover: %s', (_label, timestamp, timezone, start_time, expected) => {
+    const now = new Date(timestamp);
+    const next = nextDailyStandUpRun(settings([0], timezone, {}, start_time), now);
+    expect(next).toMatchObject({ targetTime: new Date(expected), scheduledTime: start_time, fallbackUsed: false });
+    expect(next!.targetTime.getTime()).toBeGreaterThanOrEqual(now.getTime());
+  });
+
+  it.each(['00:00', '00:30'])('uses the same midnight-gap policy for legacy business opening %s', start => {
+    expect(nextDailyStandUpRun(settings([0], 'America/Santiago', { sunday: { enabled: true, start } }),
+      new Date('2026-09-05T12:00:00Z'))).toMatchObject({
+      targetTime: new Date('2026-09-06T04:00:00Z'), scheduledTime: start, localDate: '2026-09-06', fallbackUsed: false,
+    });
+  });
+
+  it.each([null, '', '0:30', '00:60', '24:00', '00:30\n', 30])('does not recover an invalid start at a midnight gap: %j', start_time => {
+    expect(nextDailyStandUpRun(settings([0], 'America/Santiago', { sunday: { start: '00:30' } }, start_time),
+      new Date('2026-09-05T12:00:00Z'))).toBeNull();
+  });
+
+  it.each([{ weekdays: [] }, { weekdays: [7] }])('does not broaden an invalid or empty weekday selection at a midnight gap: %j', ({ weekdays }) => {
+    expect(nextDailyStandUpRun(settings(weekdays, 'America/Santiago', {}, '00:30'),
+      new Date('2026-09-05T12:00:00Z'))).toBeNull();
+  });
 });
 
 describe('Daily Standup scheduling activities', () => {
@@ -135,6 +202,28 @@ describe('Daily Standup scheduling activities', () => {
     expect(mockSaveCronStatus.mock.calls[0][0].nextRun).toBe('2026-09-28T19:00:00.000Z');
   });
 
+  it('uses a persisted start override for timer ID, delay and metadata despite stale inputs', async () => {
+    mockFetchCompleteSettings.mockResolvedValue([settings([2], 'Asia/Kathmandu', { tuesday: { start: '09:00' } }, '16:15')]);
+    expect(await scheduleIndividualDailyStandUpsActivity({ openSites: [] }, {
+      activitiesMap: { [site.id]: { [key]: { status: 'active', start_time: '09:00' } } }, timezone: 'UTC',
+    })).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    const options = mockStartWorkflow.mock.calls[0][1];
+    expect(options.workflowId).toBe('daily-standup-timer-site-1-2026-09-29-1615');
+    expect(options.args[0]).toMatchObject({ delayMs: 2.5 * 3600000, scheduledTime: '16:15 Asia/Kathmandu',
+      targetArgs: [{ site_id: site.id, additionalData: { scheduleType: 'activity-start-time',
+        fallbackUsed: false, targetTimeUTC: '2026-09-29T10:30:00.000Z' } }] });
+    expect(mockSaveCronStatus).toHaveBeenCalledWith(expect.objectContaining({ nextRun: '2026-09-29T10:30:00.000Z' }));
+  });
+
+  it.each(['direct', 'dry-run'])('blocks %s before configured start, but permits the exact local boundary', async mode => {
+    mockFetchCompleteSettings.mockResolvedValue([settings([2], 'UTC', {}, '10:30')]);
+    const options = { dryRun: mode === 'dry-run' };
+    expect(await executeDailyStandUpWorkflowsActivity(options)).toMatchObject({ scheduled: 0, skipped: 1 });
+    expect(mockStartWorkflow).not.toHaveBeenCalled();
+    jest.setSystemTime(new Date('2026-09-29T10:30:00Z'));
+    expect(await executeDailyStandUpWorkflowsActivity(options)).toMatchObject({ scheduled: 1, skipped: 0 });
+  });
+
   it('defaults missing weekdays to Monday/Friday and timezone to Mexico', async () => {
     mockFetchCompleteSettings.mockResolvedValue([{ site_id: site.id, activities: { [key]: { status: 'active' } } }]);
     await scheduleIndividualDailyStandUpsActivity(undefined, { timezone: 'UTC' });
@@ -166,6 +255,9 @@ describe('Daily Standup scheduling activities', () => {
       ['inactive', { status: 'inactive' }], ['default', { status: 'default' }], ['missing status', {}],
       ['empty weekdays', { status: 'active', weekdays: [] }], ['invalid weekday', { status: 'active', weekdays: [7] }],
       ['empty sections', { status: 'active', report_sections: [] }], ['invalid section', { status: 'active', report_sections: ['secret'] }],
+      ['invalid start', { status: 'active', weekdays: [2], start_time: '24:00' }],
+      ['empty start', { status: 'active', weekdays: [2], start_time: '' }],
+      ['null start', { status: 'active', weekdays: [2], start_time: null }],
     ])('fails closed for %s despite embedded active settings', async (_label, config) => {
       mockFetchSites.mockResolvedValue([{ ...site, settings: settings() }]);
       mockFetchCompleteSettings.mockResolvedValue([{ ...settings(), activities: { [key]: config } }]);

@@ -1179,7 +1179,7 @@ export async function scheduleDailyOperationsWorkflowActivity(
 /**
  * Schedule each site's next configured local Daily Standup using a one-time timer.
  * Business-hours analysis and activitiesMap remain accepted for historical callers,
- * but only freshly loaded complete settings determine eligibility and opening times.
+ * but only freshly loaded complete settings determine eligibility and start times.
  */
 export async function scheduleIndividualDailyStandUpsActivity(
   businessHoursAnalysis: any,
@@ -1216,10 +1216,11 @@ export async function scheduleIndividualDailyStandUpsActivity(
           continue;
         }
         const nextRun = nextDailyStandUpRun(setting, now);
-        if (!nextRun) throw new Error('No valid Daily Standup opening time found');
+        if (!nextRun) throw new Error('No valid Daily Standup start time found');
         const { targetTime: finalTargetUTC, localDate: finalLocalDateStr,
           timezone: siteTimezone, scheduledTime, fallbackUsed } = nextRun;
-        const businessHoursSource = fallbackUsed ? 'configured-day-fallback' : 'database-configured';
+        const businessHoursSource = configuration.startTime !== undefined ? 'activity-start-time'
+          : fallbackUsed ? 'configured-day-fallback' : 'database-configured';
         const delayMs = Math.max(0, finalTargetUTC.getTime() - now.getTime());
         // A weekly selection across DST can exceed the shared helper's seven-day cap.
         const workflowRunTimeout = `${Math.max(
@@ -1727,7 +1728,8 @@ export async function scheduleIndividualSiteAnalysisActivity(
 }
 
 /**
- * Schedule Lead Generation Workflows for individual sites using TIMERS
+ * Schedule local Lead Generation Workflows for individual sites using TIMERS.
+ * ICP mining has its own distributed scheduler, independent of business hours.
  * Creates delayed workflow executions for sites with business_hours OR weekday fallback
  * Uses Temporal timers instead of schedules for one-time executions
  * WEEKEND RESTRICTION: sites without business_hours are skipped on weekends (Fri/Sat)
@@ -1848,10 +1850,9 @@ export async function scheduleIndividualLeadGenerationActivity(
         
         // Check if this workflow should be scheduled based on settings.activities
         const runLocalLeadGen = shouldScheduleWorkflow(site, 'local_lead_generation');
-        const runIcpLeadGen = shouldScheduleWorkflow(site, 'icp_lead_generation');
 
-        if (!runLocalLeadGen && !runIcpLeadGen) {
-          console.log(`   ⏭️ SKIPPING - Both 'local_lead_generation' and 'icp_lead_generation' are inactive in site settings`);
+        if (!runLocalLeadGen) {
+          console.log(`   ⏭️ SKIPPING - 'local_lead_generation' is inactive in site settings`);
           continue;
         }
         
@@ -2035,125 +2036,8 @@ export async function scheduleIndividualLeadGenerationActivity(
         }
 
         // ===================================================================
-        // NEW: Schedule idealClientProfileMiningWorkflow SAME DAY (30m after Lead Gen)
-        // ===================================================================
-
-        if (runIcpLeadGen) {
-          // Calculate ICP mining time (30 minutes after lead generation)
-          let icpHour = leadGenHour;
-          let icpMinute = minutes + 30;
-          if (icpMinute >= 60) {
-            icpHour = icpHour + 1;
-            icpMinute = icpMinute - 60;
-          }
-          if (icpHour >= 24) {
-            icpHour = icpHour - 24; // Wrap to next day if needed
-          }
-
-          const icpScheduledTime = `${icpHour.toString().padStart(2, '0')}:${icpMinute.toString().padStart(2, '0')}`;
-
-          // Create target time for ICP mining in site's timezone
-          const icpTargetLocal = new Date(finalTargetLocal);
-          icpTargetLocal.setUTCHours(icpHour, icpMinute, 0, 0);
-
-          // If ICP time is earlier than lead gen time after minute adjustment, it wrapped to next day
-          if (icpHour < leadGenHour || (icpHour === leadGenHour && icpMinute < minutes)) {
-            icpTargetLocal.setUTCDate(icpTargetLocal.getUTCDate() + 1);
-          }
-
-          const icpTargetUTC = new Date(icpTargetLocal.getTime() + (timezoneOffset * 60 * 60 * 1000));
-          const icpDelayMs = icpTargetUTC.getTime() - now.getTime();
-
-          // Create unique workflow ID for ICP mining
-          const icpWorkflowId = generateDailyWorkflowId({
-            workflowType: 'icp-mining',
-            siteId: site.id,
-            dateStr: finalLocalDateStr,
-            timeStr: icpScheduledTime,
-            isTimer: true
-          });
-
-          console.log(`\n🎯 Scheduling ICP Mining workflow (30m after Lead Generation):`);
-          console.log(`   - ICP mining time: ${icpScheduledTime} ${siteTimezone}`);
-          console.log(`   - Target time UTC: ${icpTargetUTC.toISOString()}`);
-          console.log(`   - Delay: ${icpDelayMs}ms (${(icpDelayMs / 1000 / 60).toFixed(1)} minutes)`);
-          console.log(`   - Workflow ID: ${icpWorkflowId}`);
-
-          // Prepare workflow arguments for idealClientProfileMiningWorkflow
-          const icpWorkflowArgs = [{
-            site_id: site.id,
-            userId: site.user_id,
-            scheduleId: icpWorkflowId,
-            // Resolve target, research and list selection inside the child after
-            // the delay, never from this scheduler's settings snapshot.
-            additionalData: {
-              scheduledBy: 'activityPrioritizationEngine-icpMining',
-              executeReason: `post-leadgeneration-icp-mining-${businessHoursSource}-${icpScheduledTime}`,
-              scheduleType: `icp-mining-${businessHoursSource}`,
-              scheduleTime: `${icpScheduledTime} ${siteTimezone}`,
-              executionDay: finalLocalDateStr,
-              timezone: siteTimezone,
-              executionMode: 'timer-delayed-icp-mining',
-              businessHours: businessHours || {
-                open: scheduledTime,
-                close: '18:00',
-                enabled: true,
-                timezone: siteTimezone,
-                source: businessHoursSource
-              },
-              siteName: site.name || `Site ${site.id.substring(0, 8)}`,
-              fallbackUsed: !businessHours,
-              delayMs: icpDelayMs,
-              targetTimeUTC: icpTargetUTC.toISOString(),
-              leadGenTime: leadGenScheduledTime,
-              executesSameDayAsLeadGeneration: true,
-              parentScheduleId: options.parentScheduleId,
-              dailyOperationsScheduleId: options.parentScheduleId
-            }
-          }];
-
-          // Start the DELAYED workflow for ICP mining
-          await client.workflow.start('delayedExecutionWorkflow', {
-            args: [{
-              delayMs: Math.max(icpDelayMs, 0),
-              targetWorkflow: 'idealClientProfileMiningWorkflow',
-              targetArgs: icpWorkflowArgs,
-              siteName: site.name || 'Site',
-              scheduledTime: `${icpScheduledTime} ${siteTimezone}`,
-              executionType: 'timer-based-icp-mining'
-            }],
-            taskQueue: temporalConfig.taskQueue,
-            workflowId: icpWorkflowId,
-            workflowIdReusePolicy: DAILY_WORKFLOW_REUSE_POLICY as any,
-            workflowRunTimeout: computeDelayedWorkflowRunTimeout(icpDelayMs),
-          });
-
-          // Save cron status entry for ICP mining
-          const icpCronUpdate: CronStatusUpdate = {
-            siteId: site.id,
-            workflowId: icpWorkflowId,
-            scheduleId: icpWorkflowId,
-            activityName: 'idealClientProfileMiningWorkflow',
-            status: 'SCHEDULED',
-            nextRun: icpTargetUTC.toISOString(),
-          };
-          await saveCronStatusActivity(icpCronUpdate);
-          scheduled++;
-
-          results.push({
-            workflowId: icpWorkflowId,
-            scheduleId: icpWorkflowId,
-            success: true
-          });
-        } else {
-          console.log(`   ⏭️ SKIPPING - 'icp_lead_generation' is inactive`);
-        }
-
-        // ===================================================================
         // NEW: Schedule dailyStrategicAccountsWorkflow 2 hours after Lead Gen
         // ===================================================================
-        // Enabling standalone mining must not implicitly enable strategic-account research.
-        if (!runLocalLeadGen) continue;
         
         // Calculate strategic accounts time (2 hours after lead generation)
         let strategicHour = leadGenHour + 2;
@@ -3017,15 +2901,15 @@ export async function scheduleLeadQualificationActivity(
           site_id: site.id, activity_key: 'leads_follow_up', check_day: false,
         });
         if (!outreachConfig.shouldExecute) {
-          console.log(`   ⏭️ SKIPPING - 'leads_follow_up' is inactive in site settings`);
+          console.log(`   ⏭️ SKIPPING - 'leads_follow_up': ${outreachConfig.reason}`);
           skipped++;
           continue;
         }
 
         const businessHours = sitesWithBusinessHours.get(site.id);
         const siteTimezone = outreachConfig.timezone;
-        const scheduledTime = '09:00';
-        const finalTargetUTC = nextOutreachRun(new Date(), siteTimezone, outreachConfig.weekdays);
+        const scheduledTime = outreachConfig.startTime ?? '09:00';
+        const finalTargetUTC = nextOutreachRun(new Date(), siteTimezone, outreachConfig.weekdays, scheduledTime);
         if (!finalTargetUTC) {
           console.log(`   ⚠️ Could not determine next valid schedule time; skipping site`);
           skipped++;

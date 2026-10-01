@@ -6,6 +6,7 @@ const {
   scheduleIndividualDailyStandUpsActivity,
   scheduleIndividualSiteAnalysisActivity,
   scheduleIndividualLeadGenerationActivity,
+  scheduleIcpMiningWorkflowsActivity,
   scheduleIndividualDailyProspectionActivity,
   executeDailyProspectionWorkflowsActivity,
   validateAndCleanStuckCronStatusActivity,
@@ -185,6 +186,22 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
     let operationsResult;
     let operationsExecuted = false;
     let dailyStandUpScheduling;
+    let icpMiningScheduling;
+
+    // Mining has no outbound messaging: spread it over 24h even when daily operations are closed.
+    // Keep the new activity command out of pre-change workflow histories.
+    const distributedIcpMining = patched('icp-mining-distributed-scheduling-v1');
+    if (distributedIcpMining) {
+      try {
+        icpMiningScheduling = await scheduleIcpMiningWorkflowsActivity({ parentScheduleId: realScheduleId });
+      } catch (error) {
+        icpMiningScheduling = {
+          scheduled: 0, skipped: 0, failed: 1, results: [],
+          errors: [error instanceof Error ? error.message : String(error)],
+        };
+        console.error('❌ Error scheduling distributed ICP mining:', error);
+      }
+    }
 
     // Explicit standup weekdays may include closed days, even when other operations are skipped.
     if (configuredDailyStandups) {
@@ -628,6 +645,9 @@ export async function activityPrioritizationEngineWorkflow(): Promise<{
 
     if (configuredDailyStandups) {
       operationsResult = { ...operationsResult, dailyStandUpScheduling };
+    }
+    if (distributedIcpMining) {
+      operationsResult = { ...operationsResult, icpMiningScheduling };
     }
 
     const endTime = new Date();

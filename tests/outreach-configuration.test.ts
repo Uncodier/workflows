@@ -42,6 +42,47 @@ describe('outreach configuration', () => {
     expect(next?.toISOString()).toBe('2026-03-08T13:00:00.000Z');
     expect(localOutreachDay(new Date('2026-09-29T02:00:00Z'), 'America/Mexico_City').weekday).toBe(1);
   });
+
+  const followUpSettings = (start_time?: unknown) => {
+    const input = settings();
+    return { ...input, activities: { [followup]: { ...input.activities[cold], weekdays: [2], start_time } } };
+  };
+
+  it.each([null, '', '9:00', '24:00', '12:60', ' 09:00', '09:00 ', '09:00\n', '09:00\r\n', 900, false, {}, []])(
+    'fails closed for invalid nonmissing follow-up start time: %j', start_time => {
+      for (const checkDay of [true, false]) {
+        expect(resolveOutreachConfiguration(followUpSettings(start_time), followup, now, checkDay)).toMatchObject({
+          shouldExecute: false, reason: 'Invalid follow-up start time; expected HH:mm',
+        });
+      }
+    },
+  );
+
+  it.each(['00:00', '09:05', '23:59'])('accepts strict follow-up HH:mm %s for future scheduling', start_time => {
+    expect(resolveOutreachConfiguration(followUpSettings(start_time), followup, now, false))
+      .toMatchObject({ shouldExecute: true, startTime: start_time });
+  });
+
+  it('blocks follow-up before the local start, permits the exact boundary, and still restricts weekdays', () => {
+    const input = followUpSettings('10:30');
+    expect(resolveOutreachConfiguration(input, followup, new Date('2026-09-29T16:29:59.999Z')))
+      .toMatchObject({ shouldExecute: false, reason: 'Before configured follow-up start time', startTime: '10:30' });
+    expect(resolveOutreachConfiguration(input, followup, new Date('2026-09-29T16:30:00Z')).shouldExecute).toBe(true);
+    expect(resolveOutreachConfiguration(input, followup, new Date('2026-09-30T05:59:59Z')).shouldExecute).toBe(true);
+    expect(resolveOutreachConfiguration(input, followup, new Date('2026-09-30T16:30:00Z')).shouldExecute).toBe(false);
+  });
+
+  it('does not impose the scheduling default 09:00 on legacy follow-up execution', () => {
+    const result = resolveOutreachConfiguration(followUpSettings(), followup, new Date('2026-09-29T06:01:00Z'));
+    expect(result.shouldExecute).toBe(true);
+    expect(result).not.toHaveProperty('startTime');
+  });
+
+  it.each(['23:59', null, 'invalid'])('does not change Cold Outreach timing (%j)', start_time => {
+    const result = resolveOutreachConfiguration(settings({ start_time }), cold, now);
+    expect(result.shouldExecute).toBe(true);
+    expect(result).not.toHaveProperty('startTime');
+  });
 });
 
 describe('outreach audience and unanswered limit', () => {

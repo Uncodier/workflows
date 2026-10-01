@@ -10,7 +10,7 @@ export interface DailyStandUpRun {
   fallbackUsed: boolean;
 }
 
-/** Find the next selected local opening time, including explicitly selected closed days. */
+/** Find the next selected local start time (legacy opening when no override is supplied). */
 export function nextDailyStandUpRun(settings: any, now = new Date()): DailyStandUpRun | null {
   const configuration = resolveDailyStandUpConfiguration(settings, now, false);
   if (!configuration.shouldExecute) return null;
@@ -21,9 +21,10 @@ export function nextDailyStandUpRun(settings: any, now = new Date()): DailyStand
     const opening = day?.start ?? day?.open;
     const validOpening = day?.enabled !== false && typeof opening === 'string'
       && /^([01]\d|2[0-3]):[0-5]\d$/.test(opening);
-    const scheduledTime = validOpening ? opening : '09:00';
+    const scheduledTime = configuration.startTime ?? (validOpening ? opening : '09:00');
     const [hour, minute] = scheduledTime.split(':').map(Number);
-    return [weekday, { scheduledTime, minuteOfDay: hour * 60 + minute, fallbackUsed: !validOpening }];
+    return [weekday, { scheduledTime, minuteOfDay: hour * 60 + minute,
+      fallbackUsed: configuration.startTime === undefined && !validOpening }];
   }));
 
   // Search actual UTC instants: IANA rules handle DST, fractional offsets and local date rollover.
@@ -47,8 +48,12 @@ export function nextDailyStandUpRun(settings: any, now = new Date()): DailyStand
     const current = local(time);
     const opening = openings.get(current.weekday);
     // A missing spring-forward opening runs at the first valid minute after the gap.
-    const crossesGap = opening && previous.date === current.date
-      && previous.minuteOfDay < opening.minuteOfDay && current.minuteOfDay > opening.minuteOfDay;
+    // A forward date change can skip midnight too (e.g. Santiago 23:59 -> 01:00).
+    // Normal midnight is minute 0, so it never crosses a nonnegative opening.
+    const crossesGap = opening && current.minuteOfDay > opening.minuteOfDay
+      && (previous.date === current.date
+        ? previous.minuteOfDay < opening.minuteOfDay
+        : previous.date < current.date);
     if (opening && (current.minuteOfDay === opening.minuteOfDay || crossesGap)) {
       return {
         targetTime: new Date(time), localDate: current.date, timezone: configuration.timezone,

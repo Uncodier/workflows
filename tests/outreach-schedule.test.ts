@@ -32,6 +32,7 @@ import {
   nextOutreachRun,
   outreachTimezone,
 } from '../src/temporal/utils/outreachConfiguration';
+import { nextDailyStandUpRun } from '../src/temporal/utils/dailyStandUpScheduling';
 
 const followup = 'leads_follow_up';
 const cold = 'leads_initial_cold_outreach';
@@ -64,6 +65,62 @@ describe('next outreach run at local 09:00', () => {
 
   it('does not substitute default weekdays for an empty selection', () => {
     expect(nextOutreachRun(new Date('2026-09-28T00:00:00Z'), 'UTC', [])).toBeNull();
+  });
+
+  it.each([
+    ['custom exact target', '2026-09-29T16:15:00Z', 'UTC', [2], '16:15', '2026-09-29T16:15:00.000Z'],
+    ['target just passed', '2026-09-29T16:15:00.001Z', 'UTC', [2, 5], '16:15', '2026-10-02T16:15:00.000Z'],
+    ['local midnight', '2026-09-28T17:00:00Z', 'Asia/Kathmandu', [2], '00:00', '2026-09-28T18:15:00.000Z'],
+    ['last local minute', '2026-09-29T22:00:00Z', 'UTC', [2], '23:59', '2026-09-29T23:59:00.000Z'],
+    ['spring-forward gap', '2026-03-08T05:00:00Z', 'America/New_York', [0], '02:30', '2026-03-08T07:00:00.000Z'],
+    ['half-hour spring-forward gap', '2026-10-03T14:00:00Z', 'Australia/Lord_Howe', [0], '02:15', '2026-10-03T15:30:00.000Z'],
+    ['first fall-back occurrence', '2026-11-01T04:00:00Z', 'America/New_York', [0], '01:30', '2026-11-01T05:30:00.000Z'],
+    ['second fall-back occurrence', '2026-11-01T05:30:00.001Z', 'America/New_York', [0], '01:30', '2026-11-01T06:30:00.000Z'],
+  ])('custom start uses Standup DST policy: %s', (_label, timestamp, timezone, weekdays, startTime, expected) => {
+    const now = new Date(timestamp);
+    const next = nextOutreachRun(now, timezone, weekdays, startTime);
+    expect(next?.toISOString()).toBe(expected);
+    expect(next!.getTime()).toBeGreaterThanOrEqual(now.getTime());
+    expect(weekdays).toContain(localOutreachDay(next!, timezone).weekday);
+    expect(nextDailyStandUpRun({ business_hours: [{ timezone }], activities: {
+      daily_resume_and_stand_up: { status: 'active', weekdays, start_time: startTime },
+    } }, now)?.targetTime).toEqual(next);
+  });
+
+  it.each([null, '', '9:00', '24:00', 900])('does not fall back to 09:00 for an invalid supplied start: %j', startTime => {
+    expect(nextOutreachRun(new Date('2026-09-29T00:00:00Z'), 'UTC', [2], startTime as string)).toBeNull();
+  });
+
+  it.each([
+    ['missing 00:30', '2026-09-05T12:00:00Z', 'America/Santiago', '00:30', '2026-09-06T04:00:00.000Z'],
+    ['missing midnight', '2026-09-05T12:00:00Z', 'America/Santiago', '00:00', '2026-09-06T04:00:00.000Z'],
+    ['just before midnight gap', '2026-09-06T03:59:59.999Z', 'America/Santiago', '00:30', '2026-09-06T04:00:00.000Z'],
+    ['exact gap boundary', '2026-09-06T04:00:00Z', 'America/Santiago', '00:30', '2026-09-06T04:00:00.000Z'],
+    ['gap boundary just passed', '2026-09-06T04:00:00.001Z', 'America/Santiago', '00:30', '2026-09-13T03:30:00.000Z'],
+    ['missing midnight boundary just passed', '2026-09-06T04:00:00.001Z', 'America/Santiago', '00:00', '2026-09-13T03:00:00.000Z'],
+    ['ordinary midnight', '2026-09-05T12:00:00Z', 'UTC', '00:00', '2026-09-06T00:00:00.000Z'],
+    ['ordinary boundary does not replace 00:30', '2026-09-05T12:00:00Z', 'UTC', '00:30', '2026-09-06T00:30:00.000Z'],
+    ['ordinary Santiago midnight', '2026-09-12T12:00:00Z', 'America/Santiago', '00:00', '2026-09-13T03:00:00.000Z'],
+    ['ordinary Santiago boundary does not replace 00:30', '2026-09-12T12:00:00Z', 'America/Santiago', '00:30', '2026-09-13T03:30:00.000Z'],
+    ['ordinary midnight just passed', '2026-09-06T00:00:00.001Z', 'UTC', '00:00', '2026-09-13T00:00:00.000Z'],
+    ['passed target is not caught up at the next ordinary boundary', '2026-09-06T00:30:00.001Z', 'UTC', '00:30', '2026-09-13T00:30:00.000Z'],
+  ])('handles local date crossover: %s', (_label, timestamp, timezone, startTime, expected) => {
+    const now = new Date(timestamp);
+    const next = nextOutreachRun(now, timezone, [0], startTime);
+    expect(next?.toISOString()).toBe(expected);
+    expect(next!.getTime()).toBeGreaterThanOrEqual(now.getTime());
+    expect(localOutreachDay(next!, timezone).weekday).toBe(0);
+    expect(nextDailyStandUpRun({ business_hours: [{ timezone }], activities: {
+      daily_resume_and_stand_up: { status: 'active', weekdays: [0], start_time: startTime },
+    } }, now)?.targetTime).toEqual(next);
+  });
+
+  it.each([null, '', '0:30', '00:60', '24:00', '00:30\n', 30])('does not recover an invalid start at a midnight gap: %j', startTime => {
+    expect(nextOutreachRun(new Date('2026-09-05T12:00:00Z'), 'America/Santiago', [0], startTime as string)).toBeNull();
+  });
+
+  it.each([{ weekdays: [] }, { weekdays: [7] }])('does not broaden an invalid or empty weekday selection at a midnight gap: %j', ({ weekdays }) => {
+    expect(nextOutreachRun(new Date('2026-09-05T12:00:00Z'), 'America/Santiago', weekdays, '00:30')).toBeNull();
   });
 
   it.each([
@@ -146,12 +203,28 @@ describe('outreach scheduling boundaries', () => {
     expect(timeoutMs).toBeGreaterThanOrEqual(options.args[0].delayMs + 2 * 60 * 60 * 1000);
   });
 
+  it('uses custom start for the timer ID, delay and metadata rather than 09:00 or opening hours', async () => {
+    mockFetchCompleteSettings.mockResolvedValue([settings({ ...activeConfig, start_time: '02:30' })]);
+    expect(await scheduleLeadQualificationActivity({ openSites: [] }, {
+      activitiesMap: { [site.id]: { [followup]: { ...activeConfig, start_time: '09:00' } } },
+    })).toMatchObject({ scheduled: 1, skipped: 0, failed: 0 });
+    const options = mockStartWorkflow.mock.calls[0][1];
+    expect(options.workflowId).toBe('lead-qualification-timer-site-1-2026-03-08-0230');
+    expect(options.args[0]).toMatchObject({ delayMs: Date.parse('2026-03-08T07:00:00Z') - Date.now(),
+      scheduledTime: '02:30 America/New_York', targetArgs: [{ additionalData: {
+        scheduleTime: '02:30 America/New_York', targetTimeUTC: '2026-03-08T07:00:00.000Z', executionDay: '2026-03-08',
+      } }] });
+  });
+
   it.each([
     ['missing activity', {}],
     ['default status', { ...activeConfig, status: 'default' }],
     ['disabled activity', { ...activeConfig, status: 'inactive' }],
     ['empty weekdays', { ...activeConfig, weekdays: [] }],
     ['invalid weekday', { ...activeConfig, weekdays: [7] }],
+    ['invalid start', { ...activeConfig, start_time: '24:00' }],
+    ['empty start', { ...activeConfig, start_time: '' }],
+    ['null start', { ...activeConfig, start_time: null }],
     ['no selected account', { ...activeConfig, channel_accounts: {} }],
     ['missing selected account', { ...activeConfig, channel_accounts: { email: ['missing'] } }],
     ['no selected segments', { ...activeConfig, all_segments: false }],

@@ -56,6 +56,26 @@ describe('outreach DB selection', () => {
     expect(calls.every(call => call.table === 'segments')).toBe(true);
   });
 
+  it('re-reads Follow Up start time and blocks before any audience or lead work, but scheduling can look ahead', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-09-29T16:00:00Z')); // 10:00 local
+    try {
+      const input = config();
+      const activity = { ...input.activities.leads_initial_cold_outreach, weekdays: [2], start_time: '09:00' };
+      mockSettings.mockImplementation(async () => [{ ...input, activities: { leads_follow_up: { ...activity } } }]);
+      const params = { site_id: 'site', activity_key: 'leads_follow_up' as const };
+      expect(await getOutreachConfigurationActivity(params)).toMatchObject({ shouldExecute: true, startTime: '09:00' });
+      calls.length = 0;
+      activity.start_time = '11:00';
+      expect(await getOutreachConfigurationActivity({ ...params, lead_id: 'lead' })).toMatchObject({
+        shouldExecute: false, startTime: '11:00', reason: 'Before configured follow-up start time',
+      });
+      expect(calls).toHaveLength(0);
+      expect(await getOutreachConfigurationActivity({ ...params, check_day: false })).toMatchObject({ shouldExecute: true, startTime: '11:00' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('selects a Telegram-only lead by its site-owned conversation identity', async () => {
     const settings = config({ channel_accounts: { telegram: ['telegram-account'] } });
     mockSettings.mockResolvedValue([{ ...settings, channels: { connections: [

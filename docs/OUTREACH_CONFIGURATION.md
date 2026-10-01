@@ -17,6 +17,15 @@ Each object contains:
 | `daily_message_limit` | Integer 1–10,000, initially 30. Per site/activity/local day across all channels and accounts combined, including voice call attempts, not per workflow run. |
 | `max_unanswered_messages` | Integer 1–100, initially 3. Confirmed outbound messages across channels since the last genuine inbound reply, after which no further attempt is allowed. |
 | `weekdays` | Follow Up weekdays: Sunday=0 through Saturday=6; initial selection `[2,3,4]`. An empty selection disables follow-up execution. |
+| `start_time` | Follow Up only: optional site-local 24-hour `HH:mm` (`00:00`–`23:59`). Valid supplied values override the scheduler's `09:00`. Missing preserves legacy timings; invalid nonmissing values block scheduling and execution. |
+
+Follow Up may save, for example, `"weekdays": [2,3,4], "start_time": "10:30"`.
+`start_time` must be exactly five characters, without padding or coercion. Null,
+empty strings, malformed times, and non-string values are invalid rather than a
+request to reset. An untouched missing value remains omitted. A fixed `09:00`
+reset saves `"09:00"`; removing an override requires a persistence path that deletes
+the key, not omission in a partial merge. Internal configuration responses expose
+the validated value as optional `startTime`. Cold Outreach timing is unchanged.
 
 Zavu accounts use the ID from `channels.connections`; a selected account must belong
 to the current site, match the channel, and be connected. Direct email accounts use
@@ -48,6 +57,17 @@ the selections are configured. Email aliases are not independent connected accou
 
 - Cold Outreach (`dailyProspectionWorkflow`) and Follow Up
   (`leadQualificationWorkflow`) read the current configuration before selecting leads.
+- Follow Up scheduling calls `nextOutreachRun(now, timezone, weekdays, startTime)`;
+  the optional last argument defaults to `09:00`. It uses the site's timezone and
+  selected weekdays, not server time or business opening hours. As with Daily
+  Standup, a spring-forward gap uses the first valid minute after the gap; a repeated
+  fall-back time uses the first occurrence at or after now. Fractional offsets and
+  local dates crossing the UTC boundary are supported.
+- Runtime configuration reads block execution before an explicit `start_time`,
+  including when it was moved later after a timer was created. The exact local
+  minute and later times are eligible on selected days. When the field is missing,
+  the previous runtime behavior is retained (no new `09:00` execution floor).
+  Invalid supplied values fail closed even when only validating future scheduling.
 - Segments are applied in lead queries before pagination. The single-lead workflow
   rechecks eligibility before paid verification/research and content generation.
 - Channel reachability is checked against the selected accounts. A Telegram-only or
@@ -84,5 +104,12 @@ fails closed if the API tool is unavailable; it must not revert to a legacy send
 The API requires the existing Redis service (`REDIS_CACHE_URL` or `REDIS_URL`) for
 atomic daily limits and message/lead locks. Redis unavailability defers delivery.
 Temporal patch markers preserve the command history of existing workflow runs.
+Start-time enforcement uses existing configuration activity calls and adds no
+workflow commands, so no additional marker is necessary. Historical activity
+results replay unchanged, and pre-configuration patch paths remain unchanged.
+Changing a time does not cancel/recreate live timers from the UI. A timer firing
+before the updated start is skipped, not automatically rescheduled; the next
+prioritization pass uses current settings. Existing per-site/day child workflow
+deduplication still applies to same-day replacements after a completed skipped run.
 No workflow start, live configuration update, test email, or remote migration is
 needed to validate the unit tests.

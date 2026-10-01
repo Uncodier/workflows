@@ -58,16 +58,19 @@ describe('configured Daily Standup engine scheduling', () => {
       const result = await activityPrioritizationEngineWorkflow();
       expect(result).toMatchObject({
         timingDecision: decision, operationsExecuted: decision === 'execute_now',
-        operationsResult: { dailyStandUpScheduling: summary },
+        operationsResult: { dailyStandUpScheduling: summary, icpMiningScheduling: summary },
       });
       expect(mockActivities.scheduleIndividualDailyStandUpsActivity).toHaveBeenCalledTimes(1);
       expect(mockActivities.scheduleIndividualDailyStandUpsActivity).toHaveBeenCalledWith(businessHours, {
         parentScheduleId: 'parent-schedule',
       });
       expect(mockPatched).toHaveBeenCalledWith('daily-standup-configuration-v1');
+      expect(mockPatched).toHaveBeenCalledWith('icp-mining-distributed-scheduling-v1');
+      expect(mockActivities.scheduleIcpMiningWorkflowsActivity).toHaveBeenCalledTimes(1);
+      expect(mockActivities.scheduleIcpMiningWorkflowsActivity).toHaveBeenCalledWith({ parentScheduleId: 'parent-schedule' });
       const remainingCommands = decision === 'skip' ? [] : decision === 'execute_now' ? nowCommands : laterCommands;
       expect(commandSequence()).toEqual([
-        ...initialCommands, 'scheduleIndividualDailyStandUpsActivity', ...remainingCommands,
+        ...initialCommands, 'scheduleIcpMiningWorkflowsActivity', 'scheduleIndividualDailyStandUpsActivity', ...remainingCommands,
       ]);
     },
   );
@@ -87,6 +90,22 @@ describe('configured Daily Standup engine scheduling', () => {
     expect(mockActivities.scheduleIndividualDailyStandUpsActivity).toHaveBeenCalledTimes(1);
     expect(mockExecuteChild).not.toHaveBeenCalled();
     expect(mockActivities.scheduleIndividualDailyProspectionActivity).not.toHaveBeenCalled();
+    expect(mockActivities.scheduleIcpMiningWorkflowsActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it('isolates ICP scheduler failures from other scheduled work', async () => {
+    mockActivities.scheduleIcpMiningWorkflowsActivity.mockRejectedValue(new Error('Sites unavailable'));
+    expect(await activityPrioritizationEngineWorkflow()).toMatchObject({ operationsResult: {
+      icpMiningScheduling: { scheduled: 0, failed: 1, errors: ['Sites unavailable'] },
+      dailyStandUpScheduling: summary,
+    } });
+  });
+
+  it('does not add ICP commands to histories that already have configured standups but predate distributed mining', async () => {
+    mockPatched.mockImplementation(id => id !== 'icp-mining-distributed-scheduling-v1');
+    await activityPrioritizationEngineWorkflow();
+    expect(commandSequence()).toEqual([...initialCommands, 'scheduleIndividualDailyStandUpsActivity']);
+    expect(mockActivities.scheduleIcpMiningWorkflowsActivity).not.toHaveBeenCalled();
   });
 
   it('keeps the invocation concurrency guard ahead of all scheduling', async () => {

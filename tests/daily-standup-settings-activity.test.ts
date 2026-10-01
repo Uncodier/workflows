@@ -28,6 +28,17 @@ describe('persisted Daily Standup settings', () => {
     expect(await getDailyStandUpConfigurationActivity({ site_id: 'site' })).toMatchObject({ shouldExecute: false });
   });
 
+  it('re-reads a changed start time rather than trusting the previous eligible result', async () => {
+    const activity = { status: 'active', weekdays: [2], start_time: '09:00' };
+    mockSingle.mockImplementation(async () => ({ data: { activities: { daily_resume_and_stand_up: { ...activity } } }, error: null }));
+    expect(await getDailyStandUpConfigurationActivity({ site_id: 'site' })).toMatchObject({ shouldExecute: true, startTime: '09:00' });
+    activity.start_time = '11:00'; // Current local time is 10:00.
+    expect(await getDailyStandUpConfigurationActivity({ site_id: 'site' })).toMatchObject({
+      shouldExecute: false, startTime: '11:00', reason: 'Before configured Daily Standup start time',
+    });
+    expect(mockSingle).toHaveBeenCalledTimes(2);
+  });
+
   it('throws on database failure rather than silently enabling all sections', async () => {
     mockSingle.mockResolvedValue({ data: null, error: { message: 'unavailable' } });
     await expect(getDailyStandUpConfigurationActivity({ site_id: 'site' })).rejects.toThrow('Daily Standup settings unavailable');

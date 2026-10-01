@@ -50,4 +50,43 @@ describe('Daily Standup configuration', () => {
     expect(resolveDailyStandUpConfiguration(settings({ status: 'active' }, timezone), monday))
       .toMatchObject({ shouldExecute: false, reason: 'Invalid site timezone' });
   });
+
+  it.each([null, '', '9:00', '09:0', '24:00', '12:60', ' 09:00', '09:00 ', '09:00\n', '09:00\r\n', 900, false, {}, []])(
+    'fails closed for a supplied invalid start time in scheduling and execution: %j', start_time => {
+      const config = settings({ status: 'active', start_time });
+      for (const checkDay of [true, false]) {
+        expect(resolveDailyStandUpConfiguration(config, monday, checkDay)).toMatchObject({
+          shouldExecute: false, reason: 'Invalid Daily Standup start time; expected HH:mm',
+        });
+      }
+    },
+  );
+
+  it.each(['00:00', '09:05', '23:59'])('accepts strict HH:mm start time %s for future scheduling', start_time => {
+    expect(resolveDailyStandUpConfiguration(settings({ status: 'active', start_time }), monday, false))
+      .toMatchObject({ shouldExecute: true, startTime: start_time });
+  });
+
+  it('checks the configured start in the site timezone, with an inclusive boundary and no end-time restriction', () => {
+    const config = settings({ status: 'active', start_time: '10:30' });
+    expect(resolveDailyStandUpConfiguration(config, new Date('2026-09-28T16:29:59.999Z')))
+      .toMatchObject({ shouldExecute: false, reason: 'Before configured Daily Standup start time' });
+    for (const now of ['2026-09-28T16:30:00Z', '2026-09-29T05:59:59Z']) {
+      expect(resolveDailyStandUpConfiguration(config, new Date(now)).shouldExecute).toBe(true);
+    }
+    expect(resolveDailyStandUpConfiguration(config, new Date('2026-09-29T16:30:00Z')).shouldExecute).toBe(false);
+  });
+
+  it('does not impose an opening-time or 09:00 runtime guard when start_time is missing', () => {
+    const config = settings({ status: 'active' });
+    expect(resolveDailyStandUpConfiguration(config, new Date('2026-09-28T06:01:00Z')))
+      .toMatchObject({ shouldExecute: true });
+    expect(resolveDailyStandUpConfiguration(config, monday)).not.toHaveProperty('startTime');
+  });
+
+  it('allows a spring-forward gap target at the first valid minute after it', () => {
+    const config = settings({ status: 'active', weekdays: [0], start_time: '02:30' }, 'America/New_York');
+    expect(resolveDailyStandUpConfiguration(config, new Date('2026-03-08T06:59:59Z')).shouldExecute).toBe(false);
+    expect(resolveDailyStandUpConfiguration(config, new Date('2026-03-08T07:00:00Z')).shouldExecute).toBe(true);
+  });
 });

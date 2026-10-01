@@ -59,7 +59,7 @@ La lista `CRON_SCHEDULED_WORKFLOWS` de abajo es la allowlist usada por las activ
 - **Programa workflows mediante actividades**:
   - `dailyProspectionWorkflow` (vía `executeDailyProspectionWorkflowsActivity`)
   - `leadGenerationWorkflow` (vía `scheduleIndividualLeadGenerationActivity`)
-  - `idealClientProfileMiningWorkflow` (vía `scheduleIndividualLeadGenerationActivity`)
+  - `idealClientProfileMiningWorkflow` (vía `scheduleIcpMiningWorkflowsActivity`, distribuido e independiente del horario comercial)
   - `dailyStandUpWorkflow` (vía `scheduleIndividualDailyStandUpsActivity`)
   - `analyzeSiteWorkflow` (vía `scheduleIndividualSiteAnalysisActivity`)
 
@@ -85,8 +85,8 @@ Estos workflows son ejecutados por actividades que forman parte del pipeline de 
 - **Descripción**: Generación de leads para sitios individuales
 
 #### `idealClientProfileMiningWorkflow`
-- **Programado por**: `activityPrioritizationEngineWorkflow` → `scheduleIndividualLeadGenerationActivity` → `delayedExecutionWorkflow`
-- **Descripción**: Minería de perfiles de cliente ideal (ICP) para sitios individuales
+- **Programado por**: `activityPrioritizationEngineWorkflow` → `scheduleIcpMiningWorkflowsActivity` → `delayedExecutionWorkflow`
+- **Descripción**: Minería de perfiles de cliente ideal (ICP), una ejecución diaria por sitio distribuida a lo largo de 24 horas, sin depender del horario comercial
 - **Guarda cron_status**: Sí, para ejecuciones programadas (`SCHEDULED`, `RUNNING`, `COMPLETED`, `FAILED`); no para `manual-execution`.
 
 #### `dailyStandUpWorkflow`

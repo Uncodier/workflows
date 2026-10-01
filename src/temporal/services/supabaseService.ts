@@ -11,6 +11,7 @@ import * as SitesImpl from './supabase-impl/sites';
 import * as SettingsImpl from './supabase-impl/settings';
 import * as ContentImpl from './supabase-impl/content';
 import * as CronImpl from './supabase-impl/cron';
+import * as IcpScheduledStatusImpl from './supabase-impl/icpMiningScheduledStatus';
 import * as LeadsImpl from './supabase-impl/leads';
 import * as CompaniesImpl from './supabase-impl/companies';
 import * as AgentsImpl from './supabase-impl/agents';
@@ -167,6 +168,11 @@ export class SupabaseService {
   async upsertCronStatus(cronStatusRecord: any): Promise<void> {
     await this.ensureConnection();
     return CronImpl.upsertCronStatus(this.client, cronStatusRecord);
+  }
+
+  async saveIcpMiningScheduledStatus(update: IcpScheduledStatusImpl.IcpMiningScheduledStatusUpdate): Promise<void> {
+    await this.ensureConnection();
+    return IcpScheduledStatusImpl.saveIcpMiningScheduledStatus(this.client, update);
   }
 
   async batchUpsertCronStatus(records: any[]): Promise<void> {

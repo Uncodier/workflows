@@ -48,9 +48,35 @@ AI Activities stores the following object in `settings.activities`:
   Invalid controls or failed reads stop execution rather than silently spending
   against fallback settings. Saving settings does not restart an already-failed run
   or change the snapshot of a run that has already started mining.
-- Existing cadence/business-hours handling remains unchanged. Always enabled does
-  not mean continually running or immediate processing at request creation. A run
-  selects one queued request; no queued request means no provider calls.
+- Mining runs once daily per site, with deterministic per-site slots distributed
+  over all 24 hours (UTC). It no longer runs 30 minutes after lead generation and
+  does not depend on business hours, weekends, Standup or outreach activation.
+  Stable slots avoid moving pending work on scheduler retries; timer IDs contain
+  the site and UTC execution date, not a configurable clock time. Temporal rejects
+  duplicate running/successful timers, and duplicate scheduling does not overwrite
+  their current cron status. Each scheduler pass covers the next two daily slots
+  (up to 48 hours ahead), so normal jitter in the central daily scheduler cannot
+  leave the next day unplanned. This remains one execution per site per UTC day,
+  not two executions per day. Only the nearest newly created timer can publish
+  `SCHEDULED`, using a conditional write that preserves newer execution status.
+  Always enabled does not mean continually running or
+  immediate processing at request creation. A run selects one queued request; no
+  queued request means no provider calls.
+
+### Distributed scheduling rollout
+
+`scheduleIcpMiningWorkflowsActivity` is registered with the worker and invoked by
+the prioritization engine independently of the business-hours decision. The
+`icp-mining-distributed-scheduling-v1` Temporal patch keeps the additional activity
+out of historical command sequences. Local lead generation no longer creates an
+ICP timer. Deploy the updated worker before relying on the new daily scheduling;
+no new native Temporal schedule or database migration is required.
+
+Previously created fixed-time timers are not changed or cancelled by this code.
+Drain or explicitly reconcile them when rolling out to avoid a transition day with
+both an old local-date timer and a new UTC-date timer. Existing ICP ownership and
+checkpoints still guard concurrent work on the same request. No live timers or
+production data are modified by this repository change.
 
 ## Pagination and persistence
 

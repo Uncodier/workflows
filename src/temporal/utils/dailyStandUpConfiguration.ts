@@ -1,4 +1,5 @@
 import { localOutreachDay } from './outreachConfiguration';
+import { isBeforeActivityStartTime, isValidActivityStartTime } from './activityStartTime';
 
 export const DAILY_STAND_UP_REPORT_SECTIONS = [
   'sales', 'tasks', 'requirements', 'social', 'channels',
@@ -14,9 +15,14 @@ export interface DailyStandUpConfiguration {
   weekdays: number[];
   reportSections: DailyStandUpReportSection[];
   timezone: string;
+  /** Missing retains the legacy per-day opening and imposes no new runtime time floor. */
+  startTime?: string;
 }
 
-/** Missing fields preserve legacy defaults; explicit empty/invalid selections never broaden them. */
+/**
+ * Missing fields preserve legacy defaults; explicit empty/invalid selections never broaden them.
+ * checkDay=false validates future scheduling without applying today's weekday/start-time guard.
+ */
 export function resolveDailyStandUpConfiguration(
   settings: any,
   now = new Date(),
@@ -38,16 +44,21 @@ export function resolveDailyStandUpConfiguration(
     weekdays: validDays ? [...new Set<number>(weekdays)].sort((a, b) => a - b) : [],
     reportSections: validSections ? DAILY_STAND_UP_REPORT_SECTIONS.filter(section => sections.includes(section)) : [],
     timezone,
+    ...(isValidActivityStartTime(raw?.start_time) ? { startTime: raw.start_time } : {}),
   };
 
   if (status !== 'active') result.reason = 'Daily Standup is inactive; explicit activation is required';
   else if (!validDays) result.reason = 'Select at least one valid Daily Standup weekday';
   else if (!validSections) result.reason = 'Select at least one valid Daily Standup report section';
+  else if (raw?.start_time !== undefined && !isValidActivityStartTime(raw.start_time)) result.reason = 'Invalid Daily Standup start time; expected HH:mm';
   else {
     try {
       if (typeof timezone !== 'string' || !timezone.trim()) throw new Error('Invalid timezone');
       const day = localOutreachDay(now, timezone);
       if (checkDay && !result.weekdays.includes(day.weekday)) result.reason = 'Not a selected Daily Standup weekday';
+      else if (checkDay && result.startTime !== undefined && isBeforeActivityStartTime(now, timezone, result.startTime)) {
+        result.reason = 'Before configured Daily Standup start time';
+      }
     } catch {
       result.reason = 'Invalid site timezone';
     }

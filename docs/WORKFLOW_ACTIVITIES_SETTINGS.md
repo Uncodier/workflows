@@ -4,11 +4,12 @@
 
 This document describes the workflow scheduling control system using `settings.activities` in site configuration.
 
-Daily Standup supports selected delivery weekdays and report sections in AI
+Daily Standup supports selected delivery weekdays, an optional `start_time`
+(`HH:mm` in the site's timezone), and report sections in AI
 Activities. See [Daily Standup configuration](./DAILY_STANDUP_CONFIGURATION.md)
 for defaults, validation, scheduling, and deployment details.
 
-For the account, audience, weekday, and daily delivery controls on Cold Outreach and
+For the account, audience, weekday, start-time, and daily delivery controls on Cold Outreach and
 Follow Up, see [Outreach configuration](./OUTREACH_CONFIGURATION.md). Both activities
 are opt-in: absent, `default`, or `inactive` status does not permit execution.
 
@@ -17,6 +18,11 @@ outbound-channel health. AI Activities configures `target_leads` (1–3000, defa
 150), `research_enabled` (default false), and the pending-list scope (`all_lists`
 defaults to true; otherwise use `list_ids`), not activation. See
 [ICP mining configuration](./ICP_MINING_CONFIGURATION.md) for deployment and cursor details.
+Daily mining is distributed per site across 24 hours, independently of business
+hours; it has no fixed-time control. Standup and Follow Up support optional
+`start_time` alongside weekdays. Missing times preserve their previous behavior
+(Standup opening time/09:00 fallback, Follow Up 09:00); invalid supplied times block
+execution rather than falling back silently.
 
 ## Feature Description
 
@@ -115,9 +121,9 @@ The following scheduling activities now check `settings.activities`:
    - Checks: `daily_resume_and_stand_up`
    - Schedules daily stand-up workflows
 
-2. **`scheduleIndividualLeadGenerationActivity`**
-   - Schedules ICP mining independently of activation/outreach; reads its parameters at execution time
-   - Local lead generation retains its existing activation check
+2. **`scheduleIcpMiningWorkflowsActivity` / `scheduleIndividualLeadGenerationActivity`**
+   - The dedicated ICP scheduler spreads daily mining across 24h independently of business hours and activation/outreach; reads mining parameters at execution time
+   - Local lead generation retains its existing activation check and business-hours schedule
 
 3. **`scheduleIndividualDailyProspectionActivity`**
    - Checks: `leads_initial_cold_outreach`

@@ -32,6 +32,7 @@ export * from './finderActivities';
 export * from './activityControlActivities';
 export * from './icpMiningConfigurationActivity';
 export * from './icpMiningExecutionActivities';
+export * from './icpMiningSchedulingActivity';
 export * from './leadResearchStateActivity';
 export * from './messageActivities';
 export * from './outreachDeliveryActivities';
@@ -83,6 +84,7 @@ import * as finderActivities from './finderActivities';
 import * as activityControlActivities from './activityControlActivities';
 import * as icpMiningConfigurationActivities from './icpMiningConfigurationActivity';
 import * as icpMiningExecutionActivities from './icpMiningExecutionActivities';
+import * as icpMiningSchedulingActivities from './icpMiningSchedulingActivity';
 import * as leadResearchStateActivities from './leadResearchStateActivity';
 import * as messageActivities from './messageActivities';
 import * as outreachDeliveryActivities from './outreachDeliveryActivities';
@@ -134,6 +136,7 @@ export const activities = {
   ...activityControlActivities,
   ...icpMiningConfigurationActivities,
   ...icpMiningExecutionActivities,
+  ...icpMiningSchedulingActivities,
   ...leadResearchStateActivities,
   ...messageActivities,
   ...outreachDeliveryActivities,
