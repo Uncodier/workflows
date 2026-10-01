@@ -8,6 +8,8 @@ import { getPendingIcpMiningActivity } from '../src/temporal/activities/finderAc
 const id = (n: number) => `abcdef12-3456-7890-abcd-${String(n).padStart(12, '0')}`;
 const row = (n: number, extra = {}) => ({ id: id(n), site_id: 'site', status: 'pending',
   created_at: new Date(Date.UTC(2026, 8, 1, 0, n)).toISOString(), ...extra });
+const workflowFields = ['id', 'site_id', 'role_query_id', 'name', 'status', 'total_targets',
+  'processed_targets', 'found_matches', 'current_page', 'current_page_offset', 'created_at'];
 
 describe('selected ICP list queries', () => {
   let rows: ReturnType<typeof row>[];
@@ -83,7 +85,33 @@ describe('selected ICP list queries', () => {
       icp_mining_ids: rows.map(item => item.id).reverse() });
     expect(result.items?.map(item => item.id)).toEqual(rows.slice(0, 50).map(item => item.id));
     expect(queries).toHaveLength(3);
-    for (const query of queries) expect(query.find(([method, field]) => method === 'in' && field === 'id')?.[2].length).toBeLessThanOrEqual(100);
+    for (const query of queries) {
+      expect(query.find(([method, field]) => method === 'in' && field === 'id')?.[2].length).toBeLessThanOrEqual(100);
+      expect(query.find(([method]) => method === 'select')?.[1].split(',').map((field: string) => field.trim())).toEqual(workflowFields);
+    }
+  });
+  it.each([false, true])('keeps pending payloads compact despite huge audit history and snapshots (selected=%s)', async selected => {
+    const expected = row(1, { role_query_id: 'role', name: 'Target list', total_targets: 100,
+      processed_targets: 23, found_matches: 4, current_page: 2, current_page_offset: 3 });
+    const errors = Array.from({ length: 860 }, () => ({ message: 'historical error '.repeat(700) }));
+    const current_page_snapshot = { page: 2, candidates: [{ raw_result: 'snapshot'.repeat(150_000) }], hasMore: true };
+    const persisted = { ...expected, errors, last_error: errors[0].message, current_page_snapshot,
+      checkpoint_version: 5, execution_run_id: 'old-run', icp_criteria: { unused: 'criteria'.repeat(10_000) } };
+    expect(Buffer.byteLength(JSON.stringify(errors))).toBeGreaterThan(8_600_000);
+    rows = [persisted];
+
+    // This mock deliberately returns full rows even after select: the activity's
+    // DTO boundary must also guard against accidental future query/RPC widening.
+    const result = await getPendingIcpMiningActivity({ site_id: 'site', ...(selected ? { icp_mining_ids: [id(1)] } : {}) });
+    expect(result).toEqual({ success: true, items: [expected] });
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(2048);
+    expect(queries[0].find(([method]) => method === 'select')?.[1].split(',').map((field: string) => field.trim())).toEqual(workflowFields);
+    for (const query of queries) {
+      expect(query.find(([method]) => method === 'select')?.[1]).not.toMatch(/\*|errors|last_error|icp_criteria|current_page_snapshot/);
+    }
+    expect(persisted.errors).toBe(errors);
+    expect(persisted.errors).toHaveLength(860);
+    expect(persisted.current_page_snapshot).toBe(current_page_snapshot);
   });
   it('fails closed on a later chunk error rather than processing partial or unselected results', async () => {
     failQuery = 1;

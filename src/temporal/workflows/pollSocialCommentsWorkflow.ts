@@ -61,6 +61,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
   const useImportJobStatus = patched('poll-social-comments-import-job-status-v1');
   const useAutomaticInitialImport = patched('poll-social-comments-auto-initial-import-v1');
   const useDurableCommentSync = patched('poll-social-comments-durable-sync-v1');
+  const useSafeAuthorIdentity = patched('poll-social-comments-author-identity-v2') && useDurableCommentSync;
   
   await logWorkflowExecutionActivity({
     workflowId,
@@ -261,7 +262,13 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                 const networkPlatformPostId = socialAccount?.platformPostId || socialAccount?.platform_post_id;
 
                 try {
-                  const repliesResult = await fetchOutstandPostRepliesActivity(siteId, post.id, network);
+                  const repliesResult = useSafeAuthorIdentity
+                    ? await fetchOutstandPostRepliesActivity(siteId, post.id, network, {
+                      durableIdentity: true,
+                      ...(typeof socialAccount?.username === 'string' && socialAccount.username.trim()
+                        ? { username: socialAccount.username.trim() } : {}),
+                    })
+                    : await fetchOutstandPostRepliesActivity(siteId, post.id, network);
                   const comments = Array.isArray(repliesResult) ? repliesResult : (repliesResult?.comments || repliesResult?.data || []);
                   
                   if (comments.length === 0) {
@@ -269,7 +276,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                     continue;
                   }
 
-                  const commentCandidates = socialCommentCandidates(comments, network, useDurableCommentSync);
+                  const commentCandidates = socialCommentCandidates(comments, network, useDurableCommentSync, useSafeAuthorIdentity);
 
                   if (commentCandidates.size === 0) {
                     continue;
@@ -343,6 +350,15 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                         content_id: contentId,
                         source: 'comment',
                         ...(useDurableCommentSync ? { author_name: authorName, channel: origin } : {}),
+                        ...(useSafeAuthorIdentity ? {
+                          author_username: handle,
+                          author_identity_status: network === 'linkedin' ? 'resolve_on_read'
+                            : authorName || handle ? 'available' : 'unavailable',
+                          // Keep the existing account_username contract for support;
+                          // the publishing account is a separate identity, never a fallback.
+                          publisher_account_id: socialAccount?.id,
+                          publisher_username: socialAccount?.username,
+                        } : {}),
                       },
                     };
 

@@ -93,8 +93,28 @@ class HistoryFixture {
     this.workflowTask();
   }
 
-  complete(processedPosts = 0) {
-    const output = { processedPosts, processedComments: 0 };
+  child(id: string, input: unknown): void {
+    const workflowType = { name: 'ingestSocialCommentWorkflow' };
+    const execution = { workflowId: id, runId: '22222222-2222-4222-8222-222222222222' };
+    const initiated = this.event('StartChildWorkflowExecutionInitiated', {
+      namespace: 'default', workflowId: id, workflowType,
+      taskQueue: { name: 'replay' }, input: payloads(input),
+      parentClosePolicy: 'PARENT_CLOSE_POLICY_ABANDON',
+      workflowTaskCompletedEventId: this.completedTaskId,
+    });
+    const started = this.event('ChildWorkflowExecutionStarted', {
+      namespace: 'default', initiatedEventId: initiated,
+      workflowExecution: execution, workflowType,
+    });
+    this.event('ChildWorkflowExecutionCompleted', {
+      namespace: 'default', initiatedEventId: initiated, startedEventId: started,
+      workflowExecution: execution, workflowType, result: payloads({ success: true }),
+    });
+    this.workflowTask();
+  }
+
+  complete(processedPosts = 0, processedComments = 0) {
+    const output = { processedPosts, processedComments };
     this.activity('logWorkflowExecutionActivity', [{
       workflowId, workflowType: workflowId, status: 'COMPLETED', input: {}, output,
     }], null);
@@ -140,8 +160,9 @@ function ambiguousPostHistory(strictOwnership: boolean, filterPosts = strictOwne
   return fixture.complete(filterPosts ? 0 : 2);
 }
 
-function durableSyncHistory(enabled: boolean, historical: boolean) {
-  const fixture = new HistoryFixture(true, [...recentPatches, ...(enabled ? [durableSyncPatch] : [])]);
+function durableSyncHistory(enabled: boolean, historical: boolean, safeIdentity = false) {
+  const fixture = new HistoryFixture(true, [...recentPatches, ...(enabled ? [durableSyncPatch] : []),
+    ...(safeIdentity ? ['poll-social-comments-author-identity-v2'] : [])]);
   const post = { id: 'post-1', publishedAt: historical ? '2026-09-04T18:57:00.000Z' : '2026-09-26T12:00:00.000Z',
     socialAccounts: [{ ...account, status: 'published', platformPostId: 'platform-post-1' }] };
   fixture.activity('fetchSitesWithSocialCommentsActivity', [], [site]);
@@ -149,9 +170,51 @@ function durableSyncHistory(enabled: boolean, historical: boolean) {
   if (enabled) fixture.activity('getSocialCommentSyncStatesActivity', [site.site_id, ['post-1']], []);
   fixture.activity('fetchOutstandAccountsActivity', [site.site_id], []);
   fixture.activity('upsertContentFromOutstandPostActivity', [site.site_id, post, site.social_media], 'content-1');
-  if (enabled || !historical) fixture.activity('fetchOutstandPostRepliesActivity', [site.site_id, 'post-1', 'linkedin'], []);
+  if (enabled || !historical) fixture.activity('fetchOutstandPostRepliesActivity', [site.site_id, 'post-1', 'linkedin',
+    ...(safeIdentity ? [{ durableIdentity: true }] : [])], []);
   if (enabled) fixture.activity('recordSocialCommentSyncSuccessActivity', [site.site_id, 'post-1', 'linkedin'], null);
   return fixture.complete(1);
+}
+
+function commentIdentityHistory(safeIdentity: boolean) {
+  const fixture = new HistoryFixture(true, [...recentPatches, durableSyncPatch,
+    ...(safeIdentity ? ['poll-social-comments-author-identity-v2'] : [])]);
+  const account = { id: 'account-1', network: 'instagram', isActive: true, username: 'brand' };
+  const site = { site_id: 'site-1', social_media: [account] };
+  const post = { id: 'post-1', publishedAt: '2026-09-04T18:57:00.000Z',
+    socialAccounts: [{ ...account, status: 'published', platformPostId: 'platform-post-1' }] };
+  const externalId = 'outstand:instagram:comment-1';
+  fixture.activity('fetchSitesWithSocialCommentsActivity', [], [site]);
+  fixture.activity('fetchOutstandPostsActivity', [site.site_id, 100, 0], [post]);
+  fixture.activity('getSocialCommentSyncStatesActivity', [site.site_id, ['post-1']], []);
+  fixture.activity('fetchOutstandAccountsActivity', [site.site_id], []);
+  fixture.activity('upsertContentFromOutstandPostActivity', [site.site_id, post, site.social_media], 'content-1');
+  fixture.activity('fetchOutstandPostRepliesActivity', [site.site_id, 'post-1', 'instagram',
+    ...(safeIdentity ? [{ durableIdentity: true, username: 'brand' }] : [])],
+  [{ id: 'comment-1', text: 'Example', author: 'johndoe', author_id: 'actor-1' }]);
+  fixture.activity('claimSyncedObjectsBatchActivity', [[{
+    siteId: site.site_id, objectType: 'social_comment', externalId, provider: 'instagram',
+    metadata: { platform_comment_id: 'comment-1', outstand_post_id: 'post-1' },
+  }]], [{ externalId, claimed: true, claimToken: 'claim-1' }]);
+  fixture.child('social-comment-site-1-outstand_instagram_comment-1', {
+    siteId: site.site_id, externalId, claimToken: 'claim-1',
+    messageData: {
+      site_id: site.site_id, message: 'Example', name: safeIdentity ? 'johndoe' : 'Social User',
+      origin: 'instagram', origin_message_id: externalId, channel_delivery: true, require_approval: true,
+      custom_data: {
+        platform_post_id: 'platform-post-1', platform_comment_id: 'comment-1',
+        account_username: safeIdentity ? 'johndoe' : '', social_handle: safeIdentity ? 'johndoe' : '',
+        author_id: 'actor-1', profile_url: '', outstand_post_id: 'post-1', content_id: 'content-1',
+        source: 'comment', author_name: safeIdentity ? 'johndoe' : 'Social User', channel: 'instagram',
+        ...(safeIdentity ? { author_username: 'johndoe', author_identity_status: 'available',
+          publisher_account_id: 'account-1', publisher_username: 'brand' } : {}),
+      },
+    },
+    baseParams: { origin: 'instagram', origin_message_id: externalId },
+  });
+  fixture.activity('verifySocialCommentIngestionActivity', [site.site_id, [externalId]], null);
+  fixture.activity('recordSocialCommentSyncSuccessActivity', [site.site_id, post.id, 'instagram'], null);
+  return fixture.complete(1, 1);
 }
 
 describe('pollSocialCommentsWorkflow Temporal replay', () => {
@@ -185,6 +248,14 @@ describe('pollSocialCommentsWorkflow Temporal replay', () => {
 
   it.each([[false, false], [false, true], [true, false], [true, true]])('replays durable sync marker = %s, historical import = %s', async (enabled, historical) => {
     await Worker.runReplayHistory({ workflowBundle }, durableSyncHistory(enabled, historical), 'durable-sync-replay');
+  });
+
+  it('replays the new identity marker and durable activity options', async () => {
+    await Worker.runReplayHistory({ workflowBundle }, durableSyncHistory(true, true, true), 'author-identity-replay');
+  });
+
+  it.each([false, true])('replays a nonempty comment and child workflow with identity marker = %s', async enabled => {
+    await Worker.runReplayHistory({ workflowBundle }, commentIdentityHistory(enabled), 'comment-author-replay');
   });
 
   it.each([false, true])('replays ambiguous posts with ownership marker = %s', async strictOwnership => {

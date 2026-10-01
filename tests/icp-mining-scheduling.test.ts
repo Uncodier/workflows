@@ -36,7 +36,12 @@ describe('always-on ICP scheduling', () => {
       targetWorkflow: 'idealClientProfileMiningWorkflow', targetArgs: [{ site_id: 'site', userId: 'user' }],
     });
     // Controls are loaded at execution, not snapshotted when tomorrow's timer is created.
-    expect(mockStart.mock.calls[0][1].args[0].targetArgs[0]).not.toHaveProperty('targetLeadsWithEmail');
+    const timer = mockStart.mock.calls[0][1];
+    const miningArgs = timer.args[0].targetArgs[0];
+    for (const key of ['targetLeadsWithEmail', 'researchEnabled', 'icp_mining_id', 'allLists', 'listIds']) {
+      expect(miningArgs).not.toHaveProperty(key);
+    }
+    expect(miningArgs.scheduleId).toBe(timer.workflowId);
     expect(mockSaveCron).toHaveBeenCalledWith(expect.objectContaining({ activityName: 'idealClientProfileMiningWorkflow' }));
   });
 });

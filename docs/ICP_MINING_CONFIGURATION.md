@@ -40,9 +40,14 @@ AI Activities stores the following object in `settings.activities`:
   site-scoped, server-only read, including lists without role-query segments that
   the legacy browser SELECT policy can omit. No RLS policy changes are required.
 - Parameters are fetched when mining executes, so edits apply even to a previously
-  scheduled timer. Explicit workflow `targetLeadsWithEmail` / `researchEnabled`
-  options override saved values. Invalid controls or failed reads stop execution
-  rather than silently spending against fallback settings.
+  scheduled timer: `target_leads`, `research_enabled`, `all_lists` and `list_ids`
+  are read directly from the database after the delay, without a worker-side cache.
+  Scheduled runs ignore stale `targetLeadsWithEmail` / `researchEnabled` arguments;
+  only direct manual executions can intentionally override these two saved values.
+  List selection always comes from settings, including for manual executions.
+  Invalid controls or failed reads stop execution rather than silently spending
+  against fallback settings. Saving settings does not restart an already-failed run
+  or change the snapshot of a run that has already started mining.
 - Existing cadence/business-hours handling remains unchanged. Always enabled does
   not mean continually running or immediate processing at request creation. A run
   selects one queued request; no queued request means no provider calls.
@@ -102,6 +107,11 @@ provider/validation outage is not a definitive no-match.
 
 ## Deployment
 
+The runtime-settings/status and compact-payload repair requires a worker rollout
+only (and the scheduler deployment for its explicit timer ID). It adds no schema
+migration or frontend dependency. The migrations below are prerequisites from the
+earlier ownership/cursor rollout, not additional repair migrations.
+
 1. Drain old mining/research executions before rollout (old histories retain their
    recorded code paths). Apply `supabase/migrations/20260929220000_icp_mining_page_offset.sql`
    followed by `supabase/migrations/20260929230000_icp_mining_execution_checkpoints.sql`.
@@ -121,8 +131,30 @@ provider/validation outage is not a definitive no-match.
    commands unchanged. `icp-mining-owned-checkpoints-v1` enables the new ownership
    protocol; its page/enrichment children use explicit versioned input fields.
    List preferences themselves still use existing JSON settings.
+   `icp-mining-runtime-settings-status-v1` ensures scheduled executions read saved
+   controls instead of old argument overrides, and records terminal cron status.
+   Existing histories without this marker keep their recorded command sequence.
 4. No site data backfill, production restart, or request creation is performed by
    this code change. Existing pending requests can be picked up by normal scheduling.
+
+## Activity payloads and execution visibility
+
+Mining list reads transfer only orchestration fields, not the accumulated `errors`,
+`last_error` or other historical/diagnostic data. Claim responses also exclude that
+history, while retaining the active page snapshot and checkpoint needed for exact
+resume. Audit history remains in the database; it is not deleted to fit Temporal's
+message size limits.
+
+Scheduled runs save `RUNNING` before loading settings, then `COMPLETED` or `FAILED`,
+including early exits, activity exceptions and cancellations (recorded as failed
+with their cancellation reason, without swallowing cancellation). `workflow_id` is the
+real Temporal execution ID, and `schedule_id` identifies the timer/native schedule
+instead of the shared synthetic `icp-mining-batch` ID. Error summaries are bounded
+and include nested activity causes. ICP is included in both the documented cron
+allowlist and the worker's fallback when the documentation is not packaged.
+Direct manual runs retain the existing `manual-execution` exclusion from cron status.
+Forced termination and run timeouts cannot execute workflow cleanup; these still
+require the existing stuck-status reconciliation.
 
 ## Verification
 
@@ -132,6 +164,10 @@ regressions, provider-data tests and research-state tests with Jest. The SQL fix
 database and rolls back all fixture changes. Do not run it on a real application DB.
 `tests/icp-execution-checkpoints.sql` validates claim contention, repeated writes,
 stale owner rejection, monotonic progress, snapshot retention and RPC permissions.
+`icp-mining-replay.test.ts` uses synthetic histories with the real offline Temporal
+replay engine to validate old/new command sequences and reject an incompatible
+terminal-status command. `icp-mining-runtime.test.ts` checks settings edits during
+the timer delay; payload regressions use audit histories larger than 8.6 MB.
 
 No live provider calls, production Temporal replay or live RLS policy test are
 required by these unit suites. They mock service boundaries; validate the deployed

@@ -1,4 +1,5 @@
 import { buildSocialCommentExternalId, normalizeOutstandNetwork } from './outstandPoll';
+import { resolveSocialCommentIdentity } from './socialCommentIdentity';
 
 export interface SocialCommentCandidate {
   comment: any;
@@ -15,7 +16,7 @@ export interface SocialCommentCandidate {
 }
 
 /** The legacy mapping remains unchanged for replay of existing histories. */
-export function socialCommentCandidates(comments: any[], network: string, normalized = false) {
+export function socialCommentCandidates(comments: any[], network: string, normalized = false, safeIdentity = false) {
   const candidates = new Map<string, SocialCommentCandidate>();
   for (const comment of comments) {
     if (normalized && (!comment || typeof comment !== 'object')) throw new Error('Invalid social comment');
@@ -54,6 +55,7 @@ export function socialCommentCandidates(comments: any[], network: string, normal
       comment, commentId: String(commentId), commentText, origin, stableCommentId,
       externalId, handle, authorId, profileUrl, platformCommentId,
       ...(normalized ? { authorName } : {}),
+      ...(safeIdentity ? resolveSocialCommentIdentity(comment, network) : {}),
     });
   }
   return candidates;

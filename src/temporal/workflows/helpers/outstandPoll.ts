@@ -342,13 +342,18 @@ export function getPublishedCommentNetworks(post: any): string[] {
 export function buildOutstandCommentsPath(
   siteId: string,
   postId: string,
-  network: string
+  network: string,
+  options?: { username?: string; durableIdentity?: boolean }
 ): string {
   const normalizedNetwork = normalizeOutstandNetwork(network);
   const params = new URLSearchParams({
     tenant_id: siteId,
     network: normalizedNetwork,
   });
+  if (options?.username?.trim()) params.set('username', options.username.trim());
+  if (options?.durableIdentity && normalizedNetwork === 'linkedin') {
+    params.set('resolve_author_names', 'false');
+  }
   return `/api/integrations/outstand/posts/${encodeURIComponent(postId)}/comments?${params.toString()}`;
 }
 

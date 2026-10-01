@@ -1753,7 +1753,7 @@ export async function scheduleIndividualLeadGenerationActivity(
   const results: ScheduleWorkflowResult[] = [];
   const errors: string[] = [];
   let scheduled = 0;
-  let skipped = 0;
+  const skipped = 0;
   let failed = 0;
 
   try {
@@ -2083,7 +2083,9 @@ export async function scheduleIndividualLeadGenerationActivity(
           const icpWorkflowArgs = [{
             site_id: site.id,
             userId: site.user_id,
-            // Allow batch mode: will pick first pending icp_mining for the site
+            scheduleId: icpWorkflowId,
+            // Resolve target, research and list selection inside the child after
+            // the delay, never from this scheduler's settings snapshot.
             additionalData: {
               scheduledBy: 'activityPrioritizationEngine-icpMining',
               executeReason: `post-leadgeneration-icp-mining-${businessHoursSource}-${icpScheduledTime}`,

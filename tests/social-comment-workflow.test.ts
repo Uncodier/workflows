@@ -21,7 +21,7 @@ const account = { id: 'account-1', network: 'instagram', isActive: true };
 const site = { site_id: 'site-1', social_media: [account] };
 const post = { id: 'post-1', publishedAt: '2026-09-04T18:57:32Z', createdAt: '2026-09-29T01:15:56Z',
   socialAccounts: [{ ...account, status: 'published', platformPostId: 'platform-post' }] };
-const comment = { id: 'comment-1', text: 'A comment', author: 'author-1',
+const comment = { id: 'comment-1', text: 'A comment', author: 'example_person', author_id: 'author-1',
   author_name: 'Example Person', author_username: 'example_person', author_profile_url: 'https://www.instagram.com/example_person/' };
 
 beforeEach(() => {
@@ -42,7 +42,7 @@ afterEach(() => jest.restoreAllMocks());
 
 it('imports the first comments off the midnight window and records success after ingestion', async () => {
   await expect(pollSocialCommentsWorkflow()).resolves.toEqual({ success: true, processedPosts: 1, processedComments: 1 });
-  expect(mockActivities.fetchOutstandPostRepliesActivity).toHaveBeenCalledWith('site-1', 'post-1', 'instagram');
+  expect(mockActivities.fetchOutstandPostRepliesActivity).toHaveBeenCalledWith('site-1', 'post-1', 'instagram', { durableIdentity: true });
   expect(mockActivities.verifySocialCommentIngestionActivity).toHaveBeenCalledWith('site-1', ['outstand:instagram:comment-1']);
   expect(mockActivities.recordSocialCommentSyncSuccessActivity).toHaveBeenCalledWith('site-1', 'post-1', 'instagram');
   expect(mockActivities.recordSocialCommentSyncSuccessActivity.mock.invocationCallOrder[0]).toBeGreaterThan(mockActivities.verifySocialCommentIngestionActivity.mock.invocationCallOrder[0]);
@@ -131,4 +131,49 @@ it('does not cross site ownership boundaries', async () => {
   mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([site, { ...site, site_id: 'site-2' }]);
   await pollSocialCommentsWorkflow();
   expect(mockActivities.fetchOutstandPostRepliesActivity).not.toHaveBeenCalled();
+});
+
+it('passes the owned publisher separately and ingests readable string authors', async () => {
+  mockActivities.fetchOutstandPostsActivity.mockResolvedValue([{
+    ...post, socialAccounts: [{ ...post.socialAccounts[0], username: 'brand' }],
+  }]);
+  mockActivities.fetchOutstandPostRepliesActivity.mockResolvedValue([{ id: 'comment-1', text: 'Example', author: 'johndoe' }]);
+  await pollSocialCommentsWorkflow();
+  expect(mockActivities.fetchOutstandPostRepliesActivity).toHaveBeenCalledWith('site-1', 'post-1', 'instagram', { username: 'brand', durableIdentity: true });
+  expect(mockStartChild.mock.calls[0][1].args[0].messageData).toMatchObject({
+    name: 'johndoe', custom_data: {
+      author_name: 'johndoe', author_username: 'johndoe', social_handle: 'johndoe',
+      publisher_username: 'brand', publisher_account_id: 'account-1', author_identity_status: 'available',
+    },
+  });
+});
+
+it('preserves pre-identity-patch payloads and the three-argument activity call', async () => {
+  mockPatched.mockImplementation(id => id !== 'poll-social-comments-author-identity-v2');
+  mockActivities.fetchOutstandPostRepliesActivity.mockResolvedValue([{ id: 'comment-1', text: 'Example', author: 'johndoe' }]);
+  await pollSocialCommentsWorkflow();
+  expect(mockActivities.fetchOutstandPostRepliesActivity.mock.calls[0]).toEqual(['site-1', 'post-1', 'instagram']);
+  const data = mockStartChild.mock.calls[0][1].args[0].messageData;
+  expect(data.name).toBe('Social User');
+  expect(data.custom_data).not.toHaveProperty('author_identity_status');
+});
+
+it('passes LinkedIn author references, not resolved profiles, to the child workflow', async () => {
+  const linkedinAccount = { ...account, network: 'linkedin' };
+  mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([{ ...site, social_media: [linkedinAccount] }]);
+  mockActivities.fetchOutstandPostsActivity.mockResolvedValue([{
+    ...post, socialAccounts: [{ ...linkedinAccount, status: 'published', username: 'brand' }],
+  }]);
+  mockActivities.fetchOutstandPostRepliesActivity.mockResolvedValue([{
+    id: 'comment-1', text: 'Example', author_id: 'urn:li:person:123',
+    author_name: 'Resolved Person', author_username: 'resolved-person',
+    author_profile_url: 'https://www.linkedin.com/in/resolved-person',
+  }]);
+  await pollSocialCommentsWorkflow();
+  const data = mockStartChild.mock.calls[0][1].args[0].messageData;
+  expect(data.custom_data).toMatchObject({
+    author_id: 'urn:li:person:123', author_username: '', social_handle: '',
+    author_name: '', profile_url: '', author_identity_status: 'resolve_on_read',
+  });
+  expect(JSON.stringify(data)).not.toMatch(/Resolved Person|resolved-person/);
 });

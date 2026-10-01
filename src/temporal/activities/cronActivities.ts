@@ -19,6 +19,18 @@ export interface CronStatusUpdate {
   retryCount?: number;
 }
 
+// Keep in sync with CRON_SCHEDULED_WORKFLOWS in docs/cron_index.md.
+// Compiled workers may not include the docs; only real-work workflows belong here.
+const FALLBACK_CRON_SCHEDULED_WORKFLOWS = [
+  'syncEmailsWorkflow',
+  'dailyProspectionWorkflow',
+  'leadGenerationWorkflow',
+  'dailyStrategicAccountsWorkflow',
+  'dailyStandUpWorkflow',
+  'analyzeSiteWorkflow',
+  'idealClientProfileMiningWorkflow',
+];
+
 /**
  * Read the cron index file to get the list of workflows that should save cron_status
  * This ensures the code stays in sync with the documentation
@@ -31,13 +43,7 @@ function getCronScheduledWorkflows(): string[] {
     
     if (!fs.existsSync(cronIndexPath)) {
       console.warn('⚠️ cron_index.md not found, using fallback list');
-      return [
-        'scheduleActivitiesWorkflow',
-        'syncEmailsScheduleWorkflow', 
-        'activityPrioritizationEngineWorkflow',
-        'dailyOperationsWorkflow',
-        'syncEmailsWorkflow'
-      ];
+      return FALLBACK_CRON_SCHEDULED_WORKFLOWS;
     }
     
     const content = fs.readFileSync(cronIndexPath, 'utf-8');
@@ -47,13 +53,7 @@ function getCronScheduledWorkflows(): string[] {
     
     if (!listMatch) {
       console.warn('⚠️ Could not parse CRON_SCHEDULED_WORKFLOWS from cron_index.md, using fallback');
-      return [
-        'scheduleActivitiesWorkflow',
-        'syncEmailsScheduleWorkflow',
-        'activityPrioritizationEngineWorkflow', 
-        'dailyOperationsWorkflow',
-        'syncEmailsWorkflow'
-      ];
+      return FALLBACK_CRON_SCHEDULED_WORKFLOWS;
     }
     
     // Parse the workflow names from the array
@@ -67,20 +67,19 @@ function getCronScheduledWorkflows(): string[] {
         return match ? match[1] : null;
       })
       .filter(Boolean) as string[];
-    
+
+    if (workflows.length === 0) {
+      console.warn('⚠️ No workflows parsed from cron_index.md, using fallback');
+      return FALLBACK_CRON_SCHEDULED_WORKFLOWS;
+    }
+
     console.log(`📋 Loaded ${workflows.length} cron-scheduled workflows from cron_index.md`);
     return workflows;
     
   } catch (error) {
     console.error('❌ Error reading cron_index.md:', error);
     console.warn('⚠️ Using fallback list of cron-scheduled workflows');
-    return [
-      'scheduleActivitiesWorkflow',
-      'syncEmailsScheduleWorkflow',
-      'activityPrioritizationEngineWorkflow',
-      'dailyOperationsWorkflow', 
-      'syncEmailsWorkflow'
-    ];
+    return FALLBACK_CRON_SCHEDULED_WORKFLOWS;
   }
 }
 

@@ -1,13 +1,13 @@
-import { proxyActivities, executeChild, patched, workflowInfo } from '@temporalio/workflow';
+import { proxyActivities, executeChild, patched, workflowInfo, CancellationScope } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { idealClientProfilePageSearchWorkflow } from './idealClientProfilePageSearchWorkflow';
 import { selectNextIcp } from './icpMining/selectIcp';
 import { processSingleIcp } from './icpMining/processSingle';
 import { processConfiguredIcp } from './icpMining/processConfigured';
 import { processOwnedIcp } from './icpMining/processOwned';
+import type { IcpMiningWorkflowDto } from '../utils/icpMiningPayload';
 import type {
   IdealClientProfilePageSearchOptions,
-  IdealClientProfilePageSearchResult,
 } from './idealClientProfilePageSearchWorkflow';
 
 // Generic supabase and logging activities
@@ -33,8 +33,8 @@ const {
   markIcpMiningCompletedActivity,
   getSiteActivity,
 } = proxyActivities<{
-  getIcpMiningByIdActivity: (id: string) => Promise<{ success: boolean; icp?: any; error?: string }>;
-  getPendingIcpMiningActivity: (o?: { limit?: number; site_id?: string; icp_mining_ids?: string[] }) => Promise<{ success: boolean; items?: any[]; error?: string }>;
+  getIcpMiningByIdActivity: (id: string) => Promise<{ success: boolean; icp?: IcpMiningWorkflowDto | null; error?: string }>;
+  getPendingIcpMiningActivity: (o?: { limit?: number; site_id?: string; icp_mining_ids?: string[] }) => Promise<{ success: boolean; items?: IcpMiningWorkflowDto[]; error?: string }>;
   markIcpMiningStartedActivity: (o: { id: string }) => Promise<{ success: boolean; error?: string }>;
   updateIcpMiningProgressActivity: (o: {
     id: string;
@@ -62,8 +62,17 @@ export interface IdealClientProfileMiningOptions {
   userId?: string;
   maxPages?: number; // default 300
   pageSize?: number; // Finder uses fixed pages of 10
-  targetLeadsWithEmail?: number; // overrides site target_leads (default 150)
-  researchEnabled?: boolean; // overrides site research_enabled (default false)
+  targetLeadsWithEmail?: number; // manual executions only; scheduled runs read site settings
+  researchEnabled?: boolean; // manual executions only; scheduled runs read site settings
+  scheduleId?: string;
+  additionalData?: {
+    parentScheduleId?: string;
+    originalScheduleId?: string;
+    dailyOperationsScheduleId?: string;
+    scheduledBy?: string;
+    executionMode?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface IdealClientProfileMiningResult {
@@ -82,7 +91,75 @@ export interface IdealClientProfileMiningResult {
 export async function idealClientProfileMiningWorkflow(
   options: IdealClientProfileMiningOptions
 ): Promise<IdealClientProfileMiningResult> {
-  const workflowId = `icp-mining-${options.icp_mining_id || 'batch'}`;
+  // Preserve the command sequence of already-recorded executions.
+  if (!patched('icp-mining-runtime-settings-status-v1')) return runIcpMining(options);
+
+  const info = workflowInfo();
+  const scheduleCandidates = [
+    options.scheduleId,
+    info.parent?.workflowId,
+    info.searchAttributes?.TemporalScheduledById,
+    info.searchAttributes?.ScheduleId,
+    info.memo?.TemporalScheduledById,
+    info.memo?.scheduleId,
+    options.additionalData?.parentScheduleId,
+    options.additionalData?.originalScheduleId,
+    options.additionalData?.dailyOperationsScheduleId,
+  ];
+  const scheduleId = scheduleCandidates
+    .map(value => Array.isArray(value) ? value[0] : value)
+    .find((value): value is string => typeof value === 'string' && value.length > 0)
+    || (options.additionalData?.scheduledBy || options.additionalData?.executionMode === 'timer-delayed-icp-mining'
+      ? info.workflowId : 'manual-execution');
+  // Timers may have been created before settings changed (or with old overrides).
+  // Only a direct manual invocation can intentionally override the fresh DB read.
+  const runtimeOptions = scheduleId === 'manual-execution' ? options : {
+    ...options, targetLeadsWithEmail: undefined, researchEnabled: undefined,
+  };
+  const cronContext = {
+    siteId: options.site_id, workflowId: info.workflowId, scheduleId,
+    activityName: 'idealClientProfileMiningWorkflow',
+  };
+  try {
+    await saveCronStatusActivity({ ...cronContext, status: 'RUNNING', lastRun: new Date().toISOString() });
+    const result = await runIcpMining(runtimeOptions, info.workflowId);
+    await saveCronStatusActivity({
+      ...cronContext, status: result.success ? 'COMPLETED' : 'FAILED',
+      lastRun: new Date().toISOString(),
+      errorMessage: result.success ? null : summarizeMiningFailure(result.errors?.join('; ') || 'ICP mining failed'),
+    });
+    return result;
+  } catch (error) {
+    // Persist the terminal state even when settings/list loading fails or the run
+    // is cancelled. A logging failure must not hide the original Temporal failure.
+    try {
+      await CancellationScope.nonCancellable(() => saveCronStatusActivity({
+        ...cronContext, status: 'FAILED',
+        lastRun: new Date().toISOString(), errorMessage: summarizeMiningFailure(error),
+      }));
+    } catch (statusError) {
+      console.error('Failed to persist ICP mining terminal status:', summarizeMiningFailure(statusError));
+    }
+    throw error;
+  }
+}
+
+/** Keep status payloads bounded, including nested Temporal activity failures. */
+function summarizeMiningFailure(error: unknown): string {
+  const messages: string[] = [];
+  let current = error;
+  for (let depth = 0; current != null && depth < 5; depth++) {
+    messages.push((current instanceof Error ? current.message : String(current)).slice(0, 1000));
+    current = current instanceof Error ? (current as Error & { cause?: unknown }).cause : undefined;
+  }
+  return messages.join(': ').slice(0, 2000);
+}
+
+async function runIcpMining(
+  options: IdealClientProfileMiningOptions,
+  executionWorkflowId?: string,
+): Promise<IdealClientProfileMiningResult> {
+  const workflowId = executionWorkflowId ?? `icp-mining-${options.icp_mining_id || 'batch'}`;
   const maxPages = options.maxPages ?? 300;
   const pageSize = options.pageSize ?? 20;
   let targetLeadsWithEmail = options.targetLeadsWithEmail ?? 150;
@@ -148,7 +225,7 @@ export async function idealClientProfileMiningWorkflow(
     input: options,
   });
 
-  await saveCronStatusActivity({
+  if (!executionWorkflowId) await saveCronStatusActivity({
     siteId: options.site_id,
     workflowId,
     scheduleId: workflowId,

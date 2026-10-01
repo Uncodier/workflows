@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { supabaseServiceRole as supabaseAdmin } from '../../lib/supabase/client';
 import { getOwnedPublishedSocialPostAccounts } from '../workflows/helpers/outstandPoll';
 import {
@@ -96,8 +97,9 @@ function hasContentIdentityChanges(
   const existingTags = existing.tags || [];
   const tagsChanged = tags.length !== existingTags.length
     || tags.some((tag, index) => tag !== existingTags[index]);
+  // Stored JSON objects may return keys in a different order after persistence.
   return tagsChanged
-    || JSON.stringify(existing.metadata || {}) !== JSON.stringify(metadata);
+    || !isDeepStrictEqual(existing.metadata || {}, metadata);
 }
 
 export async function upsertContentFromOutstandPostActivity(
@@ -132,7 +134,8 @@ export async function upsertContentFromOutstandPostActivity(
       const metadata = mergeOutstandMetadata(
         existing.metadata,
         contentHash,
-        String(outstandId)
+        String(outstandId),
+        ownedSocialAccounts
       );
 
       if (hasContentIdentityChanges(existing, tags, metadata)) {
@@ -179,7 +182,7 @@ export async function upsertContentFromOutstandPostActivity(
       updated_at: post.createdAt || new Date().toISOString(),
       published_at: post.publishedAt || null,
       tags: incomingTags,
-      metadata: mergeOutstandMetadata(null, contentHash, String(outstandId)),
+      metadata: mergeOutstandMetadata(null, contentHash, String(outstandId), ownedSocialAccounts),
       word_count: postText.split(' ').length,
       estimated_reading_time: 1,
     };

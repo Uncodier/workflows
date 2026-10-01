@@ -1,12 +1,9 @@
 import { supabaseServiceRole } from '../../lib/supabase/client';
 import { getTemporalClient } from '../client';
+import { IcpMiningClaimResult, IcpPageSnapshot, toIcpMiningClaimResult } from '../utils/icpMiningPayload';
 
-export interface IcpPageSnapshot {
-  page: number;
-  candidates: any[];
-  hasMore: boolean;
-  total?: number;
-}
+export type { IcpPageSnapshot } from '../utils/icpMiningPayload';
+
 export interface IcpCheckpoint {
   id: string; site_id: string; run_id: string; version: number;
   processed: number; found: number; page: number; offset: number;
@@ -14,9 +11,7 @@ export interface IcpCheckpoint {
   snapshot: IcpPageSnapshot | null; errors?: string[];
 }
 
-export async function claimIcpMiningExecutionActivity(params: { id: string; site_id: string; run_id: string; workflow_id: string }): Promise<{
-  acquired: boolean; reason?: string; icp?: any;
-}> {
+export async function claimIcpMiningExecutionActivity(params: { id: string; site_id: string; run_id: string; workflow_id: string }): Promise<IcpMiningClaimResult> {
   const claim = async (previousRun?: string) => {
     const { data, error } = await supabaseServiceRole.rpc('claim_icp_mining_execution', {
       p_id: params.id, p_site_id: params.site_id, p_run_id: params.run_id,
@@ -27,7 +22,7 @@ export async function claimIcpMiningExecutionActivity(params: { id: string; site
     return data;
   };
   const result = await claim();
-  if (result.acquired || result.reason !== 'busy') return result;
+  if (result.acquired || result.reason !== 'busy') return toIcpMiningClaimResult(result);
   // Never use a clock timeout to steal a live workflow's claim. If Temporal is
   // unavailable (or history expired), fail closed for manual investigation.
   const client = await getTemporalClient();
@@ -35,7 +30,7 @@ export async function claimIcpMiningExecutionActivity(params: { id: string; site
     const description = await client.workflow.getHandle(result.owner_workflow_id, result.owner_run_id).describe();
     const terminal = ['COMPLETED', 'FAILED', 'CANCELLED', 'TERMINATED', 'TIMED_OUT'];
     if (!terminal.includes(description.status.name)) return { acquired: false, reason: 'busy' };
-    return await claim(result.owner_run_id);
+    return toIcpMiningClaimResult(await claim(result.owner_run_id));
   } finally {
     await client.connection.close();
   }

@@ -1,6 +1,7 @@
 import { apiService } from '../services/apiService';
 import { getSupabaseService } from '../services';
 import { normalizeIcpMiningListIds } from '../utils/icpMiningConfiguration';
+import { ICP_MINING_WORKFLOW_SELECT, IcpMiningWorkflowDto, toIcpMiningWorkflowDto } from '../utils/icpMiningPayload';
 import {
   FinderData, contactValues, domainOf, finderCompanyRecord, finderLeadProfile, finderPersonRecord,
   finderResponseError, hasData, mergeFinderData, normalizeFinderPerson, personPersistencePayload, selectFinderRole,
@@ -342,7 +343,7 @@ export async function callPersonContactsLookupDetailsActivity(options: {
     console.log(`🏢 Creating/updating ${organizationsMap.size} companies`);
     let currentCompanyId: string | undefined = undefined;
     
-    for (const [key, org] of organizationsMap.entries()) {
+    for (const org of organizationsMap.values()) {
       try {
         if (org.name) {
           const companyResult = await upsertFinderCompanyActivity({ organization: org });
@@ -441,7 +442,7 @@ export async function getRoleQueryByIdActivity(id: string): Promise<{
 // Read ICP Mining by ID
 export async function getIcpMiningByIdActivity(id: string): Promise<{
   success: boolean;
-  icp?: any;
+  icp?: IcpMiningWorkflowDto | null;
   error?: string;
 }> {
   try {
@@ -453,13 +454,13 @@ export async function getIcpMiningByIdActivity(id: string): Promise<{
     const { supabaseServiceRole } = await import('../../lib/supabase/client');
     const { data, error } = await supabaseServiceRole
       .from('icp_mining')
-      .select('*')
+      .select(ICP_MINING_WORKFLOW_SELECT)
       .eq('id', id)
       .single();
     if (error) {
       return { success: false, error: error.message };
     }
-    return { success: true, icp: data };
+    return { success: true, icp: data ? toIcpMiningWorkflowDto(data) : null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { success: false, error: message };
@@ -574,7 +575,7 @@ export async function markIcpMiningCompletedActivity(options: { id: string; fail
 // List pending ICP Mining rows (optionally limited and filtered by site_id)
 export async function getPendingIcpMiningActivity(options?: { limit?: number; site_id?: string; icp_mining_ids?: string[] }): Promise<{
   success: boolean;
-  items?: any[];
+  items?: IcpMiningWorkflowDto[];
   error?: string;
 }> {
   try {
@@ -588,22 +589,22 @@ export async function getPendingIcpMiningActivity(options?: { limit?: number; si
 
     const limit = options?.limit && options.limit > 0 ? options.limit : 50;
     if (selectedIds) {
-      const items: any[] = [];
+      const items: IcpMiningWorkflowDto[] = [];
       // Filter before LIMIT, with bounded URLs even for a large selection.
       for (let offset = 0; offset < selectedIds.length; offset += 100) {
-        const { data, error } = await supabaseServiceRole.from('icp_mining').select('*')
+        const { data, error } = await supabaseServiceRole.from('icp_mining').select(ICP_MINING_WORKFLOW_SELECT)
           .eq('site_id', options!.site_id!).in('status', ['running', 'pending'])
           .in('id', selectedIds.slice(offset, offset + 100))
           .order('created_at', { ascending: true }).order('id', { ascending: true }).limit(limit);
         if (error) return { success: false, error: error.message };
-        items.push(...(data || []));
+        items.push(...(data || []).map(toIcpMiningWorkflowDto));
       }
       items.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)));
       return { success: true, items: items.slice(0, limit) };
     }
     let query = supabaseServiceRole
       .from('icp_mining')
-      .select('*')
+      .select(ICP_MINING_WORKFLOW_SELECT)
       .in('status', ['running', 'pending'])
       .order('created_at', { ascending: true })
       .limit(limit);
@@ -637,12 +638,12 @@ export async function getPendingIcpMiningActivity(options?: { limit?: number; si
       console.log(`📋 Sample ICP Mining item:`, {
         id: data[0].id,
         status: data[0].status,
-        icp_criteria: data[0].icp_criteria,
-        site_id_in_criteria: data[0].icp_criteria?.site_id
+        site_id: data[0].site_id,
+        role_query_id: data[0].role_query_id,
       });
     }
     
-    return { success: true, items: data || [] };
+    return { success: true, items: (data || []).map(toIcpMiningWorkflowDto) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { success: false, error: message };

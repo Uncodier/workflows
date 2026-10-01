@@ -6,6 +6,8 @@ Este archivo define qué workflows están realmente programados para ejecutarse 
 
 Solo los workflows listados en este archivo deben guardar registros en la tabla `cron_status`. Los workflows de orquestación (schedules principales y motores de priorización) NO necesitan guardar cron_status ya que no son los workflows de trabajo real.
 
+La lista `CRON_SCHEDULED_WORKFLOWS` de abajo es la allowlist usada por las actividades de guardado individual y por lotes. Las ejecuciones con `scheduleId: 'manual-execution'` se excluyen siempre, incluso si el workflow está en esa lista.
+
 ## Workflows Programados por Cron
 
 ### 1. Schedules Principales (Definidos en `/src/temporal/schedules/index.ts`)
@@ -57,6 +59,7 @@ Solo los workflows listados en este archivo deben guardar registros en la tabla 
 - **Programa workflows mediante actividades**:
   - `dailyProspectionWorkflow` (vía `executeDailyProspectionWorkflowsActivity`)
   - `leadGenerationWorkflow` (vía `scheduleIndividualLeadGenerationActivity`)
+  - `idealClientProfileMiningWorkflow` (vía `scheduleIndividualLeadGenerationActivity`)
   - `dailyStandUpWorkflow` (vía `scheduleIndividualDailyStandUpsActivity`)
   - `analyzeSiteWorkflow` (vía `scheduleIndividualSiteAnalysisActivity`)
 
@@ -81,6 +84,11 @@ Estos workflows son ejecutados por actividades que forman parte del pipeline de 
 - **Programado por**: `activityPrioritizationEngineWorkflow` → `scheduleIndividualLeadGenerationActivity`  
 - **Descripción**: Generación de leads para sitios individuales
 
+#### `idealClientProfileMiningWorkflow`
+- **Programado por**: `activityPrioritizationEngineWorkflow` → `scheduleIndividualLeadGenerationActivity` → `delayedExecutionWorkflow`
+- **Descripción**: Minería de perfiles de cliente ideal (ICP) para sitios individuales
+- **Guarda cron_status**: Sí, para ejecuciones programadas (`SCHEDULED`, `RUNNING`, `COMPLETED`, `FAILED`); no para `manual-execution`.
+
 #### `dailyStandUpWorkflow`
 - **Programado por**: `activityPrioritizationEngineWorkflow` → `scheduleIndividualDailyStandUpsActivity`
 - **Descripción**: Daily standup del CMO para sitios individuales
@@ -98,9 +106,12 @@ const CRON_SCHEDULED_WORKFLOWS = [
   'leadGenerationWorkflow',               // Programado por activityPrioritizationEngineWorkflow
   'dailyStrategicAccountsWorkflow',       // Strategic accounts workflow
   'dailyStandUpWorkflow',                 // Programado por activityPrioritizationEngineWorkflow
-  'analyzeSiteWorkflow'                   // Programado por activityPrioritizationEngineWorkflow
+  'analyzeSiteWorkflow',                  // Programado por activityPrioritizationEngineWorkflow
+  'idealClientProfileMiningWorkflow'      // Programado por activityPrioritizationEngineWorkflow
 ];
 ```
+
+Si el archivo no está disponible (por ejemplo, en un worker compilado), no se puede leer o no contiene una lista reconocible y no vacía, `cronActivities.ts` usa `FALLBACK_CRON_SCHEDULED_WORKFLOWS`. Ese fallback debe mantener exactamente los mismos workflows de trabajo real que esta lista, sin añadir orquestadores.
 
 ## Workflows que NO Deben Guardar cron_status
 
@@ -133,13 +144,13 @@ Todos los demás workflows del sistema, incluyendo:
 1. Actualizar la sección "Schedules Principales" si es un schedule raíz
 2. Actualizar la sección "Child Workflows Ejecutados por Cron" si es un child workflow
 3. Agregar el nombre del workflow a la lista `CRON_SCHEDULED_WORKFLOWS`
-4. Actualizar el código en `/src/temporal/activities/cronActivities.ts`
+4. Mantener `FALLBACK_CRON_SCHEDULED_WORKFLOWS` en `/src/temporal/activities/cronActivities.ts` sincronizado con esta lista
 
 ### Al Remover un Schedule de Cron
 
 1. Remover de las secciones correspondientes
 2. Remover de la lista `CRON_SCHEDULED_WORKFLOWS`
-3. Actualizar el código en `/src/temporal/activities/cronActivities.ts`
+3. Mantener `FALLBACK_CRON_SCHEDULED_WORKFLOWS` en `/src/temporal/activities/cronActivities.ts` sincronizado con esta lista
 
 ### Al Cambiar la Arquitectura de Schedules
 
@@ -154,10 +165,12 @@ Para verificar que este índice está actualizado:
 1. Revisar `/src/temporal/schedules/index.ts` para schedules activos
 2. Revisar workflows que llaman `startChild` para identificar children
 3. Revisar logs de producción para ver qué workflows están guardando `cron_status`
-4. Ejecutar tests que validen la lógica de filtrado
+4. Ejecutar `npm test -- --runInBand tests/cron-status-filter.test.ts` (sin conexión a servicios externos) para validar la allowlist, el fallback y la exclusión de ejecuciones manuales
 
 ## Última Actualización
 
-**Fecha**: 2024-12-19  
-**Por**: Assistant  
-**Motivo**: Agregado analyzeSiteWorkflow que también es programado por activityPrioritizationEngineWorkflow vía scheduleIndividualSiteAnalysisActivity.
+**Fecha**: 2026-10-01
+
+**Por**: Assistant
+
+**Motivo**: Agregado idealClientProfileMiningWorkflow y unificado el fallback con los workflows de trabajo real documentados, excluyendo orquestadores y ejecuciones manuales.

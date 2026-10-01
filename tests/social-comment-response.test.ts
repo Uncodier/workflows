@@ -39,6 +39,52 @@ describe('social comment API boundary', () => {
     mockGet.mockResolvedValue({ success: true, data: [] });
     await expect(fetchOutstandPostRepliesActivity('site-1', 'post-1', 'instagram')).resolves.toEqual([]);
   });
+
+  it('requests the owned publishing account and strips LinkedIn profiles before returning to Temporal', async () => {
+    mockGet.mockResolvedValue({ success: true, data: [{
+      id: 'comment-1', text: 'A comment', author: 'urn:li:person:123',
+      author_name: 'Resolved Person', author_username: 'resolved-person',
+      platform_specific: { commentUrn: 'urn:li:comment:1', profile: { name: 'Resolved Person' } },
+    }] });
+    const result = await fetchOutstandPostRepliesActivity('site-1', 'post-1', 'linkedin', {
+      username: 'brand', durableIdentity: true,
+    });
+    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post-1/comments?tenant_id=site-1&network=linkedin&username=brand&resolve_author_names=false');
+    expect(result).toEqual([{ id: 'comment-1', text: 'A comment', author_id: 'urn:li:person:123', platform_specific: { commentUrn: 'urn:li:comment:1' } }]);
+    expect(JSON.stringify(result)).not.toContain('Resolved Person');
+  });
+
+  it('preserves Instagram author fields and never opts in to LinkedIn resolution during ingestion', async () => {
+    mockGet.mockResolvedValue({ success: true, data: [comment] });
+    await expect(fetchOutstandPostRepliesActivity('site-1', 'post-1', 'instagram', {
+      username: 'brand', durableIdentity: true,
+    })).resolves.toEqual([comment]);
+    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post-1/comments?tenant_id=site-1&network=instagram&username=brand');
+  });
+
+  it('protects pending legacy LinkedIn activities even without new options', async () => {
+    mockGet.mockResolvedValue({ success: true, data: [{ id: 'c', text: 'Example',
+      author: 'urn:li:person:123', author_name: 'Private Name', author_username: 'private-name' }] });
+    await expect(fetchOutstandPostRepliesActivity('site', 'post', 'linkedin')).resolves.toEqual([
+      { id: 'c', text: 'Example', author_id: 'urn:li:person:123', platform_specific: {} },
+    ]);
+    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post/comments?tenant_id=site&network=linkedin&resolve_author_names=false');
+  });
+
+  it.each([[400, true], [403, true], [408, false], [429, false], [502, false]])('sanitizes LinkedIn error bodies without losing HTTP %s retryability', async (status, nonRetryable) => {
+    mockGet.mockResolvedValue({ success: false, error: { status, message: 'Upstream included Private Name' } });
+    const error = await fetchOutstandPostRepliesActivity('site', 'post', 'linkedin').catch(value => value);
+    expect(error).toMatchObject({ message: `LinkedIn comments request failed (HTTP ${status})`, nonRetryable });
+    expect(error.cause).toBeUndefined();
+    expect(error.stack).not.toContain('Private Name');
+  });
+
+  it('does not leak transport errors into LinkedIn activity history', async () => {
+    mockGet.mockRejectedValue(new Error('Private Name'));
+    await expect(fetchOutstandPostRepliesActivity('site', 'post', 'linkedin')).rejects.toMatchObject({
+      message: 'LinkedIn comments request failed', cause: undefined,
+    });
+  });
 });
 
 describe('social comment identity mapping', () => {
