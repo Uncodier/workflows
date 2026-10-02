@@ -44,7 +44,10 @@ export async function fetchSitesDueForCreditRenewalActivity(): Promise<any[]> {
   console.log('🔍 Checking for sites due for credit renewal...');
 
   const supabaseService = getSupabaseService();
-  const billings = await supabaseService.fetchActiveBillings();
+  // Stripe invoice settlement owns credits for Stripe-managed subscriptions.
+  const billings = (await supabaseService.fetchActiveBillings()).filter(
+    (billing) => !billing.stripe_subscription_id
+  );
   const siteIds = billings.map((billing) => billing.site_id).filter(Boolean);
   const latestRenewalBySite = new Map<string, string>();
 
@@ -138,59 +141,46 @@ export async function renewSiteCreditsActivity(
 
   const supabaseService = getSupabaseService();
 
-  let newCredits = currentCredits;
-
-  const normalizedPlan = (plan || 'free').toLowerCase();
-
-  if (normalizedPlan === 'startup') {
-    newCredits = currentCredits + 100;
-  } else if (normalizedPlan === 'enterprise') {
-    newCredits = currentCredits + 1000;
-  } else if (normalizedPlan === 'free' || normalizedPlan === 'commission') {
-    newCredits = 20;
-  } else {
-    newCredits = currentCredits + 30;
-  }
-
   try {
+    // Re-check persisted ownership: queued activities may predate the Stripe subscription.
+    const billing = await supabaseService.fetchBillingForSite(siteId);
+    if (billing?.stripe_subscription_id || stripeSubscriptionId) {
+      const credits = billing?.credits_available ?? currentCredits;
+      console.log(`⏭️ Skipping monthly credit renewal for Stripe-managed site ${siteId}`);
+      return { success: true, newCredits: credits, oldCredits: credits };
+    }
+
+    let newCredits = currentCredits;
+
+    const normalizedPlan = (plan || 'free').toLowerCase();
+
+    if (normalizedPlan === 'startup') {
+      newCredits = currentCredits + 100;
+    } else if (normalizedPlan === 'enterprise') {
+      newCredits = currentCredits + 1000;
+    } else if (normalizedPlan === 'free' || normalizedPlan === 'commission') {
+      newCredits = 20;
+    } else {
+      newCredits = currentCredits + 30;
+    }
+
     await supabaseService.updateSiteCredits(siteId, newCredits);
 
     const addedCredits = Math.round(newCredits - currentCredits > 0 ? newCredits - currentCredits : 0);
 
-    let shouldCreateNewPayment = true;
-    if (stripeSubscriptionId) {
-      const lastStripePayment = await supabaseService.fetchLastStripeSubscriptionPayment(
-        siteId,
-        stripeSubscriptionId
-      );
-      if (lastStripePayment) {
-        const lastPaymentDate = new Date(lastStripePayment.created_at);
-        const today = new Date();
-        const daysSinceLastPayment =
-          (today.getTime() - lastPaymentDate.getTime()) / (1000 * 60 * 60 * 24);
-
-        if (daysSinceLastPayment <= 5) {
-          shouldCreateNewPayment = false;
-          console.log(`🔗 Linked credit renewal to recent Stripe payment ${lastStripePayment.id}`);
-        }
+    await supabaseService.createPaymentRecord({
+      site_id: siteId,
+      amount: 0,
+      credits: addedCredits,
+      payment_method: 'credit_renewal',
+      status: 'completed',
+      transaction_type: 'credit',
+      details: {
+        note: options?.note ?? 'Monthly credit renewal',
+        plan: normalizedPlan,
+        stripe_subscription_id: null
       }
-    }
-
-    if (shouldCreateNewPayment) {
-      await supabaseService.createPaymentRecord({
-        site_id: siteId,
-        amount: 0,
-        credits: addedCredits,
-        payment_method: 'credit_renewal',
-        status: 'completed',
-        transaction_type: 'credit',
-        details: {
-          note: options?.note ?? 'Monthly credit renewal',
-          plan: normalizedPlan,
-          stripe_subscription_id: stripeSubscriptionId || null
-        }
-      });
-    }
+    });
 
     console.log(`✅ Credits updated for site ${siteId}: ${currentCredits} -> ${newCredits}`);
     return { success: true, newCredits, oldCredits: currentCredits };
