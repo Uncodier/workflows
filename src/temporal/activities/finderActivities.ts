@@ -1186,6 +1186,27 @@ export async function upsertLeadForPersonActivity(options: {
   }
 }
 
+// A social network's hostname belongs to the platform, not to the company.
+// Only a specific page can identify an organization on a shared host.
+const sharedCompanyWebsiteHosts = new Set([
+  'facebook.com', 'instagram.com', 'linkedin.com', 'tiktok.com', 'twitter.com', 'x.com', 'youtube.com',
+]);
+
+function companyWebsiteIdentity(value: any): string {
+  const host = domainOf(value);
+  if (!host) return '';
+  if (!sharedCompanyWebsiteHosts.has(host)) return `domain:${host}`;
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    const path = url.pathname.replace(/\/+$/, '').toLowerCase();
+    if (host === 'facebook.com' && path === '/profile.php') {
+      const id = url.searchParams.get('id')?.trim().toLowerCase();
+      return id ? `page:${host}${path}?id=${id}` : '';
+    }
+    return path ? `page:${host}${path}` : '';
+  } catch { return ''; }
+}
+
 /** Finder-specific company persistence. Do not add provider IDs/unknown fields to companies.
  * Name alone is not sufficient when provider identities conflict.
  */
@@ -1197,9 +1218,14 @@ export async function upsertFinderCompanyActivity(options: { organization: Finde
     const { supabaseServiceRole: db } = await import('../../lib/supabase/client');
     const payload = finderCompanyRecord(options.organization);
     if (!payload.name) return { success: false, error: 'Organization name is required' };
-    const domain = domainOf(payload.website);
+    const websiteIdentity = companyWebsiteIdentity(payload.website);
+    const websiteHost = domainOf(payload.website);
+    const sharedWebsite = sharedCompanyWebsiteHosts.has(websiteHost);
     const linkedin = (value: any) => typeof value === 'string' ? value.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '') : '';
     const profile = linkedin(payload.linkedin_url);
+    if (sharedWebsite && !websiteIdentity && !profile && !options.company_id) {
+      throw new Error(`Cannot resolve organization identity: ${payload.name}`);
+    }
     let existing: any;
     // Only trusted callers may pass a local ID (e.g. an existing lead.company_id).
     // A stale ID is a failure, never a reason to create an unrelated company.
@@ -1211,18 +1237,26 @@ export async function upsertFinderCompanyActivity(options: { organization: Finde
     }
     const choose = (rows: any[]) => {
       const matches = rows.filter(row => {
-        const rowDomain = domainOf(row.website);
+        const rowWebsiteIdentity = companyWebsiteIdentity(row.website);
         const rowProfile = linkedin(row.linkedin_url);
-        return !(domain && rowDomain && domain !== rowDomain) && !(profile && rowProfile && profile !== rowProfile);
+        // Shared-platform pages need positive page or LinkedIn identity evidence;
+        // name alone (or a different Facebook page) cannot establish ownership.
+        if (sharedWebsite && !(websiteIdentity && rowWebsiteIdentity === websiteIdentity)
+          && !(profile && rowProfile === profile)) return false;
+        return !(websiteIdentity && rowWebsiteIdentity && websiteIdentity !== rowWebsiteIdentity)
+          && !(profile && rowProfile && profile !== rowProfile);
       });
       if (matches.length > 1) throw new Error(`Ambiguous organization identity: ${payload.name}`);
       return matches[0];
     };
-    if (!existing && domain) {
-      // Wildcard results are filtered by exact parsed hostname before selecting a company.
-      const { data, error } = await db.from('companies').select('*').ilike('website', `%${domain}%`).limit(50);
+    if (!existing && websiteIdentity) {
+      // Search by host or full social page, then compare normalized identities;
+      // a Facebook hostname (or a prefix of another page) is not a company match.
+      // A substring of facebook.com/page also matches www.facebook.com/page.
+      const needle = websiteIdentity.slice(websiteIdentity.indexOf(':') + 1).replace(/[\\%_]/g, '\\$&');
+      const { data, error } = await db.from('companies').select('*').ilike('website', `%${needle}%`).limit(50);
       if (error) throw new Error(error.message);
-      existing = choose((data || []).filter(row => domainOf(row.website) === domain));
+      existing = choose((data || []).filter(row => companyWebsiteIdentity(row.website) === websiteIdentity));
     }
     if (!existing && profile) {
       const { data, error } = await db.from('companies').select('*').ilike('linkedin_url', `%${profile.replace(/[%_]/g, '')}%`).limit(50);
@@ -1235,7 +1269,7 @@ export async function upsertFinderCompanyActivity(options: { organization: Finde
       const { data, error } = await db.from('companies').select('*').ilike('name', namePattern).limit(50);
       if (error) throw new Error(error.message);
       existing = choose(data || []);
-      if (!existing && (data || []).length && !domain && !profile) throw new Error(`Cannot resolve organization identity: ${payload.name}`);
+      if (!existing && (data || []).length && !websiteIdentity && !profile) throw new Error(`Cannot resolve organization identity: ${payload.name}`);
     }
     for (const key of Object.keys(payload)) {
       if (existing?.[key] && typeof payload[key] === 'object') payload[key] = mergeFinderData(existing[key], payload[key]);

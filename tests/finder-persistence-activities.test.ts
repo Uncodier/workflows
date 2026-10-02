@@ -124,6 +124,107 @@ describe('Finder persistence activities with mocked database boundary', () => {
     expect(mockQueries[2].write.payload).not.toHaveProperty('id');
   });
 
+  it('does not match other Facebook pages when Finder returns the CM Studio profile', async () => {
+    const organization = { id: 23053505, name: 'CM Studio', website: 'https://facebook.com/CulturaMercadologica',
+      linkedin_info: { public_profile_url: 'https://www.linkedin.com/company/cmstudiomkt/' } };
+    mockReplies.push(row([
+      { id: 'other-1', name: 'Other', website: 'https://facebook.com/OtherOne' },
+      { id: 'other-2', name: 'Another', website: 'https://www.facebook.com/OtherTwo' },
+    ]), row([]), row([]), row({ id: 'cm-studio' }));
+
+    expect(await upsertFinderCompanyActivity({ organization })).toMatchObject({ success: true, company: { id: 'cm-studio' } });
+    expect(mockQueries[0].filters).toContainEqual(['ilike', 'website', '%facebook.com/culturamercadologica%']);
+    expect(mockQueries.filter(query => query.write)).toHaveLength(1);
+    expect(mockQueries[3].write).toMatchObject({ method: 'insert', payload: {
+      name: 'CM Studio', website: organization.website, linkedin_url: organization.linkedin_info.public_profile_url,
+    } });
+  });
+
+  it('matches only the exact social page, ignoring www, case, trailing slash and tracking parameters', async () => {
+    mockReplies.push(row([
+      { id: 'different', website: 'https://facebook.com/CulturaMercadologicaTeam' },
+      { id: 'correct', website: 'https://www.facebook.com/culturamercadologica/?ref=share' },
+    ]), row({ id: 'correct' }));
+
+    expect(await upsertFinderCompanyActivity({ organization: {
+      name: 'CM Studio', website: 'https://facebook.com/CulturaMercadologica',
+    } })).toMatchObject({ success: true, company: { id: 'correct' } });
+    expect(mockQueries[0].filters).toContainEqual(['ilike', 'website', '%facebook.com/culturamercadologica%']);
+    expect(mockQueries[1].write.method).toBe('update');
+    expect(mockQueries[1].filters).toContainEqual(['eq', 'id', 'correct']);
+  });
+
+  it('does not merge different social pages just because their company names match', async () => {
+    mockReplies.push(row([]), row([{ id: 'other', name: 'CM Studio', website: 'https://facebook.com/OtherStudio' }]),
+      row({ id: 'new' }));
+
+    expect(await upsertFinderCompanyActivity({ organization: {
+      name: 'CM Studio', website: 'https://facebook.com/CulturaMercadologica',
+    } })).toMatchObject({ success: true, company: { id: 'new' } });
+    expect(mockQueries[2].write.method).toBe('insert');
+    expect(mockQueries.filter(query => query.write && query.write.method === 'update')).toHaveLength(0);
+  });
+
+  it('does not match a name-only company to a social page without shared identity evidence', async () => {
+    mockReplies.push(row([]), row([{ id: 'unknown', name: 'CM Studio', website: null, linkedin_url: null }]),
+      row({ id: 'new' }));
+
+    expect(await upsertFinderCompanyActivity({ organization: {
+      name: 'CM Studio', website: 'https://facebook.com/CulturaMercadologica',
+    } })).toMatchObject({ success: true, company: { id: 'new' } });
+    expect(mockQueries[2].write.method).toBe('insert');
+  });
+
+  it('rejects a bare shared-platform hostname without a company page or trusted identity', async () => {
+    expect(await upsertFinderCompanyActivity({ organization: {
+      name: 'CM Studio', website: 'https://facebook.com/',
+    } })).toMatchObject({ success: false, error: 'Cannot resolve organization identity: CM Studio' });
+    expect(mockQueries).toHaveLength(0);
+  });
+
+  it('does not identify a bare Facebook host from a same-name page with no matching LinkedIn', async () => {
+    mockReplies.push(row([]), row([{
+      id: 'other', name: 'CM Studio', website: 'https://facebook.com/OtherStudio', linkedin_url: null,
+    }]), row({ id: 'new' }));
+    expect(await upsertFinderCompanyActivity({ organization: {
+      name: 'CM Studio', website: 'https://facebook.com/', linkedin_url: 'https://linkedin.com/company/cmstudiomkt',
+    } })).toMatchObject({ success: true, company: { id: 'new' } });
+    expect(mockQueries[2].write.method).toBe('insert');
+  });
+
+  it('fails closed when multiple companies have the exact same social page', async () => {
+    mockReplies.push(row([
+      { id: 'duplicate-1', website: 'https://facebook.com/CulturaMercadologica' },
+      { id: 'duplicate-2', website: 'https://www.facebook.com/culturamercadologica/' },
+    ]));
+
+    expect(await upsertFinderCompanyActivity({ organization: {
+      name: 'CM Studio', website: 'https://facebook.com/CulturaMercadologica',
+    } })).toMatchObject({ success: false, error: 'Ambiguous organization identity: CM Studio' });
+    expect(mockQueries.some(query => query.write)).toBe(false);
+  });
+
+  it('uses the Facebook profile id rather than conflating different profile.php pages', async () => {
+    mockReplies.push(row([
+      { id: 'different', website: 'https://facebook.com/profile.php?id=456' },
+      { id: 'correct', website: 'https://www.facebook.com/profile.php?id=123&ref=share' },
+    ]), row({ id: 'correct' }));
+
+    expect(await upsertFinderCompanyActivity({ organization: {
+      name: 'CM Studio', website: 'https://facebook.com/profile.php?id=123',
+    } })).toMatchObject({ success: true, company: { id: 'correct' } });
+    expect(mockQueries[0].filters).toContainEqual(['ilike', 'website', '%facebook.com/profile.php?id=123%']);
+    expect(mockQueries[1].write.method).toBe('update');
+    expect(mockQueries[1].filters).toContainEqual(['eq', 'id', 'correct']);
+  });
+
+  it('refuses a Facebook profile.php page without an identity id', async () => {
+    expect(await upsertFinderCompanyActivity({ organization: {
+      name: 'CM Studio', website: 'https://facebook.com/profile.php',
+    } })).toMatchObject({ success: false, error: 'Cannot resolve organization identity: CM Studio' });
+    expect(mockQueries).toHaveLength(0);
+  });
+
   it('merges sparse company refresh and nested address without clearing rich fields', async () => {
     mockReplies.push(row([{ id: 'company', name: 'Acme', website: 'https://acme.test', description: 'Rich', address: { city: 'Madrid', country: 'ES' } }]), row({ id: 'company' }));
     await upsertFinderCompanyActivity({ organization: { name: 'Acme', description: '', address: { city: null, postal_code: '1234' } } });
