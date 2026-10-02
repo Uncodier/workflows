@@ -102,6 +102,11 @@ export async function updateMessageStatusToSentActivity(request: MessageDelivery
     }
 
     const currentCustomData = currentMessage.custom_data || {};
+    // The comment API owns the exact-target delivery claim and provider receipt.
+    // Generic status callbacks (including old queued workflows) must not race it.
+    if (currentCustomData.source === 'comment') {
+      return { success: true, updated_message_id: messageId };
+    }
     const currentStatus = currentCustomData.status;
 
     if (shouldSkipDeliveryStatusUpdate(currentCustomData, request.delivery_success)) {

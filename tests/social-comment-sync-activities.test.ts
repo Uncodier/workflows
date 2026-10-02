@@ -296,6 +296,12 @@ describe('batch ingestion verification', () => {
 });
 
 describe('input validation', () => {
+  it('verifies new scoped origin IDs without parsing or truncating account/post identity', async () => {
+    const id = 'outstand-comment-claim:v2:["site-1","x","account","post"]:"comment"';
+    const query = queueQuery([{ id: 'saved-message' }]);
+    await assertSocialCommentPersistedActivity(siteId, id);
+    expect(query.eq).toHaveBeenCalledWith('custom_data->>origin_message_id', id);
+  });
   it.each(['', '  ', null, 7])('rejects invalid site identifiers (%j) before database access', async (value) => {
     const invalid = value as string;
     await expect(getSocialCommentSyncStatesActivity(invalid, [])).rejects.toThrow('siteId');

@@ -1,5 +1,10 @@
 # Durable social comment synchronization
 
+> This document describes the earlier network-only durable-sync rollout.
+> New runs use [account-scoped comment ingestion](SOCIAL_COMMENT_GROUPING.md),
+> including prospective activation cutoffs instead of historical first-sync
+> backfill, explicit account selectors, and separate boundary/success keys.
+
 ## Behavior
 
 The `pollSocialCommentsWorkflow` now tracks the last successful comment sync

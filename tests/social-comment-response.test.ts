@@ -40,6 +40,12 @@ describe('social comment API boundary', () => {
     await expect(fetchOutstandPostRepliesActivity('site-1', 'post-1', 'instagram')).resolves.toEqual([]);
   });
 
+  it('sends the exact owned account selector to the authorized API guard', async () => {
+    mockGet.mockResolvedValue({ success: true, data: [] });
+    await fetchOutstandPostRepliesActivity('site', 'post', 'twitter', { accountId: 'owned-account', durableIdentity: true });
+    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post/comments?tenant_id=site&network=x&account_id=owned-account');
+  });
+
   it('requests the owned publishing account and strips LinkedIn profiles before returning to Temporal', async () => {
     mockGet.mockResolvedValue({ success: true, data: [{
       id: 'comment-1', text: 'A comment', author: 'urn:li:person:123',

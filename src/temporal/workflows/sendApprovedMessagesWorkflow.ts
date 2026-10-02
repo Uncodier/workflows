@@ -34,6 +34,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
   console.log('🚀 Starting sendApprovedMessagesWorkflow...');
   const useBatchClaims = patched('send-approved-messages-batch-claims-v1');
   const useConfiguredOutreach = patched('outreach-configured-delivery-v1');
+  const useExactCommentDelivery = patched('send-approved-comment-exact-target-v1');
   let deferredCount = 0;
 
   const resetResult = await resetStuckSendingMessagesActivity();
@@ -148,7 +149,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         }
 
         const channelWorkflowId = `send-${channel}-approved-${msg.message_id}-${Date.now()}`;
-        await startChild(sendChannelMessageFromAgentWorkflow, {
+        const commentChild = await startChild(sendChannelMessageFromAgentWorkflow, {
           workflowId: channelWorkflowId,
           args: [{
             channel,
@@ -163,6 +164,11 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
           }],
           parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
         });
+        if (useExactCommentDelivery && msg.custom_data?.source === 'comment') {
+          // Starting a child is not delivery. The API validates the saved target
+          // and owns its claim/receipt; do not run generic status writes.
+          await commentChild.result();
+        }
         
         sent = true;
         console.log(`✅ ${channel} child started (workflowId: ${channelWorkflowId}).`);
@@ -320,6 +326,10 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
       }
       return false;
     } catch (error) {
+      if (useExactCommentDelivery && msg.custom_data?.source === 'comment') {
+        console.error(`Comment delivery failed for saved proposal ${messageId}; retaining it for review`, error);
+        return false;
+      }
       console.error(`❌ Failed to send message ${msg.message_id}:`, error);
       if (managedOutreach && !sent) {
         // Policy/cap/network failures must not invalidate contacts or trigger another provider.

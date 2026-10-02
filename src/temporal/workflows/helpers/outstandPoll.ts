@@ -343,7 +343,7 @@ export function buildOutstandCommentsPath(
   siteId: string,
   postId: string,
   network: string,
-  options?: { username?: string; durableIdentity?: boolean }
+  options?: { username?: string; durableIdentity?: boolean; accountId?: string }
 ): string {
   const normalizedNetwork = normalizeOutstandNetwork(network);
   const params = new URLSearchParams({
@@ -351,6 +351,7 @@ export function buildOutstandCommentsPath(
     network: normalizedNetwork,
   });
   if (options?.username?.trim()) params.set('username', options.username.trim());
+  if (options?.accountId?.trim()) params.set('account_id', options.accountId.trim());
   if (options?.durableIdentity && normalizedNetwork === 'linkedin') {
     params.set('resolve_author_names', 'false');
   }

@@ -172,6 +172,9 @@ export async function getApprovedMessagesActivity(): Promise<any[]> {
   }
 
   for (const invalidMessage of unprocessableMessages) {
+    // Retain legacy comment proposals for explicit repair, and never replace a
+    // comment API delivery receipt with this earlier enrichment snapshot.
+    if (invalidMessage.customData?.source === 'comment') continue;
     const { error: updateError } = await supabaseServiceRole
       .from('messages')
       .update({

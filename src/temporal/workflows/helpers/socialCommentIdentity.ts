@@ -74,7 +74,7 @@ export function durableLinkedInComment(value: unknown): Record<string, unknown> 
   const { authorId } = resolveSocialCommentIdentity(comment, 'linkedin');
   const durable: Record<string, unknown> = {};
   for (const key of [
-    'id', 'reply_id', 'text', 'message', 'network', 'created_at', 'like_count',
+    'id', 'reply_id', 'platform_comment_id', 'text', 'message', 'network', 'created_at', 'like_count',
     'platformPostId', 'platform_post_id', 'platformPostUrl', 'platform_post_url',
     'parentCommentId', 'parent_comment_id', 'rootCommentId', 'root_comment_id',
   ]) {

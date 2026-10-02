@@ -23,6 +23,7 @@ import {
 import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
 import { socialCommentCandidates } from './helpers/socialCommentPayload';
 import { shouldSyncSocialComments } from './helpers/socialCommentCadence';
+import { pollOwnedSocialComments } from './helpers/pollOwnedSocialComments';
 
 const {
   fetchSitesWithSocialCommentsActivity,
@@ -62,6 +63,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
   const useAutomaticInitialImport = patched('poll-social-comments-auto-initial-import-v1');
   const useDurableCommentSync = patched('poll-social-comments-durable-sync-v1');
   const useSafeAuthorIdentity = patched('poll-social-comments-author-identity-v2') && useDurableCommentSync;
+  const useOwnedAccountScope = patched('poll-social-comments-owned-account-scope-v2') && useSafeAuthorIdentity;
   
   await logWorkflowExecutionActivity({
     workflowId,
@@ -91,7 +93,7 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
           const result = await fetchOutstandPostsActivity(siteId, limit, offset);
           
           const posts = Array.isArray(result) ? result : (result?.posts || result?.data || []);
-          const syncStates = useDurableCommentSync
+          const syncStates = useDurableCommentSync && !useOwnedAccountScope
             ? await getSocialCommentSyncStatesActivity(siteId, posts.map((post: any) => post.id))
             : [];
           // Older activity histories may contain only an array with no total.
@@ -243,6 +245,13 @@ export async function pollSocialCommentsWorkflow(): Promise<any> {
                 continue;
               }
               processedPosts++;
+
+              if (useOwnedAccountScope) {
+                const result = await pollOwnedSocialComments(siteId, post, ownedSocialAccounts, contentId!, nowMs);
+                processedComments += result.processed;
+                failedCommentSyncs += result.failed;
+                continue;
+              }
 
               // Preserve legacy cadence for replay. New runs always perform an
               // initial sync, including historical posts, before reducing frequency.

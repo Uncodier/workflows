@@ -102,6 +102,7 @@ describe('pollSocialCommentsWorkflow ownership patch branches', () => {
       automaticImportPatch,
       durableSyncPatch,
       'poll-social-comments-author-identity-v2',
+      'poll-social-comments-owned-account-scope-v2',
     ]);
     expect(mockPatched.mock.invocationCallOrder[4]).toBeLessThan(
       mockActivities.logWorkflowExecutionActivity.mock.invocationCallOrder[0]

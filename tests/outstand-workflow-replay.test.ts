@@ -2,6 +2,7 @@ import path from 'node:path';
 import { defaultPayloadConverter } from '@temporalio/common';
 import { temporal } from '@temporalio/proto';
 import { bundleWorkflowCode, DefaultLogger, Runtime, Worker } from '@temporalio/worker';
+import { commentScopeKey } from '../src/temporal/workflows/helpers/socialCommentScope';
 
 // Synthetic histories use the actual Temporal replay engine, without a server,
 // credentials or live activities. Branch/unit tests separately cover children.
@@ -217,6 +218,30 @@ function commentIdentityHistory(safeIdentity: boolean) {
   return fixture.complete(1, 1);
 }
 
+function ownedAccountScopeHistory() {
+  const fixture = new HistoryFixture(true, [...recentPatches, durableSyncPatch,
+    'poll-social-comments-author-identity-v2', 'poll-social-comments-owned-account-scope-v2']);
+  const accounts = ['first', 'second'].map(id => ({ id, network: 'instagram', username: id, isActive: true, status: 'published' }));
+  const scopedSite = { site_id: 'site-1', social_media: accounts };
+  const post = { id: 'post-1', publishedAt: '2026-09-25T00:00:00Z', socialAccounts: accounts };
+  fixture.activity('fetchSitesWithSocialCommentsActivity', [], [scopedSite]);
+  fixture.activity('fetchOutstandPostsActivity', ['site-1', 100, 0], [post]);
+  fixture.activity('fetchOutstandAccountsActivity', ['site-1'], []);
+  fixture.activity('upsertContentFromOutstandPostActivity', ['site-1', post, accounts], 'content-1');
+  for (const account of accounts) {
+    const scope = { siteId: 'site-1', postId: 'post-1', network: 'instagram', accountId: account.id };
+    fixture.activity('initializeSocialCommentScopeActivity', [scope, false], { boundary: '2026-09-25T00:00:00Z' });
+    fixture.activity('fetchOutstandPostRepliesActivity', ['site-1', 'post-1', 'instagram', {
+      durableIdentity: true, accountId: account.id, username: account.username,
+    }], []);
+    fixture.activity('findLegacySocialCommentClaimsActivity', [scope, [], false], []);
+    fixture.activity('claimSyncedObjectsBatchActivity', [[]], []);
+    fixture.activity('verifySocialCommentIngestionActivity', ['site-1', []], null);
+    fixture.activity('recordSocialCommentSyncSuccessActivity', ['site-1', commentScopeKey(scope), 'instagram'], null);
+  }
+  return fixture.complete(1);
+}
+
 describe('pollSocialCommentsWorkflow Temporal replay', () => {
   let workflowBundle: Awaited<ReturnType<typeof bundleWorkflowCode>>;
 
@@ -252,6 +277,10 @@ describe('pollSocialCommentsWorkflow Temporal replay', () => {
 
   it('replays the new identity marker and durable activity options', async () => {
     await Worker.runReplayHistory({ workflowBundle }, durableSyncHistory(true, true, true), 'author-identity-replay');
+  });
+
+  it('replays the owned-account scope patch with two accounts on the same network', async () => {
+    await Worker.runReplayHistory({ workflowBundle }, ownedAccountScopeHistory(), 'owned-account-replay');
   });
 
   it.each([false, true])('replays a nonempty comment and child workflow with identity marker = %s', async enabled => {

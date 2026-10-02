@@ -48,6 +48,8 @@ export * from './channelGuidanceActivities';
 export * from './outstandActivities';
 export * from './outstandContentActivities';
 export * from './syncedObjectActivities';
+export * from './socialCommentScopeActivities';
+export { cleanupFailedFollowUpActivity } from './commentSafeCleanupActivity';
 export * from './socialCommentSyncActivities';
 export * from './sessionRecordingMaintenanceActivities';
 
@@ -101,6 +103,8 @@ import * as channelGuidanceActivities from './channelGuidanceActivities';
 import * as outstandActivities from './outstandActivities';
 import * as outstandContentActivities from './outstandContentActivities';
 import * as syncedObjectActivities from './syncedObjectActivities';
+import * as socialCommentScopeActivities from './socialCommentScopeActivities';
+import * as commentSafeCleanupActivities from './commentSafeCleanupActivity';
 import * as socialCommentSyncActivities from './socialCommentSyncActivities';
 import * as sessionRecordingMaintenanceActivities from './sessionRecordingMaintenanceActivities';
 
@@ -154,6 +158,8 @@ export const activities = {
   ...outstandActivities,
   ...outstandContentActivities,
   ...syncedObjectActivities,
+  ...socialCommentScopeActivities,
+  ...commentSafeCleanupActivities,
   ...socialCommentSyncActivities,
   ...sessionRecordingMaintenanceActivities
 };

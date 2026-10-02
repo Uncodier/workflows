@@ -28,7 +28,7 @@ beforeEach(() => {
   jest.resetAllMocks();
   jest.spyOn(Date, 'now').mockReturnValue(now);
   jest.spyOn(console, 'error').mockImplementation(() => {});
-  mockPatched.mockReturnValue(true);
+  mockPatched.mockImplementation(id => id !== 'poll-social-comments-owned-account-scope-v2');
   mockActivities.fetchSitesWithSocialCommentsActivity.mockResolvedValue([site]);
   mockActivities.fetchOutstandPostsActivity.mockResolvedValue([post]);
   mockActivities.fetchOutstandAccountsActivity.mockResolvedValue([]);
@@ -149,7 +149,7 @@ it('passes the owned publisher separately and ingests readable string authors', 
 });
 
 it('preserves pre-identity-patch payloads and the three-argument activity call', async () => {
-  mockPatched.mockImplementation(id => id !== 'poll-social-comments-author-identity-v2');
+  mockPatched.mockImplementation(id => !['poll-social-comments-author-identity-v2', 'poll-social-comments-owned-account-scope-v2'].includes(id));
   mockActivities.fetchOutstandPostRepliesActivity.mockResolvedValue([{ id: 'comment-1', text: 'Example', author: 'johndoe' }]);
   await pollSocialCommentsWorkflow();
   expect(mockActivities.fetchOutstandPostRepliesActivity.mock.calls[0]).toEqual(['site-1', 'post-1', 'instagram']);
