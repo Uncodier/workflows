@@ -200,6 +200,31 @@ not a claim about Forager's account quota; verify provider capacity before raisi
 further. Provider billing is separately documented in
 [Forager API Credit Pricing](https://docs.forager.ai/api-overview/credit-pricing).
 
+### Provider emails versus AI-generated emails
+
+New ICP enrichment executions accept Finder and IcyPeas email results without
+revalidating them through Reoon. This includes work/personal emails and cached
+provider contacts returned by Finder preparation. Format checks, case-insensitive
+deduplication and rejection of explicitly invalid/undeliverable contacts still
+apply; a provider response is not permission to revive a known-invalid address.
+
+Previously verified lead primaries remain eligible. A legacy lead email with no
+provider contact evidence or prior verification is not assumed to be a provider
+result; enrichment continues to the provider cascade rather than revalidating it.
+AI generation remains the last fallback, and only its `validatedEmail` is eligible:
+the generation child must confirm validity and deliverability through
+`validateEmailWorkflow`. Unvalidated `generatedEmails` are never promoted.
+
+The existing `emailVerified`, `validated_contacts` and result `validation_status`
+fields represent acceptance by the contact policy, not proof of a new Reoon check
+for provider emails. Full provider responses remain in `finder_contact_enrichment`.
+This change does not disable validation globally or change outreach health gates.
+
+The Temporal patch `icp-provider-email-trust-v1` preserves the Reoon activity
+sequence for histories without that marker. Deploy the worker for new executions
+to use provider trust. It does not reset pending-list cooldowns or replay completed
+activities with new results. No database migration or automatic restart is required.
+
 ### IcyPeas asynchronous email discovery
 
 IcyPeas is the first email-discovery provider in the contact cascade. Its
@@ -212,8 +237,9 @@ including after an activity failure or a later mining execution. It never starts
 another provider search just because polling was interrupted.
 
 - `NONE`, `SCHEDULED`, `IN_PROGRESS`: keep waiting, never report an empty success.
-- `FOUND`, `DEBITED`: return `results.emails`, retain certainty metadata and run
-  the normal contact validation before saving a lead. Certainty is not a bypass.
+- `FOUND`, `DEBITED`: return `results.emails` and retain certainty metadata. New
+  ICP executions use the provider-email policy above, without another Reoon check.
+  Histories predating that policy retain their recorded validation sequence.
 - `NOT_FOUND`, `DEBITED_NOT_FOUND`: confirmed no-match; allow the Finder fallback.
 - `BAD_INPUT`, `INSUFFICIENT_FUNDS`, `ABORTED`, malformed/unknown responses: expose
   an error, not no-match. An ambiguous initial submission remains fail-closed for

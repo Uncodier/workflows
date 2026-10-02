@@ -9,7 +9,7 @@ const site_id = '9be0a6a2-5567-41bf-ad06-cb4014f0faf2';
 
 // Replay the actual enrichment workflow through the IcyPeas boundary, not a
 // synthetic stand-in workflow. Activities do not run and no provider is called.
-function history(durable: boolean) {
+function history(durable: boolean, trustProviderEmails = false) {
   const events: Record<string, unknown>[] = [];
   let taskId = 0;
   let sequence = 0;
@@ -43,13 +43,15 @@ function history(durable: boolean) {
   activity('logWorkflowExecutionActivity', [{}], null);
   if (durable) event('MarkerRecorded', { markerName: 'core_patch',
     details: { 'patch-data': payloads({ id: 'icypeas-durable-email-search-v1', deprecated: false }) }, workflowTaskCompletedEventId: taskId });
+  if (trustProviderEmails) event('MarkerRecorded', { markerName: 'core_patch',
+    details: { 'patch-data': payloads({ id: 'icp-provider-email-trust-v1', deprecated: false }) }, workflowTaskCompletedEventId: taskId });
   const person = { id: 'person', external_person_id: 1, full_name: 'Ada Example', raw_result: {} };
   activity('prepareFinderPersonActivity', [input], { success: true, errors: [], person, role: { organization: { domain: 'acme.test', name: 'Acme' } } });
   activity('checkExistingLeadForPersonActivity', [{ person_id: 'person', site_id }], { success: true });
   activity('lookEmailOnIcyPeas', [{ domainOrCompany: 'acme.test', firstname: 'Ada', lastname: 'Example', ...(durable ? { site_id } : {}) }], {
     success: true, ...(durable ? { outcome: 'matched', searchId: 'durable-id' } : {}), data: { email: 'ada@acme.test' },
   });
-  activity('validateContactInformation', [{ email: 'ada@acme.test', hasEmailMessage: true }], { success: true, isValid: true });
+  if (!trustProviderEmails) activity('validateContactInformation', [{ email: 'ada@acme.test', hasEmailMessage: true }], { success: true, isValid: true });
   activity('upsertPersonActivity', [{}], { success: true, person });
   activity('upsertLeadForPersonActivity', [{}], { success: true, leadId: 'lead' });
   activity('logWorkflowExecutionActivity', [{}], null);
@@ -66,5 +68,8 @@ describe('IcyPeas tenant-context replay compatibility', () => {
   afterAll(async () => { await Runtime.instance().shutdown(); });
   it.each([false, true])('replays enrichment with durable IcyPeas patch = %s', async durable => {
     await Worker.runReplayHistory({ workflowBundle }, history(durable), 'icypeas-enrichment-replay');
+  });
+  it('replays the provider-trust policy without a Reoon activity', async () => {
+    await Worker.runReplayHistory({ workflowBundle }, history(true, true), 'icp-provider-trust-replay');
   });
 });

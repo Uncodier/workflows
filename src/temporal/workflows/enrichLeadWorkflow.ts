@@ -112,13 +112,16 @@ export async function enrichLeadWorkflow(
   });
 
   if (options.validated_contact_policy && options.source_search_result) {
+    // Old histories scheduled Reoon activities for provider emails. Keep that
+    // command sequence on replay; new executions trust the discovery provider.
+    const trustProviderEmails = patched('icp-provider-email-trust-v1');
     const result = await enrichWithValidatedContacts(options, { prepareFinderPersonActivity, checkExistingLeadForPersonActivity,
       validateContactInformation, lookEmailOnIcyPeas: lookupIcyPeas, callPersonWorkEmailsActivity, callPersonContactsLookupPersonalEmailsActivity,
       callPersonContactsLookupPhoneNumbersActivity, upsertPersonActivity, upsertLeadForPersonActivity,
       generateEmail: params => executeChild(generatePersonEmailWorkflow, {
         workflowId: `generate-email-icp-${params.person_id}-${site_id}`, args: [params],
       }),
-    });
+    }, { trustProviderEmails });
     await logWorkflowExecutionActivity({ workflowId, workflowType: 'enrichLeadWorkflow',
       status: result.success ? 'COMPLETED' : 'FAILED', output: result });
     return result;

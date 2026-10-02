@@ -116,4 +116,15 @@ describe('enrichLeadWorkflow source-aware persistence', () => {
     expect(mockActivities.callPersonContactsLookupPersonalEmailsActivity).not.toHaveBeenCalled();
     expect(mockActivities.callPersonContactsLookupPhoneNumbersActivity).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])('uses the provider-trust patch only for the ICP contact policy (%s)', async enabled => {
+    mockPatched.mockImplementation(id => id !== 'icp-provider-email-trust-v1' || enabled);
+    mockActivities.validateContactInformation.mockResolvedValue({ success: true, isValid: true });
+    expect(await enrichLeadWorkflow({ person_id: '11', site_id: 'site', source_search_result: source, validated_contact_policy: true }))
+      .toMatchObject({ success: true, leadId: 'saved-lead', errors: [] });
+    expect(mockPatched).toHaveBeenCalledWith('icp-provider-email-trust-v1');
+    if (enabled) expect(mockActivities.validateContactInformation).not.toHaveBeenCalled();
+    else expect(mockActivities.validateContactInformation).toHaveBeenCalledTimes(2);
+    expect(mockExecuteChild).not.toHaveBeenCalled();
+  });
 });

@@ -81,4 +81,131 @@ describe('ICP validated contact policy', () => {
     expect(f.deps.upsertLeadForPersonActivity).toHaveBeenCalledWith(expect.objectContaining({ email: 'valid@acme.test' }));
     expect(f.deps.callPersonWorkEmailsActivity).not.toHaveBeenCalled();
   });
+
+  describe('provider-trust policy', () => {
+    const policy = { trustProviderEmails: true };
+    const noCredits = { success: false, error: 'Reoon has no available verification credits' };
+
+    it.each(['icypeas', 'work_emails', 'personal_emails'])('saves %s results without Reoon credits or AI generation', async provider => {
+      const f = fixture();
+      f.deps.validateContactInformation.mockResolvedValue(noCredits);
+      f.deps.generateEmail = jest.fn();
+      if (provider !== 'icypeas') f.deps.lookEmailOnIcyPeas.mockResolvedValue({ success: true, data: {} });
+      if (provider === 'work_emails') f.deps.callPersonWorkEmailsActivity.mockResolvedValue({ success: true, emails: ['valid@acme.test'] });
+      if (provider === 'personal_emails') f.deps.callPersonContactsLookupPersonalEmailsActivity.mockResolvedValue({ success: true, emails: ['valid@acme.test'] });
+      expect(await enrichWithValidatedContacts(f.options, f.deps, policy)).toMatchObject({ success: true, outcome: 'matched', leadId: 'lead', errors: [] });
+      expect(f.deps.validateContactInformation).not.toHaveBeenCalled();
+      expect(f.deps.generateEmail).not.toHaveBeenCalled();
+      expect(f.deps.callPersonContactsLookupPhoneNumbersActivity).not.toHaveBeenCalled();
+      expect(f.deps.upsertLeadForPersonActivity).toHaveBeenCalledWith(expect.objectContaining({
+        [provider === 'personal_emails' ? 'personal_email' : 'email']: 'valid@acme.test', validated_contact_policy: true,
+      }));
+    });
+
+    it.each([
+      { emails: ['cached@acme.test'] },
+      { raw_result: { work_emails: ['cached@acme.test'] } },
+      { raw_result: { finder_search_result: { person: { work_emails: ['cached@acme.test'] } } } },
+      { raw_result: { finder_details: { person: { work_emails: ['cached@acme.test'] } } } },
+      { raw_result: { roles: [{ work_emails: ['cached@acme.test'] }] } },
+    ])('reuses cached/prepared provider contacts without verification (%j)', async contacts => {
+      const f = fixture();
+      f.deps.prepareFinderPersonActivity.mockResolvedValue({ success: true, errors: [], person: { id: 'person', ...contacts } });
+      f.deps.validateContactInformation.mockResolvedValue(noCredits);
+      expect(await enrichWithValidatedContacts(f.options, f.deps, policy)).toMatchObject({ success: true, outcome: 'matched', errors: [] });
+      expect(f.deps.upsertLeadForPersonActivity).toHaveBeenCalledWith(expect.objectContaining({ email: 'cached@acme.test' }));
+      expect(f.deps.validateContactInformation).not.toHaveBeenCalled();
+      expect(f.deps.lookEmailOnIcyPeas).not.toHaveBeenCalled();
+    });
+
+    it('still rejects malformed and explicitly invalid provider results and deduplicates alternatives', async () => {
+      const f = fixture();
+      f.deps.lookEmailOnIcyPeas.mockResolvedValue({ success: true, data: { emails: [
+        'not-an-email', 'bounce@acme.test', { email: 'BOUNCE@acme.test', validation_status: 'invalid' },
+        { email: 'valid@acme.test', certainty: 'probable' }, 'VALID@acme.test',
+      ] } });
+      expect(await enrichWithValidatedContacts(f.options, f.deps, policy)).toMatchObject({ success: true, errors: [] });
+      expect(f.deps.upsertPersonActivity).toHaveBeenCalledWith(expect.objectContaining({ emails: ['valid@acme.test'] }));
+      expect(f.deps.validateContactInformation).not.toHaveBeenCalled();
+    });
+
+    it('does not assume an unknown-origin legacy lead email came from a provider', async () => {
+      const f = fixture();
+      f.deps.checkExistingLeadForPersonActivity.mockResolvedValue({ success: true, existingLead: { email: 'unknown@acme.test' } });
+      expect(await enrichWithValidatedContacts(f.options, f.deps, policy)).toMatchObject({ success: true, errors: [] });
+      expect(f.deps.upsertLeadForPersonActivity).toHaveBeenCalledWith(expect.objectContaining({ email: 'valid@acme.test' }));
+      expect(f.deps.validateContactInformation).not.toHaveBeenCalled();
+    });
+
+    it('does not revive a known-invalid email returned without annotations by a later provider', async () => {
+      const f = fixture();
+      f.deps.lookEmailOnIcyPeas.mockResolvedValue({ success: true, data: { email: 'bounce@acme.test' } });
+      f.deps.callPersonWorkEmailsActivity.mockResolvedValue({ success: true, emails: [
+        { email: 'bounce@acme.test', verified: true }, 'valid@acme.test',
+      ] });
+      expect(await enrichWithValidatedContacts(f.options, f.deps, policy)).toMatchObject({ success: true, outcome: 'matched', errors: [] });
+      expect(f.deps.upsertPersonActivity).toHaveBeenCalledWith(expect.objectContaining({ emails: ['valid@acme.test'] }));
+      expect(f.deps.validateContactInformation).not.toHaveBeenCalled();
+    });
+
+    it('does not bypass a work-email rejection by returning its plain copy as a personal email', async () => {
+      const f = fixture();
+      f.deps.lookEmailOnIcyPeas.mockResolvedValue({ success: true, data: {} });
+      f.deps.callPersonContactsLookupPersonalEmailsActivity.mockResolvedValue({ success: true, emails: ['bounce@acme.test'] });
+      expect(await enrichWithValidatedContacts(f.options, f.deps, policy)).toMatchObject({ success: true, outcome: 'no_match' });
+      expect(f.deps.upsertLeadForPersonActivity).not.toHaveBeenCalled();
+      expect(f.deps.validateContactInformation).not.toHaveBeenCalled();
+    });
+
+    it('retains the pending-provider and database-failure safeguards', async () => {
+      const f = fixture();
+      f.deps.lookEmailOnIcyPeas.mockResolvedValueOnce({ success: false, outcome: 'pending', error: 'Still pending' });
+      expect(await enrichWithValidatedContacts(f.options, f.deps, policy)).toMatchObject({ success: false, errors: ['Still pending'] });
+      expect(f.deps.callPersonWorkEmailsActivity).not.toHaveBeenCalled();
+      expect(f.deps.upsertLeadForPersonActivity).not.toHaveBeenCalled();
+      f.deps.upsertLeadForPersonActivity.mockResolvedValue({ success: false, error: 'db down' });
+      expect(await enrichWithValidatedContacts(f.options, f.deps, policy)).toMatchObject({ success: false, errors: ['db down'] });
+      expect(f.deps.validateContactInformation).not.toHaveBeenCalled();
+    });
+
+    it('preserves a previously verified primary before provider alternatives', async () => {
+      const f = fixture();
+      f.deps.checkExistingLeadForPersonActivity.mockResolvedValue({ success: true,
+        existingLead: { email: 'trusted@acme.test', metadata: { emailVerified: true } } });
+      expect(await enrichWithValidatedContacts(f.options, f.deps, policy)).toMatchObject({ success: true, errors: [] });
+      expect(f.deps.upsertLeadForPersonActivity).toHaveBeenCalledWith(expect.objectContaining({ email: 'trusted@acme.test' }));
+      expect(f.deps.validateContactInformation).not.toHaveBeenCalled();
+      expect(f.deps.lookEmailOnIcyPeas).not.toHaveBeenCalled();
+    });
+
+    it('does not harvest unvalidated AI guesses stored in raw enrichment responses', async () => {
+      const f = fixture();
+      f.deps.prepareFinderPersonActivity.mockResolvedValue({ success: true, errors: [], person: { id: 'person',
+        raw_result: { finder_contact_enrichment: { generated_email: { success: false, generatedEmails: ['guess@acme.test'] } } } } });
+      expect(await enrichWithValidatedContacts(f.options, f.deps, policy)).toMatchObject({ success: true, outcome: 'no_match' });
+      expect(f.deps.upsertLeadForPersonActivity).not.toHaveBeenCalled();
+      expect(f.deps.validateContactInformation).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { success: true, outcome: 'matched', validatedEmail: 'ai@acme.test', generatedEmails: ['guess@acme.test', 'ai@acme.test'] },
+      { success: false, outcome: 'no_match', generatedEmails: ['guess@acme.test'] },
+      { success: false, outcome: 'retryable_error', error: noCredits.error, generatedEmails: ['guess@acme.test'] },
+    ])('accepts only the validated AI fallback result (%j)', async generated => {
+      const f = fixture();
+      f.deps.lookEmailOnIcyPeas.mockResolvedValue({ success: true, data: {} });
+      f.deps.generateEmail = jest.fn().mockResolvedValue(generated);
+      const result = await enrichWithValidatedContacts(f.options, f.deps, policy);
+      expect(f.deps.generateEmail).toHaveBeenCalledWith(expect.objectContaining({ reportOutcome: true, person_id: 'person' }));
+      if (generated.success) {
+        expect(result).toMatchObject({ success: true, outcome: 'matched', errors: [] });
+        expect(f.deps.upsertLeadForPersonActivity).toHaveBeenCalledWith(expect.objectContaining({ email: 'ai@acme.test', person_emails: ['ai@acme.test'] }));
+      } else {
+        expect(f.deps.upsertLeadForPersonActivity).not.toHaveBeenCalled();
+        expect(result).toMatchObject(generated.outcome === 'no_match'
+          ? { success: true, outcome: 'no_match' } : { success: false, errors: [noCredits.error] });
+      }
+      expect(f.deps.validateContactInformation).not.toHaveBeenCalled();
+    });
+  });
 });
