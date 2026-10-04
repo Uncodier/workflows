@@ -18,7 +18,7 @@ export async function dailyCreditRenewalWorkflow(): Promise<{ processed: number;
   let processed = 0;
   let errors = 0;
   
-  // 1. First, check for any sites that need initialization (missing credits)
+  // 1. Atomic one-time initialization, never an emergency balance top-up.
   try {
     console.log('🔍 Checking for sites needing initialization...');
     const sitesToInit = await fetchSitesNeedingInitializationActivity();
@@ -26,8 +26,9 @@ export async function dailyCreditRenewalWorkflow(): Promise<{ processed: number;
     
     for (const siteId of sitesToInit) {
       try {
-        await initializeSiteCreditsActivity(siteId);
-        initialized++;
+        const result = await initializeSiteCreditsActivity(siteId);
+        // Undefined is the result recorded by pre-RPC activity histories.
+        if (!result || result.outcome === 'initialized') initialized++;
       } catch (err) {
         console.error(`Failed to initialize credits for site ${siteId}:`, err);
         initErrors++;
@@ -38,15 +39,16 @@ export async function dailyCreditRenewalWorkflow(): Promise<{ processed: number;
     // Continue with renewal even if initialization fails
   }
 
-  // 2. Then proceed with normal credit renewal for existing billing records
+  // 2. DB decides due periods/Stripe ownership. Discovery rows are only hints.
   try {
     const sitesDue = await fetchSitesDueForCreditRenewalActivity();
-    console.log(`Found ${sitesDue.length} sites due for renewal.`);
+    console.log(`Found ${sitesDue.length} renewal candidates.`);
     
     for (const site of sitesDue) {
       try {
-        await renewSiteCreditsActivity(site.site_id, site.plan, site.credits_available, site.stripe_subscription_id);
-        processed++;
+        const result = await renewSiteCreditsActivity(site.site_id, site.plan, site.credits_available, site.stripe_subscription_id);
+        // Old histories had no outcome; retain their accounting on replay.
+        if (!('outcome' in result) || result.outcome === 'reset') processed++;
       } catch (err) {
         console.error(`Failed to renew credits for site ${site.site_id}:`, err);
         errors++;

@@ -257,9 +257,9 @@ export class SupabaseService {
 
   // --- BILLING ---
 
-  async fetchActiveBillings(): Promise<any[]> {
+  async fetchBillingRenewalCandidates(): Promise<any[]> {
     await this.ensureConnection();
-    return BillingImpl.fetchActiveBillings(this.client);
+    return BillingImpl.fetchBillingRenewalCandidates(this.client);
   }
 
   async fetchBillingForSite(siteId: string): Promise<any> {
@@ -267,9 +267,9 @@ export class SupabaseService {
     return BillingImpl.fetchBillingForSite(this.client, siteId);
   }
 
-  async updateSiteCredits(siteId: string, credits: number): Promise<void> {
+  async renewSitePlanCredits(siteId: string): Promise<BillingImpl.PlanCreditRenewalResult> {
     await this.ensureConnection();
-    return BillingImpl.updateSiteCredits(this.client, siteId, credits);
+    return BillingImpl.renewSitePlanCredits(this.client, siteId);
   }
 
   async fetchSitesWithoutBilling(): Promise<string[]> {
@@ -277,9 +277,9 @@ export class SupabaseService {
     return BillingImpl.fetchSitesWithoutBilling(this.client);
   }
 
-  async createBillingRecord(billingData: any): Promise<any> {
+  async initializeSiteBilling(siteId: string): Promise<BillingImpl.BillingInitializationResult> {
     await this.ensureConnection();
-    return BillingImpl.createBillingRecord(this.client, billingData);
+    return BillingImpl.initializeSiteBilling(this.client, siteId);
   }
 
   async createPaymentRecord(paymentData: any): Promise<any> {

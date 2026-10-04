@@ -1,53 +1,77 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 
-export async function fetchActiveBillings(client: SupabaseClient): Promise<any[]> {
-  console.log('🔍 Fetching active billing records...');
-  
-  const { data, error } = await client
-    .from('billing')
-    .select(`
-      id,
-      site_id,
-      plan,
-      credits_available,
-      credits_used,
-      subscription_start_date,
-      created_at,
-      status,
-      stripe_subscription_id
-    `)
-    .eq('status', 'active');
-
-  if (error) {
-    console.error('❌ Error fetching billing records:', error);
-    throw new Error(`Failed to fetch billing records: ${error.message}`);
-  }
-
-  console.log(`✅ Successfully fetched ${data?.length || 0} active billing records`);
-  return data || [];
+export interface BillingInitializationResult {
+  success: true;
+  outcome: 'initialized' | 'already_initialized';
+  credits_granted: number;
+  billing_id: string;
+  credits_available: number;
 }
 
-export async function updateSiteCredits(
-  client: SupabaseClient, 
-  siteId: string, 
-  credits: number
-): Promise<void> {
-  console.log(`Updating credits for site ${siteId} to ${credits}`);
-  
-  const { error } = await client
-    .from('billing')
-    .update({ 
-      credits_available: credits,
-      updated_at: new Date().toISOString()
-    })
-    .eq('site_id', siteId);
+export interface PlanCreditRenewalResult {
+  success: true;
+  outcome: 'reset' | 'not_due' | 'stale_period' | 'stripe_managed' | 'inactive';
+  credits_granted: number;
+  credits_available: number;
+}
 
-  if (error) {
-    console.error(`❌ Error updating credits for site ${siteId}:`, error);
-    throw new Error(`Failed to update credits: ${error.message}`);
+/** Candidates only: the RPC owns period eligibility and Stripe ownership. */
+export async function fetchBillingRenewalCandidates(client: SupabaseClient): Promise<any[]> {
+  console.log('🔍 Fetching billing renewal candidates...');
+  const records: any[] = [];
+  const pageSize = 500;
+  // Include all states: subscription_status can be canceled while billing.status
+  // is inactive. RPC eligibility is authoritative. Page to avoid PostgREST caps.
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await client
+      .from('billing')
+      .select('id, site_id, plan, credits_available, status, stripe_subscription_id')
+      .order('id', { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (error) {
+      throw new Error(`Failed to fetch billing records: ${error.message}`);
+    }
+    records.push(...(data || []));
+    if (!data || data.length < pageSize) break;
   }
-  
-  console.log(`✅ Successfully updated credits for site ${siteId}`);
+  console.log(`✅ Successfully fetched ${records.length} billing renewal candidates`);
+  return records;
+}
+
+async function callCreditRpc(
+  client: SupabaseClient,
+  name: string,
+  siteId: string,
+  outcomes: readonly string[]
+): Promise<Record<string, unknown>> {
+  const { data, error } = await client.rpc(name, { p_site_id: siteId });
+  if (error) {
+    throw new Error(`${name} failed: ${error.message}`);
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data) || data.success !== true) {
+    throw new Error(`${name} failed: ${typeof data?.error === 'string' ? data.error : 'Invalid or unsuccessful RPC result'}`);
+  }
+  if (!outcomes.includes(data.outcome) ||
+      typeof data.credits_granted !== 'number' || !Number.isFinite(data.credits_granted) || data.credits_granted < 0 ||
+      typeof data.credits_available !== 'number' || !Number.isFinite(data.credits_available)) {
+    throw new Error(`${name} failed: Invalid credit RPC result`);
+  }
+  return data;
+}
+
+export async function renewSitePlanCredits(client: SupabaseClient, siteId: string): Promise<PlanCreditRenewalResult> {
+  const result = await callCreditRpc(client, 'renew_site_plan_credits', siteId,
+    ['reset', 'not_due', 'stale_period', 'stripe_managed', 'inactive']);
+  return result as unknown as PlanCreditRenewalResult;
+}
+
+export async function initializeSiteBilling(client: SupabaseClient, siteId: string): Promise<BillingInitializationResult> {
+  const result = await callCreditRpc(client, 'initialize_site_billing', siteId,
+    ['initialized', 'already_initialized']);
+  if (typeof result.billing_id !== 'string' || !result.billing_id) {
+    throw new Error('initialize_site_billing failed: Invalid billing ID');
+  }
+  return result as unknown as BillingInitializationResult;
 }
 
 export async function fetchBillingForSite(client: SupabaseClient, siteId: string): Promise<any> {
@@ -78,63 +102,4 @@ export async function fetchSitesWithoutBilling(client: SupabaseClient): Promise<
   const siteIds = (data || []).map((row: { site_id: string }) => row.site_id);
   console.log(`✅ Found ${siteIds.length} sites needing billing initialization`);
   return siteIds;
-}
-
-export async function createBillingRecord(
-  client: SupabaseClient,
-  billingData: {
-    site_id: string;
-    plan?: string;
-    credits_available?: number;
-    status?: string;
-  }
-): Promise<any> {
-  console.log(`Creating billing record for site ${billingData.site_id}`);
-
-  // First, check if a billing record already exists to avoid duplicates
-  // since site_id does not have a unique constraint, we cannot use upsert with onConflict.
-  const { data: existingData, error: fetchError } = await client
-    .from('billing')
-    .select()
-    .eq('site_id', billingData.site_id)
-    .maybeSingle();
-
-  if (fetchError) {
-    console.error(`❌ Error fetching existing billing record for site ${billingData.site_id}:`, fetchError);
-    throw new Error(`Failed to fetch existing billing record: ${fetchError.message}`);
-  }
-
-  if (existingData) {
-    console.log(`ℹ️ Billing record already exists for site ${billingData.site_id}, returning existing record...`);
-    return existingData;
-  }
-
-  let { data, error } = await client
-    .from('billing')
-    .insert(
-      {
-        site_id: billingData.site_id,
-        plan: billingData.plan || 'free',
-        credits_available: billingData.credits_available || 0,
-        credits_used: 0,
-        status: billingData.status || 'active',
-        subscription_start_date: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }
-    )
-    .select()
-    .maybeSingle();
-
-  if (error) {
-    if (error.code === '23503' && error.message?.includes('billing_site_id_fkey')) {
-      console.log(`⚠️ Site ${billingData.site_id} no longer exists. Skipping billing record creation.`);
-      return null;
-    }
-    console.error(`❌ Error creating billing record for site ${billingData.site_id}:`, error);
-    throw new Error(`Failed to create billing record: ${error.message}`);
-  }
-
-  console.log(`✅ Successfully created billing record for site ${billingData.site_id}`);
-  return data;
 }

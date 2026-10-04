@@ -36,7 +36,8 @@ La lista `CRON_SCHEDULED_WORKFLOWS` de abajo es la allowlist usada por las activ
 #### `dailyCreditRenewalWorkflow`
 - **Schedule ID**: `daily-credit-renewal`
 - **Frecuencia**: Cada 24 horas
-- **Descripción**: Workflow diario para renovar los créditos de los sitios de acuerdo a su ciclo de facturación.
+- **Descripción**: Reconcilia el allowance mensual por RPC atómico; no acumula créditos de plan ni modifica créditos comprados/retirables. La DB decide períodos de mes calendario UTC y excluye Stripe activo; cancelados reciben Toolbox 1/mes. Inicialización única compartida con API y market-fit.
+- **Contrato, períodos y pruebas**: [Billing credit allowances](BILLING_CREDIT_ALLOWANCES.md).
 - **Guarda cron_status**: No (es una operación directa sin estado por sitio en cron_status).
 
 #### `processReservationsWorkflow`
