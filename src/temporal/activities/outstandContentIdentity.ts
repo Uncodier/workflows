@@ -7,7 +7,11 @@ export function normalizeOutstandContent(text: string): string {
 
 export function outstandPostText(post: { id?: unknown; containers?: Array<{ content?: string | null }>; text?: string | null }): string {
   const caption = post.containers?.[0]?.content?.trim() || post.text?.trim();
-  return caption || `Social media post ${String(post.id)}`;
+  // With the Unicode flag, valid surrogate pairs are a single code point and
+  // are not matched. Replace only malformed provider characters before hashing
+  // or persisting: PostgreSQL's JSON parser rejects isolated surrogates.
+  return (caption || `Social media post ${String(post.id)}`)
+    .replace(/[\uD800-\uDFFF]/gu, '\uFFFD');
 }
 
 export function buildOutstandContentHash(text: string): string {

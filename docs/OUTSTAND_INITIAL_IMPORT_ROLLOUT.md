@@ -44,3 +44,24 @@ Inspect `settings.social_media[*].initialImport` for the display state and
 `outstand_initial_imports` for the durable state. Never clear the ledger as a
 routine retry. The migration alone creates no billable work: **the first cron
 cycle after deploying the new worker can start imports on all eligible accounts.**
+
+## Unicode-safe content persistence
+
+`upsertContentFromOutstandPostActivity` limits titles to 50 Unicode code points,
+not 50 UTF-16 code units. Cutting a surrogate pair with `substring(0, 50)` can
+split an emoji and cause PostgreSQL `22P02` (`Unicode low surrogate must follow
+a high surrogate`). Full captions remain untruncated. Isolated surrogates already
+present in provider captions are replaced with U+FFFD before hashing and saving;
+valid emoji, including joined sequences in the full caption, are preserved.
+
+Deploy the updated Workflows worker for this fix; it requires no new SQL migration
+and no Temporal workflow-history changes. Existing claim/deduplication rules remain
+unchanged. Do **not** clear initial-import ledgers or start a second paid historical
+import to recover an individual content write. Review failed content claims and
+let the existing post-poll retry policy handle them.
+
+Offline regression checks:
+
+```sh
+npm test -- --runInBand tests/outstand-content-activity-metadata.test.ts tests/outstand-content-identity.test.ts
+```

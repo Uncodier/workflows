@@ -103,6 +103,32 @@ describe('Outstand content publishing accounts with mocked persistence', () => {
     }));
   });
 
+  it.each([
+    ['emoji at the old UTF-16 cut', 'x'.repeat(49) + '🔥 salsa', 'x'.repeat(49) + '🔥...'],
+    ['exactly 50 code points', 'x'.repeat(49) + '🔥', 'x'.repeat(49) + '🔥'],
+    ['multiple supplementary characters', '🔥'.repeat(51), '🔥'.repeat(50) + '...'],
+    ['ASCII caption', 'x'.repeat(51), 'x'.repeat(50) + '...'],
+    ['short caption', 'Menú 🌮', 'Menú 🌮'],
+    ['isolated provider surrogates', 'Menú \uD83D salsa \uDC00', 'Menú \uFFFD salsa \uFFFD'],
+  ])('persists valid Unicode for %s without truncating the full caption', async (_name, caption, expectedTitle) => {
+    mockReplies.push(row(null), row(null), row([]), row({ id: 'content-unicode' }));
+    await expect(upsertContentFromOutstandPostActivity(siteId, { ...post, text: caption }, settings))
+      .resolves.toBe('content-unicode');
+
+    const payload = mockQueries.find(query => query.write?.method === 'insert').write.payload[0];
+    const expectedCaption = caption === 'Menú \uD83D salsa \uDC00' ? 'Menú \uFFFD salsa \uFFFD' : caption;
+    expect(payload.title).toBe(expectedTitle);
+    expect(payload.text).toBe(expectedCaption);
+    expect(payload.description).toBe(expectedCaption);
+    // PostgreSQL rejects lone UTF-16 surrogates even though JSON.stringify accepts them.
+    for (const value of [payload.title, payload.text, payload.description]) {
+      expect(Array.from(value as string).some(character => character.length === 1
+        && character.charCodeAt(0) >= 0xD800 && character.charCodeAt(0) <= 0xDFFF)).toBe(false);
+    }
+    expect(payload.metadata.source_content_hash).toBe(buildOutstandContentHash(expectedCaption));
+    expect(mockFinishClaim).toHaveBeenCalledWith(expect.objectContaining({ status: 'completed' }));
+  });
+
   it.each(['post ID', 'content hash', 'legacy text'])
     ('backfills an existing match by %s, preserves other accounts/metadata and skips repeated writes', async match => {
       const previousAccount = {

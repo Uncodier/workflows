@@ -171,8 +171,11 @@ export async function upsertContentFromOutstandPostActivity(
       : post.scheduledAt
         ? 'approved'
         : 'published';
+    // UTF-16 substring can split an emoji and produce JSON PostgreSQL rejects.
+    // Limit only the title by Unicode code points; keep the full caption intact.
+    const titleCharacters = Array.from(postText);
     const insertData = {
-      title: postText.substring(0, 50) + (postText.length > 50 ? '...' : ''),
+      title: titleCharacters.slice(0, 50).join('') + (titleCharacters.length > 50 ? '...' : ''),
       description: postText,
       type: 'social_post',
       text: postText,

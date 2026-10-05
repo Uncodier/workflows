@@ -26,6 +26,19 @@ describe('Outstand content identity', () => {
     );
   });
 
+  it('replaces isolated provider surrogates while preserving valid emoji and caption selection', () => {
+    expect(outstandPostText({ id: 'post', text: '  🌮 \uD83D salsa \uDC00  ' }))
+      .toBe('🌮 \uFFFD salsa \uFFFD');
+    expect(outstandPostText({ id: 'post', containers: [{ content: '  🔥 \uD83D  ' }], text: 'fallback' }))
+      .toBe('🔥 \uFFFD');
+    expect(outstandPostText({ id: 'post', text: '👩‍🍳 café' })).toBe('👩‍🍳 café');
+    // Node's UTF-8 hash encoding already replaces lone surrogates. Sanitizing
+    // captions must not change existing external claim IDs or create duplicates.
+    const malformed = '🌮 \uD83D salsa \uDC00';
+    expect(buildOutstandContentHash(outstandPostText({ id: 'post', text: malformed })))
+      .toBe(buildOutstandContentHash(malformed));
+  });
+
   it('uses the content hash instead of the provider post ID', () => {
     const hash = buildOutstandContentHash('Shared logical post');
 
