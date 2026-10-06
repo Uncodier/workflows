@@ -3,6 +3,7 @@ import type { EnrichLeadOptions, EnrichLeadResult } from '../enrichLeadWorkflow'
 import type { generatePersonEmailWorkflow } from '../generatePersonEmailWorkflow';
 import { domainOf, finderLeadProfile, mergeFinderData } from '../../utils/finderData';
 import { emailCandidates, personContactDocuments, usablePhoneNumbers } from '../../utils/icpContactCandidates';
+import type { IcpOrganizationReview } from '../../utils/icpIdentityReview';
 
 type Deps = Pick<Activities, 'prepareFinderPersonActivity' | 'checkExistingLeadForPersonActivity' | 'validateContactInformation'
   | 'lookEmailOnIcyPeas' | 'callPersonWorkEmailsActivity' | 'callPersonContactsLookupPersonalEmailsActivity'
@@ -12,17 +13,25 @@ type Deps = Pick<Activities, 'prepareFinderPersonActivity' | 'checkExistingLeadF
 
 /** Raw contacts are retained, but only usable contacts can terminate enrichment. */
 export async function enrichWithValidatedContacts(options: EnrichLeadOptions, deps: Deps,
-  policy: { trustProviderEmails?: boolean } = {}): Promise<EnrichLeadResult> {
+  policy: { trustProviderEmails?: boolean; isolateIdentityReviews?: boolean } = {}): Promise<EnrichLeadResult> {
   const start = Date.now();
   const errors: string[] = [];
   const responses: Record<string, any> = {};
+  let identityReviews: IcpOrganizationReview[] | undefined;
   const finish = (data: Partial<EnrichLeadResult>): EnrichLeadResult => ({ success: false, errors,
+    ...(identityReviews?.length ? { identityReviews } : {}),
     executionTime: `${((Date.now() - start) / 1000).toFixed(2)}s`, completedAt: new Date().toISOString(), ...data });
   try {
-    const prepared = await deps.prepareFinderPersonActivity({ ...options, source_search_result: options.source_search_result! });
+    const prepared = await deps.prepareFinderPersonActivity({ ...options, source_search_result: options.source_search_result!,
+      ...(policy.isolateIdentityReviews ? { isolate_identity_reviews: true } : {}) });
     errors.push(...prepared.errors);
     if (!prepared.success || !prepared.person?.id) throw new Error(prepared.error || 'Person preparation failed');
     const person = prepared.person;
+    identityReviews = prepared.identityReviews;
+    if (prepared.requiresIdentityReview) {
+      // No contacts are bought and no lead is linked to a guessed organization.
+      return finish({ success: true, outcome: 'needs_review', personId: person.id });
+    }
     const checked = await deps.checkExistingLeadForPersonActivity({ person_id: person.id, site_id: options.site_id });
     if (!checked.success) throw new Error(checked.error || 'Lead lookup failed');
     const lead = checked.existingLead;

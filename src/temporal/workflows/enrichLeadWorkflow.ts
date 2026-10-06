@@ -4,6 +4,7 @@ import { selectRoleForEnrichment } from '../utils/personRoleUtils';
 import { generatePersonEmailWorkflow } from './generatePersonEmailWorkflow';
 import { contactValues, finderLeadProfile, mergeFinderData, selectFinderRole } from '../utils/finderData';
 import { enrichWithValidatedContacts } from './icpMining/enrichWithValidatedContacts';
+import type { IcpOrganizationReview } from '../utils/icpIdentityReview';
 
 // Configure activity options
 const {
@@ -41,7 +42,8 @@ export interface EnrichLeadOptions {
 
 export interface EnrichLeadResult {
   success: boolean;
-  outcome?: 'matched' | 'no_match';
+  outcome?: 'matched' | 'no_match' | 'needs_review';
+  identityReviews?: IcpOrganizationReview[];
   personId?: string;
   leadId?: string;
   enrichedData?: {
@@ -118,13 +120,14 @@ export async function enrichLeadWorkflow(
     // New ICP runs stop at provider contacts. Keep the generation child only
     // for recorded histories that already used the paid fallback.
     const providerOnlyContacts = patched('icp-provider-only-contacts-v1');
+    const isolateIdentityReviews = patched('icp-isolate-organization-reviews-v1');
     const result = await enrichWithValidatedContacts(options, { prepareFinderPersonActivity, checkExistingLeadForPersonActivity,
       validateContactInformation, lookEmailOnIcyPeas: lookupIcyPeas, callPersonWorkEmailsActivity, callPersonContactsLookupPersonalEmailsActivity,
       callPersonContactsLookupPhoneNumbersActivity, upsertPersonActivity, upsertLeadForPersonActivity,
       generateEmail: providerOnlyContacts ? undefined : params => executeChild(generatePersonEmailWorkflow, {
         workflowId: `generate-email-icp-${params.person_id}-${site_id}`, args: [params],
       }),
-    }, { trustProviderEmails });
+    }, { trustProviderEmails, isolateIdentityReviews });
     await logWorkflowExecutionActivity({ workflowId, workflowType: 'enrichLeadWorkflow',
       status: result.success ? 'COMPLETED' : 'FAILED', output: result });
     return result;

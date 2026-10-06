@@ -56,6 +56,12 @@ it('backs off insufficient-credit errors without pretending the page completed',
   expect(mockActivities.saveCronStatusActivity).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'FAILED' }));
 });
 
+it('settles organization review diagnostics without a retry cooldown', async () => {
+  mockExecuteChild.mockResolvedValue({ ...result, success: false, errors: ['Ambiguous organization identity: UNITEC'] });
+  await icpMiningSliceWorkflow({ reservationId: 'reservation' });
+  expect(mockActivities.finishIcpDispatchActivity).toHaveBeenCalledWith(expect.objectContaining({ retryAfterSeconds: 0 }));
+});
+
 it('publishes the database cooldown after exponential backoff instead of an optimistic five-minute time', async () => {
   mockActivities.finishIcpDispatchActivity.mockResolvedValue({ success: true, next_eligible_at: '2026-10-03T08:00:00Z' });
   await icpMiningSliceWorkflow({ reservationId: 'reservation' });
@@ -80,4 +86,33 @@ it('limits candidates independently from matches and preserves the remaining pag
   expect(page).toMatchObject({ processed: 2, foundMatches: 0, pageCompleted: false,
     checkpoint: { processed: 2, offset: 2, snapshot } });
   expect(deps.enrich).toHaveBeenCalledTimes(2);
+});
+
+it('continues past a durably deferred candidate without counting it as a match', async () => {
+  const snapshot = { page: 0, candidates: [{ person: { id: 1 } }, { person: { id: 2 } }], hasMore: false };
+  const deps: any = { getSegmentIdFromRoleQueryActivity: jest.fn().mockResolvedValue({ success: true }),
+    enrich: jest.fn().mockResolvedValueOnce({ success: true, outcome: 'needs_review', personId: 'person', errors: [],
+      identityReviews: [{ id: 'site:31', site_id: 'site', selected: true, status: 'pending',
+        error: 'Ambiguous organization identity: Acme' }] })
+      .mockResolvedValueOnce({ success: true, outcome: 'matched', leadId: 'lead', errors: [] }),
+    checkpointIcpMiningExecutionActivity: jest.fn().mockResolvedValue({ success: true }) };
+  const page = await processPageSafely({ site_id: 'site', userId: 'user', role_query_id: 'role', icp_mining_id: 'list',
+    page: 0, page_size: 10, snapshot, max_candidates: 2, max_matches: 2,
+    execution: { run_id: 'run', version: 0, processed: 0, found: 0 } }, deps);
+  expect(page).toMatchObject({ processed: 2, foundMatches: 1, pageCompleted: true, retryableFailure: false,
+    errors: ['Ambiguous organization identity: Acme'], checkpoint: { processed: 2, found: 1, page: 1, offset: 0 } });
+  expect(deps.enrich).toHaveBeenCalledTimes(2);
+});
+
+it('does not advance an unpersisted or cross-site review outcome', async () => {
+  for (const identityReviews of [undefined, [{ id: 'other:31', site_id: 'other', selected: true, status: 'pending' }]]) {
+    const deps: any = { getSegmentIdFromRoleQueryActivity: jest.fn().mockResolvedValue({ success: true }),
+      enrich: jest.fn().mockResolvedValue({ success: true, outcome: 'needs_review', personId: 'person', errors: [], identityReviews }),
+      checkpointIcpMiningExecutionActivity: jest.fn() };
+    const page = await processPageSafely({ site_id: 'site', userId: 'user', role_query_id: 'role', icp_mining_id: 'list',
+      page: 0, page_size: 10, snapshot: { page: 0, candidates: [{ person: { id: 1 } }], hasMore: false },
+      execution: { run_id: 'run', version: 0, processed: 0, found: 0 } }, deps);
+    expect(page).toMatchObject({ processed: 0, foundMatches: 0, retryableFailure: true, checkpoint: { offset: 0 } });
+    expect(deps.checkpointIcpMiningExecutionActivity).not.toHaveBeenCalled();
+  }
 });

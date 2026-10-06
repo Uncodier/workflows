@@ -1,3 +1,5 @@
+import { isIcpOrganizationIdentityError } from './icpIdentityReview';
+
 /** A list candidate with a snapshot of its site's shared daily dispatch budget. */
 export interface IcpDispatchCandidate {
   siteId: string;
@@ -157,16 +159,18 @@ export function selectIcpDispatchCandidates<T extends IcpDispatchCandidate>(
  * Returns a base cooldown in seconds, not an exponentially increased duration.
  * The optional failures argument is accepted for callers that have a failure
  * count, but SQL/API owns the 5-minute-to-6-hour backoff to avoid applying it twice.
+ * Identity-only diagnostics return zero: their durable reviews need resolution,
+ * not a time delay. The dispatcher still runs on its normal five-minute schedule.
  */
 export function classifyIcpDispatchCooldown(errors: readonly string[], failures?: number): number {
   void failures;
-  const needsLongCooldown = errors.some(error => {
+  const retryableErrors = errors.filter(error => !isIcpOrganizationIdentityError(error));
+  if (errors.length > 0 && retryableErrors.length === 0) return 0;
+  const needsLongCooldown = retryableErrors.some(error => {
     const normalized = error.toLowerCase().replace(/[_-]+/g, ' ');
     return /\b(?:402|http\s*402|insufficient\s*(?:funds|credits?))\b/.test(normalized)
       || /\b(?:no|not enough|out of)\s+credits?\b/.test(normalized)
       || /\bcredits?\s+(?:balance\s+)?(?:exhausted|depleted|insufficient)\b/.test(normalized)
-      || /\bambiguous\s*(?:org|organization|organisation)\b/.test(normalized)
-      || /\b(?:organization|organisation|org)\b.*\bambiguous\b/.test(normalized)
       || /\bsubmission\s*(?:(?:status|outcome)\s+(?:is\s+)?)?unknown\b/.test(normalized)
       || /\bunknown\s*submission\b/.test(normalized)
       || /\bambiguous\s+(?:initial\s+)?submission\b/.test(normalized);

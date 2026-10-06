@@ -2,6 +2,7 @@ import { apiService } from '../services/apiService';
 import { getSupabaseService } from '../services';
 import { normalizeIcpMiningListIds } from '../utils/icpMiningConfiguration';
 import { ICP_MINING_WORKFLOW_SELECT, IcpMiningWorkflowDto, toIcpMiningWorkflowDto } from '../utils/icpMiningPayload';
+import { isIcpOrganizationIdentityError, type IcpOrganizationReview } from '../utils/icpIdentityReview';
 import {
   FinderData, contactValues, domainOf, finderCompanyRecord, finderLeadProfile, finderPersonRecord,
   finderResponseError, hasData, mergeFinderData, normalizeFinderPerson, personPersistencePayload, selectFinderRole,
@@ -1292,7 +1293,9 @@ export async function upsertFinderCompanyActivity(options: { organization: Finde
  */
 export async function prepareFinderPersonActivity(options: {
   person_id?: string; linkedin_profile?: string; site_id: string; company_name?: string; source_search_result: FinderData;
-}): Promise<{ success: boolean; person?: any; role?: any; companyId?: string; errors: string[]; error?: string }> {
+  isolate_identity_reviews?: boolean;
+}): Promise<{ success: boolean; person?: any; role?: any; companyId?: string; errors: string[]; error?: string;
+  identityReviews?: IcpOrganizationReview[]; requiresIdentityReview?: boolean }> {
   const errors: string[] = [];
   try {
     if (!await getSupabaseService().getConnectionStatus()) throw new Error('Database not available');
@@ -1360,13 +1363,31 @@ export async function prepareFinderPersonActivity(options: {
     }
     if (raw.organization?.name && !organizations.some(o => o.name === raw.organization.name)) organizations.push(raw.organization);
     let companyId: string | undefined;
+    const identityReviews: IcpOrganizationReview[] = [];
     for (const org of organizations) {
-      const result = await upsertFinderCompanyActivity({ organization: org });
-      if (!result.success || !result.company?.id) throw new Error(result.error || `Company ${org.name} was not saved`);
       const selected = role?.organization;
-      if ((selected?.id != null && String(selected.id) === String(org.id))
+      const isSelected = (selected?.id != null && String(selected.id) === String(org.id))
         || (selected?.id == null && (selected?.name || role?.organization_name) === org.name)
-        || (!role && raw.organization === org)) companyId = result.company.id;
+        || (!role && raw.organization === org);
+      const result = await upsertFinderCompanyActivity({ organization: org });
+      if (!result.success || !result.company?.id) {
+        const message = result.error || `Company ${org.name} was not saved`;
+        if (!options.isolate_identity_reviews || !isIcpOrganizationIdentityError(message)) throw new Error(message);
+        // Keep the exact provider document; never choose an arbitrary company.
+        // A site-scoped stable ID deduplicates retries on the per-role person row.
+        identityReviews.push({ id: `${options.site_id}:${org.id ?? org.name}`, site_id: options.site_id,
+          organization: org, selected: isSelected, status: 'pending', error: message });
+        continue;
+      }
+      if (isSelected) companyId = result.company.id;
+    }
+    if (identityReviews.length > 0) {
+      const reviewed = await upsertPersonActivity({ id: saved.person.id,
+        raw_result: mergeFinderData(raw, { icp_organization_identity_reviews: identityReviews }) });
+      if (!reviewed.success || !reviewed.person?.id) throw new Error(reviewed.error || 'Organization reviews were not saved');
+      // Only acknowledge the deferred candidate after its review is durable.
+      return { success: true, person: reviewed.person, role, companyId, errors, identityReviews,
+        requiresIdentityReview: identityReviews.some(review => review.selected) };
     }
     return { success: true, person: saved.person, role, companyId, errors };
   } catch (error) {

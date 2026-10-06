@@ -30,6 +30,7 @@ describe('ICP dispatcher isolated SQL', () => {
           await db.exec(read('tests/icp-dispatcher-schema-fixture.sql'));
           await db.exec(read('supabase/migrations/20260929230000_icp_mining_execution_checkpoints.sql'));
           await db.exec(read('supabase/migrations/20261002010000_icp_dispatcher.sql'));
+          await db.exec(read('supabase/migrations/20261006230000_icp_identity_reviews_no_cooldown.sql'));
           const parts = read('tests/icp-dispatcher.sql').split(/^-- case: /m);
           await db.exec(parts.shift());
           const passed = [];

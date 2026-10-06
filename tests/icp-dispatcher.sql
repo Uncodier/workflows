@@ -401,6 +401,36 @@ BEGIN
 END $$;
 ROLLBACK;
 
+-- case: identity reviews retain diagnostics but never add cooldown or exponential failures
+BEGIN;
+DO $$
+DECLARE response jsonb; d public.icp_dispatch_runs; owner uuid := pg_temp.test_uuid(1001);
+BEGIN
+  response := pg_temp.reserve(1);
+  SELECT * INTO d FROM public.icp_dispatch_runs WHERE id = (response->'reservation'->>'id')::uuid;
+  PERFORM public.begin_icp_dispatch(d.id, owner, d.workflow_id);
+  UPDATE public.icp_dispatch_site_state SET consecutive_failures = 21 WHERE site_id = d.site_id;
+  UPDATE public.icp_dispatch_list_state SET failure_count = 21 WHERE icp_mining_id = d.icp_mining_id;
+  PERFORM public.checkpoint_icp_mining_execution(d.icp_mining_id, d.site_id, owner, 1, 2, 1, 0, 2, 1000, 'pending', NULL);
+  -- Ignore a stale old worker's six-hour hint for identity-only diagnostics.
+  PERFORM public.finish_icp_dispatch(d.id, owner, '["Ambiguous organization identity: UNITEC", "AMBIGUOUS_ORG", "Cannot resolve organization identity: Acme"]', 21600);
+  ASSERT (SELECT next_eligible_at = x.updated_at AND consecutive_failures = 0
+    FROM public.icp_dispatch_site_state s CROSS JOIN public.icp_dispatch_runs x WHERE s.site_id = d.site_id AND x.id = d.id);
+  ASSERT (SELECT next_eligible_at = x.updated_at AND failure_count = 0
+    FROM public.icp_dispatch_list_state s CROSS JOIN public.icp_dispatch_runs x WHERE s.icp_mining_id = d.icp_mining_id AND x.id = d.id);
+  ASSERT (SELECT x.state = 'settled' AND x.processed = 2 AND x.found = 1 AND x.error IS NOT NULL AND x.reserved_candidates = 10
+    FROM public.icp_dispatch_runs x WHERE x.id = d.id);
+  response := pg_temp.reserve(1, '-mixed');
+  SELECT * INTO d FROM public.icp_dispatch_runs WHERE id = (response->'reservation'->>'id')::uuid;
+  owner := pg_temp.test_uuid(1002);
+  PERFORM public.begin_icp_dispatch(d.id, owner, d.workflow_id);
+  PERFORM public.checkpoint_icp_mining_execution(d.icp_mining_id, d.site_id, owner, 1, 2, 1, 0, 2, 1000, 'pending', NULL);
+  PERFORM public.finish_icp_dispatch(d.id, owner, '["Ambiguous organization identity: UNITEC", "HTTP 503"]', 300);
+  ASSERT (SELECT next_eligible_at = x.updated_at + interval '5 minutes' AND consecutive_failures = 1
+    FROM public.icp_dispatch_site_state s CROSS JOIN public.icp_dispatch_runs x WHERE s.site_id = d.site_id AND x.id = d.id);
+END $$;
+ROLLBACK;
+
 -- case: service-only ACL/RLS, operator config updates and common lock ordering
 BEGIN;
 DO $$

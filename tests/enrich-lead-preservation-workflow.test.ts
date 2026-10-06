@@ -55,6 +55,37 @@ describe('enrichLeadWorkflow source-aware persistence', () => {
     expect(mockActivities.callPersonContactsLookupDetailsActivity).not.toHaveBeenCalled();
   });
 
+  it('isolates employer review without buying contacts or associating a lead', async () => {
+    const identityReviews = [{ id: 'site:31', site_id: 'site', organization: source.organization,
+      selected: true, status: 'pending', error: 'Ambiguous organization identity: Acme' }];
+    mockActivities.prepareFinderPersonActivity.mockResolvedValue({ success: true, person, errors: [],
+      requiresIdentityReview: true, identityReviews });
+    expect(await enrichLeadWorkflow({ person_id: '11', site_id: 'site', source_search_result: source, validated_contact_policy: true }))
+      .toMatchObject({ success: true, outcome: 'needs_review', personId: person.id, identityReviews, errors: [] });
+    expect(mockActivities.prepareFinderPersonActivity).toHaveBeenCalledWith(expect.objectContaining({ isolate_identity_reviews: true }));
+    for (const name of ['checkExistingLeadForPersonActivity', 'lookEmailOnIcyPeas', 'callPersonWorkEmailsActivity',
+      'callPersonContactsLookupPersonalEmailsActivity', 'callPersonContactsLookupPhoneNumbersActivity', 'upsertLeadForPersonActivity']) {
+      expect(mockActivities[name]).not.toHaveBeenCalled();
+    }
+    expect(mockExecuteChild).not.toHaveBeenCalled();
+  });
+
+  it('keeps secondary identity reviews out of contact errors and returns the saved lead', async () => {
+    const identityReviews = [{ id: 'site:32', site_id: 'site', organization: { name: 'University' },
+      selected: false, status: 'pending', error: 'Ambiguous organization identity: University' }];
+    mockActivities.prepareFinderPersonActivity.mockResolvedValue({ success: true, person, role: person.raw_result.roles[0],
+      companyId: 'correct-company', errors: [], requiresIdentityReview: false, identityReviews });
+    expect(await enrichLeadWorkflow({ person_id: '11', site_id: 'site', source_search_result: source, validated_contact_policy: true }))
+      .toMatchObject({ success: true, outcome: 'matched', leadId: 'saved-lead', identityReviews, errors: [] });
+    expect(mockActivities.upsertLeadForPersonActivity).toHaveBeenCalledWith(expect.objectContaining({ company_id: 'correct-company' }));
+  });
+
+  it('keeps preparation payload unchanged for histories without the review-isolation patch', async () => {
+    mockPatched.mockImplementation(id => id !== 'icp-isolate-organization-reviews-v1');
+    await enrichLeadWorkflow({ person_id: '11', site_id: 'site', source_search_result: source, validated_contact_policy: true });
+    expect(mockActivities.prepareFinderPersonActivity.mock.calls[0][0]).not.toHaveProperty('isolate_identity_reviews');
+  });
+
   it('returns optional provider errors alongside a successfully persisted existing lead', async () => {
     mockActivities.prepareFinderPersonActivity.mockResolvedValue({ success: true, person, companyId: 'company', errors: ['Details lookup: quota exceeded'] });
     const result = await enrichLeadWorkflow({ person_id: '11', site_id: 'site', source_search_result: source });

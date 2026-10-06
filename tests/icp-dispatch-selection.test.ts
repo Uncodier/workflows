@@ -434,9 +434,6 @@ describe('classifyIcpDispatchCooldown', () => {
     'No credits remaining',
     'Out of credits',
     'Credit balance exhausted',
-    'Ambiguous organization identity: ACME',
-    'AMBIGUOUS_ORG',
-    'Organization identity is ambiguous',
     'SUBMISSION_UNKNOWN',
     'submissionUnknown',
     'Unknown submission',
@@ -444,6 +441,17 @@ describe('classifyIcpDispatchCooldown', () => {
     'Ambiguous initial submission',
   ])('uses six hours for credit or reconciliation failures: %s', error => {
     expect(classifyIcpDispatchCooldown([error])).toBe(21600);
+  });
+
+  it.each(['Ambiguous organization identity: ACME', 'AMBIGUOUS_ORG',
+    'Organization identity is ambiguous', 'Cannot resolve organization identity: ACME'])
+  ('does not assign a cooldown for identity review: %s', error => {
+    expect(classifyIcpDispatchCooldown([error], 21)).toBe(0);
+  });
+
+  it('retains backoff for a real transient or credit failure alongside a review', () => {
+    expect(classifyIcpDispatchCooldown(['Ambiguous organization identity: ACME', 'HTTP 503'])).toBe(300);
+    expect(classifyIcpDispatchCooldown(['AMBIGUOUS_ORG', 'INSUFFICIENT_FUNDS'])).toBe(21600);
   });
 
   it('chooses the longest base across errors without modifying the array', () => {

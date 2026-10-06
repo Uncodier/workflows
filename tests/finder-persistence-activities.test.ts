@@ -259,6 +259,46 @@ describe('Finder persistence activities with mocked database boundary', () => {
     expect(result).toMatchObject({ success: false, error: 'company permission denied', errors: ['company permission denied'] });
   });
 
+  it('durably records ambiguous education without blocking the selected employer', async () => {
+    const university = { id: 32, name: 'Universidad Tecnológica de México', domain: 'unitec.mx' };
+    const source = { id: 21, person: { id: 11, full_name: 'Ada' }, organization: { id: 31, name: 'Employer', domain: 'employer.test' } };
+    mockPost.mockResolvedValue({ success: true, data: { id: 11, educations: [{ organization: university }] } });
+    mockReplies.push(row(null), row(null), row({ id: 'person' }), row([]), row([]), row({ id: 'employer' }),
+      row([{ id: 'campus', website: 'https://unitec.mx/campus-marina/' }, { id: 'university', website: 'https://unitec.mx/' }]),
+      row({ id: 'person', raw_result: {} }), row({ id: 'person' }));
+    const result = await prepareFinderPersonActivity({ person_id: '11', site_id: 'site', source_search_result: source,
+      isolate_identity_reviews: true });
+    expect(result).toMatchObject({ success: true, companyId: 'employer', requiresIdentityReview: false, errors: [],
+      identityReviews: [{ site_id: 'site', selected: false, status: 'pending', organization: university }] });
+    expect(mockQueries.at(-1).write.payload.raw_result).toMatchObject({
+      educations: [{ organization: university }],
+      icp_organization_identity_reviews: [{ id: 'site:32', status: 'pending', selected: false }],
+    });
+    expect(mockReplies).toHaveLength(0);
+  });
+
+  it('defers an ambiguous employer only after saving the pending review', async () => {
+    mockPost.mockResolvedValue({ success: true, data: { id: 11 } });
+    mockReplies.push(row(null), row(null), row({ id: 'person' }),
+      row([{ id: 'a', website: 'acme.test' }, { id: 'b', website: 'https://acme.test' }]),
+      row({ id: 'person', raw_result: {} }), row({ id: 'person' }));
+    const result = await prepareFinderPersonActivity({ person_id: '11', site_id: 'site', isolate_identity_reviews: true,
+      source_search_result: { id: 21, person: { id: 11 }, organization: { id: 31, name: 'Acme', domain: 'acme.test' } } });
+    expect(result).toMatchObject({ success: true, requiresIdentityReview: true, errors: [],
+      identityReviews: [{ id: 'site:31', selected: true, status: 'pending' }] });
+    expect(result.companyId).toBeUndefined();
+    expect(mockQueries.filter(q => q.table === 'companies').some(q => q.write)).toBe(false);
+  });
+
+  it('does not acknowledge a review when its durable save fails', async () => {
+    mockPost.mockResolvedValue({ success: true, data: { id: 11 } });
+    mockReplies.push(row(null), row(null), row({ id: 'person' }),
+      row([{ id: 'a', website: 'acme.test' }, { id: 'b', website: 'acme.test' }]), failure('review read denied'));
+    expect(await prepareFinderPersonActivity({ person_id: '11', site_id: 'site', isolate_identity_reviews: true,
+      source_search_result: { id: 21, person: { id: 11 }, organization: { id: 31, name: 'Acme', domain: 'acme.test' } } }))
+      .toMatchObject({ success: false, error: 'review read denied' });
+  });
+
   it('does not rewrite another role person row when details selects a different role', async () => {
     mockReplies.push(row({ id: 'old-role-person', external_person_id: 11, external_role_id: 9, created_at: '2020-01-01', raw_result: {} }),
       row(null), row({ id: 'new-role-person' }));

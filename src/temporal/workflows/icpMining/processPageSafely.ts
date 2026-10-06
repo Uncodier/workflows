@@ -80,11 +80,17 @@ export async function processPageSafely(options: IdealClientProfilePageSearchOpt
       } catch (error) {
         errors.push(`Enrichment failed: ${String(error)}`); retryableFailure = true; break;
       }
-      if (!result.success || (!result.leadId && result.outcome !== 'no_match')) {
+      const durableReview = result.outcome === 'needs_review' && !!result.personId && !result.leadId
+        && result.identityReviews?.some(review => review.site_id === options.site_id && review.selected
+          && review.status === 'pending' && !!review.id);
+      if (!result.success || (!result.leadId && result.outcome !== 'no_match' && !durableReview)) {
         errors.push(...(result.errors.length ? result.errors : ['Enrichment did not persist a result']));
         retryableFailure = true; break;
       }
       errors.push(...result.errors);
+      // Reviews were saved on the person before enrichment acknowledged them.
+      // Advance the scan, not the match count; review is not a definitive no-match.
+      errors.push(...(result.identityReviews || []).map(review => review.error));
       if (result.leadId) {
         let researchFailed = false;
         if (options.research_enabled) {

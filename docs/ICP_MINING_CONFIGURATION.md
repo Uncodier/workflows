@@ -107,10 +107,42 @@ same Temporal workflow ID; an ambiguous start never releases its reservation.
 The existing execution checkpoint RPC is fenced by the reserved candidate/match
 amounts before any progress write. A normal result releases ownership, settles
 actual found matches from database counters, then permits the next turn after at
-least five minutes. Repeated failures back off exponentially to six hours; missing
-credits, ambiguous company identities and unknown provider submissions start at
-six hours. Settlement publishes the authoritative earliest next eligible time to
+least five minutes. Repeated transient failures back off exponentially to six hours;
+missing credits and unknown provider submissions start at six hours. Organization
+identity reviews do not generate a cooldown or increase failure counters. Settlement
+publishes the authoritative earliest next eligible time to
 `cron_status.next_run`; that is an eligibility time, not guaranteed admission.
+
+### Organization identity reviews (no site cooldown)
+
+New enrichment runs use Temporal patch `icp-isolate-organization-reviews-v1`.
+An unresolved or ambiguous organization is not associated with an arbitrary local
+company. The exact provider document and a stable site/organization review ID are
+saved in `persons.raw_result.icp_organization_identity_reviews`, with `status: pending`
+and `selected` indicating whether it is the candidate's target employer. Repeated
+preparation merges the same ID rather than creating duplicate reviews.
+
+- A secondary employer/education review does not prevent contact enrichment for
+  the selected employer. Raw role/education data is retained.
+- A selected employer review returns `outcome: needs_review` only after persistence
+  is acknowledged. The scan continues without buying contacts for that candidate,
+  creating a lead, or incrementing matches. Scanned/deferred is not `no_match`.
+- Page/checkpoint diagnostics retain the review errors. A failed review save,
+  unrelated database failure, provider failure or pending paid search still holds
+  the cursor for safe retry. Other transient errors in the same slice retain backoff.
+- Apply `supabase/migrations/20261006230000_icp_identity_reviews_no_cooldown.sql`
+  before deploying the worker. The settlement RPC ignores legacy six-hour hints
+  for identity-only errors and excludes these errors from exponential failure
+  counters, without changing ownership, quotas, ACLs or start reconciliation.
+- There is no mining-specific support delivery endpoint in this checkout. Pending
+  reviews are durable diagnostics, **not** sent support tickets/emails. The API's
+  requirement harness escalation requires its own circuit-break evidence and must
+  not be called with fabricated requirement/repair data. Support delivery and
+  controlled retry of a reviewed candidate remain separate integrations.
+
+This source change does not clear previously stored cooldowns, replay completed
+activities, deploy a worker, or update production. Existing eligibility timestamps
+must be reviewed separately; it never steals an active reservation.
 
 **Crash safety:** thrown child/checkpoint failures retain the reservation and
 ownership. No timed lease steals it. These require explicit reconciliation after
