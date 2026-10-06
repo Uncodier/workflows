@@ -13,11 +13,15 @@ verificaciones individuales mediante HTTPS con `mode=power`.
 
 ## Política de resultados
 
-En las nuevas ejecuciones de generación ICP, los correos obtenidos de Finder o
+En las nuevas ejecuciones de minado ICP, los correos obtenidos de Finder o
 IcyPeas no se revalidan con Reoon: se conservan los controles de formato y el
 rechazo de estados explícitamente inválidos. Solo el fallback de correo generado
-con IA requiere esa verificación. Véase la política y compatibilidad Temporal en
-[ICP_MINING_CONFIGURATION.md](./ICP_MINING_CONFIGURATION.md#provider-emails-versus-ai-generated-emails).
+con IA requiere esa verificación en historiales antiguos. Las nuevas ejecuciones
+ICP ya no invocan ese fallback: tras agotar los proveedores sin correo ni teléfono
+utilizable, guardan el resultado sin contacto y pasan al siguiente candidato.
+El generador y el validador siguen disponibles para otros usos. Véase la política
+y compatibilidad Temporal en
+[ICP_MINING_CONFIGURATION.md](./ICP_MINING_CONFIGURATION.md#provider-only-contacts-in-new-icp-executions).
 Esto no desactiva el validador compartido ni los controles de outreach.
 
 | Resultado Power Mode | Tratamiento |

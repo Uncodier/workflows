@@ -200,7 +200,7 @@ not a claim about Forager's account quota; verify provider capacity before raisi
 further. Provider billing is separately documented in
 [Forager API Credit Pricing](https://docs.forager.ai/api-overview/credit-pricing).
 
-### Provider emails versus AI-generated emails
+### Provider-only contacts in new ICP executions
 
 New ICP enrichment executions accept Finder and IcyPeas email results without
 revalidating them through Reoon. This includes work/personal emails and cached
@@ -211,9 +211,20 @@ apply; a provider response is not permission to revive a known-invalid address.
 Previously verified lead primaries remain eligible. A legacy lead email with no
 provider contact evidence or prior verification is not assumed to be a provider
 result; enrichment continues to the provider cascade rather than revalidating it.
-AI generation remains the last fallback, and only its `validatedEmail` is eligible:
-the generation child must confirm validity and deliverability through
-`validateEmailWorkflow`. Unvalidated `generatedEmails` are never promoted.
+The cascade stops at IcyPeas email discovery, Finder/Forager work emails,
+personal emails and phone numbers, short-circuiting once a usable contact exists.
+New ICP executions do **not** call the AI email-generation fallback. A phone-only
+contact still creates/enriches a lead. If all provider lookups finish without a
+usable contact, the person/provider responses are saved and enrichment returns
+`success: true, outcome: 'no_match'`: the page checkpoints that candidate as
+processed, without increasing found matches, and continues with the next one.
+Pending IcyPeas searches, provider/credit failures and failed persistence are not
+no-matches; they retain the existing retry/checkpoint safeguards.
+
+The generator code and workflow registration remain available for other uses and
+historical replays. Historical generation children only accept `validatedEmail`
+confirmed through `validateEmailWorkflow`. Unvalidated `generatedEmails` are
+never promoted, including guesses stored by a previous enrichment attempt.
 
 The existing `emailVerified`, `validated_contacts` and result `validation_status`
 fields represent acceptance by the contact policy, not proof of a new Reoon check
@@ -224,6 +235,13 @@ The Temporal patch `icp-provider-email-trust-v1` preserves the Reoon activity
 sequence for histories without that marker. Deploy the worker for new executions
 to use provider trust. It does not reset pending-list cooldowns or replay completed
 activities with new results. No database migration or automatic restart is required.
+
+The Temporal patch `icp-provider-only-contacts-v1` removes the generation step from
+new ICP enrichment runs while preserving the child-workflow commands in recorded
+histories without the marker. Deploy the worker to activate it. Existing cooldowns
+are not reset, completed candidates are not reprocessed, and already-started
+historical generation workflows are not canceled by this source change. Non-ICP
+enrichment and the shared email validator are unchanged.
 
 ### IcyPeas asynchronous email discovery
 

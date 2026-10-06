@@ -115,10 +115,13 @@ export async function enrichLeadWorkflow(
     // Old histories scheduled Reoon activities for provider emails. Keep that
     // command sequence on replay; new executions trust the discovery provider.
     const trustProviderEmails = patched('icp-provider-email-trust-v1');
+    // New ICP runs stop at provider contacts. Keep the generation child only
+    // for recorded histories that already used the paid fallback.
+    const providerOnlyContacts = patched('icp-provider-only-contacts-v1');
     const result = await enrichWithValidatedContacts(options, { prepareFinderPersonActivity, checkExistingLeadForPersonActivity,
       validateContactInformation, lookEmailOnIcyPeas: lookupIcyPeas, callPersonWorkEmailsActivity, callPersonContactsLookupPersonalEmailsActivity,
       callPersonContactsLookupPhoneNumbersActivity, upsertPersonActivity, upsertLeadForPersonActivity,
-      generateEmail: params => executeChild(generatePersonEmailWorkflow, {
+      generateEmail: providerOnlyContacts ? undefined : params => executeChild(generatePersonEmailWorkflow, {
         workflowId: `generate-email-icp-${params.person_id}-${site_id}`, args: [params],
       }),
     }, { trustProviderEmails });

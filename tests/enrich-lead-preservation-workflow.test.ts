@@ -12,6 +12,8 @@ jest.mock('@temporalio/workflow', () => ({
 jest.mock('../src/temporal/workflows/generatePersonEmailWorkflow', () => ({ generatePersonEmailWorkflow: jest.fn() }));
 
 import { enrichLeadWorkflow } from '../src/temporal/workflows/enrichLeadWorkflow';
+import { processPageSafely } from '../src/temporal/workflows/icpMining/processPageSafely';
+import { generatePersonEmailWorkflow } from '../src/temporal/workflows/generatePersonEmailWorkflow';
 
 const source = { id: 21, person: { id: 11, full_name: 'Ada' }, organization: { id: 31, name: 'Acme', domain: 'acme.test' } };
 const person = { id: 'local-person', external_person_id: 11, external_role_id: 21, full_name: 'Ada', company_name: 'Acme',
@@ -126,5 +128,78 @@ describe('enrichLeadWorkflow source-aware persistence', () => {
     if (enabled) expect(mockActivities.validateContactInformation).not.toHaveBeenCalled();
     else expect(mockActivities.validateContactInformation).toHaveBeenCalledTimes(2);
     expect(mockExecuteChild).not.toHaveBeenCalled();
+  });
+
+  function withoutContacts() {
+    mockActivities.prepareFinderPersonActivity.mockResolvedValue({ success: true,
+      person: { ...person, emails: [], phones: [], personal_emails: [], raw_result: { finder_search_result: source } },
+      role: { organization: source.organization }, companyId: 'company', errors: [] });
+  }
+
+  it('finishes a provider-only ICP no-match without generation or Reoon calls', async () => {
+    withoutContacts();
+    expect(await enrichLeadWorkflow({ person_id: '11', site_id: 'site', source_search_result: source, validated_contact_policy: true }))
+      .toMatchObject({ success: true, outcome: 'no_match', errors: [] });
+    expect(mockPatched).toHaveBeenCalledWith('icp-provider-only-contacts-v1');
+    for (const name of ['lookEmailOnIcyPeas', 'callPersonWorkEmailsActivity',
+      'callPersonContactsLookupPersonalEmailsActivity', 'callPersonContactsLookupPhoneNumbersActivity']) {
+      expect(mockActivities[name]).toHaveBeenCalledTimes(1);
+    }
+    expect(mockExecuteChild).not.toHaveBeenCalled();
+    expect(mockActivities.validateContactInformation).not.toHaveBeenCalled();
+    expect(mockActivities.upsertLeadForPersonActivity).not.toHaveBeenCalled();
+    expect(mockActivities.logWorkflowExecutionActivity).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'COMPLETED' }));
+  });
+
+  it('still saves a phone-only provider match without generating an email', async () => {
+    withoutContacts();
+    mockActivities.callPersonContactsLookupPhoneNumbersActivity.mockResolvedValue({ success: true, phoneNumbers: [{ phone_number: '+14155551234' }] });
+    expect(await enrichLeadWorkflow({ person_id: '11', site_id: 'site', source_search_result: source, validated_contact_policy: true }))
+      .toMatchObject({ success: true, outcome: 'matched', leadId: 'saved-lead', errors: [] });
+    expect(mockActivities.upsertLeadForPersonActivity).toHaveBeenCalledWith(expect.objectContaining({ phone: '+14155551234', email: undefined }));
+    expect(mockExecuteChild).not.toHaveBeenCalled();
+    expect(mockActivities.validateContactInformation).not.toHaveBeenCalled();
+  });
+
+  it('does not mistake a provider failure for a definitive no-match', async () => {
+    withoutContacts();
+    mockActivities.callPersonWorkEmailsActivity.mockResolvedValue({ success: false, error: 'HTTP 402 INSUFFICIENT_CREDITS' });
+    expect(await enrichLeadWorkflow({ person_id: '11', site_id: 'site', source_search_result: source, validated_contact_policy: true }))
+      .toMatchObject({ success: false, errors: ['HTTP 402 INSUFFICIENT_CREDITS'] });
+    expect(mockExecuteChild).not.toHaveBeenCalled();
+    expect(mockActivities.upsertLeadForPersonActivity).not.toHaveBeenCalled();
+  });
+
+  it('keeps the generation child for ICP histories without the provider-only patch', async () => {
+    withoutContacts();
+    mockPatched.mockImplementation(id => id !== 'icp-provider-only-contacts-v1');
+    mockExecuteChild.mockResolvedValue({ success: false, outcome: 'retryable_error', error: 'Reoon has no available verification credits' });
+    expect(await enrichLeadWorkflow({ person_id: '11', site_id: 'site', source_search_result: source, validated_contact_policy: true }))
+      .toMatchObject({ success: false, errors: ['Reoon has no available verification credits'] });
+    expect(mockExecuteChild).toHaveBeenCalledWith(generatePersonEmailWorkflow, expect.objectContaining({
+      workflowId: 'generate-email-icp-local-person-site', args: [expect.objectContaining({ reportOutcome: true })],
+    }));
+  });
+
+  it('checkpoints a provider no-match and moves on to the next candidate in the same slice', async () => {
+    withoutContacts();
+    mockActivities.callPersonWorkEmailsActivity.mockResolvedValueOnce({ success: true, emails: [] })
+      .mockResolvedValueOnce({ success: true, emails: ['next@acme.test'] });
+    const enrich = jest.fn((options: Parameters<typeof enrichLeadWorkflow>[0]) => enrichLeadWorkflow(options));
+    const checkpoint = jest.fn().mockResolvedValue({ success: true });
+    const result = await processPageSafely({ site_id: 'site', userId: 'user', role_query_id: 'role', icp_mining_id: 'list',
+      page: 0, page_size: 10, max_candidates: 2, max_matches: 1,
+      snapshot: { page: 0, candidates: [source, { ...source, person: { id: 12, full_name: 'Next Person' } }], hasMore: false },
+      execution: { run_id: 'run', version: 0, processed: 0, found: 0 },
+    }, { enrich, checkpointIcpMiningExecutionActivity: checkpoint,
+      getSegmentIdFromRoleQueryActivity: jest.fn().mockResolvedValue({ success: true }),
+    } as any);
+    expect(result).toMatchObject({ success: true, processed: 2, foundMatches: 1, pageCompleted: true, errors: [],
+      checkpoint: { processed: 2, found: 1, page: 1, offset: 0, snapshot: null } });
+    expect(enrich.mock.calls.map(([options]) => options.person_id)).toEqual(['11', '12']);
+    expect(checkpoint).toHaveBeenNthCalledWith(1, expect.objectContaining({ processed: 1, found: 0, offset: 1 }));
+    expect(mockActivities.upsertLeadForPersonActivity).toHaveBeenCalledTimes(1);
+    expect(mockExecuteChild).not.toHaveBeenCalled();
+    expect(mockActivities.validateContactInformation).not.toHaveBeenCalled();
   });
 });

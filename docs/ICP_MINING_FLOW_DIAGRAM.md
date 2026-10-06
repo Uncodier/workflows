@@ -1,6 +1,13 @@
 # ICP Mining Workflow - Person to Lead Flow Diagram
 
 ## Overview
+> This is a historical diagram. New dispatcher-owned ICP executions use the
+> [provider-only contact cascade](./ICP_MINING_CONFIGURATION.md#provider-only-contacts-in-new-icp-executions):
+> IcyPeas, Forager work/personal emails, then phones. They do not generate email
+> guesses; a definitive no-contact result advances to the next candidate. A usable
+> phone is sufficient for lead creation. The generator remains for historical
+> replays and other workflows.
+
 This diagram shows the complete flow from person discovery to lead creation in the Ideal Client Profile Mining workflow.
 
 ## Flow Diagram
