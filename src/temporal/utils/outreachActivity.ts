@@ -1,9 +1,10 @@
-export type OutreachActivityKey = 'leads_initial_cold_outreach' | 'leads_follow_up';
+export type OutreachActivityKey = 'leads_initial_cold_outreach' | 'leads_follow_up' | 'invoices_due';
 
 /** Recognize historical automatic messages as well as explicitly tagged new work. */
 export function resolveOutreachActivity(data: Record<string, any> | null | undefined): OutreachActivityKey | undefined {
   if (!data) return undefined;
-  if (data.outreach_activity === 'leads_initial_cold_outreach' || data.outreach_activity === 'leads_follow_up') {
+  if (data.outreach_activity === 'leads_initial_cold_outreach' || data.outreach_activity === 'leads_follow_up'
+    || data.outreach_activity === 'invoices_due') {
     return data.outreach_activity;
   }
   if (data.outreach_activity !== undefined) return undefined;

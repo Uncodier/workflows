@@ -62,6 +62,7 @@ import { pollSocialAnalyticsWorkflow } from './pollSocialAnalyticsWorkflow';
 import { dailyCreditRenewalWorkflow } from './dailyCreditRenewalWorkflow';
 import { processReservationsWorkflow } from './processReservationsWorkflow';
 import { processSubscriptionsWorkflow } from './processSubscriptionsWorkflow';
+import { processDueInvoicesWorkflow } from './processDueInvoicesWorkflow';
 import { processTasksWorkflow } from './processTasksWorkflow';
 
 // Export workflows individually
@@ -118,6 +119,7 @@ export * from './ingestSocialCommentWorkflow';
 export * from './pollSocialAnalyticsWorkflow';
 
 export * from './processSubscriptionsWorkflow';
+export * from './processDueInvoicesWorkflow';
 export * from './processTasksWorkflow';
 
 // Also export as a bundle for the client
@@ -180,6 +182,7 @@ export const workflows = {
   dailyCreditRenewalWorkflow,
   processReservationsWorkflow,
   processSubscriptionsWorkflow,
+  processDueInvoicesWorkflow,
   processTasksWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
@@ -249,6 +252,7 @@ export const workflowNames = {
   dailyCreditRenewalWorkflow: 'dailyCreditRenewalWorkflow',
   processReservationsWorkflow: 'processReservationsWorkflow',
   processSubscriptionsWorkflow: 'processSubscriptionsWorkflow',
+  processDueInvoicesWorkflow: 'processDueInvoicesWorkflow',
   processTasksWorkflow: 'processTasksWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',

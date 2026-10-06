@@ -8,6 +8,7 @@ export const WORKFLOW_ACTIVITY_KEYS: Record<string, string> = {
   idealClientProfileMiningWorkflow: 'icp_lead_generation',
   dailyProspectionWorkflow: 'leads_initial_cold_outreach',
   leadQualificationWorkflow: 'leads_follow_up',
+  processDueInvoicesWorkflow: 'invoices_due',
   syncEmailsWorkflow: 'email_sync',
 };
 

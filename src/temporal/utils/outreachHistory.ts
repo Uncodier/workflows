@@ -25,11 +25,13 @@ export function summarizeOutreachHistory(messages: OutreachMessage[]) {
   let lastSentAt = 0;
   const sent = new Set<string>();
   for (const message of messages) {
+    const data = message.custom_data || {};
+    // Collections do not count toward the prospecting sequence or mark buyers cold.
+    if (data.outreach_activity === 'invoices_due' || data.outreach_delivery?.activity === 'invoices_due') continue;
     const at = confirmedMessageTime(message);
     if (at === undefined) continue;
     lastSentAt = Math.max(lastSentAt, at);
     if (at <= lastInboundAt) continue;
-    const data = message.custom_data || {};
     const externalId = data.outreach_delivery?.provider_message_id || data.delivery?.details?.message_id || data.external_message_id || data.message_id;
     sent.add(externalId || message.id);
   }

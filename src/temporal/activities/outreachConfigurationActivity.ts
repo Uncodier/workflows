@@ -27,6 +27,9 @@ export async function getOutreachConfigurationActivity(params: {
   const settings = await getSupabaseService().fetchCompleteSettings([params.site_id]);
   const result = resolveOutreachConfiguration(settings[0], params.activity_key, new Date(), params.check_day !== false);
   if (!result.shouldExecute) return result;
+  // Invoice recipients are validated against their financial record by the API,
+  // never the unassigned/new lead audience or prospecting unanswered sequence.
+  if (params.activity_key === 'invoices_due') return result;
   const { supabaseServiceRole } = await import('../../lib/supabase/client');
   if (!result.allSegments) {
     const { data, error } = await supabaseServiceRole.from('segments').select('id')

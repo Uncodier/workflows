@@ -11,6 +11,7 @@ export async function selectOutreachLeads(params: {
   cursor?: { createdAt: string; id: string };
   waitMs: number;
 }) {
+  if (params.activity === 'invoices_due') throw new Error('Invoice reminders must select financial records, not prospecting leads');
   const config = await getOutreachConfigurationActivity({ site_id: params.site_id, activity_key: params.activity });
   const pageSize = Math.min(Math.max(params.pageSize || 30, 1), config.dailyMessageLimit);
   const page = Math.max(0, params.page || 0);

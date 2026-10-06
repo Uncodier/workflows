@@ -12,6 +12,7 @@ type WorkflowArgs = {
   dailyCreditRenewalWorkflow: [];
   processReservationsWorkflow: [];
   processSubscriptionsWorkflow: [];
+  processDueInvoicesWorkflow: [];
   processTasksWorkflow: [];
   pollSocialCommentsWorkflow: [];
   pollSocialAnalyticsWorkflow: [];
@@ -126,6 +127,18 @@ export const defaultSchedules: ScheduleSpec[] = [
     pauseOnFailure: false,
     catchupWindow: '1h',
     paused: false
+  },
+  {
+    id: 'process-due-invoices-schedule',
+    workflowType: 'processDueInvoicesWorkflow',
+    intervalMinutes: 60,
+    args: [],
+    description: 'Poll unpaid due invoices; contact only explicitly opted-in sites at their configured interval',
+    jitterMs: 60000,
+    pauseOnFailure: false,
+    catchupWindow: '1h',
+    paused: false,
+    overlap: 'SKIP',
   },
   {
     id: 'poll-social-comments-schedule',

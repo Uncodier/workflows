@@ -21,7 +21,7 @@ export async function validateWorkflowConfigActivity(
   }
   
   // Define opt-in activities that require explicit activation
-  const optInActivities = ['supervise_conversations', 'assign_leads_to_team', 'local_lead_generation', 'leads_initial_cold_outreach', 'leads_follow_up'];
+  const optInActivities = ['supervise_conversations', 'assign_leads_to_team', 'local_lead_generation', 'leads_initial_cold_outreach', 'leads_follow_up', 'invoices_due'];
   
   try {
     // Fetch activities configuration for the site

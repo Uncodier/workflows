@@ -42,6 +42,7 @@ export * from './icypeasActivities';
 export * from './billingActivities';
 export * from './reservationActivities';
 export * from './subscriptionActivities';
+export * from './dueInvoiceActivities';
 export * from './taskActivities';
 export * from './channelActivities';
 export * from './channelGuidanceActivities';
@@ -97,6 +98,7 @@ import * as icypeasActivities from './icypeasActivities';
 import * as billingActivities from './billingActivities';
 import * as reservationActivities from './reservationActivities';
 import * as subscriptionActivities from './subscriptionActivities';
+import * as dueInvoiceActivities from './dueInvoiceActivities';
 import * as taskActivities from './taskActivities';
 import * as channelActivities from './channelActivities';
 import * as channelGuidanceActivities from './channelGuidanceActivities';
@@ -152,6 +154,7 @@ export const activities = {
   ...billingActivities,
   ...reservationActivities,
   ...subscriptionActivities,
+  ...dueInvoiceActivities,
   ...taskActivities,
   ...channelActivities,
   ...channelGuidanceActivities,

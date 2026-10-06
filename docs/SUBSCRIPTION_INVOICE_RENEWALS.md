@@ -18,6 +18,8 @@ contacts in a batch, and processes each subscription independently.
      `subscription_id`, buyer/owner references, and renewal-cycle metadata.
    - Creates its pending `sale_orders` record with the same responsible user,
      a stable order number, catalog item, amount, and public access token.
+   - Copies an optional `due_date` into the invoice and advances it together with
+     `next_billing_date`, preserving the UTC calendar-day payment-term offset.
    - Advances `next_billing_date` only after both records exist. Monthly dates
      use UTC and clamp to the last valid day of the next month.
    - Returns `{ sale_id, amount, currency, next_billing_date,
@@ -31,7 +33,9 @@ The sale and order primary keys are deterministic UUIDs derived from the site,
 subscription, canonical UTC billing timestamp, and record type. Existing records
 are read and reused. A concurrent insert conflict is recovered by reading the
 winning record, not by overwriting financial state. This also handles responses
-lost after a committed insert. No database migration is required.
+lost after a committed insert. Financial due dates require the forward-only
+migration documented in `DUE_INVOICES.md`; invoice idempotency needs no separate
+migration.
 
 The order number is derived from the sale UUID. Public tokens are random and
 persisted once; retries reuse the stored token. A failure creating the order or

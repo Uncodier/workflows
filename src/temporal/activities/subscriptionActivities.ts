@@ -1,5 +1,6 @@
 import { getSupabaseService } from '../services/supabaseService';
 import { apiService } from '../services/apiService';
+import { advanceSubscriptionDueDate, invoiceDate } from '../utils/invoiceDueDate';
 import { 
   fetchDueSubscriptions, 
   generateSubscriptionSale, 
@@ -81,6 +82,7 @@ export interface ProcessSubscriptionRenewalResult {
   amount: number;
   currency: string;
   next_billing_date: string;
+  due_date?: string;
   public_access_token?: string;
 }
 
@@ -88,6 +90,8 @@ export async function processSubscriptionRenewalActivity(sub: Subscription): Pro
   const supabase = getSupabaseService().getClient();
   
   const nextBillingStr = nextSubscriptionBillingDate(sub.next_billing_date);
+  const dueDate = sub.due_date ? invoiceDate(sub.due_date) : undefined;
+  const nextDueDate = dueDate ? advanceSubscriptionDueDate(dueDate, sub.next_billing_date, nextBillingStr) : undefined;
   const userId = await resolveSubscriptionUserId(supabase, sub);
   const saleId = subscriptionRenewalRecordId(sub, 'sale');
   const now = new Date().toISOString();
@@ -97,6 +101,7 @@ export async function processSubscriptionRenewalActivity(sub: Subscription): Pro
     site_id: sub.site_id,
     user_id: userId,
     subscription_id: sub.id,
+    ...(dueDate ? { due_date: dueDate } : {}),
     lead_id: sub.lead_id,
     owner_site_id: sub.owner_site_id,
     amount: sub.amount,
@@ -134,13 +139,14 @@ export async function processSubscriptionRenewalActivity(sub: Subscription): Pro
 
   const sale = await generateSubscriptionSale(supabase, saleData, saleOrderData);
   
-  await updateSubscriptionNextBilling(supabase, sub.id, nextBillingStr);
+  await updateSubscriptionNextBilling(supabase, sub.id, nextBillingStr, nextDueDate);
 
   return {
     sale_id: sale.id,
     amount: sub.amount,
     currency: 'USD',
     next_billing_date: nextBillingStr,
+    ...(dueDate ? { due_date: dueDate } : {}),
     public_access_token: sale.sale_order.public_access_token
   };
 }

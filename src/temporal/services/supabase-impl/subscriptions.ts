@@ -9,6 +9,7 @@ export interface Subscription {
   status: string;
   start_date: string;
   next_billing_date: string;
+  due_date?: string | null;
   amount: number;
   buyer_user_id?: string;
   owner_site_id?: string;
@@ -38,12 +39,14 @@ export async function fetchDueSubscriptions(client: SupabaseClient): Promise<Sub
 export async function updateSubscriptionNextBilling(
   client: SupabaseClient,
   subscriptionId: string,
-  newNextBillingDate: string
+  newNextBillingDate: string,
+  nextDueDate?: string
 ): Promise<void> {
   const { error } = await client
     .from('subscriptions')
     .update({ 
       next_billing_date: newNextBillingDate,
+      ...(nextDueDate ? { due_date: nextDueDate } : {}),
       updated_at: new Date().toISOString()
     })
     .eq('id', subscriptionId);
@@ -125,6 +128,7 @@ export interface SubscriptionSaleData {
   status: 'pending';
   title: string;
   sale_date: string;
+  due_date?: string;
   product_details: { subscription_id: string; billing_cycle: string };
   created_at: string;
   updated_at: string;

@@ -10,6 +10,7 @@ export interface OutreachConfiguration {
   allSegments: boolean;
   dailyMessageLimit: number;
   maxUnansweredMessages: number;
+  repeatIntervalDays?: number;
   weekdays: number[];
   channelAccounts: Record<string, string[]>;
   availableChannels: string[];
@@ -91,9 +92,11 @@ export function selectedAccountIds(settings: any, selected: string[], channel: s
 /** checkDay=false validates future scheduling without applying today's weekday/start-time guard. */
 export function resolveOutreachConfiguration(settings: any, activityKey: OutreachActivityKey, now = new Date(), checkDay = true): OutreachConfiguration {
   const raw = settings?.activities?.[activityKey] || {};
-  const timing = resolveActivityStartTime(raw);
-  const isFollowUp = activityKey === 'leads_follow_up';
-  const label = isFollowUp ? 'follow-up' : 'cold outreach';
+  const isInvoice = activityKey === 'invoices_due';
+  const timing = resolveActivityStartTime(isInvoice && raw.start_time_mode === undefined && raw.start_time === undefined
+    ? { ...raw, start_time_mode: 'business_opening' } : raw);
+  const isFollowUp = activityKey === 'leads_follow_up' || isInvoice;
+  const label = isInvoice ? 'invoice reminder' : isFollowUp ? 'follow-up' : 'cold outreach';
   const invalidSelection = raw.channel_accounts != null && (typeof raw.channel_accounts !== 'object'
     || Array.isArray(raw.channel_accounts) || Object.keys(raw.channel_accounts).some(key => !isOutreachChannelKey(key)));
   const keys = [...new Set(['email', 'whatsapp', ...Object.keys(raw.channel_accounts || {})])].filter(isOutreachChannelKey);
@@ -102,9 +105,10 @@ export function resolveOutreachConfiguration(settings: any, activityKey: Outreac
   const availableChannels = keys.filter(channel => channelAccounts[channel].length > 0);
   const result: OutreachConfiguration = {
     shouldExecute: false, reason: '', activityKey,
-    segmentIds: strings(raw.segment_ids), allSegments: raw.all_segments === true,
+    segmentIds: isInvoice ? [] : strings(raw.segment_ids), allSegments: isInvoice || raw.all_segments === true,
     dailyMessageLimit: raw.daily_message_limit ?? 30, maxUnansweredMessages: raw.max_unanswered_messages ?? 3,
-    weekdays: raw.weekdays ?? [2, 3, 4], channelAccounts, availableChannels,
+    ...(isInvoice ? { repeatIntervalDays: raw.repeat_interval_days === undefined ? 3 : raw.repeat_interval_days } : {}),
+    weekdays: raw.weekdays ?? (isInvoice ? [1, 2, 3, 4, 5] : [2, 3, 4]), channelAccounts, availableChannels,
     hasEmailChannel: channelAccounts.email.length > 0, hasWhatsappChannel: channelAccounts.whatsapp.length > 0,
     hasAnyChannel: availableChannels.length > 0,
     timezone: outreachTimezone(settings),
@@ -114,10 +118,11 @@ export function resolveOutreachConfiguration(settings: any, activityKey: Outreac
   if (raw.status !== 'active') result.reason = 'Outreach is inactive; explicit activation is required';
   else if (invalidSelection) result.reason = 'Invalid outreach channel selection';
   else if (!Number.isInteger(result.dailyMessageLimit) || result.dailyMessageLimit < 1 || result.dailyMessageLimit > 10000) result.reason = 'Invalid daily message limit';
-  else if (!Number.isInteger(result.maxUnansweredMessages) || result.maxUnansweredMessages < 1 || result.maxUnansweredMessages > 100) result.reason = 'Invalid unanswered message limit';
+  else if (isInvoice && (!Number.isInteger(result.repeatIntervalDays) || result.repeatIntervalDays! < 1 || result.repeatIntervalDays! > 365)) result.reason = 'Invalid invoice reminder interval';
+  else if (!isInvoice && (!Number.isInteger(result.maxUnansweredMessages) || result.maxUnansweredMessages < 1 || result.maxUnansweredMessages > 100)) result.reason = 'Invalid unanswered message limit';
   else if (!result.hasAnyChannel) result.reason = 'Select at least one connected outreach account';
   else if (!result.allSegments && !result.segmentIds.length) result.reason = 'Select segments or explicitly enable all segments';
-  else if (activityKey === 'leads_follow_up' && (!Array.isArray(result.weekdays) || !result.weekdays.length
+  else if (isFollowUp && (!Array.isArray(result.weekdays) || !result.weekdays.length
     || result.weekdays.some(day => !Number.isInteger(day) || day < 0 || day > 6))) result.reason = 'Select valid follow-up weekdays';
   else if (timing.error) result.reason = timing.error.replace('Invalid start time', `Invalid ${label} start time`);
   else {
@@ -127,7 +132,7 @@ export function resolveOutreachConfiguration(settings: any, activityKey: Outreac
       if (timing.mode) result.startTimesByWeekday = activityStartTimes(settings,
         isFollowUp ? result.weekdays : [0, 1, 2, 3, 4, 5, 6], timing, { businessDaysOnly: !isFollowUp });
       const start = result.startTimesByWeekday?.[day.weekday];
-      if (checkDay && activityKey === 'leads_follow_up' && !result.weekdays.includes(day.weekday)) result.reason = 'Not a selected follow-up weekday';
+      if (checkDay && isFollowUp && !result.weekdays.includes(day.weekday)) result.reason = 'Not a selected follow-up weekday';
       else if (checkDay && timing.mode && !start) result.reason = `Business is closed on this ${label} weekday`;
       else if (checkDay && start && isBeforeActivityStartTime(now, result.timezone, start.scheduledTime)) {
         result.reason = `Before configured ${label} start time`;

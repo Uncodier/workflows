@@ -245,4 +245,22 @@ describe('subscription invoice renewals', () => {
       .rejects.toThrow('Invalid subscription next billing date');
     expect(db.operations).toHaveLength(0);
   });
+
+  it('copies the current due date to the invoice and advances subscription net terms with the billing date', async () => {
+    const result = await processSubscriptionRenewalActivity({ ...subscription, due_date: '2026-10-11' });
+    expect(db.rows.sales[0].due_date).toBe('2026-10-11');
+    expect(db.rows.subscriptions[0]).toMatchObject({ next_billing_date: '2026-11-01T00:00:00.000Z', due_date: '2026-11-11' });
+    expect(result.due_date).toBe('2026-10-11');
+  });
+
+  it('preserves the due date on failed invoice generation and rejects invalid dates before writes', async () => {
+    await expect(processSubscriptionRenewalActivity({ ...subscription, due_date: '2026-02-30' }))
+      .rejects.toThrow('Invalid invoice due date');
+    expect(db.operations).toHaveLength(0);
+    db.rows.subscriptions[0].due_date = '2026-10-11';
+    db.failures['insert:sale_orders'] = { message: 'Order unavailable' };
+    await expect(processSubscriptionRenewalActivity({ ...subscription, due_date: '2026-10-11' }))
+      .rejects.toThrow('Order unavailable');
+    expect(db.rows.subscriptions[0].due_date).toBe('2026-10-11');
+  });
 });
