@@ -3,9 +3,13 @@ import { apiService } from '../services/apiService';
 import { 
   fetchDueSubscriptions, 
   generateSubscriptionSale, 
-  generateSubscriptionPurchase,
+  resolveSubscriptionUserId,
+  subscriptionRenewalRecordId,
+  nextSubscriptionBillingDate,
   updateSubscriptionNextBilling,
-  Subscription
+  Subscription,
+  SubscriptionSaleData,
+  SubscriptionSaleOrderData
 } from '../services/supabase-impl/subscriptions';
 
 export async function fetchDueSubscriptionsActivity(): Promise<Subscription[]> {
@@ -83,31 +87,42 @@ export interface ProcessSubscriptionRenewalResult {
 export async function processSubscriptionRenewalActivity(sub: Subscription): Promise<ProcessSubscriptionRenewalResult> {
   const supabase = getSupabaseService().getClient();
   
-  const currentNext = new Date(sub.next_billing_date);
-  currentNext.setMonth(currentNext.getMonth() + 1);
-  const nextBillingStr = currentNext.toISOString();
+  const nextBillingStr = nextSubscriptionBillingDate(sub.next_billing_date);
+  const userId = await resolveSubscriptionUserId(supabase, sub);
+  const saleId = subscriptionRenewalRecordId(sub, 'sale');
+  const now = new Date().toISOString();
 
-  const saleData: any = {
+  const saleData: SubscriptionSaleData = {
+    id: saleId,
     site_id: sub.site_id,
+    user_id: userId,
+    subscription_id: sub.id,
+    lead_id: sub.lead_id,
+    owner_site_id: sub.owner_site_id,
     amount: sub.amount,
     amount_due: sub.amount,
     currency: 'USD',
     status: 'pending',
     title: 'Subscription Renewal',
-    sale_date: new Date().toISOString(),
+    sale_date: now.slice(0, 10),
     buyer_user_id: sub.buyer_user_id,
-    product_details: { subscription_id: sub.id },
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
+    product_details: {
+      subscription_id: sub.id,
+      billing_cycle: new Date(sub.next_billing_date).toISOString(),
+    },
+    created_at: now,
+    updated_at: now
   };
 
-  let tokenToReturn: string | undefined;
-
-  // We are generating sale_order, so we also need to generate the public token there or get it back
-  const saleOrderData = {
+  const saleOrderData: SubscriptionSaleOrderData = {
+    id: subscriptionRenewalRecordId(sub, 'order'),
     site_id: sub.site_id,
+    user_id: userId,
+    order_number: `SO-SUB-${saleId.toUpperCase()}`,
+    owner_site_id: sub.owner_site_id,
     subtotal: sub.amount,
     total: sub.amount,
+    currency: 'USD',
     status: 'pending',
     buyer_user_id: sub.buyer_user_id,
     items: [{
@@ -119,9 +134,6 @@ export async function processSubscriptionRenewalActivity(sub: Subscription): Pro
 
   const sale = await generateSubscriptionSale(supabase, saleData, saleOrderData);
   
-  // extract token
-  tokenToReturn = sale.sale_order?.public_access_token;
-
   await updateSubscriptionNextBilling(supabase, sub.id, nextBillingStr);
 
   return {
@@ -129,7 +141,7 @@ export async function processSubscriptionRenewalActivity(sub: Subscription): Pro
     amount: sub.amount,
     currency: 'USD',
     next_billing_date: nextBillingStr,
-    public_access_token: tokenToReturn
+    public_access_token: sale.sale_order.public_access_token
   };
 }
 

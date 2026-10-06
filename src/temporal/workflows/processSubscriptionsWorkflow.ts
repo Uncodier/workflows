@@ -1,4 +1,4 @@
-import { patched, proxyActivities } from '@temporalio/workflow';
+import { ApplicationFailure, patched, proxyActivities } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 
 const {
@@ -17,6 +17,7 @@ const {
 export async function processSubscriptionsWorkflow(): Promise<{ processed: number; errors: number }> {
   console.log('🔄 Starting processSubscriptionsWorkflow (Cron)...');
   const useBatchContactLookup = patched('subscription-renewals-batch-contacts-v1');
+  const reportFailures = patched('subscription-renewals-report-failures-v1');
 
   let processed = 0;
   let errors = 0;
@@ -58,6 +59,14 @@ export async function processSubscriptionsWorkflow(): Promise<{ processed: numbe
   }
 
   console.log(`✅ processSubscriptionsWorkflow completed. Processed: ${processed}, Errors: ${errors}`);
+
+  if (reportFailures && errors > 0) {
+    throw ApplicationFailure.nonRetryable(
+      `Subscription renewals failed: ${errors} errors, ${processed} processed`,
+      'SUBSCRIPTION_RENEWALS_FAILED',
+      { processed, errors }
+    );
+  }
 
   return { processed, errors };
 }

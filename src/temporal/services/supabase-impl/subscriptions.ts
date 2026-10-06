@@ -1,5 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 
 export interface Subscription {
   id: string;
@@ -54,48 +54,148 @@ export async function updateSubscriptionNextBilling(
   }
 }
 
+export async function resolveSubscriptionUserId(
+  client: SupabaseClient,
+  sub: Subscription
+): Promise<string> {
+  if (sub.lead_id) {
+    const { data: lead, error } = await client
+      .from('leads')
+      .select('assignee_id')
+      .eq('id', sub.lead_id)
+      .eq('site_id', sub.site_id)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to fetch subscription lead assignee: ${error.message}`);
+    }
+    if (lead?.assignee_id) return lead.assignee_id;
+  }
+
+  const { data: site, error } = await client
+    .from('sites')
+    .select('user_id')
+    .eq('id', sub.site_id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to fetch subscription site owner: ${error.message}`);
+  }
+  if (!site?.user_id) {
+    throw new Error(`No lead assignee or site owner available for subscription ${sub.id}`);
+  }
+  return site.user_id;
+}
+
+export function subscriptionRenewalRecordId(sub: Subscription, kind: 'sale' | 'order'): string {
+  const cycle = new Date(sub.next_billing_date).toISOString();
+  // UUIDv5 under the standard URL namespace, compatible with existing UUID validators.
+  const bytes = createHash('sha1')
+    .update(Buffer.from('6ba7b8119dad11d180b400c04fd430c8', 'hex'))
+    .update(JSON.stringify(['subscription-renewal-v1', kind, sub.site_id, sub.id, cycle]))
+    .digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function nextSubscriptionBillingDate(current: string): string {
+  const date = new Date(current);
+  if (!Number.isFinite(date.getTime())) throw new Error('Invalid subscription next billing date');
+  const day = date.getUTCDate();
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth() + 1);
+  const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+  date.setUTCDate(Math.min(day, lastDay));
+  return date.toISOString();
+}
+
+export interface SubscriptionSaleData {
+  id: string;
+  site_id: string;
+  user_id: string;
+  subscription_id: string;
+  lead_id?: string;
+  buyer_user_id?: string;
+  owner_site_id?: string;
+  amount: number;
+  amount_due: number;
+  currency: string;
+  status: 'pending';
+  title: string;
+  sale_date: string;
+  product_details: { subscription_id: string; billing_cycle: string };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SubscriptionSaleOrderData {
+  id: string;
+  site_id: string;
+  user_id: string;
+  order_number: string;
+  buyer_user_id?: string;
+  owner_site_id?: string;
+  subtotal: number;
+  total: number;
+  currency: string;
+  status: 'pending';
+  items: { catalog_item_id?: string; quantity: number; unit_price: number }[];
+  public_access_token?: string;
+}
+
+interface SubscriptionRecord {
+  id: string;
+  public_access_token?: string;
+}
+
+// Primary-key uniqueness is the concurrency guard; never upsert financial data.
+async function getOrCreateSubscriptionRecord(
+  client: SupabaseClient,
+  table: 'sales' | 'sale_orders',
+  payload: SubscriptionSaleData | (SubscriptionSaleOrderData & { sale_id: string })
+): Promise<SubscriptionRecord> {
+  const find = () => client.from(table)
+    .select('id, public_access_token')
+    .eq('id', payload.id)
+    .eq('site_id', payload.site_id)
+    .maybeSingle();
+
+  const existing = await find();
+  if (existing.error) {
+    throw new Error(`Failed to find subscription ${table}: ${existing.error.message}`);
+  }
+  if (existing.data) return existing.data;
+
+  const inserted = await client.from(table).insert(payload)
+    .select('id, public_access_token').single();
+  if (!inserted.error && inserted.data) return inserted.data;
+
+  if (inserted.error?.code === '23505') {
+    const concurrent = await find();
+    if (concurrent.error) {
+      throw new Error(`Failed to find concurrent subscription ${table}: ${concurrent.error.message}`);
+    }
+    if (concurrent.data) return concurrent.data;
+  }
+  throw new Error(`Failed to generate subscription ${table}: ${inserted.error?.message || 'No record returned'}`);
+}
+
 export async function generateSubscriptionSale(
   client: SupabaseClient,
-  saleData: any,
-  saleOrderData: any
-): Promise<any> {
+  saleData: SubscriptionSaleData,
+  saleOrderData: SubscriptionSaleOrderData
+): Promise<SubscriptionRecord & { sale_order: SubscriptionRecord }> {
   console.log('📝 Generating sale for subscription...');
 
-  // Start a transaction-like process (or insert sequence)
-  const { data: sale, error: saleError } = await client
-    .from('sales')
-    .insert(saleData)
-    .select()
-    .single();
-
-  if (saleError) {
-    console.error('❌ Error generating sale:', saleError);
-    throw new Error(`Failed to generate sale: ${saleError.message}`);
-  }
-
-  if (saleOrderData) {
-    saleOrderData.sale_id = sale.id;
-    // Generate public access token for the Sale Order
-    if (!saleOrderData.public_access_token) {
-      saleOrderData.public_access_token = randomBytes(24).toString('base64url');
-    }
-
-    const { data: order, error: orderError } = await client
-      .from('sale_orders')
-      .insert(saleOrderData)
-      .select('id, public_access_token')
-      .single();
-
-    if (orderError) {
-      console.error('❌ Error generating sale_order:', orderError);
-      throw new Error(`Failed to generate sale order: ${orderError.message}`);
-    }
-    
-    // Attach order details to sale result for further use
-    sale.sale_order = order;
-  }
-
-  return sale;
+  const sale = await getOrCreateSubscriptionRecord(client, 'sales', saleData);
+  const order = await getOrCreateSubscriptionRecord(client, 'sale_orders', {
+    ...saleOrderData,
+    sale_id: sale.id,
+    public_access_token: saleOrderData.public_access_token || randomBytes(24).toString('base64url'),
+  });
+  return { ...sale, sale_order: order };
 }
 
 export async function generateSubscriptionPurchase(
