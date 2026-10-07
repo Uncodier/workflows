@@ -1,4 +1,5 @@
 import { apiService } from '../services/apiService';
+import type { PostgrestError } from '@supabase/supabase-js';
 import { getSupabaseService } from '../services';
 import { normalizeIcpMiningListIds } from '../utils/icpMiningConfiguration';
 import { ICP_MINING_WORKFLOW_SELECT, IcpMiningWorkflowDto, toIcpMiningWorkflowDto } from '../utils/icpMiningPayload';
@@ -1015,7 +1016,7 @@ export async function upsertLeadForPersonActivity(options: {
     const { supabaseServiceRole } = await import('../../lib/supabase/client');
 
     // Check if lead already exists
-    const { data: existingLead, error: checkError } = await supabaseServiceRole
+    const { data: personLead, error: checkError } = await supabaseServiceRole
       .from('leads')
       .select('*')
       .eq('person_id', options.person_id)
@@ -1025,6 +1026,16 @@ export async function upsertLeadForPersonActivity(options: {
     if (checkError) {
       return { success: false, error: checkError.message };
     }
+
+    let existingLead = personLead;
+    let reuseContactLead = false;
+    const findContactLead = (name: string, email: string) => supabaseServiceRole
+      .from('leads')
+      .select('*')
+      .eq('site_id', options.site_id)
+      .eq('name', name)
+      .eq('email', email)
+      .maybeSingle();
 
     // Get person data for name if not provided
     let leadName = options.name;
@@ -1052,6 +1063,17 @@ export async function upsertLeadForPersonActivity(options: {
       if (error) return { success: false, error: error.message };
       personEmails = contactValues(personData?.emails);
     }
+
+    // Legacy leads may be linked to another local person record. Match the exact
+    // unique key, never a name alone or an empty email, before creating a duplicate.
+    const contactEmail = options.validated_contact_policy
+      ? options.email || '' : options.email || contactValues(personEmails)[0] || '';
+    if (!existingLead && hasData(contactEmail)) {
+      const { data, error } = await findContactLead(leadName || 'Unknown', contactEmail);
+      if (error) return { success: false, error: error.message };
+      existingLead = data;
+      reuseContactLead = !!data;
+    }
     
     const hasPersonWorkEmail = contactValues(personEmails, options.email).length > 0;
     
@@ -1073,77 +1095,92 @@ export async function upsertLeadForPersonActivity(options: {
       return { success: false, error: 'Person must have at least 1 contact method (work email, personal email, or phone) to create/update lead' };
     }
 
-    const leadData: any = {
-      person_id: options.person_id,
-      site_id: options.site_id,
-      name: leadName,
-      // If company_id is provided, it means lead will be enriched, so allow null/empty email
-      // Otherwise, require email or phone for lead creation
-      // Provider refreshes may add alternatives but must never replace validated primaries.
-      email: options.validated_contact_policy ? options.email || '' : existingLead?.email || options.email || contactValues(personEmails)[0] || '',
-      phone: options.validated_contact_policy ? options.phone || null : existingLead?.phone || options.phone || null,
-      personal_email: options.validated_contact_policy ? options.personal_email || null : existingLead?.personal_email || options.personal_email || null,
-      updated_at: new Date().toISOString(),
+    const buildLeadData = (): FinderData => {
+      const leadData: FinderData = {
+        // Reusing a lead does not merge/reassign the underlying person records.
+        person_id: reuseContactLead ? existingLead?.person_id || options.person_id : options.person_id,
+        site_id: options.site_id,
+        name: leadName,
+        // Empty email is required by the schema for phone-only creation.
+        email: options.validated_contact_policy ? options.email || '' : existingLead?.email || options.email || contactValues(personEmails)[0] || '',
+        // A contact-key match adds data without clearing/replacing existing contacts.
+        phone: options.validated_contact_policy && !reuseContactLead ? options.phone || null : existingLead?.phone || options.phone || null,
+        personal_email: options.validated_contact_policy && !reuseContactLead ? options.personal_email || null : existingLead?.personal_email || options.personal_email || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      for (const key of ['position', 'address', 'company', 'metadata', 'social_networks']) {
+        if (hasData(options.profile?.[key])) {
+          leadData[key] = mergeFinderData(existingLead?.[key], options.profile![key]);
+        }
+      }
+      if (options.profile?.metadata?.finder || reuseContactLead) {
+        // Keep both prior primaries and any new alternatives in structured metadata.
+        leadData.metadata = mergeFinderData(leadData.metadata || existingLead?.metadata, { finder: { contacts: {
+          emails: contactValues(existingLead?.email, options.email, personEmails),
+          personal_emails: contactValues(existingLead?.personal_email, options.personal_email),
+          phones: contactValues(existingLead?.phone, options.phone),
+        } } });
+      }
+      if (options.validated_contact_policy) {
+        leadData.metadata = { ...existingLead?.metadata, ...leadData.metadata, emailVerified: !!options.email };
+      }
+
+      // Merge social profiles rather than clearing other platforms.
+      if (options.linkedin_url) {
+        const existingSocial = existingLead?.social_networks && typeof existingLead.social_networks === 'object'
+          ? existingLead.social_networks : {};
+        leadData.social_networks = { ...existingSocial, ...leadData.social_networks, linkedin: options.linkedin_url };
+      }
+
+      if (options.company_id) leadData.company_id = options.company_id;
+      if (options.segment_id) leadData.segment_id = options.segment_id;
+
+      if (options.notes) {
+        if (existingLead?.notes && !existingLead.notes.includes(options.notes)) {
+          leadData.notes = `${existingLead.notes}\n${options.notes}`;
+        } else {
+          leadData.notes = existingLead?.notes || options.notes;
+        }
+      }
+
+      if (options.userId && (!reuseContactLead || !existingLead?.user_id)) {
+        leadData.user_id = options.userId;
+      }
+
+      return leadData;
     };
 
-    for (const key of ['position', 'address', 'company', 'metadata', 'social_networks']) {
-      if (hasData(options.profile?.[key])) {
-        leadData[key] = mergeFinderData(existingLead?.[key], options.profile![key]);
-      }
-    }
-    if (options.profile?.metadata?.finder) {
-      // Keep both prior validated primaries and any new alternatives in structured metadata.
-      leadData.metadata = mergeFinderData(leadData.metadata || existingLead?.metadata, { finder: { contacts: {
-        emails: contactValues(existingLead?.email, options.email, personEmails),
-        personal_emails: contactValues(existingLead?.personal_email, options.personal_email),
-        phones: contactValues(existingLead?.phone, options.phone),
-      } } });
-    }
-    if (options.validated_contact_policy) {
-      leadData.metadata = { ...existingLead?.metadata, ...leadData.metadata, emailVerified: !!options.email };
-    }
+    const leadData = buildLeadData();
+    const updateExistingLead = () => supabaseServiceRole
+      .from('leads')
+      .update(buildLeadData())
+      .eq('site_id', options.site_id)
+      .eq('id', existingLead!.id)
+      .select()
+      .single();
 
-    // Add social_networks.linkedin if provided (merge with existing to preserve other platforms)
-    if (options.linkedin_url) {
-      const existingSocial = existingLead?.social_networks && typeof existingLead.social_networks === 'object'
-        ? existingLead.social_networks
-        : {};
-      leadData.social_networks = { ...existingSocial, ...leadData.social_networks, linkedin: options.linkedin_url };
-    }
-
-    // Add company_id if provided
-    if (options.company_id) {
-      leadData.company_id = options.company_id;
-    }
-
-    // Add segment_id if provided
-    if (options.segment_id) {
-      leadData.segment_id = options.segment_id;
-    }
-
-    // Append notes if provided
-    if (options.notes) {
-      if (existingLead?.notes && !existingLead.notes.includes(options.notes)) {
-        leadData.notes = `${existingLead.notes}\n${options.notes}`;
-      } else {
-        leadData.notes = existingLead?.notes || options.notes;
-      }
-    }
-
-    if (options.userId) {
-      leadData.user_id = options.userId;
-    }
+    const recoverContactConflict = async (error: PostgrestError) => {
+      // Only this known uniqueness conflict is recoverable. Other DB failures
+      // must retain the candidate checkpoint instead of masquerading as a match.
+      if (error.code !== '23505' || !error.message.includes('"leads_site_name_email_unique"')
+        || !hasData(leadData.email)) return { data: null, error };
+      const found = await findContactLead(leadData.name, leadData.email);
+      if (found.error) return { data: null, error: found.error };
+      if (!found.data) return { data: null, error };
+      existingLead = found.data;
+      reuseContactLead = true;
+      // Rebuild against the winner's metadata/contacts, not the failed insert.
+      // Do not carry creation fields (status, origin, created_at) into the update.
+      return updateExistingLead();
+    };
 
     let resultLead: any;
 
     if (existingLead) {
       // Update existing lead
-      const { data, error } = await supabaseServiceRole
-        .from('leads')
-        .update(leadData)
-        .eq('id', existingLead.id)
-        .select()
-        .single();
+      let { data, error } = await updateExistingLead();
+      if (error) ({ data, error } = await recoverContactConflict(error));
 
       if (error) return { success: false, error: error.message };
       resultLead = data;
@@ -1169,12 +1206,13 @@ export async function upsertLeadForPersonActivity(options: {
       leadData.origin = 'lead_enrichment_workflow';
       leadData.created_at = new Date().toISOString();
 
-      const { data, error } = await supabaseServiceRole
+      let { data, error } = await supabaseServiceRole
         .from('leads')
         .insert([leadData])
         .select()
         .single();
 
+      if (error) ({ data, error } = await recoverContactConflict(error));
       if (error) return { success: false, error: error.message };
       resultLead = data;
     }

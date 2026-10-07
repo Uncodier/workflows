@@ -26,6 +26,8 @@ jest.mock('../src/lib/supabase/client', () => ({ supabaseServiceRole: { from: mo
 
 import { callPersonRoleSearchActivity, callPersonWorkEmailsActivity, prepareFinderPersonActivity, upsertFinderCompanyActivity,
   upsertLeadForPersonActivity, upsertPersonActivity, updateIcpMiningProgressActivity, checkExistingLeadForPersonActivity } from '../src/temporal/activities/finderActivities';
+import { enrichWithValidatedContacts } from '../src/temporal/workflows/icpMining/enrichWithValidatedContacts';
+import { processPageSafely } from '../src/temporal/workflows/icpMining/processPageSafely';
 
 const row = (data: any) => ({ data, error: null });
 const failure = (message: string, code?: string) => ({ data: null, error: { message, code } });
@@ -93,7 +95,7 @@ describe('Finder persistence activities with mocked database boundary', () => {
     expect(await upsertLeadForPersonActivity({ person_id: 'p', site_id: 's', userId: 'u', name: 'Ada',
       phone: '+1234', person_emails: [], company_id: 'c' })).toMatchObject({ success: true, leadId: 'new-lead' });
     expect(mockQueries[1].write.payload[0].email).toBe('');
-    mockReplies.push(row(null), row({ id: 'email-lead' }));
+    mockReplies.push(row(null), row(null), row({ id: 'email-lead' }));
     expect(await upsertLeadForPersonActivity({ person_id: 'p2', site_id: 's', userId: 'u', name: 'Ada',
       email: 'ada@test', person_emails: [] })).toMatchObject({ success: true, leadId: 'email-lead' });
   });
@@ -113,6 +115,130 @@ describe('Finder persistence activities with mocked database boundary', () => {
     if (stage === 'write') mockReplies.push(failure('db failed'));
     expect(await upsertLeadForPersonActivity({ person_id: 'p', site_id: 's', name: 'Ada', person_emails: [] }))
       .toMatchObject({ success: false, error: 'db failed' });
+  });
+
+  describe('same-site contact-key lead reuse', () => {
+    const options = { person_id: 'new-person', site_id: 'site', userId: 'mining-user', name: 'Ada',
+      email: 'ada@example.test', person_emails: ['ada@example.test'], segment_id: 'campaign-segment',
+      company_id: 'company', notes: 'ICP enrichment', validated_contact_policy: true,
+      phone: '+14155559999', linkedin_url: 'https://linkedin.com/in/ada',
+      profile: { position: 'Founder', address: { city: 'Madrid' }, metadata: { finder: { new: true } } } };
+    const existing = { id: 'canonical-lead', person_id: 'legacy-person', site_id: 'site', name: options.name,
+      email: options.email, phone: '+14155551234', personal_email: 'personal@example.test', user_id: 'owner',
+      segment_id: 'old-segment', status: 'qualified', origin: 'import', created_at: '2026-01-01', notes: 'Prior note',
+      metadata: { research: { report: 'Preserve research' }, finder: { old: true } },
+      social_networks: { twitter: '@ada' }, address: { country: 'ES' } };
+    const conflict = () => failure('duplicate key value violates unique constraint "leads_site_name_email_unique"', '23505');
+
+    function expectReusedWrite(query: any) {
+      expect(query.write.method).toBe('update');
+      expect(query.filters).toContainEqual(['eq', 'site_id', 'site']);
+      expect(query.filters).toContainEqual(['eq', 'id', existing.id]);
+      expect(query.write.payload).toMatchObject({ person_id: existing.person_id, segment_id: options.segment_id,
+        company_id: 'company', position: 'Founder', email: existing.email, phone: existing.phone,
+        personal_email: existing.personal_email, notes: 'Prior note\nICP enrichment',
+        address: { country: 'ES', city: 'Madrid' },
+        social_networks: { twitter: '@ada', linkedin: options.linkedin_url },
+        metadata: { research: existing.metadata.research, emailVerified: true,
+          finder: { old: true, new: true, contacts: { phones: [existing.phone, options.phone] } } } });
+      for (const key of ['user_id', 'status', 'origin', 'created_at']) expect(query.write.payload).not.toHaveProperty(key);
+    }
+
+    it('assigns the segment and enrichment to the legacy lead without inserting or changing its person/owner/status', async () => {
+      mockReplies.push(row(null), row(existing), row(existing));
+      expect(await upsertLeadForPersonActivity(options)).toMatchObject({ success: true, leadId: existing.id });
+      expect(mockQueries[1].filters).toEqual([
+        ['select', '*'], ['eq', 'site_id', 'site'], ['eq', 'name', options.name], ['eq', 'email', options.email],
+      ]);
+      expect(mockQueries.some(query => query.write?.method === 'insert')).toBe(false);
+      expectReusedWrite(mockQueries[2]);
+    });
+
+    it.each(['insert', 'update'])('recovers the exact unique conflict during %s using the canonical lead data', async operation => {
+      if (operation === 'insert') mockReplies.push(row(null), row(null), conflict(), row(existing), row(existing));
+      else mockReplies.push(row({ id: 'person-lead', person_id: options.person_id, email: 'old@example.test' }),
+        conflict(), row(existing), row(existing));
+      expect(await upsertLeadForPersonActivity(options)).toMatchObject({ success: true, leadId: existing.id });
+      expectReusedWrite(mockQueries[mockQueries.length - 1]);
+    });
+
+    it('keeps an existing segment when no new segment is supplied and links only an unlinked legacy lead', async () => {
+      mockReplies.push(row(null), row({ ...existing, person_id: null }), row(existing));
+      expect(await upsertLeadForPersonActivity({ ...options, segment_id: undefined })).toMatchObject({ success: true });
+      expect(mockQueries[2].write.payload.person_id).toBe(options.person_id);
+      expect(mockQueries[2].write.payload).not.toHaveProperty('segment_id');
+    });
+
+    it('uses the person name and first available email when options omit them', async () => {
+      mockReplies.push(row(null), row({ full_name: 'Ada' }), row({ emails: [options.email] }), row(existing), row(existing));
+      expect(await upsertLeadForPersonActivity({ person_id: options.person_id, site_id: options.site_id,
+        segment_id: options.segment_id })).toMatchObject({ success: true, leadId: existing.id });
+      expect(mockQueries[3].filters).toContainEqual(['eq', 'email', options.email]);
+      expect(mockQueries[4].write.payload.segment_id).toBe(options.segment_id);
+    });
+
+    it('does not conflate phone-only people sharing a name and empty email', async () => {
+      mockReplies.push(row(null), conflict());
+      expect(await upsertLeadForPersonActivity({ ...options, email: undefined, person_emails: [] }))
+        .toMatchObject({ success: false, error: expect.stringContaining('leads_site_name_email_unique') });
+      expect(mockQueries).toHaveLength(2);
+      expect(mockQueries[1].write.method).toBe('insert');
+    });
+
+    it.each([
+      ['contact lookup', [row(null), failure('read denied')], 'read denied'],
+      ['canonical update', [row(null), row(existing), failure('write denied')], 'write denied'],
+      ['conflict lookup', [row(null), row(null), conflict(), failure('lookup denied')], 'lookup denied'],
+      ['missing winner', [row(null), row(null), conflict(), row(null)], 'leads_site_name_email_unique'],
+      ['conflict update', [row(null), row(null), conflict(), row(existing), failure('update denied')], 'update denied'],
+      ['unrelated constraint', [row(null), row(null), failure('duplicate key violates "other_unique"', '23505')], 'other_unique'],
+      ['insert timeout', [row(null), row(null), failure('statement timeout', '57014')], 'statement timeout'],
+    ])('does not hide %s failures as matches', async (_stage, replies, error) => {
+      mockReplies.push(...replies as any[]);
+      expect(await upsertLeadForPersonActivity(options)).toMatchObject({ success: false,
+        error: expect.stringContaining(error as string) });
+      expect(mockReplies).toHaveLength(0);
+    });
+
+    it.each([false, true])('advances the ICP cursor past a reused lead and processes the next candidate (race=%s)', async race => {
+      if (race) mockReplies.push(row(null), row(null), conflict(), row(existing), row(existing));
+      else mockReplies.push(row(null), row(existing), row(existing));
+      mockReplies.push(row(null), row(null), row({ id: 'next-lead' }));
+      const contacts: any = {
+        prepareFinderPersonActivity: jest.fn(async (input: any) => ({ success: true, errors: [],
+          person: { id: `local-${input.person_id}`, full_name: input.source_search_result.person.full_name,
+            emails: input.source_search_result.person.emails, raw_result: {} }, role: {} })),
+        checkExistingLeadForPersonActivity: jest.fn().mockResolvedValue({ success: true }),
+        upsertPersonActivity: jest.fn(async (input: any) => ({ success: true, person: input })),
+        upsertLeadForPersonActivity,
+        validateContactInformation: jest.fn(), lookEmailOnIcyPeas: jest.fn(),
+        callPersonWorkEmailsActivity: jest.fn(), callPersonContactsLookupPersonalEmailsActivity: jest.fn(),
+        callPersonContactsLookupPhoneNumbersActivity: jest.fn(),
+      };
+      const checkpoint = jest.fn().mockResolvedValue({ success: true });
+      const result = await processPageSafely({ icp_mining_id: 'list', role_query_id: 'query', site_id: 'site',
+        page: 3, page_size: 10, start_index: 0, max_candidates: 10, max_matches: 10, userId: 'mining-user',
+        execution: { run_id: 'run', version: 0, processed: 30, found: 26 },
+        snapshot: { page: 3, hasMore: true, candidates: [
+          { person: { id: 1, full_name: 'Ada', emails: [options.email] } },
+          { person: { id: 2, full_name: 'Bob', emails: ['bob@example.test'] } },
+        ] } }, {
+        getRoleQueryByIdActivity: jest.fn(), callPersonRoleSearchActivity: jest.fn(),
+        getSegmentIdFromRoleQueryActivity: jest.fn().mockResolvedValue({ success: true, segmentId: options.segment_id }),
+        getLeadActivity: jest.fn(), research: jest.fn(), checkpointIcpMiningExecutionActivity: checkpoint,
+        enrich: input => enrichWithValidatedContacts(input, contacts, { trustProviderEmails: true }),
+      });
+      expect(result).toMatchObject({ success: true, processed: 2, foundMatches: 2,
+        leadsCreated: [existing.id, 'next-lead'], errors: [], pageCompleted: true,
+        checkpoint: { processed: 32, found: 28, page: 4, offset: 0, snapshot: null } });
+      const reused = mockQueries.find(query => query.write?.method === 'update');
+      expect(reused.write.payload.segment_id).toBe(options.segment_id);
+      expect(reused.filters).toContainEqual(['eq', 'id', existing.id]);
+      expect(checkpoint).toHaveBeenCalledTimes(2);
+      expect(contacts.prepareFinderPersonActivity).toHaveBeenCalledTimes(2);
+      expect(contacts.lookEmailOnIcyPeas).not.toHaveBeenCalled();
+      expect(mockReplies).toHaveLength(0);
+    });
   });
 
   it('does not conflate companies with same name and conflicting domains', async () => {

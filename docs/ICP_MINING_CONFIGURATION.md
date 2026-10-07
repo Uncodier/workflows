@@ -275,6 +275,30 @@ are not reset, completed candidates are not reprocessed, and already-started
 historical generation workflows are not canceled by this source change. Non-ICP
 enrichment and the shared email validator are unchanged.
 
+### Reusing an existing lead for campaign segmentation
+
+ICP lead persistence first checks the site's `person_id`, then the exact
+`(site_id, name, email)` key when a nonempty work email is available. A historical
+lead linked to a different local person record is reused rather than inserted.
+It receives the requested `segment_id`, company and non-destructively merged
+profile/contact data; its lead ID, nonempty person link, owner, commercial status,
+origin, creation timestamp, research and omitted contacts are preserved. The
+schema has a single `segment_id`: a supplied segment replaces that field, while
+an omitted segment leaves the previous assignment intact. Campaign status,
+consent and outreach eligibility checks are not bypassed or reset.
+
+The same behavior handles a concurrent insert/update rejected by PostgreSQL
+`23505` on `leads_site_name_email_unique`: it re-reads that exact same-site key
+and updates the canonical row without copying creation fields from the failed
+insert. Name-only and empty-email collisions are not merged. Other database
+errors, a missing conflicting row or a failed canonical update still hold the
+candidate checkpoint. An acknowledged reuse returns the existing lead ID as a
+successful match, so mining advances to the next candidate.
+
+This is an activity-only change: no migration or new Temporal workflow commands
+are needed. Deploy the worker to activate it; previously settled runs and stored
+cooldowns are not restarted/reset by changing the source.
+
 ### IcyPeas asynchronous email discovery
 
 IcyPeas is the first email-discovery provider in the contact cascade. Its
