@@ -32,6 +32,17 @@ describe('coordinated billing RPC contract', () => {
     expect(client.from).not.toHaveBeenCalled();
   });
 
+  it('accepts one initial monthly credit without calculating a signup bonus', async () => {
+    const response = {
+      success: true, outcome: 'initialized', credits_granted: 1,
+      billing_id: 'new-billing', credits_available: 1,
+    };
+    client.rpc.mockResolvedValue({ data: response, error: null });
+    await expect(initializeSiteBilling(supabase, 'site')).resolves.toEqual(response);
+    expect(client.rpc).toHaveBeenCalledWith('initialize_site_billing', { p_site_id: 'site' });
+    expect(client.from).not.toHaveBeenCalled();
+  });
+
   it('returns already-initialized balance unchanged; no additive signup fallback', async () => {
     const response = {
       success: true, outcome: 'already_initialized', credits_granted: 0,
@@ -85,7 +96,7 @@ describe('coordinated billing RPC contract', () => {
 
   it('requires a billing ID in successful signup responses', async () => {
     client.rpc.mockResolvedValue({
-      data: { success: true, outcome: 'initialized', credits_granted: 30, credits_available: 30 }, error: null,
+      data: { success: true, outcome: 'initialized', credits_granted: 1, credits_available: 1 }, error: null,
     });
     await expect(initializeSiteBilling(supabase, 'site')).rejects.toThrow('Invalid billing ID');
     expect(client.from).not.toHaveBeenCalled();

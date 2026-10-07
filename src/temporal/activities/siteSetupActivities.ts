@@ -1,402 +1,123 @@
-import { apiService } from '../services/apiService';
+import { dispatchSetupEmailFromActivity } from './siteSetupEmailProxy';
 import { getSupabaseService } from '../services/supabaseService';
-import type { AgentConfig } from '../config/agentsConfig';
-import { randomUUID } from 'crypto';
+import { createAgent } from '../services/supabase-impl/agents';
+import { CancelledFailure } from '@temporalio/activity';
+import {
+  buildSetupAgentRow, fetchSetupSite, findExistingSetupAgent, requireSetupUuid,
+  setupAgentCandidates, setupAgentResult,
+} from './siteSetupAgentHelpers';
+import type {
+  AssignAccountManagerParams, AssignAccountManagerResult, CreateAgentsParams,
+  CreateAgentsResult, SendSetupFollowUpEmailParams, SendSetupFollowUpEmailResult,
+} from './siteSetupTypes';
 
-/**
- * Site Setup Activity interfaces
- */
-export interface SiteSetupParams {
-  site_id: string;
-  user_id: string;
-  company_name: string;
-  contact_email: string;
-  contact_name: string;
-  package_type?: string;
-  custom_requirements?: string[];
-}
+export type * from './siteSetupTypes';
 
-export interface CreateAgentsParams {
-  site_id: string;
-  user_id: string;
-  company_name: string;
-  agent_types?: string[];
-  custom_config?: {
-    agents_config?: AgentConfig[];
-    use_detailed_config?: boolean;
-    [key: string]: any;
-  };
-}
-
-export interface CreateAgentsResult {
-  success: boolean;
-  agents: Array<{
-    agent_id: string;
-    type: string;
-    name: string;
-    status: string;
-    description?: string;
-    activities?: Array<{
-      name: string;
-      description: string;
-      estimatedTime: string;
-      successRate: number;
-    }>;
-  }>;
-  total_created: number;
-}
-
-export interface AssignAccountManagerParams {
-  site_id: string;
-  user_id: string;
-  contact_email: string;
-  contact_name: string;
-  company_name: string;
-  preferred_manager_id?: string;
-}
-
-export interface AssignAccountManagerResult {
-  success: boolean;
-  account_manager: {
-    manager_id: string;
-    name: string;
-    email: string;
-    phone?: string;
-  };
-  assignment_date: string;
-}
-
-export interface SendSetupFollowUpEmailParams {
-  contact_email: string;
-  contact_name: string;
-  company_name: string;
-  site_id: string;
-  account_manager: {
-    name: string;
-    email: string;
-    phone?: string;
-  };
-  agents_created: Array<{
-    type: string;
-    name: string;
-  }>;
-  next_steps?: string[];
-}
-
-export interface SendSetupFollowUpEmailResult {
-  success: boolean;
-  messageId: string;
-  recipient: string;
-  timestamp: string;
-}
-
-/**
- * Activity to create agents for a new site
- */
+/** Creates missing agents without changing existing configuration or status. */
 export async function createAgentsActivity(params: CreateAgentsParams): Promise<CreateAgentsResult> {
-  console.log('🤖 Creating agents for site:', {
-    site_id: params.site_id,
-    user_id: params.user_id,
-    company_name: params.company_name,
-    agent_types: params.agent_types,
-    use_detailed_config: params.custom_config?.use_detailed_config
-  });
-
-  try {
-    const supabaseService = getSupabaseService();
-    const createdAgents: Array<{
-      agent_id: string;
-      type: string;
-      name: string;
-      status: string;
-      description?: string;
-      activities?: Array<{
-        name: string;
-        description: string;
-        estimatedTime: string;
-        successRate: number;
-      }>;
-    }> = [];
-
-    // Si se proporciona configuración detallada, usar esos agentes
-    if (params.custom_config?.use_detailed_config && params.custom_config?.agents_config) {
-      console.log('📋 Using detailed agents configuration...');
-      
-      for (const agentConfig of params.custom_config.agents_config) {
-        const agentId = randomUUID();
-        const now = new Date().toISOString();
-        
-        // Preparar datos del agente para Supabase
-        const agentData = {
-          id: agentId,
-          name: agentConfig.name,
-          description: agentConfig.description,
-          type: agentConfig.type,
-          status: agentConfig.status,
-          site_id: params.site_id,
-          user_id: params.user_id,
-          conversations: agentConfig.conversations || 0,
-          success_rate: agentConfig.success_rate || 0,
-          role: agentConfig.role || agentConfig.name, // Usar role si existe, sino el nombre
-          activities: agentConfig.activities, // Guardamos las actividades como JSON
-          configuration: {
-            company_name: params.company_name,
-            agent_type: agentConfig.type
-          },
-          created_at: now,
-          updated_at: now,
-          last_active: agentConfig.last_active || now,
-          tools: [], // Inicializamos vacío, se puede configurar después
-          integrations: {}, // Inicializamos vacío, se puede configurar después
-          backstory: agentConfig.backstory || `AI agent specialized in ${agentConfig.description.toLowerCase()}`,
-          prompt: agentConfig.prompt || `You are a ${agentConfig.name} specialized in ${agentConfig.description}. Help users with tasks related to your expertise.`
-        };
-
-        console.log(`   • Creating agent: ${agentConfig.name} (${agentConfig.type})`);
-        
-        try {
-          // Insertar agente en Supabase usando el método del servicio
-          await supabaseService.createAgent(agentData);
-          
-          console.log(`   ✅ Agent ${agentConfig.name} created with ID: ${agentId}`);
-
-          // Agregar a la lista de agentes creados
-          createdAgents.push({
-            agent_id: agentId,
-            type: agentConfig.type,
-            name: agentConfig.name,
-            status: agentConfig.status,
-            description: agentConfig.description,
-            activities: agentConfig.activities.map(activity => ({
-              name: activity.name,
-              description: activity.description,
-              estimatedTime: activity.estimatedTime,
-              successRate: activity.successRate
-            }))
-          });
-        } catch (error) {
-          console.error(`❌ Failed to create agent ${agentConfig.name}:`, error);
-          throw new Error(`Failed to create agent ${agentConfig.name}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      
-      console.log(`✅ Successfully created ${createdAgents.length} agents with detailed configuration`);
-    } else {
-      // Configuración básica - crear agentes simples basados en tipos
-      const agentTypes = params.agent_types || ['customer_support', 'sales', 'general'];
-      console.log('📋 Using basic agent types configuration:', agentTypes);
-      
-      for (const agentType of agentTypes) {
-        const agentId = randomUUID();
-        const now = new Date().toISOString();
-        
-        // Configuración básica por tipo
-        const typeConfigs = {
-          customer_support: {
-            name: 'Customer Support',
-            description: 'Handles customer inquiries and support requests',
-            icon: 'HelpCircle'
-          },
-          sales: {
-            name: 'Sales Assistant',
-            description: 'Assists with sales processes and lead management',
-            icon: 'ShoppingCart'
-          },
-          general: {
-            name: 'General Assistant',
-            description: 'Provides general assistance and information',
-            icon: 'MessageSquare'
-          }
-        };
-
-        const config = typeConfigs[agentType as keyof typeof typeConfigs] || typeConfigs.general;
-        
-        const agentData = {
-          id: agentId,
-          name: config.name,
-          description: config.description,
-          type: agentType,
-          status: 'active',
-          site_id: params.site_id,
-          user_id: params.user_id,
-          conversations: 0,
-          success_rate: 0,
-          role: config.name,
-          activities: [],
-          configuration: {
-            icon: config.icon,
-            company_name: params.company_name,
-            agent_type: agentType
-          },
-          created_at: now,
-          updated_at: now,
-          last_active: now,
-          tools: [],
-          integrations: {},
-          backstory: `AI agent specialized in ${config.description.toLowerCase()}`,
-          prompt: `You are a ${config.name} for ${params.company_name}. ${config.description}.`
-        };
-
-        console.log(`   • Creating basic agent: ${config.name} (${agentType})`);
-        
-        try {
-          // Insertar agente en Supabase usando el método del servicio
-          await supabaseService.createAgent(agentData);
-
-          console.log(`   ✅ Agent ${config.name} created with ID: ${agentId}`);
-
-          // Agregar a la lista de agentes creados
-          createdAgents.push({
-            agent_id: agentId,
-            type: agentType,
-            name: config.name,
-            status: 'active',
-            description: config.description
-          });
-        } catch (error) {
-          console.error(`❌ Failed to create agent ${config.name}:`, error);
-          throw new Error(`Failed to create agent ${config.name}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      
-      console.log(`✅ Successfully created ${createdAgents.length} basic agents`);
-    }
-
-    return {
-      success: true,
-      agents: createdAgents,
-      total_created: createdAgents.length
-    };
-
-  } catch (error) {
-    console.error('❌ Agent creation failed:', error);
-    throw new Error(`Agent creation failed: ${error instanceof Error ? error.message : String(error)}`);
+  requireSetupUuid(params.site_id, 'site_id');
+  const service = getSupabaseService();
+  const client = service.getClient();
+  const site = await fetchSetupSite(client, params.site_id);
+  if (!site) throw new Error('Site not found');
+  // The API actor may be a manager; persisted site ownership is authoritative.
+  requireSetupUuid(site.user_id, 'Site owner user_id');
+  const result: CreateAgentsResult = {
+    success: false, agents: [], total_created: 0, total_existing: 0, partial: false, errors: [],
+  };
+  const candidates = setupAgentCandidates(params);
+  if (!candidates.length) {
+    result.errors.push('No agents were requested');
+    return result;
   }
+  const seen = new Set<string>();
+  const consumed = new Set<string>();
+  for (const candidate of candidates) {
+    try {
+      const row = buildSetupAgentRow(candidate, params.site_id, site.user_id, site.name);
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      const existing = await findExistingSetupAgent(client, row, consumed);
+      if (existing) {
+        result.agents.push(setupAgentResult(existing));
+        consumed.add(existing.id);
+        result.total_existing++;
+        continue;
+      }
+      try {
+        const created = await createAgent(client, row);
+        result.agents.push(setupAgentResult(created));
+        consumed.add(created.id);
+        result.total_created++;
+      } catch (error) {
+        if (error instanceof CancelledFailure) throw error;
+        // Recover a concurrent insert or a committed write with a lost response.
+        const recovered = await findExistingSetupAgent(client, row, consumed);
+        if (!recovered) throw error;
+        result.agents.push(setupAgentResult(recovered));
+        consumed.add(recovered.id);
+        result.total_existing++;
+      }
+    } catch (error) {
+      if (error instanceof CancelledFailure) throw error;
+      result.errors.push(`${candidate.config?.name || candidate.config?.type || 'Agent'}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  result.success = result.errors.length === 0;
+  result.partial = result.agents.length > 0 && !result.success;
+  return result;
 }
 
-/**
- * Activity to assign an account manager to a new site
- */
-export async function assignAccountManagerActivity(params: AssignAccountManagerParams): Promise<AssignAccountManagerResult> {
-  console.log('👤 Assigning account manager for site:', {
-    site_id: params.site_id,
-    user_id: params.user_id,
-    contact_email: params.contact_email,
-    company_name: params.company_name,
-    preferred_manager_id: params.preferred_manager_id
-  });
-
-  try {
-    const response = await apiService.post('/api/sites/setup/account-manager', {
-      site_id: params.site_id,
-      user_id: params.user_id,
-      contact_email: params.contact_email,
-      contact_name: params.contact_name,
-      company_name: params.company_name,
-      preferred_manager_id: params.preferred_manager_id
-    });
-
-    if (!response.success) {
-      throw new Error(`Failed to assign account manager: ${response.error?.message}`);
-    }
-
-    console.log('✅ Account manager assigned successfully:', response.data);
-
-    return {
-      success: true,
-      account_manager: response.data.account_manager,
-      assignment_date: response.data.assignment_date || new Date().toISOString()
-    };
-
-  } catch (error) {
-    console.error('❌ Account manager assignment failed:', error);
-    throw new Error(`Account manager assignment failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
+/** No account-manager assignment service exists in the current API. */
+export async function assignAccountManagerActivity(_params: AssignAccountManagerParams): Promise<AssignAccountManagerResult> {
+  return {
+    success: false, skipped: true,
+    skipped_reason: 'account_manager_api_unavailable',
+    account_manager: { manager_id: '', name: '', email: '' }, assignment_date: '',
+  };
 }
 
-/**
- * Activity to send setup follow-up email with next steps
- */
+/** Sends only through the real site-configured email implementation. */
 export async function sendSetupFollowUpEmailActivity(params: SendSetupFollowUpEmailParams): Promise<SendSetupFollowUpEmailResult> {
-  console.log('📧 Sending setup follow-up email:', {
-    recipient: params.contact_email,
-    contact_name: params.contact_name,
-    company_name: params.company_name,
-    site_id: params.site_id,
-    account_manager: params.account_manager.name,
-    agents_count: params.agents_created.length
-  });
-
-  try {
-    // Construir el mensaje del email con los siguientes pasos
-    const agentsList = params.agents_created
-      .map(agent => `- ${agent.name} (${agent.type})`)
-      .join('\n');
-
-    const defaultNextSteps = [
-      'Configurar las integraciones necesarias',
-      'Personalizar las respuestas de los agentes',
-      'Realizar pruebas de funcionamiento',
-      'Programar sesión de entrenamiento del equipo',
-      'Activar el servicio en producción'
-    ];
-
-    const nextStepsList = (params.next_steps || defaultNextSteps)
-      .map((step, index) => `${index + 1}. ${step}`)
-      .join('\n');
-
-    const emailMessage = `
-Hola ${params.contact_name},
-
-¡Bienvenido a Uncodie! Nos complace informarte que hemos completado la configuración inicial de tu sitio.
-
-**Detalles de la configuración:**
-- Empresa: ${params.company_name}
-- ID del sitio: ${params.site_id}
-
-**Agentes creados:**
-${agentsList}
-
-**Tu Account Manager asignado:**
-- Nombre: ${params.account_manager.name}
-- Email: ${params.account_manager.email}
-${params.account_manager.phone ? `- Teléfono: ${params.account_manager.phone}` : ''}
-
-**Próximos pasos:**
-${nextStepsList}
-
-Tu Account Manager se pondrá en contacto contigo en las próximas 24 horas para coordinar los siguientes pasos.
-
-¡Gracias por confiar en Uncodie!
-
-Saludos,
-El equipo de Uncodie
-`.trim();
-
-    const response = await apiService.post('/api/emails/send', {
-      to: params.contact_email,
-      from: 'setup@uncodie.com',
-      subject: `¡Bienvenido a Uncodie! - Configuración completada para ${params.company_name}`,
-      message: emailMessage,
-      cc: params.account_manager.email,
-      tags: ['site_setup', 'welcome', 'onboarding']
-    });
-
-    if (!response.success) {
-      throw new Error(`Failed to send setup follow-up email: ${response.error?.message}`);
-    }
-
-    console.log('✅ Setup follow-up email sent successfully:', response.data);
-
-    return {
-      success: true,
-      messageId: response.data.messageId || 'unknown',
-      recipient: params.contact_email,
-      timestamp: new Date().toISOString()
-    };
-
-  } catch (error) {
-    console.error('❌ Setup follow-up email failed:', error);
-    throw new Error(`Setup follow-up email failed: ${error instanceof Error ? error.message : String(error)}`);
+  // Preserve legacy result fields; empty values never claim a recipient or send.
+  const unsent = { success: false, messageId: '', recipient: '', timestamp: '' };
+  const recipient = params.contact_email?.trim();
+  if (!recipient) return { ...unsent, skipped: true, skipped_reason: 'missing_contact_email' };
+  if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(recipient) || recipient === 'no-email@example.com') {
+    return { ...unsent, skipped: true, skipped_reason: 'invalid_contact_email' };
   }
-} 
+  requireSetupUuid(params.site_id, 'site_id');
+  const agents = (params.agents_created ?? []).map(agent => `- ${agent.name} (${agent.type})`).join('\n');
+  const steps = (params.next_steps ?? [
+    'Configure the required integrations', 'Customize agent responses', 'Test the agents',
+  ]).map((step, index) => `${index + 1}. ${step}`).join('\n');
+  const manager = params.account_manager;
+  const message = [
+    params.contact_name?.trim() ? `Hello ${params.contact_name.trim()},` : 'Hello,',
+    'Your initial site setup has been processed.',
+    `Site ID: ${params.site_id}`,
+    ...(params.company_name?.trim() ? [`Company: ${params.company_name.trim()}`] : []),
+    ...(agents ? [`Agents available:\n${agents}`] : []),
+    ...(manager?.name && manager.email ? [`Account manager: ${manager.name} (${manager.email})${manager.phone ? `, ${manager.phone}` : ''}`] : []),
+    ...(steps ? [`Next steps:\n${steps}`] : []),
+  ].join('\n\n');
+  const response = await dispatchSetupEmailFromActivity({
+    site_id: params.site_id, email: recipient,
+    subject: params.company_name?.trim() ? `Site setup update for ${params.company_name.trim()}` : 'Site setup update',
+    message,
+  });
+  const data = response.data;
+  if (data?.status === 'skipped') return { ...unsent, skipped: true, skipped_reason: data.reason || 'email_provider_skipped' };
+  if (data?.status === 'uncertain' || !response.success) {
+    return { ...unsent, unconfirmed: true, skipped: true, skipped_reason: data?.reason || 'delivery_unconfirmed' };
+  }
+  if (!response.success || data?.success === false) {
+    return { ...unsent, error: response.error?.message || data?.error?.message || 'Email sending failed' };
+  }
+  const messageId = data?.messageId;
+  if (data?.status !== 'sent' || typeof messageId !== 'string' || !messageId.trim()
+    || data.recipient !== recipient || typeof data.sent_at !== 'string' || !Number.isFinite(Date.parse(data.sent_at))) {
+    return { ...unsent, unconfirmed: true, skipped: true, skipped_reason: 'delivery_unconfirmed' };
+  }
+  return { success: true, messageId, recipient, timestamp: data.sent_at };
+}

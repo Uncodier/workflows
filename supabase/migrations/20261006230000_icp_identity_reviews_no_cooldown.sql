@@ -18,7 +18,7 @@ BEGIN
   END IF;
   IF d.state <> 'running' OR d.baseline_processed IS NULL OR d.baseline_found IS NULL THEN
     RAISE EXCEPTION 'Dispatch must be running to settle';
-  END IF;
+  END IF; 
   IF jsonb_typeof(p_errors) IS DISTINCT FROM 'array' THEN RAISE EXCEPTION 'Dispatch errors must be an array'; END IF;
   SELECT * INTO r FROM public.icp_mining WHERE id = d.icp_mining_id AND site_id = d.site_id FOR UPDATE;
   IF NOT FOUND OR r.execution_run_id IS DISTINCT FROM p_run_id OR r.execution_workflow_id IS DISTINCT FROM d.workflow_id THEN

@@ -34,7 +34,8 @@ a JSON object:
 | `initialize_site_billing` | `initialized`, `already_initialized` | `success`, `outcome`, `credits_granted`, `billing_id`, `credits_available` |
 | `renew_site_plan_credits` | `reset`, `not_due`, `stale_period`, `stripe_managed`, `inactive` | `success`, `outcome`, `credits_granted`, `credits_available` |
 
-Initialization grants 30 once for a genuinely new billing account. Existing
+Initialization grants one current-month Toolbox credit for a genuinely new
+billing account, with no signup bonus. Existing
 billing is **never topped up** merely because its initial payment marker is
 missing. This closes the third signup issuer in Workflows as well as the API /
 market-fit race. Atomic marker and billing creation belong to the RPC.
@@ -67,8 +68,8 @@ UTC month boundary, not necessarily at 00:00 UTC. The DB period must not drift
 to the processing timestamp.
 
 Non-Stripe periods are UTC calendar months (first day at 00:00 UTC to the first
-day of the next month), not subscription anniversary dates. Signup retains the
-one-time 30 until the first new calendar month. Terminal statuses include
+day of the next month), not subscription anniversary dates. Initial signup uses
+the same one-credit allowance as monthly Toolbox renewal. Terminal statuses include
 `canceled`, `cancelled`, and `incomplete_expired`. Scheduled cancellation is
 still paid until terminal status; downgrades use canonical `commission`.
 
@@ -90,6 +91,10 @@ load `.env.local` or connect to services.
 ## Rollout and offline verification
 
 Install and verify the coordinated API migrations before deploying this worker.
+The forward `20261007003000_remove_signup_credit_bonus.sql` migration removes
+future welcome grants without changing existing balances. Market-fit's independent
+authorized billing initialization is the primary creation path; optional setup
+and this daily worker are idempotent retries, not prerequisites for initial credit.
 Do not silently revert to legacy writers if an RPC is unavailable. Existing
 workflow/activity names and positional parameters are retained for queued
 Temporal histories; result consumers must recognize no-op outcomes.
@@ -109,7 +114,7 @@ npx tsc --noEmit --incremental false
 npx tsc --project worker.tsconfig.json --noEmit --incremental false
 ```
 
-These 39 regressions verify boundary contracts, paginated discovery above 1000
+These regressions verify boundary contracts, paginated discovery above 1000
 rows, no legacy writes on failure, once-per-site reconciliation, and compatible
 recorded activity result shapes. Database concurrency and balance conservation
 must additionally pass the SQL regression suite in the API repository.

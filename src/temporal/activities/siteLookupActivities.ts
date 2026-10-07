@@ -1,4 +1,5 @@
 import { getSupabaseService } from '../services/supabaseService';
+import { fetchSetupSite } from './siteSetupAgentHelpers';
 
 export interface Site {
   id: string;
@@ -22,20 +23,8 @@ export async function getSiteActivity(siteId: string): Promise<GetSiteResult> {
   try {
     const supabaseService = getSupabaseService();
 
-    console.log('🔍 Checking database connection...');
-    const isConnected = await supabaseService.getConnectionStatus();
-
-    if (!isConnected) {
-      console.log('⚠️  Database not available, cannot fetch site information');
-      return {
-        success: false,
-        error: 'Database not available'
-      };
-    }
-
-    console.log('✅ Database connection confirmed, fetching site...');
-
-    const siteData = await supabaseService.fetchSiteById(siteId);
+    // A scoped read is also the connectivity check; no global site probe is needed.
+    const siteData = await fetchSetupSite(supabaseService.getClient(), siteId);
 
     if (!siteData) {
       console.error(`❌ Site ${siteId} not found`);
@@ -47,7 +36,7 @@ export async function getSiteActivity(siteId: string): Promise<GetSiteResult> {
 
     const site: Site = {
       id: siteData.id,
-      name: siteData.name || 'Unnamed Site',
+      name: siteData.name || '',
       url: siteData.url || '',
       description: siteData.description || null,
       user_id: siteData.user_id,

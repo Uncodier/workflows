@@ -61,6 +61,9 @@ temporal-workflows/
 
 ## Available Workflows
 
+- [Minimum-data site setup](workflows/SITE_SETUP_WORKFLOW.md) — current required
+  input, independent stages, partial results, queue alignment and replay safety.
+
 ### Data Processing Workflow
 Processes data from an API and can apply transformations.
 
