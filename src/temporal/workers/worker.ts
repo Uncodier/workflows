@@ -76,7 +76,8 @@ export async function startWorker() {
     }
 
     console.log('🔗 Connecting to Temporal server...');
-    console.log('Connection options:', JSON.stringify(connectionOptions, null, 2));
+    // Never log connectionOptions: it contains the Temporal API key. The
+    // non-secret connection settings are already logged above.
     logger.info('🔗 Connecting to Temporal server...');
     const connection = await NativeConnection.connect(connectionOptions);
     console.log('✅ Successfully connected to Temporal server');

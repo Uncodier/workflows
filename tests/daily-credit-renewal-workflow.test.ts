@@ -1,3 +1,4 @@
+const activityOptions: unknown[] = [];
 const mockActivities = {
   fetchSitesNeedingInitializationActivity: jest.fn(),
   initializeSiteCreditsActivity: jest.fn(),
@@ -6,12 +7,19 @@ const mockActivities = {
 };
 
 jest.mock('@temporalio/workflow', () => ({
-  proxyActivities: () => mockActivities,
+  proxyActivities: (options: unknown) => { activityOptions.push(options); return mockActivities; },
 }));
 
 import { dailyCreditRenewalWorkflow } from '../src/temporal/workflows/dailyCreditRenewalWorkflow';
 
 describe('daily credit renewal orchestration', () => {
+  it('bounds activity retries so a persistently failing site cannot block later sites', () => {
+    expect(activityOptions).toEqual([expect.objectContaining({
+      startToCloseTimeout: '5m',
+      scheduleToCloseTimeout: '15m',
+      retry: expect.objectContaining({ maximumAttempts: 3 }),
+    })]);
+  });
   beforeEach(() => {
     jest.resetAllMocks();
     jest.spyOn(console, 'log').mockImplementation(() => {});

@@ -8,6 +8,10 @@ const {
   initializeSiteCreditsActivity
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5m',
+  // A permanently failing site must not hold a serial batch indefinitely.
+  // Successful RPCs remain idempotent when an activity is retried.
+  scheduleToCloseTimeout: '15m',
+  retry: { maximumAttempts: 3 },
 });
 
 export async function dailyCreditRenewalWorkflow(): Promise<{ processed: number; errors: number; initialized: number; initErrors: number }> {
