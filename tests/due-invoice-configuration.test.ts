@@ -18,13 +18,18 @@ describe('due invoice configuration', () => {
   });
   it('uses unpaid invoices as audience rather than requiring lead segments', () => {
     expect(resolveOutreachConfiguration(settings(), 'invoices_due', now)).toMatchObject({
-      shouldExecute: true, allSegments: true, segmentIds: [], repeatIntervalDays: 3,
+      shouldExecute: true, allSegments: true, segmentIds: [], repeatIntervalDays: 3, cooldownMode: 'progressive',
       availableChannels: ['email'], weekdays: [1, 2, 3, 4, 5],
       startTimeMode: 'business_opening',
     });
   });
   it.each([0, -1, 1.5, 366, '3', null])('rejects invalid intervals %j when provided', value => {
     expect(resolveOutreachConfiguration(settings({ repeat_interval_days: value }), 'invoices_due', now).shouldExecute).toBe(false);
+  });
+  it('preserves legacy fixed invoice settings and validates explicit cadence', () => {
+    expect(resolveOutreachConfiguration(settings({ repeat_interval_days: 5 }), 'invoices_due', now)).toMatchObject({ shouldExecute: true, cooldownMode: 'fixed', repeatIntervalDays: 5 });
+    expect(resolveOutreachConfiguration(settings({ cooldown_mode: 'fixed', repeat_interval_days: 5 }), 'invoices_due', now)).toMatchObject({ shouldExecute: true, cooldownMode: 'fixed' });
+    expect(resolveOutreachConfiguration(settings({ cooldown_mode: 'invalid' }), 'invoices_due', now).shouldExecute).toBe(false);
   });
   it('requires a selected connected account and honors weekdays and opening time', () => {
     expect(resolveOutreachConfiguration(settings({ channel_accounts: {} }), 'invoices_due', now).shouldExecute).toBe(false);

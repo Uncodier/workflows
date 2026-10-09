@@ -4,6 +4,7 @@ import type { generatePersonEmailWorkflow } from '../generatePersonEmailWorkflow
 import { domainOf, finderLeadProfile, mergeFinderData } from '../../utils/finderData';
 import { emailCandidates, personContactDocuments, usablePhoneNumbers } from '../../utils/icpContactCandidates';
 import type { IcpOrganizationReview } from '../../utils/icpIdentityReview';
+import { isIcpCreditFailure } from '../../utils/icpDispatchSelection';
 
 type Deps = Pick<Activities, 'prepareFinderPersonActivity' | 'checkExistingLeadForPersonActivity' | 'validateContactInformation'
   | 'lookEmailOnIcyPeas' | 'callPersonWorkEmailsActivity' | 'callPersonContactsLookupPersonalEmailsActivity'
@@ -13,7 +14,7 @@ type Deps = Pick<Activities, 'prepareFinderPersonActivity' | 'checkExistingLeadF
 
 /** Raw contacts are retained, but only usable contacts can terminate enrichment. */
 export async function enrichWithValidatedContacts(options: EnrichLeadOptions, deps: Deps,
-  policy: { trustProviderEmails?: boolean; isolateIdentityReviews?: boolean } = {}): Promise<EnrichLeadResult> {
+  policy: { trustProviderEmails?: boolean; isolateIdentityReviews?: boolean; stopOnCreditFailure?: boolean } = {}): Promise<EnrichLeadResult> {
   const start = Date.now();
   const errors: string[] = [];
   const responses: Record<string, any> = {};
@@ -85,10 +86,14 @@ export async function enrichWithValidatedContacts(options: EnrichLeadOptions, de
     const lookup = async (key: string, call: () => Promise<any>, accept: (result: any) => Promise<void>) => {
       try {
         const result = await call(); responses[key] = result;
-        if (!result.success && result.outcome !== 'no_match') errors.push(result.error?.message || result.error || `${key} unavailable`);
+        if (!result.success && result.outcome !== 'no_match') {
+          const message = result.error?.message || result.error || `${key} unavailable`;
+          errors.push(typeof message === 'string' ? message : String(message));
+        }
         else await accept(result);
       } catch (error) { errors.push(`${key}: ${String(error)}`); }
     };
+    const creditsExhausted = () => policy.stopOnCreditFailure && errors.some(isIcpCreditFailure);
     const company = prepared.role?.organization || {};
     const domain = domainOf(company.website || company.domain);
     if (!available() && domain && person.full_name) {
@@ -99,11 +104,15 @@ export async function enrichWithValidatedContacts(options: EnrichLeadOptions, de
       // checkpoint; its durable search will be resumed instead of buying fallbacks.
       if (responses.icypeas?.outcome === 'pending') return finish({ personId: person.id });
     }
+    if (creditsExhausted()) return finish({ personId: person.id });
     if (!available()) await lookup('work_emails', () => deps.callPersonWorkEmailsActivity(params), result => acceptEmails([result.emails], work, true));
+    if (creditsExhausted()) return finish({ personId: person.id });
     if (!available()) await lookup('personal_emails', () => deps.callPersonContactsLookupPersonalEmailsActivity(params), result => acceptEmails([result.emails], personal, true));
+    if (creditsExhausted()) return finish({ personId: person.id });
     if (!available()) await lookup('phones', () => deps.callPersonContactsLookupPhoneNumbersActivity(params), async result => {
       phones.push(...usablePhoneNumbers(result.phoneNumbers));
     });
+    if (creditsExhausted()) return finish({ personId: person.id });
     if (!available() && domain && person.full_name && deps.generateEmail) {
       await lookup('generated_email', () => deps.generateEmail!({ reportOutcome: true, person_id: person.id, full_name: person.full_name,
         company_name: company.name || options.company_name || person.company_name, company_domain: domain,

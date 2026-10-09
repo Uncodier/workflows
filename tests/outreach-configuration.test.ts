@@ -1,5 +1,5 @@
 import { resolveOutreachConfiguration, nextOutreachRun, localOutreachDay } from '../src/temporal/utils/outreachConfiguration';
-import { evaluateOutreachHistory, summarizeOutreachHistory } from '../src/temporal/utils/outreachHistory';
+import { evaluateOutreachHistory, outreachCooldownMs, summarizeOutreachHistory } from '../src/temporal/utils/outreachHistory';
 
 const cold = 'leads_initial_cold_outreach' as const;
 const followup = 'leads_follow_up' as const;
@@ -32,6 +32,23 @@ describe('outreach configuration', () => {
   });
   it.each([0, 101, 1.5, '3'])('rejects invalid unanswered cap %s', value => {
     expect(resolveOutreachConfiguration(settings({ max_unanswered_messages: value }), cold, now).shouldExecute).toBe(false);
+  });
+  it('defaults to progressive cooldown and validates a fixed interval independently for both activities', () => {
+    for (const key of [cold, followup]) {
+      const input = settings();
+      const configured = { ...input, activities: { [key]: input.activities[cold] } };
+      expect(resolveOutreachConfiguration(configured, key, now, false)).toMatchObject({ cooldownMode: 'progressive', shouldExecute: true });
+      for (const value of [0, -1, 1.5, 366, '3', null]) {
+        configured.activities[key] = { ...input.activities[cold], cooldown_mode: 'fixed', cooldown_period_days: value } as any;
+        expect(resolveOutreachConfiguration(configured, key, now, false).shouldExecute).toBe(false);
+      }
+      configured.activities[key] = { ...input.activities[cold], cooldown_mode: 'fixed', cooldown_period_days: 5 } as any;
+      expect(resolveOutreachConfiguration(configured, key, now, false)).toMatchObject({ shouldExecute: true, cooldownMode: 'fixed', cooldownPeriodDays: 5 });
+    }
+  });
+  it.each([cold, followup])('rejects unknown cooldown mode for %s', key => {
+    const input = settings();
+    expect(resolveOutreachConfiguration({ ...input, activities: { [key]: { ...input.activities[cold], cooldown_mode: 'unknown' } } }, key, now, false).shouldExecute).toBe(false);
   });
   it('checks follow-up weekdays locally, and schedules across DST correctly', () => {
     const input = settings();
@@ -86,6 +103,17 @@ describe('outreach configuration', () => {
 });
 
 describe('outreach audience and unanswered limit', () => {
+  it('uses consecutive days first, then wider intervals; fixed days apply after each confirmed contact', () => {
+    expect([1, 2, 3, 4, 5, 6].map(count => outreachCooldownMs(count, 'progressive') / 86400000)).toEqual([1, 1, 3, 7, 14, 14]);
+    for (const activity of [cold, followup]) {
+      const messages = [sent('one', '2026-09-01T12:00:00Z')];
+      if (activity === followup) messages.unshift({ id: 'reply', role: 'user', created_at: '2026-08-31T12:00:00Z', custom_data: {} });
+      expect(evaluateOutreachHistory(messages, activity, 3, 7 * 86400000, Date.parse('2026-09-02T11:59:59Z')).eligible).toBe(false);
+      expect(evaluateOutreachHistory(messages, activity, 3, 7 * 86400000, Date.parse('2026-09-02T12:00:00Z')).eligible).toBe(true);
+      expect(evaluateOutreachHistory(messages, activity, 3, 0, Date.parse('2026-09-05T11:59:59Z'), 0, 'fixed', 4).eligible).toBe(false);
+      expect(evaluateOutreachHistory(messages, activity, 3, 0, Date.parse('2026-09-05T12:00:00Z'), 0, 'fixed', 4).eligible).toBe(true);
+    }
+  });
   it('separates never-replied contacts from contacts who have written', () => {
     const messages = [sent('one', '2026-09-01T12:00:00Z')];
     expect(evaluateOutreachHistory(messages, cold, 3, 0, now.getTime()).eligible).toBe(true);
@@ -103,7 +131,7 @@ describe('outreach audience and unanswered limit', () => {
     ];
     expect(summarizeOutreachHistory(messages).unanswered).toBe(2);
     expect(evaluateOutreachHistory(messages, followup, 2, 7 * 86400000, now.getTime())).toMatchObject({ eligible: false, shouldMarkCold: true });
-    expect(evaluateOutreachHistory(messages, followup, 2, 7 * 86400000, Date.parse('2026-09-05T12:00:00Z')).shouldMarkCold).toBe(false);
+    expect(evaluateOutreachHistory(messages, followup, 2, 7 * 86400000, Date.parse('2026-09-04T11:59:59Z')).shouldMarkCold).toBe(false);
     messages.push({ id: 'draft', role: 'assistant', created_at: '2026-09-06T12:00:00Z', custom_data: { status: 'pending' } });
     expect(summarizeOutreachHistory(messages)).toMatchObject({ unanswered: 2, hasPending: true });
   });

@@ -167,13 +167,19 @@ export function classifyIcpDispatchCooldown(errors: readonly string[], failures?
   const retryableErrors = errors.filter(error => !isIcpOrganizationIdentityError(error));
   if (errors.length > 0 && retryableErrors.length === 0) return 0;
   const needsLongCooldown = retryableErrors.some(error => {
+    if (isIcpCreditFailure(error)) return true;
     const normalized = error.toLowerCase().replace(/[_-]+/g, ' ');
-    return /\b(?:402|http\s*402|insufficient\s*(?:funds|credits?))\b/.test(normalized)
-      || /\b(?:no|not enough|out of)\s+credits?\b/.test(normalized)
-      || /\bcredits?\s+(?:balance\s+)?(?:exhausted|depleted|insufficient)\b/.test(normalized)
-      || /\bsubmission\s*(?:(?:status|outcome)\s+(?:is\s+)?)?unknown\b/.test(normalized)
+    return /\bsubmission\s*(?:(?:status|outcome)\s+(?:is\s+)?)?unknown\b/.test(normalized)
       || /\bunknown\s*submission\b/.test(normalized)
       || /\bambiguous\s+(?:initial\s+)?submission\b/.test(normalized);
   });
   return needsLongCooldown ? longCooldownSeconds : baseCooldownSeconds;
+}
+
+/** Only credit exhaustion should trigger the site-owner email, not other provider errors. */
+export function isIcpCreditFailure(error: string): boolean {
+  const normalized = error.toLowerCase().replace(/[_-]+/g, ' ');
+  return /\b(?:402|http\s*402|insufficient\s*(?:funds|credits?))\b/.test(normalized)
+    || /\b(?:no|not enough|out of)\s+(?:available\s+)?(?:verification\s+)?credits?\b/.test(normalized)
+    || /\bcredits?\s+(?:balance\s+)?(?:exhausted|depleted|insufficient)\b/.test(normalized);
 }

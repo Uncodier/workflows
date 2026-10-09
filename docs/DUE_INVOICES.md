@@ -8,7 +8,10 @@ cold outreach and lead follow-up.
 
 - `channel_accounts`: existing connected account IDs grouped by channel. No
   unselected account or provider fallback is allowed. Phone calls use `voice`.
-- `repeat_interval_days`: integer from 1 through 365, default 3, per invoice.
+- `cooldown_mode`: `progressive` by default for new invoice settings (1, 1, 3,
+  7, then 14 days after successive confirmed reminders of the same invoice) or
+  `fixed` using `repeat_interval_days` (integer 1–365, default 3). Existing
+  invoice settings with `repeat_interval_days` and no mode remain fixed.
 - `daily_message_limit`: shared per-site activity delivery budget, default 30.
 - `weekdays`: selected local weekdays, default Monday through Friday.
 - `start_time_mode` / `start_time`: existing activity opening/custom-time rules.
@@ -54,6 +57,10 @@ are accumulated while later invoices continue, then reported as a nonretryable
 `DUE_INVOICE_REMINDERS_FAILED` failure with the summary.
 
 ## Rollout
+
+Apply `20261008230000_invoice_reminder_cooldown.sql` once before deploying the
+new API. It adds an atomic claim for progressive/fixed reminders without changing
+the existing claim or old invoice receipts. Keep both repository copies identical.
 
 Apply the forward-only financial-date and invoice-reminder migrations through
 the canonical migration process before deploying callers that select the new

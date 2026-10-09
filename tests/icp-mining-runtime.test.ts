@@ -10,6 +10,7 @@ const mockActivities = {
   getIcpMiningByIdActivity: jest.fn(), getSiteActivity: jest.fn(),
   claimIcpMiningExecutionActivity: jest.fn(), checkpointIcpMiningExecutionActivity: jest.fn(),
   isIcpDispatcherEnabledActivity: jest.fn(),
+  checkIcpMiningCreditsActivity: jest.fn(), warnIcpMiningCreditsActivity: jest.fn(),
 };
 jest.mock('../src/lib/supabase/client', () => ({ supabaseServiceRole: {
   from: () => ({ select: () => ({ eq: () => ({ maybeSingle: mockSingle }) }) }),
@@ -41,6 +42,7 @@ describe('ICP execution-time settings and terminal status', () => {
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     mockPatched.mockReturnValue(true);
     mockActivities.isIcpDispatcherEnabledActivity.mockResolvedValue(false);
+    mockActivities.checkIcpMiningCreditsActivity.mockResolvedValue(true);
     mockWorkflowInfo.mockReturnValue({ workflowId: 'actual-mining-run', runId: 'run',
       parent: { workflowId: 'icp-timer' } });
     mockNonCancellable.mockImplementation(fn => fn());
@@ -54,6 +56,29 @@ describe('ICP execution-time settings and terminal status', () => {
         page: 0, offset: 3, snapshot: null } });
   });
   afterEach(() => jest.restoreAllMocks());
+
+  it('does not start mining or send an email when the site has no credits', async () => {
+    mockActivities.checkIcpMiningCreditsActivity.mockResolvedValue(false);
+    expect(await idealClientProfileMiningWorkflow(options)).toMatchObject({ success: false, processed: 0 });
+    expect(mockActivities.getIcpMiningConfigurationActivity).not.toHaveBeenCalled();
+    expect(mockExecuteChild).not.toHaveBeenCalled();
+    expect(mockActivities.warnIcpMiningCreditsActivity).not.toHaveBeenCalled();
+  });
+
+  it('warns only once when a mining page fails for lack of credits', async () => {
+    mockActivities.getPendingIcpMiningActivity.mockResolvedValue({ success: true, items: [row] });
+    mockExecuteChild.mockResolvedValue({ success: false, processed: 0, foundMatches: 0, total: 100,
+      errors: ['Insufficient credits', 'No credits remaining'], retryableFailure: true, pageCompleted: false, hasMore: true,
+      checkpoint: { processed: 0, found: 0, version: 1, page: 0, offset: 0, snapshot: null } });
+    await idealClientProfileMiningWorkflow(options);
+    expect(mockActivities.warnIcpMiningCreditsActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not email the owner for unrelated mining errors', async () => {
+    mockActivities.getPendingIcpMiningActivity.mockResolvedValue({ success: false, error: 'database unavailable' });
+    await idealClientProfileMiningWorkflow(options);
+    expect(mockActivities.warnIcpMiningCreditsActivity).not.toHaveBeenCalled();
+  });
 
   it('does not let old daily timers or manual runs bypass the dispatcher daily budget', async () => {
     mockActivities.isIcpDispatcherEnabledActivity.mockResolvedValue(true);

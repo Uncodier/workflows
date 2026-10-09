@@ -3,6 +3,7 @@ import type { EnrichLeadOptions, EnrichLeadResult } from '../enrichLeadWorkflow'
 import type { IdealClientProfilePageSearchOptions, IdealClientProfilePageSearchResult } from '../idealClientProfilePageSearchWorkflow';
 import type { LeadResearchOptions, LeadResearchResult } from '../leadResearchWorkflow';
 import { needsLeadDeepResearch } from '../../utils/leadResearchState';
+import { isIcpCreditFailure } from '../../utils/icpDispatchSelection';
 
 type Deps = Pick<Activities, 'getRoleQueryByIdActivity' | 'callPersonRoleSearchActivity' | 'getSegmentIdFromRoleQueryActivity'
   | 'checkpointIcpMiningExecutionActivity' | 'getLeadActivity'> & {
@@ -91,6 +92,7 @@ export async function processPageSafely(options: IdealClientProfilePageSearchOpt
       // Reviews were saved on the person before enrichment acknowledged them.
       // Advance the scan, not the match count; review is not a definitive no-match.
       errors.push(...(result.identityReviews || []).map(review => review.error));
+      if (options.stop_on_credit_failure && errors.some(isIcpCreditFailure)) { retryableFailure = true; break; }
       if (result.leadId) {
         let researchFailed = false;
         if (options.research_enabled) {

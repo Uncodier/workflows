@@ -9,6 +9,7 @@ const mockActivities = {
   getLeadActivity: jest.fn(),
   claimIcpMiningExecutionActivity: jest.fn(), checkpointIcpMiningExecutionActivity: jest.fn(),
   isIcpDispatcherEnabledActivity: jest.fn(),
+  checkIcpMiningCreditsActivity: jest.fn(), warnIcpMiningCreditsActivity: jest.fn(),
 };
 jest.mock('@temporalio/workflow', () => ({
   ...jest.requireActual('@temporalio/workflow'), proxyActivities: () => mockActivities,
@@ -24,6 +25,7 @@ describe('configurable independent ICP workflow', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     mockActivities.isIcpDispatcherEnabledActivity.mockResolvedValue(false);
+    mockActivities.checkIcpMiningCreditsActivity.mockResolvedValue(true);
     jest.spyOn(console, 'log').mockImplementation(() => undefined);
     mockPatched.mockImplementation((key: string) => key !== 'icp-mining-owned-checkpoints-v1');
     mockActivities.getIcpMiningConfigurationActivity.mockResolvedValue({ targetLeads: 3, researchEnabled: true });

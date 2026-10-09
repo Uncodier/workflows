@@ -1,5 +1,6 @@
 import type { Activities, IcpPageSnapshot } from '../../activities';
 import type { processSingleIcp } from './processSingle';
+import { isIcpCreditFailure } from '../../utils/icpDispatchSelection';
 
 export type OwnedIcpArgs = Parameters<typeof processSingleIcp>[0] & {
   execution: { runId: string; workflowId: string };
@@ -34,6 +35,7 @@ export async function processOwnedIcp(args: OwnedIcpArgs) {
       role_query_id: row.role_query_id, site_id: options.site_id, userId: args.actualUserId,
       icp_mining_id: row.id, page, page_size: 10, start_index: offset,
       max_matches: args.targetLeadsWithEmail - (found - baselineFound), research_enabled: options.researchEnabled === true,
+      ...(options.icpCreditGuard ? { stop_on_credit_failure: true } : {}),
       execution: { run_id: execution.runId, version, processed, found }, snapshot,
     });
     if (!result.checkpoint) throw new Error('ICP child did not return its durable checkpoint');
@@ -41,7 +43,7 @@ export async function processOwnedIcp(args: OwnedIcpArgs) {
     if (result.total !== undefined) total = result.total;
     errors.push(...result.errors);
     exhausted = result.pageCompleted === true && result.hasMore === false;
-    if (result.retryableFailure) break;
+    if (result.retryableFailure || (options.icpCreditGuard && result.errors.some(isIcpCreditFailure))) break;
     if (!result.processed && !result.pageCompleted) throw new Error('ICP page made no progress');
   }
   await args.checkpoint({ id: row.id, site_id: options.site_id, run_id: execution.runId, version: version + 1,

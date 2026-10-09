@@ -113,6 +113,13 @@ identity reviews do not generate a cooldown or increase failure counters. Settle
 publishes the authoritative earliest next eligible time to
 `cron_status.next_run`; that is an eligibility time, not guaranteed admission.
 
+The dispatcher skips sites whose persisted `billing.credits_available` is zero or
+unavailable; a slice checks again before starting its paid page. The legacy mining
+entry point also checks before starting. If credits run out while processing, the
+page stops at that candidate, retains its checkpoint for resumption, and the parent
+execution sends one credit-warning email to the site's owner (not to each lead).
+An initial zero balance skips without sending a warning email.
+
 ### Organization identity reviews (no site cooldown)
 
 New enrichment runs use Temporal patch `icp-isolate-organization-reviews-v1`.

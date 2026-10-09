@@ -7,6 +7,13 @@ export interface OutreachMessage {
   custom_data?: Record<string, any> | null;
 }
 
+/** Waiting period after a confirmed send; the first contact keeps its existing initial threshold. */
+export function outreachCooldownMs(unanswered: number, mode: 'progressive' | 'fixed', fixedDays?: number): number {
+  if (unanswered < 1) return 0;
+  const days = mode === 'fixed' ? fixedDays! : [1, 1, 3, 7, 14][Math.min(unanswered - 1, 4)];
+  return days * 86400000;
+}
+
 export function isInboundReply(message: OutreachMessage): boolean {
   const data = message.custom_data || {};
   return message.role === 'user' && data.is_internal !== true && data.internal !== true
@@ -45,11 +52,11 @@ export function summarizeOutreachHistory(messages: OutreachMessage[]) {
 }
 
 export function evaluateOutreachHistory(messages: OutreachMessage[], activity: OutreachActivityKey, maxUnanswered: number,
-  waitMs: number, now = Date.now(), createdAt = 0) {
+  waitMs: number, now = Date.now(), createdAt = 0, cooldownMode: 'progressive' | 'fixed' = 'progressive', cooldownDays?: number) {
   const history = summarizeOutreachHistory(messages);
   const matchesAudience = activity === 'leads_initial_cold_outreach' ? !history.hasInbound : history.hasInbound;
   const lastContact = Math.max(history.lastSentAt, history.lastInboundAt, createdAt);
-  const replyWindowElapsed = now - lastContact >= waitMs;
+  const replyWindowElapsed = now - lastContact >= (history.unanswered ? outreachCooldownMs(history.unanswered, cooldownMode, cooldownDays) : waitMs);
   return {
     ...history, matchesAudience,
     shouldMarkCold: matchesAudience && history.unanswered >= maxUnanswered && replyWindowElapsed && !history.uncertain,

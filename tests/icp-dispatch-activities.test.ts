@@ -31,9 +31,23 @@ beforeEach(() => {
   store.settings = [{ site_id: site, activities: { icp_lead_generation: { target_leads: 150, all_lists: true } } }];
   store.icp_mining = [{ id: list, site_id: site, total_targets: 1188, processed_targets: 0, current_page_offset: 0, snapshot_page: 0, execution_active: false }];
   store.icp_dispatch_site_state = []; store.icp_dispatch_list_state = []; store.icp_dispatch_runs = [];
+  store.billing = [{ site_id: site, credits_available: 100 }];
   mockRpc.mockImplementation(async (name, params) => ({ data: name === 'reserve_icp_dispatch' ? { acquired: true,
     reservation: { id: 'reservation', site_id: site, icp_mining_id: list, workflow_id: params.p_workflow_id,
       reserved_candidates: 10, reserved_matches: 10, research_enabled: false } } : { success: true }, error: null }));
+});
+
+it('does not reserve or start paid mining for a site with no credits', async () => {
+  store.billing[0].credits_available = 0;
+  expect(await dispatchIcpMiningActivity({ dispatchId: 'tick' })).toMatchObject({ started: 0 });
+  expect(mockRpc).not.toHaveBeenCalled();
+  expect(mockStart).not.toHaveBeenCalled();
+});
+
+it('fails closed when billing balances cannot be read', async () => {
+  readError = 'billing';
+  await expect(dispatchIcpMiningActivity({ dispatchId: 'tick' })).rejects.toThrow('offline');
+  expect(mockStart).not.toHaveBeenCalled();
 });
 
 it('reserves one site turn before starting it, not the full target each tick', async () => {

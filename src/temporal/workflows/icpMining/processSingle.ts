@@ -1,4 +1,5 @@
 import type { IdealClientProfilePageSearchOptions, IdealClientProfilePageSearchResult } from '../idealClientProfilePageSearchWorkflow';
+import { isIcpCreditFailure } from '../../utils/icpDispatchSelection';
 
 type Deps = {
   logWorkflowExecutionActivity: (params: any) => Promise<void>;
@@ -85,7 +86,11 @@ export async function processSingleIcp(args: {
         site_id: options.site_id,
         userId: args.actualUserId,
         icp_mining_id: icpId,
+        ...(options.icpCreditGuard ? { stop_on_credit_failure: true } : {}),
       });
+      if (options.icpCreditGuard && hydrateRes.errors.some(isIcpCreditFailure)) {
+        throw new Error(hydrateRes.errors.join('; '));
+      }
 
       if (hydrateRes.success && typeof hydrateRes.total === 'number' && hydrateRes.total > 0) {
         totalTargets = hydrateRes.total;
@@ -102,6 +107,7 @@ export async function processSingleIcp(args: {
       }
       // page size is fixed by API; ignore hydrateRes.pageSize if present
     } catch (e) {
+      if (options.icpCreditGuard && isIcpCreditFailure(e instanceof Error ? e.message : String(e))) throw e;
       await deps.updateIcpMiningProgressActivity({ id: icpId, appendError: `Hydration error: ${e}` });
     }
   }
@@ -182,17 +188,20 @@ export async function processSingleIcp(args: {
         site_id: options.site_id,
         userId: args.actualUserId,
         icp_mining_id: icpId,
+        ...(options.icpCreditGuard ? { stop_on_credit_failure: true } : {}),
       });
     } catch (error) {
       const err = `Page ${currentPage} search failed: ${error}`;
       await deps.updateIcpMiningProgressActivity({ id: icpId, appendError: err });
+      if (options.icpCreditGuard && isIcpCreditFailure(err)) throw error;
       break;
     }
 
     if (!pageResult.success) {
       const err = `Page ${currentPage} returned errors: ${pageResult.errors.join(', ')}`;
       await deps.updateIcpMiningProgressActivity({ id: icpId, appendError: err });
-      // Continue to next page
+      if (options.icpCreditGuard && pageResult.errors.some(isIcpCreditFailure)) throw new Error(err);
+      // Continue to next page for non-credit errors
     }
 
     // If we learned total on first page fetch, persist it
@@ -295,5 +304,3 @@ export async function processSingleIcp(args: {
 
   return { processed: totalProcessed, foundMatches: totalFoundMatches, totalTargets };
 }
-
-

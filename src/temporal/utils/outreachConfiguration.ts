@@ -10,6 +10,8 @@ export interface OutreachConfiguration {
   allSegments: boolean;
   dailyMessageLimit: number;
   maxUnansweredMessages: number;
+  cooldownMode: 'progressive' | 'fixed';
+  cooldownPeriodDays?: number;
   repeatIntervalDays?: number;
   weekdays: number[];
   channelAccounts: Record<string, string[]>;
@@ -107,6 +109,8 @@ export function resolveOutreachConfiguration(settings: any, activityKey: Outreac
     shouldExecute: false, reason: '', activityKey,
     segmentIds: isInvoice ? [] : strings(raw.segment_ids), allSegments: isInvoice || raw.all_segments === true,
     dailyMessageLimit: raw.daily_message_limit ?? 30, maxUnansweredMessages: raw.max_unanswered_messages ?? 3,
+    cooldownMode: raw.cooldown_mode === undefined ? (isInvoice && raw.repeat_interval_days !== undefined ? 'fixed' : 'progressive') : raw.cooldown_mode,
+    ...(raw.cooldown_mode === 'fixed' ? { cooldownPeriodDays: raw.cooldown_period_days } : {}),
     ...(isInvoice ? { repeatIntervalDays: raw.repeat_interval_days === undefined ? 3 : raw.repeat_interval_days } : {}),
     weekdays: raw.weekdays ?? (isInvoice ? [1, 2, 3, 4, 5] : [2, 3, 4]), channelAccounts, availableChannels,
     hasEmailChannel: channelAccounts.email.length > 0, hasWhatsappChannel: channelAccounts.whatsapp.length > 0,
@@ -119,7 +123,10 @@ export function resolveOutreachConfiguration(settings: any, activityKey: Outreac
   else if (invalidSelection) result.reason = 'Invalid outreach channel selection';
   else if (!Number.isInteger(result.dailyMessageLimit) || result.dailyMessageLimit < 1 || result.dailyMessageLimit > 10000) result.reason = 'Invalid daily message limit';
   else if (isInvoice && (!Number.isInteger(result.repeatIntervalDays) || result.repeatIntervalDays! < 1 || result.repeatIntervalDays! > 365)) result.reason = 'Invalid invoice reminder interval';
+  else if (isInvoice && result.cooldownMode !== 'progressive' && result.cooldownMode !== 'fixed') result.reason = 'Invalid invoice reminder cooldown mode';
   else if (!isInvoice && (!Number.isInteger(result.maxUnansweredMessages) || result.maxUnansweredMessages < 1 || result.maxUnansweredMessages > 100)) result.reason = 'Invalid unanswered message limit';
+  else if (!isInvoice && (result.cooldownMode !== 'progressive' && result.cooldownMode !== 'fixed')) result.reason = 'Invalid outreach cooldown mode';
+  else if (!isInvoice && result.cooldownMode === 'fixed' && (!Number.isInteger(result.cooldownPeriodDays) || result.cooldownPeriodDays! < 1 || result.cooldownPeriodDays! > 365)) result.reason = 'Invalid outreach cooldown period';
   else if (!result.hasAnyChannel) result.reason = 'Select at least one connected outreach account';
   else if (!result.allSegments && !result.segmentIds.length) result.reason = 'Select segments or explicitly enable all segments';
   else if (isFollowUp && (!Array.isArray(result.weekdays) || !result.weekdays.length

@@ -1,4 +1,5 @@
 import type { processSingleIcp } from './processSingle';
+import { isIcpCreditFailure } from '../../utils/icpDispatchSelection';
 
 /** New histories: exact lead target, partial-page resume and cumulative completion. */
 export async function processConfiguredIcp(args: Parameters<typeof processSingleIcp>[0]) {
@@ -43,6 +44,7 @@ export async function processConfiguredIcp(args: Parameters<typeof processSingle
         start_index: startIndex,
         max_matches: targetLeadsWithEmail - foundMatches,
         research_enabled: options.researchEnabled === true,
+        ...(options.icpCreditGuard ? { stop_on_credit_failure: true } : {}),
       });
     } catch (error) {
       errors.push(`Page ${currentPage} failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -69,7 +71,7 @@ export async function processConfiguredIcp(args: Parameters<typeof processSingle
       output: { page: currentPage, processed, foundMatches, targetLeadsWithEmail, researchEnabled: options.researchEnabled },
     });
     // A failed fetch must not advance the cursor or turn an API error into completion.
-    if (!result.success && result.processed === 0) break;
+    if ((options.icpCreditGuard && errors.some(isIcpCreditFailure)) || (!result.success && result.processed === 0)) break;
     exhausted = (pageComplete && !result.hasMore)
       || (totalTargets !== undefined && previousProcessed + processed >= totalTargets);
     if (exhausted || foundMatches >= targetLeadsWithEmail) break;

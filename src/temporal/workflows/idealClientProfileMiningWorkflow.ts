@@ -6,6 +6,7 @@ import { processSingleIcp } from './icpMining/processSingle';
 import { processConfiguredIcp } from './icpMining/processConfigured';
 import { processOwnedIcp } from './icpMining/processOwned';
 import type { IcpMiningWorkflowDto } from '../utils/icpMiningPayload';
+import { isIcpCreditFailure } from '../utils/icpDispatchSelection';
 import type {
   IdealClientProfilePageSearchOptions,
 } from './idealClientProfilePageSearchWorkflow';
@@ -20,9 +21,13 @@ const {
   claimIcpMiningExecutionActivity,
   checkpointIcpMiningExecutionActivity,
   isIcpDispatcherEnabledActivity,
+  checkIcpMiningCreditsActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: { maximumAttempts: 3 },
+});
+const { warnIcpMiningCreditsActivity } = proxyActivities<Activities>({
+  startToCloseTimeout: '5 minutes', retry: { maximumAttempts: 1 },
 });
 
 // DB activities for ICP mining orchestration
@@ -128,7 +133,11 @@ export async function idealClientProfileMiningWorkflow(
     siteId: options.site_id, workflowId: info.workflowId, scheduleId,
     activityName: 'idealClientProfileMiningWorkflow',
   };
+  const creditGuard = patched('icp-mining-credit-guard-v1');
   try {
+    if (creditGuard && !(await checkIcpMiningCreditsActivity(options.site_id)))
+      return { success: false, icp_mining_id: options.icp_mining_id || 'batch', processed: 0, foundMatches: 0,
+        errors: ['ICP mining skipped: no credits available'] };
     await saveCronStatusActivity({ ...cronContext, status: 'RUNNING', lastRun: new Date().toISOString() });
     const result = await runIcpMining(runtimeOptions, info.workflowId);
     await saveCronStatusActivity({
@@ -147,6 +156,10 @@ export async function idealClientProfileMiningWorkflow(
       }));
     } catch (statusError) {
       console.error('Failed to persist ICP mining terminal status:', summarizeMiningFailure(statusError));
+    }
+    if (creditGuard && isIcpCreditFailure(summarizeMiningFailure(error))) {
+      try { await CancellationScope.nonCancellable(() => warnIcpMiningCreditsActivity({ siteId: options.site_id, workflowId: info.workflowId })); }
+      catch (warningError) { console.error('Failed to send ICP credit warning:', summarizeMiningFailure(warningError)); }
     }
     throw error;
   }
@@ -176,8 +189,9 @@ async function runIcpMining(
   const filterSelectedLists = configurableMining && patched('icp-mining-list-selection-v1');
   let allLists = true;
   let listIds: string[] = [];
-  let miningOptions = options;
+  let miningOptions: IdealClientProfileMiningOptions & { icpCreditGuard?: boolean } = options;
   const ownedExecution = configurableMining && patched('icp-mining-owned-checkpoints-v1');
+  const creditGuard = patched('icp-mining-credit-guard-v1');
   const processIcp = (args: Parameters<typeof processSingleIcp>[0]) => ownedExecution
     ? processOwnedIcp({ ...args, execution: { runId: workflowInfo().runId, workflowId: workflowInfo().workflowId },
       claim: claimIcpMiningExecutionActivity, checkpoint: checkpointIcpMiningExecutionActivity })
@@ -225,6 +239,9 @@ async function runIcpMining(
       listIds = config.listIds ?? [];
     }
   }
+
+  // Page processing needs to surface provider exhaustion to this parent.
+  if (creditGuard) miningOptions = { ...miningOptions, icpCreditGuard: true };
 
   await logWorkflowExecutionActivity({
     workflowId,
@@ -321,6 +338,10 @@ async function runIcpMining(
       },
     });
     if ('errors' in res && Array.isArray(res.errors)) errors.push(...res.errors);
+    if (creditGuard && errors.some(isIcpCreditFailure)) {
+      try { await CancellationScope.nonCancellable(() => warnIcpMiningCreditsActivity({ siteId: options.site_id, workflowId })); }
+      catch (error) { console.error('Failed to send ICP credit warning:', summarizeMiningFailure(error)); }
+    }
     return {
       success: errors.length === 0,
       icp_mining_id: options.icp_mining_id as string,
@@ -429,6 +450,10 @@ async function runIcpMining(
     },
   });
   if ('errors' in res && Array.isArray(res.errors)) errors.push(...res.errors);
+  if (creditGuard && errors.some(isIcpCreditFailure)) {
+    try { await CancellationScope.nonCancellable(() => warnIcpMiningCreditsActivity({ siteId: options.site_id, workflowId })); }
+    catch (error) { console.error('Failed to send ICP credit warning:', summarizeMiningFailure(error)); }
+  }
 
   return {
     success: errors.length === 0,

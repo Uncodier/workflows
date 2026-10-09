@@ -5,6 +5,7 @@ import { leadResearchWorkflow } from './leadResearchWorkflow';
 import { needsLeadDeepResearch } from '../utils/leadResearchState';
 import { processPageSafely } from './icpMining/processPageSafely';
 import type { IcpPageSnapshot } from '../activities/icpMiningExecutionActivities';
+import { isIcpCreditFailure } from '../utils/icpDispatchSelection';
 
 const { getLeadActivity, checkpointIcpMiningExecutionActivity } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes', retry: { maximumAttempts: 3 },
@@ -39,6 +40,7 @@ export interface IdealClientProfilePageSearchOptions {
   max_matches?: number;
   max_candidates?: number; // Reserved candidate-attempt budget for a dispatcher slice.
   research_enabled?: boolean;
+  stop_on_credit_failure?: boolean;
   execution?: { run_id: string; version: number; processed: number; found: number };
   snapshot?: IcpPageSnapshot | null;
 }
@@ -281,6 +283,7 @@ export async function idealClientProfilePageSearchWorkflow(
       errors.push(`Enrich failed for ${full_name || external_person_id}: ${msg}`);
       processed += 1;
     }
+    if (options.stop_on_credit_failure && errors.some(isIcpCreditFailure)) break;
   }
 
   await logWorkflowExecutionActivity({

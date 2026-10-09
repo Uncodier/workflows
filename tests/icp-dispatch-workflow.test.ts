@@ -1,11 +1,14 @@
 const mockActivities = {
   dispatchIcpMiningActivity: jest.fn(), beginIcpDispatchActivity: jest.fn(), finishIcpDispatchActivity: jest.fn(),
   checkpointIcpMiningExecutionActivity: jest.fn(), getSiteActivity: jest.fn(), saveCronStatusActivity: jest.fn(),
+  checkIcpMiningCreditsActivity: jest.fn(), warnIcpMiningCreditsActivity: jest.fn(),
 };
 const mockExecuteChild = jest.fn();
 jest.mock('@temporalio/workflow', () => ({
   proxyActivities: () => mockActivities, executeChild: (...args: any[]) => mockExecuteChild(...args),
   workflowInfo: () => ({ runId: 'run-id', workflowId: 'slice-workflow' }),
+  patched: () => true,
+  CancellationScope: { nonCancellable: (fn: () => Promise<unknown>) => fn() },
 }));
 jest.mock('../src/temporal/workflows/idealClientProfilePageSearchWorkflow', () => ({ idealClientProfilePageSearchWorkflow: jest.fn() }));
 import { icpDispatcherWorkflow } from '../src/temporal/workflows/icpDispatcherWorkflow';
@@ -24,7 +27,36 @@ beforeEach(() => {
   mockActivities.getSiteActivity.mockResolvedValue({ success: true, site: { user_id: 'user' } });
   mockActivities.checkpointIcpMiningExecutionActivity.mockResolvedValue({ success: true });
   mockActivities.finishIcpDispatchActivity.mockResolvedValue({ success: true });
+  mockActivities.checkIcpMiningCreditsActivity.mockResolvedValue(true);
   mockExecuteChild.mockResolvedValue(result);
+});
+
+it('settles without starting a page when credits have run out', async () => {
+  mockActivities.checkIcpMiningCreditsActivity.mockResolvedValue(false);
+  expect(await icpMiningSliceWorkflow({ reservationId: 'reservation' })).toMatchObject({ success: false, processed: 0 });
+  expect(mockExecuteChild).not.toHaveBeenCalled();
+  expect(mockActivities.finishIcpDispatchActivity).toHaveBeenCalledTimes(1);
+  expect(mockActivities.warnIcpMiningCreditsActivity).not.toHaveBeenCalled();
+});
+
+it('warns the owner once after a credit failure in the page', async () => {
+  mockExecuteChild.mockResolvedValue({ ...result, success: false, errors: ['Insufficient credits', 'No credits remaining'], retryableFailure: true });
+  await icpMiningSliceWorkflow({ reservationId: 'reservation' });
+  expect(mockActivities.warnIcpMiningCreditsActivity).toHaveBeenCalledTimes(1);
+  expect(mockActivities.warnIcpMiningCreditsActivity).toHaveBeenCalledWith({ siteId: 'site', workflowId: 'slice-workflow' });
+});
+
+it('does not warn for ordinary page failures', async () => {
+  mockExecuteChild.mockResolvedValue({ ...result, success: false, errors: ['Provider unavailable'] });
+  await icpMiningSliceWorkflow({ reservationId: 'reservation' });
+  expect(mockActivities.warnIcpMiningCreditsActivity).not.toHaveBeenCalled();
+});
+
+it('warns once if the page throws a credit error, without releasing an uncertain reservation', async () => {
+  mockExecuteChild.mockRejectedValue(new Error('Insufficient credits'));
+  await expect(icpMiningSliceWorkflow({ reservationId: 'reservation' })).rejects.toThrow('Insufficient credits');
+  expect(mockActivities.warnIcpMiningCreditsActivity).toHaveBeenCalledTimes(1);
+  expect(mockActivities.finishIcpDispatchActivity).not.toHaveBeenCalled();
 });
 
 it('dispatches only admission under the stable coordinator workflow ID', async () => {
@@ -115,4 +147,17 @@ it('does not advance an unpersisted or cross-site review outcome', async () => {
     expect(page).toMatchObject({ processed: 0, foundMatches: 0, retryableFailure: true, checkpoint: { offset: 0 } });
     expect(deps.checkpointIcpMiningExecutionActivity).not.toHaveBeenCalled();
   }
+});
+
+it('stops the owned page at the first credit error instead of trying the next lead', async () => {
+  const snapshot = { page: 0, candidates: [{ person: { id: 1 } }, { person: { id: 2 } }], hasMore: true };
+  const deps: any = { getSegmentIdFromRoleQueryActivity: jest.fn().mockResolvedValue({ success: true }),
+    enrich: jest.fn().mockResolvedValue({ success: false, errors: ['Insufficient credits'] }),
+    checkpointIcpMiningExecutionActivity: jest.fn() };
+  const page = await processPageSafely({ site_id: 'site', userId: 'user', role_query_id: 'role', icp_mining_id: 'list',
+    page: 0, page_size: 10, snapshot, stop_on_credit_failure: true,
+    execution: { run_id: 'run', version: 0, processed: 0, found: 0 } }, deps);
+  expect(page).toMatchObject({ processed: 0, retryableFailure: true, checkpoint: { offset: 0 }, errors: ['Insufficient credits'] });
+  expect(deps.enrich).toHaveBeenCalledTimes(1);
+  expect(deps.checkpointIcpMiningExecutionActivity).not.toHaveBeenCalled();
 });

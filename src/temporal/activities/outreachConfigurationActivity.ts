@@ -49,7 +49,7 @@ export async function getOutreachConfigurationActivity(params: {
       return { ...result, shouldExecute: false, reason: 'Lead is outside the selected outreach audience' };
     }
     const history = evaluateOutreachHistory(await fetchOutreachHistory(params.site_id, lead.id), params.activity_key,
-      result.maxUnansweredMessages, 0);
+      result.maxUnansweredMessages, 0, Date.now(), 0, result.cooldownMode, result.cooldownPeriodDays);
     if (!history.eligible) return { ...result, shouldExecute: false, reason: 'Lead audience, unanswered limit, or pending message prevents outreach' };
     result.leadChannels = await getReachableOutreachChannels(params.site_id, lead, result.availableChannels);
     if (!result.leadChannels.length) return { ...result, shouldExecute: false, reason: 'No selected channel has a reachable recipient for this lead' };

@@ -70,6 +70,16 @@ describe('ICP validated contact policy', () => {
     expect(f.deps.upsertLeadForPersonActivity).not.toHaveBeenCalled();
   });
 
+  it('stops trying paid contact providers after a credit failure', async () => {
+    const f = fixture();
+    f.deps.lookEmailOnIcyPeas.mockResolvedValue({ success: false, error: 'Insufficient credits' });
+    expect(await enrichWithValidatedContacts(f.options, f.deps, { stopOnCreditFailure: true }))
+      .toMatchObject({ success: false, errors: ['Insufficient credits'] });
+    expect(f.deps.callPersonWorkEmailsActivity).not.toHaveBeenCalled();
+    expect(f.deps.callPersonContactsLookupPersonalEmailsActivity).not.toHaveBeenCalled();
+    expect(f.deps.callPersonContactsLookupPhoneNumbersActivity).not.toHaveBeenCalled();
+  });
+
   it('validates all completed IcyPeas alternatives instead of treating certainty as verified', async () => {
     const f = fixture();
     f.deps.lookEmailOnIcyPeas.mockResolvedValue({ success: true, outcome: 'matched', searchId: 'search',

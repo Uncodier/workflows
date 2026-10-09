@@ -40,7 +40,8 @@ export async function selectOutreachLeads(params: {
     if (lead.status === 'cold' || lead.metadata?.quarantined_cross_tenant === true || lead.unsubscribed
       || lead.metadata?.unsubscribed === true || lead.metadata?.do_not_contact === true) continue;
     const history = evaluateOutreachHistory(await fetchOutreachHistory(params.site_id, lead.id), params.activity,
-      config.maxUnansweredMessages, params.waitMs, Date.now(), Date.parse(lead.created_at) || 0);
+      config.maxUnansweredMessages, params.waitMs, Date.now(), Date.parse(lead.created_at) || 0,
+      config.cooldownMode, config.cooldownPeriodDays);
     if (history.shouldMarkCold) {
       // Optimistic update preserves concurrent lead edits (including inbound status updates).
       let update = supabaseServiceRole.from('leads').update({ status: 'cold', updated_at: new Date().toISOString() })

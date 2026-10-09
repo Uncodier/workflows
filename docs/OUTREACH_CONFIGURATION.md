@@ -16,6 +16,7 @@ Each object contains:
 | `segment_ids` | Selected site-owned segment IDs, matched against `leads.segment_id`. Empty targets no leads unless `all_segments` is true. |
 | `daily_message_limit` | Integer 1–10,000, initially 30. Per site/activity/local day across all channels and accounts combined, including voice call attempts, not per workflow run. |
 | `max_unanswered_messages` | Integer 1–100, initially 3. Confirmed outbound messages across channels since the last genuine inbound reply, after which no further attempt is allowed. |
+| `cooldown_mode`, `cooldown_period_days` | Both prospecting activities: `progressive` by default (1, 1, 3, 7, then 14 days between confirmed contacts); or `fixed` with `cooldown_period_days` as an integer from 1 to 365. The first contact still uses its existing initial wait (48 hours cold outreach, 7 days follow-up). A reply resets the sequence. |
 | `weekdays` | Follow Up weekdays: Sunday=0 through Saturday=6; initial selection `[2,3,4]`. An empty selection disables follow-up execution. |
 | `start_time_mode` | Both activities: `business_opening` or `custom`. Opening resolves the execution day's business hours and ignores stale custom times. |
 | `start_time` | Both activities: site-local 24-hour `HH:mm` (`00:00`–`23:59`), required in custom mode. Invalid values block scheduling/execution unless the mode is explicitly `business_opening`. |
@@ -55,8 +56,7 @@ the selections are configured. Email aliases are not independent connected accou
 - Follow Up targets contacts with at least one genuine inbound message. A reply
   resets the unanswered counter; drafts, failed sends, and queued messages do not count.
 - Once the unanswered cap is reached, the next eligible selection pass marks the
-  lead `cold` after the reply waiting period (existing defaults: 48 hours for cold
-  outreach, 7 days for follow-up). Pending work cannot send past the cap. Ambiguous
+  lead `cold` after its configured cooldown period. Pending work cannot send past the cap. Ambiguous
   dispatches require reconciliation and do not count as confirmed sends.
 
 - Cold Outreach (`dailyProspectionWorkflow`) and Follow Up

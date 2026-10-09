@@ -58,7 +58,7 @@ export async function dispatchIcpMiningActivity(options: { dispatchId: string })
   if (!config.enabled) return summary;
   if (!options.dispatchId || options.dispatchId.length > 500) throw new Error('ICP dispatch identity required');
   const day = new Date().toISOString().slice(0, 10);
-  const [sites, settings, lists, siteState, listState, ledger] = await Promise.all([
+  const [sites, settings, lists, siteState, listState, ledger, billing] = await Promise.all([
     rows(() => db.from('sites').select('id,user_id').is('archived_at', null).order('id')),
     rows(() => db.from('settings').select('site_id,activities').order('site_id')),
     rows(() => db.from('icp_mining').select('id,site_id,total_targets,processed_targets,current_page_offset,execution_active,snapshot_page:current_page_snapshot->page')
@@ -67,11 +67,13 @@ export async function dispatchIcpMiningActivity(options: { dispatchId: string })
     rows(() => db.from('icp_dispatch_list_state').select('*').order('icp_mining_id')),
     rows(() => db.from('icp_dispatch_runs').select('id,site_id,icp_mining_id,workflow_id,run_id,state,budget_day,reserved_candidates,reserved_matches,found,research_enabled,processed')
       .or(`budget_day.eq.${day},state.in.(reserved,running,blocked)`).order('id')),
+    rows(() => db.from('billing').select('site_id,credits_available').order('site_id')),
   ]);
   const active = ledger.filter(row => row.state !== 'settled');
   const legacyActive = lists.filter(list => list.execution_active && !active.some(row => row.icp_mining_id === list.id));
   summary.active = active.length + legacyActive.length;
   const siteById = new Map(sites.map(site => [site.id, site]));
+  const creditsBySite = new Map(billing.map(row => [row.site_id, row.credits_available]));
   const settingsBySite = new Map(settings.map(setting => [setting.site_id, setting]));
   const states = new Map(siteState.map(state => [state.site_id, state]));
   const listStates = new Map(listState.map(state => [state.icp_mining_id, state]));
@@ -98,6 +100,8 @@ export async function dispatchIcpMiningActivity(options: { dispatchId: string })
       continue;
     }
     if (!controls.allLists && !controls.listIds.includes(list.id)) continue;
+    // Do not reserve or start a paid page when the site has no credits.
+    if (!(typeof creditsBySite.get(site.id) === 'number' && creditsBySite.get(site.id) > 0)) continue;
     const daily = budgets.get(site.id) || { found: 0, reserved: 0, candidates: 0 };
     const state = states.get(site.id);
     const ls = listStates.get(list.id);
