@@ -14,6 +14,7 @@ const mockActivities = {
   getPendingIcpMiningActivity: jest.fn(),
   getIcpMiningConfigurationActivity: jest.fn(),
   isIcpDispatcherEnabledActivity: jest.fn(),
+  checkIcpMiningCreditsActivity: jest.fn(),
 };
 
 jest.mock('@temporalio/workflow', () => ({
@@ -33,6 +34,7 @@ describe('outbound health boundary before billable search', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     mockActivities.isIcpDispatcherEnabledActivity.mockResolvedValue(false);
+    mockActivities.checkIcpMiningCreditsActivity.mockResolvedValue(true);
     jest.spyOn(console, 'log').mockImplementation(() => undefined);
     mockPatched.mockReturnValue(true);
     mockWorkflowInfo.mockReturnValue({ workflowId: 'health-test', startTime: new Date() });

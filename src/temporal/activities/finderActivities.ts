@@ -1003,6 +1003,7 @@ export async function upsertLeadForPersonActivity(options: {
   linkedin_url?: string; // LinkedIn profile URL from Person API
   profile?: FinderData; // Schema-mapped provider data, merged with existing metadata/research
   validated_contact_policy?: boolean;
+  icp_reuse_only?: boolean; // Existing ICP leads keep their identity and contact columns.
 }): Promise<{
   success: boolean;
   lead?: any;
@@ -1089,7 +1090,8 @@ export async function upsertLeadForPersonActivity(options: {
       hasExistingContact = !!(hasData(existingLead.email) || existingPersonalEmail || existingPhone);
     }
     
-    const hasAtLeastOneContact = hasPersonWorkEmail || hasPersonalEmail || hasPhone || (!options.validated_contact_policy && hasExistingContact);
+    const hasAtLeastOneContact = hasPersonWorkEmail || hasPersonalEmail || hasPhone
+      || ((!options.validated_contact_policy || options.icp_reuse_only) && hasExistingContact);
     
     if (!hasAtLeastOneContact) {
       return { success: false, error: 'Person must have at least 1 contact method (work email, personal email, or phone) to create/update lead' };
@@ -1151,20 +1153,36 @@ export async function upsertLeadForPersonActivity(options: {
       return leadData;
     };
 
-    const leadData = buildLeadData();
-    const updateExistingLead = () => supabaseServiceRole
-      .from('leads')
-      .update(buildLeadData())
-      .eq('site_id', options.site_id)
-      .eq('id', existingLead!.id)
-      .select()
-      .single();
+    // Do not build a full update (with an email/name rewrite) for an ICP lead
+    // already identified by person_id. Only new leads need the creation payload.
+    const leadData = existingLead && options.icp_reuse_only ? null : buildLeadData();
+    const updateExistingLead = () => {
+      // ICP only needs to assign the segment and merge Finder metadata on an
+      // existing lead. Rewriting email/name/person_id can collide with another
+      // lead's unique (site_id, name, email), especially for email=''.
+      const payload = options.icp_reuse_only ? (() => {
+        const update: FinderData = {};
+        if (options.segment_id) update.segment_id = options.segment_id;
+        const contacts = {
+          emails: contactValues(existingLead?.email, options.email, personEmails),
+          personal_emails: contactValues(existingLead?.personal_email, options.personal_email),
+          phones: contactValues(existingLead?.phone, options.phone),
+        };
+        const incoming = mergeFinderData(options.profile?.metadata, {
+          finder: { contacts },
+        });
+        if (hasData(incoming)) update.metadata = mergeFinderData(existingLead?.metadata, incoming);
+        return update;
+      })() : buildLeadData();
+      return supabaseServiceRole.from('leads').update(payload)
+        .eq('site_id', options.site_id).eq('id', existingLead!.id).select().single();
+    };
 
     const recoverContactConflict = async (error: PostgrestError) => {
       // Only this known uniqueness conflict is recoverable. Other DB failures
       // must retain the candidate checkpoint instead of masquerading as a match.
       if (error.code !== '23505' || !error.message.includes('"leads_site_name_email_unique"')
-        || !hasData(leadData.email)) return { data: null, error };
+        || !leadData || !hasData(leadData.email)) return { data: null, error };
       const found = await findContactLead(leadData.name, leadData.email);
       if (found.error) return { data: null, error: found.error };
       if (!found.data) return { data: null, error };
@@ -1186,6 +1204,7 @@ export async function upsertLeadForPersonActivity(options: {
       resultLead = data;
     } else {
       // Create new lead
+      const newLeadData = leadData!;
       if (!options.userId) {
         // Try to get user_id from site
         const { data: site, error } = await supabaseServiceRole
@@ -1196,19 +1215,19 @@ export async function upsertLeadForPersonActivity(options: {
         
         if (error) return { success: false, error: error.message };
         if (site?.user_id) {
-          leadData.user_id = site.user_id;
+          newLeadData.user_id = site.user_id;
         } else {
           return { success: false, error: 'user_id is required to create lead' };
         }
       }
 
-      leadData.status = 'new';
-      leadData.origin = 'lead_enrichment_workflow';
-      leadData.created_at = new Date().toISOString();
+      newLeadData.status = 'new';
+      newLeadData.origin = 'lead_enrichment_workflow';
+      newLeadData.created_at = new Date().toISOString();
 
       let { data, error } = await supabaseServiceRole
         .from('leads')
-        .insert([leadData])
+        .insert([newLeadData])
         .select()
         .single();
 

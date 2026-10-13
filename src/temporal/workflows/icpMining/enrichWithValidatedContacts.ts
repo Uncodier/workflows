@@ -14,7 +14,7 @@ type Deps = Pick<Activities, 'prepareFinderPersonActivity' | 'checkExistingLeadF
 
 /** Raw contacts are retained, but only usable contacts can terminate enrichment. */
 export async function enrichWithValidatedContacts(options: EnrichLeadOptions, deps: Deps,
-  policy: { trustProviderEmails?: boolean; isolateIdentityReviews?: boolean; stopOnCreditFailure?: boolean } = {}): Promise<EnrichLeadResult> {
+  policy: { trustProviderEmails?: boolean; isolateIdentityReviews?: boolean; stopOnCreditFailure?: boolean; reuseExistingLeadOnly?: boolean } = {}): Promise<EnrichLeadResult> {
   const start = Date.now();
   const errors: string[] = [];
   const responses: Record<string, any> = {};
@@ -36,6 +36,21 @@ export async function enrichWithValidatedContacts(options: EnrichLeadOptions, de
     const checked = await deps.checkExistingLeadForPersonActivity({ person_id: person.id, site_id: options.site_id });
     if (!checked.success) throw new Error(checked.error || 'Lead lookup failed');
     const lead = checked.existingLead;
+    const trustedExistingWorkEmail = emailCandidates({ email: lead?.email,
+      verified: lead?.metadata?.emailVerified === true,
+      validation_status: lead?.metadata?.email_validation?.status }).some(candidate => candidate.verified);
+    if (policy.reuseExistingLeadOnly && lead?.id &&
+      (trustedExistingWorkEmail || emailCandidates(lead.personal_email).length > 0 || usablePhoneNumbers(lead.phone).length > 0)) {
+      // This lead already has a usable contact. ICP only needs its segment and
+      // fresh Finder evidence; do not buy contact lookups or rewrite identities.
+      const saved = await deps.upsertLeadForPersonActivity({
+        person_id: person.id, site_id: options.site_id, segment_id: options.segment_id,
+        name: person.full_name, person_emails: [], profile: finderLeadProfile(person, prepared.role),
+        validated_contact_policy: true, icp_reuse_only: true,
+      });
+      if (!saved.success || !saved.leadId) throw new Error(saved.error || 'Existing ICP lead was not updated');
+      return finish({ success: true, outcome: 'matched', personId: person.id, leadId: saved.leadId });
+    }
     const documents = personContactDocuments(person);
     // Finder preparation supplies provider contacts (including cached results).
     // Do not infer provider origin from an unrelated existing lead's email, or
@@ -132,6 +147,7 @@ export async function enrichWithValidatedContacts(options: EnrichLeadOptions, de
       name: person.full_name, email: work[0], personal_email: personal[0], phone: phones[0], person_emails: work,
       company_id: prepared.companyId || lead?.company_id, segment_id: options.segment_id,
       linkedin_url: person.linkedin_profile, profile, validated_contact_policy: true,
+      ...(policy.reuseExistingLeadOnly ? { icp_reuse_only: true } : {}),
     });
     if (!saved.success || !saved.leadId) throw new Error(saved.error || 'Lead was not saved');
     return finish({ success: true, outcome: 'matched', personId: person.id, leadId: saved.leadId,

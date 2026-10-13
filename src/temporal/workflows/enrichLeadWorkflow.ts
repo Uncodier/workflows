@@ -127,7 +127,8 @@ export async function enrichLeadWorkflow(
       generateEmail: providerOnlyContacts ? undefined : params => executeChild(generatePersonEmailWorkflow, {
         workflowId: `generate-email-icp-${params.person_id}-${site_id}`, args: [params],
       }),
-    }, { trustProviderEmails, isolateIdentityReviews, stopOnCreditFailure: patched('icp-stop-on-credit-failure-v1') });
+    }, { trustProviderEmails, isolateIdentityReviews, stopOnCreditFailure: patched('icp-stop-on-credit-failure-v1'),
+      reuseExistingLeadOnly: patched('icp-reuse-existing-lead-segment-metadata-v1') });
     await logWorkflowExecutionActivity({ workflowId, workflowType: 'enrichLeadWorkflow',
       status: result.success ? 'COMPLETED' : 'FAILED', output: result });
     return result;

@@ -130,6 +130,50 @@ describe('Finder persistence activities with mocked database boundary', () => {
       social_networks: { twitter: '@ada' }, address: { country: 'ES' } };
     const conflict = () => failure('duplicate key value violates unique constraint "leads_site_name_email_unique"', '23505');
 
+    it('updates only segment and merged metadata for an existing phone/personal-email ICP lead', async () => {
+      // Production regression: this person already has an email='' lead. A full
+      // validated-contact update would rewrite the unique (site,name,email) key.
+      const personLead = { ...existing, person_id: options.person_id, email: '',
+        personal_email: 'personal@example.test', status: 'qualified', segment_id: 'previous-segment' };
+      mockReplies.push(row(personLead), row({ ...personLead, segment_id: options.segment_id }));
+      expect(await upsertLeadForPersonActivity({ ...options, icp_reuse_only: true, email: 'new@company.test',
+        person_emails: ['new@company.test'] })).toMatchObject({ success: true, leadId: existing.id });
+      expect(mockQueries).toHaveLength(2);
+      expect(mockQueries[1].filters).toContainEqual(['eq', 'site_id', 'site']);
+      expect(mockQueries[1].filters).toContainEqual(['eq', 'id', existing.id]);
+      expect(mockQueries[1].write).toMatchObject({ method: 'update', payload: {
+        segment_id: options.segment_id,
+        metadata: { research: existing.metadata.research,
+          finder: { old: true, new: true, contacts: { emails: ['new@company.test'],
+            personal_emails: ['personal@example.test'], phones: [personLead.phone, options.phone] } } },
+      } });
+      expect(Object.keys(mockQueries[1].write.payload).sort()).toEqual(['metadata', 'segment_id']);
+      expect(mockQueries.some(query => query.write?.method === 'insert')).toBe(false);
+    });
+
+    it('keeps the old segment and only merges metadata when the ICP has no new segment', async () => {
+      mockReplies.push(row(existing), row(existing));
+      expect(await upsertLeadForPersonActivity({ ...options, icp_reuse_only: true, segment_id: undefined }))
+        .toMatchObject({ success: true, leadId: existing.id });
+      expect(Object.keys(mockQueries[1].write.payload)).toEqual(['metadata']);
+      expect(mockQueries[1].write.payload.metadata.research).toEqual(existing.metadata.research);
+    });
+
+    it('does not treat a failed segment/metadata update as a successful ICP match', async () => {
+      mockReplies.push(row({ ...existing, person_id: options.person_id }), failure('write denied'));
+      expect(await upsertLeadForPersonActivity({ ...options, icp_reuse_only: true }))
+        .toMatchObject({ success: false, error: 'write denied' });
+    });
+
+    it('does not reuse a different person by name alone when work email is empty', async () => {
+      mockReplies.push(row(null), row({ id: 'new-lead' }));
+      expect(await upsertLeadForPersonActivity({ ...options, icp_reuse_only: true,
+        email: undefined, person_emails: [], personal_email: 'personal@example.test' }))
+        .toMatchObject({ success: true, leadId: 'new-lead' });
+      expect(mockQueries[1].write.method).toBe('insert');
+      expect(mockQueries.every(query => !query.filters.some((filter: any[]) => filter[0] === 'eq' && filter[1] === 'name'))).toBe(true);
+    });
+
     function expectReusedWrite(query: any) {
       expect(query.write.method).toBe('update');
       expect(query.filters).toContainEqual(['eq', 'site_id', 'site']);
@@ -228,6 +272,7 @@ describe('Finder persistence activities with mocked database boundary', () => {
         getLeadActivity: jest.fn(), research: jest.fn(), checkpointIcpMiningExecutionActivity: checkpoint,
         enrich: input => enrichWithValidatedContacts(input, contacts, { trustProviderEmails: true }),
       });
+      expect(result.errors).toEqual([]);
       expect(result).toMatchObject({ success: true, processed: 2, foundMatches: 2,
         leadsCreated: [existing.id, 'next-lead'], errors: [], pageCompleted: true,
         checkpoint: { processed: 32, found: 28, page: 4, offset: 0, snapshot: null } });
@@ -237,6 +282,47 @@ describe('Finder persistence activities with mocked database boundary', () => {
       expect(checkpoint).toHaveBeenCalledTimes(2);
       expect(contacts.prepareFinderPersonActivity).toHaveBeenCalledTimes(2);
       expect(contacts.lookEmailOnIcyPeas).not.toHaveBeenCalled();
+      expect(mockReplies).toHaveLength(0);
+    });
+
+    it('resumes a saved ICP page after a same-person lead with email="" and advances to the next candidate', async () => {
+      const saved = { ...existing, id: 'saved-lead', person_id: 'local-84462653',
+        name: 'Yamil Morales', email: '', personal_email: 'personal@example.test',
+        status: 'qualified', metadata: { research: { report: 'keep' }, finder: { old: true } } };
+      mockReplies.push(row(saved), row({ ...saved, segment_id: options.segment_id }),
+        row(null), row(null), row({ id: 'next-lead' }));
+      const contacts: any = {
+        prepareFinderPersonActivity: jest.fn(async (input: any) => ({ success: true, errors: [],
+          person: { id: `local-${input.person_id}`, full_name: input.source_search_result.person.full_name,
+            emails: input.source_search_result.person.emails || [], raw_result: {} }, role: {} })),
+        checkExistingLeadForPersonActivity: jest.fn(async (input: any) => ({ success: true,
+          existingLead: input.person_id === saved.person_id ? saved : undefined })),
+        upsertPersonActivity: jest.fn(async (input: any) => ({ success: true, person: input })),
+        upsertLeadForPersonActivity,
+        validateContactInformation: jest.fn(), lookEmailOnIcyPeas: jest.fn(),
+        callPersonWorkEmailsActivity: jest.fn(), callPersonContactsLookupPersonalEmailsActivity: jest.fn(),
+        callPersonContactsLookupPhoneNumbersActivity: jest.fn(),
+      };
+      const checkpoint = jest.fn().mockResolvedValue({ success: true });
+      const result = await processPageSafely({ icp_mining_id: 'list', role_query_id: 'query', site_id: 'site',
+        page: 7, page_size: 10, start_index: 0, max_candidates: 10, max_matches: 10, userId: 'mining-user',
+        execution: { run_id: 'run', version: 0, processed: 70, found: 58 },
+        snapshot: { page: 7, hasMore: true, candidates: [
+          { person: { id: 84462653, full_name: saved.name } },
+          { person: { id: 2, full_name: 'Bob', emails: ['bob@example.test'] } },
+        ] } }, {
+        getRoleQueryByIdActivity: jest.fn(), callPersonRoleSearchActivity: jest.fn(),
+        getSegmentIdFromRoleQueryActivity: jest.fn().mockResolvedValue({ success: true, segmentId: options.segment_id }),
+        getLeadActivity: jest.fn(), research: jest.fn(), checkpointIcpMiningExecutionActivity: checkpoint,
+        enrich: input => enrichWithValidatedContacts(input, contacts, { trustProviderEmails: true, reuseExistingLeadOnly: true }),
+      });
+      expect(result.errors).toEqual([]);
+      expect(result).toMatchObject({ success: true, processed: 2, foundMatches: 2,
+        leadsCreated: [saved.id, 'next-lead'], checkpoint: { processed: 72, found: 60, page: 8, offset: 0 } });
+      expect(Object.keys(mockQueries[1].write.payload).sort()).toEqual(['metadata', 'segment_id']);
+      expect(mockQueries[1].filters).toContainEqual(['eq', 'id', saved.id]);
+      expect(contacts.lookEmailOnIcyPeas).not.toHaveBeenCalled();
+      expect(checkpoint).toHaveBeenCalledTimes(2);
       expect(mockReplies).toHaveLength(0);
     });
   });

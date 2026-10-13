@@ -22,6 +22,48 @@ describe('ICP validated contact policy', () => {
     expect(emailCandidates(['bounce@acme.test'], source.person.work_emails)).toEqual([]);
     expect(usablePhoneNumbers(['not a phone', '+14155551234'], [{ phone_number: '+14155551234', status: 'invalid' }])).toEqual([]);
   });
+  it('reuses an existing lead with a personal email for ICP without paying for contact lookups', async () => {
+    const f = fixture();
+    f.deps.checkExistingLeadForPersonActivity.mockResolvedValue({ success: true, existingLead: {
+      id: 'lead', email: '', personal_email: 'personal@example.test', metadata: { research: { report: 'keep' } },
+    } });
+    expect(await enrichWithValidatedContacts({ ...f.options, segment_id: 'segment' }, f.deps,
+      { trustProviderEmails: true, reuseExistingLeadOnly: true }))
+      .toMatchObject({ success: true, outcome: 'matched', leadId: 'lead', errors: [] });
+    expect(f.deps.upsertLeadForPersonActivity).toHaveBeenCalledWith(expect.objectContaining({
+      segment_id: 'segment', icp_reuse_only: true, person_emails: [], validated_contact_policy: true,
+    }));
+    expect(f.deps.upsertPersonActivity).not.toHaveBeenCalled();
+    expect(f.deps.lookEmailOnIcyPeas).not.toHaveBeenCalled();
+    expect(f.deps.callPersonWorkEmailsActivity).not.toHaveBeenCalled();
+    expect(f.deps.callPersonContactsLookupPersonalEmailsActivity).not.toHaveBeenCalled();
+    expect(f.deps.callPersonContactsLookupPhoneNumbersActivity).not.toHaveBeenCalled();
+    expect(f.deps.validateContactInformation).not.toHaveBeenCalled();
+  });
+
+  it('still enriches a lead with no usable persisted contact and does not claim a failed reuse', async () => {
+    const f = fixture();
+    f.deps.checkExistingLeadForPersonActivity.mockResolvedValue({ success: true, existingLead: { id: 'lead', email: '' } });
+    expect(await enrichWithValidatedContacts(f.options, f.deps, { reuseExistingLeadOnly: true }))
+      .toMatchObject({ success: true, leadId: 'lead' });
+    expect(f.deps.lookEmailOnIcyPeas).toHaveBeenCalled();
+    f.deps.checkExistingLeadForPersonActivity.mockResolvedValue({ success: true, existingLead: {
+      id: 'lead', personal_email: 'personal@example.test',
+    } });
+    f.deps.upsertLeadForPersonActivity.mockResolvedValue({ success: false, error: 'write denied' });
+    expect(await enrichWithValidatedContacts(f.options, f.deps, { reuseExistingLeadOnly: true }))
+      .toMatchObject({ success: false, errors: ['write denied'] });
+  });
+
+  it('does not count an unverified/invalid work email as an existing ICP match', async () => {
+    const f = fixture();
+    f.deps.checkExistingLeadForPersonActivity.mockResolvedValue({ success: true, existingLead: {
+      id: 'lead', email: 'bounce@acme.test', metadata: { emailVerified: false, email_validation: { status: 'invalid' } },
+    } });
+    await enrichWithValidatedContacts(f.options, f.deps, { trustProviderEmails: true, reuseExistingLeadOnly: true });
+    expect(f.deps.lookEmailOnIcyPeas).toHaveBeenCalled();
+    expect(f.deps.upsertPersonActivity).toHaveBeenCalled();
+  });
   it('searches and validates an alternative instead of counting an invalid provider email', async () => {
     const f = fixture();
     expect(await enrichWithValidatedContacts(f.options, f.deps)).toMatchObject({ success: true, outcome: 'matched', leadId: 'lead' });

@@ -284,6 +284,16 @@ enrichment and the shared email validator are unchanged.
 
 ### Reusing an existing lead for campaign segmentation
 
+New ICP enrichment executions use Temporal patch
+`icp-reuse-existing-lead-segment-metadata-v1`. If a lead already belongs to the
+site/person and has a usable contact (including a personal email), ICP skips
+additional contact lookups and updates only `segment_id` (when supplied) and
+non-destructively merged Finder metadata. It does **not** overwrite the lead's
+name, email, personal email, phone, person link, owner or commercial status.
+This also avoids a `leads_site_name_email_unique` collision when a previously
+saved lead has an empty work email. Uncontactable leads still use the existing
+enrichment path. Already-started Temporal histories keep their command sequence.
+
 ICP lead persistence first checks the site's `person_id`, then the exact
 `(site_id, name, email)` key when a nonempty work email is available. A historical
 lead linked to a different local person record is reused rather than inserted.
