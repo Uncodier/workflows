@@ -135,42 +135,42 @@ describe('Finder persistence activities with mocked database boundary', () => {
       // validated-contact update would rewrite the unique (site,name,email) key.
       const personLead = { ...existing, person_id: options.person_id, email: '',
         personal_email: 'personal@example.test', status: 'qualified', segment_id: 'previous-segment' };
-      mockReplies.push(row(personLead), row({ ...personLead, segment_id: options.segment_id }));
+      mockReplies.push(row(personLead), row({ id: options.person_id }), row([personLead]), row({ ...personLead, segment_id: options.segment_id }));
       expect(await upsertLeadForPersonActivity({ ...options, icp_reuse_only: true, email: 'new@company.test',
         person_emails: ['new@company.test'] })).toMatchObject({ success: true, leadId: existing.id });
-      expect(mockQueries).toHaveLength(2);
-      expect(mockQueries[1].filters).toContainEqual(['eq', 'site_id', 'site']);
-      expect(mockQueries[1].filters).toContainEqual(['eq', 'id', existing.id]);
-      expect(mockQueries[1].write).toMatchObject({ method: 'update', payload: {
+      expect(mockQueries).toHaveLength(4);
+      expect(mockQueries[3].filters).toContainEqual(['eq', 'site_id', 'site']);
+      expect(mockQueries[3].filters).toContainEqual(['eq', 'id', existing.id]);
+      expect(mockQueries[3].write).toMatchObject({ method: 'update', payload: {
         segment_id: options.segment_id,
         metadata: { research: existing.metadata.research,
           finder: { old: true, new: true, contacts: { emails: ['new@company.test'],
             personal_emails: ['personal@example.test'], phones: [personLead.phone, options.phone] } } },
       } });
-      expect(Object.keys(mockQueries[1].write.payload).sort()).toEqual(['metadata', 'segment_id']);
+      expect(Object.keys(mockQueries[3].write.payload).sort()).toEqual(['metadata', 'segment_id']);
       expect(mockQueries.some(query => query.write?.method === 'insert')).toBe(false);
     });
 
     it('keeps the old segment and only merges metadata when the ICP has no new segment', async () => {
-      mockReplies.push(row(existing), row(existing));
+      mockReplies.push(row(existing), row({ id: options.person_id }), row([existing]), row(existing));
       expect(await upsertLeadForPersonActivity({ ...options, icp_reuse_only: true, segment_id: undefined }))
         .toMatchObject({ success: true, leadId: existing.id });
-      expect(Object.keys(mockQueries[1].write.payload)).toEqual(['metadata']);
-      expect(mockQueries[1].write.payload.metadata.research).toEqual(existing.metadata.research);
+      expect(Object.keys(mockQueries[3].write.payload)).toEqual(['metadata']);
+      expect(mockQueries[3].write.payload.metadata.research).toEqual(existing.metadata.research);
     });
 
     it('does not treat a failed segment/metadata update as a successful ICP match', async () => {
-      mockReplies.push(row({ ...existing, person_id: options.person_id }), failure('write denied'));
+      mockReplies.push(row({ ...existing, person_id: options.person_id }), row({ id: options.person_id }), row([existing]), failure('write denied'));
       expect(await upsertLeadForPersonActivity({ ...options, icp_reuse_only: true }))
         .toMatchObject({ success: false, error: 'write denied' });
     });
 
     it('does not reuse a different person by name alone when work email is empty', async () => {
-      mockReplies.push(row(null), row({ id: 'new-lead' }));
+      mockReplies.push(row(null), row({ id: options.person_id }), row([]), row({ id: 'new-lead' }));
       expect(await upsertLeadForPersonActivity({ ...options, icp_reuse_only: true,
         email: undefined, person_emails: [], personal_email: 'personal@example.test' }))
         .toMatchObject({ success: true, leadId: 'new-lead' });
-      expect(mockQueries[1].write.method).toBe('insert');
+      expect(mockQueries[3].write.method).toBe('insert');
       expect(mockQueries.every(query => !query.filters.some((filter: any[]) => filter[0] === 'eq' && filter[1] === 'name'))).toBe(true);
     });
 
@@ -289,8 +289,8 @@ describe('Finder persistence activities with mocked database boundary', () => {
       const saved = { ...existing, id: 'saved-lead', person_id: 'local-84462653',
         name: 'Yamil Morales', email: '', personal_email: 'personal@example.test',
         status: 'qualified', metadata: { research: { report: 'keep' }, finder: { old: true } } };
-      mockReplies.push(row(saved), row({ ...saved, segment_id: options.segment_id }),
-        row(null), row(null), row({ id: 'next-lead' }));
+      mockReplies.push(row(saved), row({ id: saved.person_id }), row([saved]), row({ ...saved, segment_id: options.segment_id }),
+        row(null), row({ id: 'local-2' }), row([]), row(null), row({ id: 'next-lead' }));
       const contacts: any = {
         prepareFinderPersonActivity: jest.fn(async (input: any) => ({ success: true, errors: [],
           person: { id: `local-${input.person_id}`, full_name: input.source_search_result.person.full_name,
@@ -319,8 +319,8 @@ describe('Finder persistence activities with mocked database boundary', () => {
       expect(result.errors).toEqual([]);
       expect(result).toMatchObject({ success: true, processed: 2, foundMatches: 2,
         leadsCreated: [saved.id, 'next-lead'], checkpoint: { processed: 72, found: 60, page: 8, offset: 0 } });
-      expect(Object.keys(mockQueries[1].write.payload).sort()).toEqual(['metadata', 'segment_id']);
-      expect(mockQueries[1].filters).toContainEqual(['eq', 'id', saved.id]);
+      expect(Object.keys(mockQueries[3].write.payload).sort()).toEqual(['metadata', 'segment_id']);
+      expect(mockQueries[3].filters).toContainEqual(['eq', 'id', saved.id]);
       expect(contacts.lookEmailOnIcyPeas).not.toHaveBeenCalled();
       expect(checkpoint).toHaveBeenCalledTimes(2);
       expect(mockReplies).toHaveLength(0);

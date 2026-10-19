@@ -127,6 +127,14 @@ describe('enrichLeadWorkflow source-aware persistence', () => {
     const result = await enrichLeadWorkflow({ person_id: '11', site_id: 'site' });
     expect(mockActivities.prepareFinderPersonActivity).not.toHaveBeenCalled();
     expect(result.success).toBe(true);
+    expect(mockActivities.checkExistingLeadForPersonActivity).toHaveBeenCalledWith({ person_id: person.id,site_id: 'site' });
+  });
+
+  it.each([false,true])('opts ICP into cross-role identity only with its Temporal patch (%s)', async enabled => {
+    mockPatched.mockImplementation(id => id !== 'icp-role-identity-reuse-v1' || enabled);
+    await enrichLeadWorkflow({ person_id: '11',site_id: 'site',source_search_result: source,validated_contact_policy: true });
+    expect(mockActivities.checkExistingLeadForPersonActivity).toHaveBeenCalledWith({ person_id: person.id,site_id: 'site',
+      ...(enabled ? { icp_role_identity: true } : {}) });
   });
 
   it.each([false, true])('preserves legacy IcyPeas payloads and adds tenant context only with the patch (%s)', async enabled => {

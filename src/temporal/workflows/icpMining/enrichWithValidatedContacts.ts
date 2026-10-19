@@ -14,7 +14,7 @@ type Deps = Pick<Activities, 'prepareFinderPersonActivity' | 'checkExistingLeadF
 
 /** Raw contacts are retained, but only usable contacts can terminate enrichment. */
 export async function enrichWithValidatedContacts(options: EnrichLeadOptions, deps: Deps,
-  policy: { trustProviderEmails?: boolean; isolateIdentityReviews?: boolean; stopOnCreditFailure?: boolean; reuseExistingLeadOnly?: boolean } = {}): Promise<EnrichLeadResult> {
+  policy: { trustProviderEmails?: boolean; isolateIdentityReviews?: boolean; stopOnCreditFailure?: boolean; reuseExistingLeadOnly?: boolean; resolveRoleIdentity?: boolean } = {}): Promise<EnrichLeadResult> {
   const start = Date.now();
   const errors: string[] = [];
   const responses: Record<string, any> = {};
@@ -33,7 +33,8 @@ export async function enrichWithValidatedContacts(options: EnrichLeadOptions, de
       // No contacts are bought and no lead is linked to a guessed organization.
       return finish({ success: true, outcome: 'needs_review', personId: person.id });
     }
-    const checked = await deps.checkExistingLeadForPersonActivity({ person_id: person.id, site_id: options.site_id });
+    const checked = await deps.checkExistingLeadForPersonActivity({ person_id: person.id, site_id: options.site_id,
+      ...(policy.resolveRoleIdentity ? { icp_role_identity: true } : {}) });
     if (!checked.success) throw new Error(checked.error || 'Lead lookup failed');
     const lead = checked.existingLead;
     const trustedExistingWorkEmail = emailCandidates({ email: lead?.email,

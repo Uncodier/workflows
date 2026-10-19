@@ -38,6 +38,7 @@ export * from './icpMiningCreditActivities';
 export * from './leadResearchStateActivity';
 export * from './messageActivities';
 export * from './outreachDeliveryActivities';
+export * from './exactDeliveryActivities';
 export * from './outreachConfigurationActivity';
 export * from './icypeasActivities';
 export * from './billingActivities';
@@ -95,6 +96,7 @@ import * as icpMiningCreditActivities from './icpMiningCreditActivities';
 import * as leadResearchStateActivities from './leadResearchStateActivity';
 import * as messageActivities from './messageActivities';
 import * as outreachDeliveryActivities from './outreachDeliveryActivities';
+import * as exactDeliveryActivities from './exactDeliveryActivities';
 import * as outreachConfigurationActivities from './outreachConfigurationActivity';
 import * as icypeasActivities from './icypeasActivities';
 import * as billingActivities from './billingActivities';
@@ -152,6 +154,7 @@ export const activities = {
   ...leadResearchStateActivities,
   ...messageActivities,
   ...outreachDeliveryActivities,
+  ...exactDeliveryActivities,
   ...outreachConfigurationActivities,
   ...icypeasActivities,
   ...billingActivities,

@@ -294,11 +294,29 @@ This also avoids a `leads_site_name_email_unique` collision when a previously
 saved lead has an empty work email. Uncontactable leads still use the existing
 enrichment path. Already-started Temporal histories keep their command sequence.
 
-ICP lead persistence first checks the site's `person_id`, then the exact
-`(site_id, name, email)` key when a nonempty work email is available. A historical
+ICP lead persistence validates the site's local `person_id` and other role records
+for the same identity through the persisted positive
+`external_person_id`, or canonical LinkedIn profile variants when that ID is
+unavailable. It reads only this site's leads linked to those roles. Names,
+personal emails, phones and empty work emails are never identity evidence.
+LinkedIn-only fallback accepts literal HTTP(S) `/in/` URLs with ASCII identifiers,
+including country hosts, case differences and query/fragment decorations. It does
+not normalize encoded identifiers, explicit ports, dot segments or whitespace;
+those unsupported forms require identity cleanup rather than guessed reuse.
+Conflicting provider/LinkedIn evidence, multiple candidate leads, failed reads,
+and more than 100 role records fail closed instead of selecting an arbitrary lead.
+New ICP contact checks opt into the same resolver through Temporal patch
+`icp-role-identity-reuse-v1`; legacy/non-ICP calls retain their previous local-role
+lookup. Even a directly linked ICP lead is checked for identity-wide ambiguity.
+An existing personal-email-only lead can be reused without purchasing contacts
+even with a different role UUID.
+ICP reuse updates only segment and merged metadata and preserves the original
+person link, company, contact columns, owner, commercial status and research.
+
+The nonempty `(site_id, name, email)` fallback is retained. A historical
 lead linked to a different local person record is reused rather than inserted.
-It receives the requested `segment_id`, company and non-destructively merged
-profile/contact data; its lead ID, nonempty person link, owner, commercial status,
+Legacy/non-ICP enrichment receives the requested `segment_id`, company and
+non-destructively merged profile/contact data; its lead ID, nonempty person link, owner, commercial status,
 origin, creation timestamp, research and omitted contacts are preserved. The
 schema has a single `segment_id`: a supplied segment replaces that field, while
 an omitted segment leaves the previous assignment intact. Campaign status,
@@ -307,14 +325,23 @@ consent and outreach eligibility checks are not bypassed or reset.
 The same behavior handles a concurrent insert/update rejected by PostgreSQL
 `23505` on `leads_site_name_email_unique`: it re-reads that exact same-site key
 and updates the canonical row without copying creation fields from the failed
-insert. Name-only and empty-email collisions are not merged. Other database
+insert. ICP also re-resolves stable person identity after a concurrent `23505`,
+including empty-email collisions, and reuses only an unambiguous same-site lead.
+An empty-email collision without stable identity is never merged. Other database
 errors, a missing conflicting row or a failed canonical update still hold the
 candidate checkpoint. An acknowledged reuse returns the existing lead ID as a
 successful match, so mining advances to the next candidate.
 
-This is an activity-only change: no migration or new Temporal workflow commands
-are needed. Deploy the worker to activate it; previously settled runs and stored
+No database migration is required. The lookup payload change is protected by
+the Temporal patch above; recorded histories retain the original lookup payload.
+Deploy the worker to activate it; previously settled runs and stored
 cooldowns are not restarted/reset by changing the source.
+
+Regression coverage in `tests/finder-lead-identity-sql.test.ts` executes the actual
+activities and PostgreSQL uniqueness/filter semantics using the already-installed
+sibling API PGlite fixture in a separate process (no production/provider calls).
+It covers different role UUIDs, personal-email-only reuse, cursor advancement,
+real insert races, homonyms, cross-site isolation, ambiguity and read failures.
 
 ### IcyPeas asynchronous email discovery
 

@@ -25,7 +25,7 @@ const {
   retry: RETRY_POLICIES.DATABASE,
 });
 
-const { sendEmailFromAgentActivity, sendOutreachMessageActivity } = proxyActivities<Activities>({
+const { sendEmailFromAgentActivity, sendOutreachMessageActivity, sendExactQueuedMessageActivity } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.EMAIL_OPERATIONS,
   retry: RETRY_POLICIES.NETWORK,
 });
@@ -35,6 +35,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
   const useBatchClaims = patched('send-approved-messages-batch-claims-v1');
   const useConfiguredOutreach = patched('outreach-configured-delivery-v1');
   const useExactCommentDelivery = patched('send-approved-comment-exact-target-v1');
+  const useExactConnectionDelivery = patched('send-approved-connection-exact-delivery-v1');
   let deferredCount = 0;
 
   const resetResult = await resetStuckSendingMessagesActivity();
@@ -77,6 +78,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     let sent = false;
     let voiceChildStarted = false;
     const channel = (msg.custom_data?.channel || msg.custom_data?.source || msg.channel || (msg.custom_data?.type === 'email' ? 'email' : 'whatsapp')).toLowerCase();
+    const exactConnection = useExactConnectionDelivery && Object.prototype.hasOwnProperty.call(msg.custom_data || {}, 'connection_id');
     const dispatch = resolveApprovedMessageDispatch(
       channel,
       msg.custom_data?.voice_mode
@@ -110,6 +112,18 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
             reason: result.reason || 'Outreach delivery deferred',
             retryAt: result.retryAt,
           });
+          deferredCount++;
+          return false;
+        }
+        sent = true;
+        sentMessageId = result.messageId;
+        sentRecipient = result.recipient;
+      } else if (exactConnection) {
+        const result = await sendExactQueuedMessageActivity({ site_id: msg.site_id, message_id: msg.message_id,
+          conversation_id: msg.conversation_id, channel });
+        if (!result.success) {
+          await deferOutreachMessageActivity({ site_id: msg.site_id, conversation_id: msg.conversation_id,
+            message_id: msg.message_id, reason: result.reason || 'Exact delivery unavailable' });
           deferredCount++;
           return false;
         }
@@ -277,12 +291,12 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         return true;
       }
 
-      if (sent && managedOutreach && channel === 'voice') {
+      if (sent && channel === 'voice' && (managedOutreach || (exactConnection && msg.custom_data?.voice_mode === 'agent_call'))) {
         // The tracked-call service and its webhooks own call status. A callback
         // may already have recorded no-answer/failed; never overwrite it as sent.
         return true;
       }
-      if (sent && (managedOutreach || channel === 'email')) {
+      if (sent && (managedOutreach || exactConnection || channel === 'email')) {
         await updateMessageStatusToSentActivity({
           message_id: messageId,
           conversation_id: msg.conversation_id,
@@ -331,7 +345,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         return false;
       }
       console.error(`❌ Failed to send message ${msg.message_id}:`, error);
-      if (managedOutreach && !sent) {
+      if ((managedOutreach || exactConnection) && !sent) {
         // Policy/cap/network failures must not invalidate contacts or trigger another provider.
         await deferOutreachMessageActivity({
           site_id: msg.site_id,

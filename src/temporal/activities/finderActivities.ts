@@ -1,6 +1,7 @@
 import { apiService } from '../services/apiService';
 import type { PostgrestError } from '@supabase/supabase-js';
 import { getSupabaseService } from '../services';
+import { findLeadByFinderIdentity } from '../services/finderLeadIdentity';
 import { normalizeIcpMiningListIds } from '../utils/icpMiningConfiguration';
 import { ICP_MINING_WORKFLOW_SELECT, IcpMiningWorkflowDto, toIcpMiningWorkflowDto } from '../utils/icpMiningPayload';
 import { isIcpOrganizationIdentityError, type IcpOrganizationReview } from '../utils/icpIdentityReview';
@@ -829,6 +830,7 @@ export async function checkPersonByLinkedInActivity(options: {
 export async function checkExistingLeadForPersonActivity(options: {
   person_id: string;
   site_id: string;
+  icp_role_identity?: boolean;
 }): Promise<{
   success: boolean;
   hasExistingLead: boolean;
@@ -841,8 +843,8 @@ export async function checkExistingLeadForPersonActivity(options: {
     if (!isConnected) return { success: false, hasExistingLead: false, error: 'Database not available' };
     const { supabaseServiceRole } = await import('../../lib/supabase/client');
 
-    // Check if there's already a lead for this person
-    const { data: existingLead, error } = await supabaseServiceRole
+    // Check the local role first, then bridge other roles of the same identity.
+    const { data: personLead, error } = await supabaseServiceRole
       .from('leads')
       .select('id, name, email, phone, personal_email, status, created_at, company_id, metadata')
       .eq('site_id', options.site_id)
@@ -851,6 +853,8 @@ export async function checkExistingLeadForPersonActivity(options: {
       .maybeSingle();
 
     if (error) return { success: false, hasExistingLead: false, error: error.message };
+    const existingLead = options.icp_role_identity
+      ? await findLeadByFinderIdentity(supabaseServiceRole, options.person_id, options.site_id) : personLead;
     
     const hasExistingLead = !!existingLead;
     return { 
@@ -1030,6 +1034,10 @@ export async function upsertLeadForPersonActivity(options: {
 
     let existingLead = personLead;
     let reuseContactLead = false;
+    if (options.icp_reuse_only) {
+      existingLead = await findLeadByFinderIdentity(supabaseServiceRole, options.person_id, options.site_id);
+      reuseContactLead = !!existingLead;
+    }
     const findContactLead = (name: string, email: string) => supabaseServiceRole
       .from('leads')
       .select('*')
@@ -1181,8 +1189,16 @@ export async function upsertLeadForPersonActivity(options: {
     const recoverContactConflict = async (error: PostgrestError) => {
       // Only this known uniqueness conflict is recoverable. Other DB failures
       // must retain the candidate checkpoint instead of masquerading as a match.
-      if (error.code !== '23505' || !error.message.includes('"leads_site_name_email_unique"')
-        || !leadData || !hasData(leadData.email)) return { data: null, error };
+      if (error.code !== '23505' || !error.message.includes('"leads_site_name_email_unique"')) return { data: null, error };
+      if (options.icp_reuse_only) {
+        const canonical = await findLeadByFinderIdentity(supabaseServiceRole, options.person_id, options.site_id);
+        if (canonical) {
+          existingLead = canonical;
+          reuseContactLead = true;
+          return updateExistingLead();
+        }
+      }
+      if (!leadData || !hasData(leadData.email)) return { data: null, error };
       const found = await findContactLead(leadData.name, leadData.email);
       if (found.error) return { data: null, error: found.error };
       if (!found.data) return { data: null, error };

@@ -10,7 +10,7 @@ const site_id = '9be0a6a2-5567-41bf-ad06-cb4014f0faf2';
 // Replay the actual enrichment workflow through the IcyPeas boundary, not a
 // synthetic stand-in workflow. Activities do not run and no provider is called.
 function history(durable: boolean, trustProviderEmails = false,
-  contactOutcome: 'matched' | 'provider_no_match' | 'generated' = 'matched') {
+  contactOutcome: 'matched' | 'provider_no_match' | 'generated' = 'matched', roleIdentity = false) {
   const events: Record<string, unknown>[] = [];
   let taskId = 0;
   let sequence = 0;
@@ -48,6 +48,8 @@ function history(durable: boolean, trustProviderEmails = false,
     details: { 'patch-data': payloads({ id: 'icp-provider-email-trust-v1', deprecated: false }) }, workflowTaskCompletedEventId: taskId });
   if (contactOutcome === 'provider_no_match') event('MarkerRecorded', { markerName: 'core_patch',
     details: { 'patch-data': payloads({ id: 'icp-provider-only-contacts-v1', deprecated: false }) }, workflowTaskCompletedEventId: taskId });
+  if (roleIdentity) event('MarkerRecorded', { markerName: 'core_patch',
+    details: { 'patch-data': payloads({ id: 'icp-role-identity-reuse-v1', deprecated: false }) }, workflowTaskCompletedEventId: taskId });
   const person = { id: 'person', external_person_id: 1, full_name: 'Ada Example', raw_result: {} };
   activity('prepareFinderPersonActivity', [input], { success: true, errors: [], person, role: { organization: { domain: 'acme.test', name: 'Acme' } } });
   activity('checkExistingLeadForPersonActivity', [{ person_id: 'person', site_id }], { success: true });
@@ -104,5 +106,8 @@ describe('IcyPeas tenant-context replay compatibility', () => {
   });
   it('replays a provider-only no-match without a generation child', async () => {
     await Worker.runReplayHistory({ workflowBundle }, history(true, true, 'provider_no_match'), 'icp-provider-only-replay');
+  });
+  it('replays a new ICP role-identity lookup without changing historical enrichment commands', async () => {
+    await Worker.runReplayHistory({ workflowBundle }, history(true, true, 'matched', true), 'icp-role-identity-replay');
   });
 });
