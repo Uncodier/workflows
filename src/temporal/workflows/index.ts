@@ -64,6 +64,7 @@ import { processReservationsWorkflow } from './processReservationsWorkflow';
 import { processSubscriptionsWorkflow } from './processSubscriptionsWorkflow';
 import { processDueInvoicesWorkflow } from './processDueInvoicesWorkflow';
 import { processTasksWorkflow } from './processTasksWorkflow';
+import { catalogIndexWorkflow } from './catalogIndexWorkflow';
 
 // Export workflows individually
 export * from './dataProcessingWorkflow';
@@ -121,6 +122,7 @@ export * from './pollSocialAnalyticsWorkflow';
 export * from './processSubscriptionsWorkflow';
 export * from './processDueInvoicesWorkflow';
 export * from './processTasksWorkflow';
+export * from './catalogIndexWorkflow';
 
 // Also export as a bundle for the client
 export const workflows = {
@@ -184,6 +186,7 @@ export const workflows = {
   processSubscriptionsWorkflow,
   processDueInvoicesWorkflow,
   processTasksWorkflow,
+  catalogIndexWorkflow,
   // Alias for backward compatibility
   whatsappMessageWorkflow: answerWhatsappMessageWorkflow,
   // ✅ Aliases for agent workflows with different naming conventions
@@ -254,6 +257,7 @@ export const workflowNames = {
   processSubscriptionsWorkflow: 'processSubscriptionsWorkflow',
   processDueInvoicesWorkflow: 'processDueInvoicesWorkflow',
   processTasksWorkflow: 'processTasksWorkflow',
+  catalogIndexWorkflow: 'catalogIndexWorkflow',
   // Alias for backward compatibility
   whatsappMessageWorkflow: 'whatsappMessageWorkflow',
   // ✅ Aliases for agent workflows with different naming conventions

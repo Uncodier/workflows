@@ -55,6 +55,7 @@ export * from './socialCommentScopeActivities';
 export { cleanupFailedFollowUpActivity } from './commentSafeCleanupActivity';
 export * from './socialCommentSyncActivities';
 export * from './sessionRecordingMaintenanceActivities';
+export * from './catalogIndexActivities';
 
 // Bundle all activities for the worker
 import * as supabaseActivities from './supabaseActivities';
@@ -113,6 +114,7 @@ import * as socialCommentScopeActivities from './socialCommentScopeActivities';
 import * as commentSafeCleanupActivities from './commentSafeCleanupActivity';
 import * as socialCommentSyncActivities from './socialCommentSyncActivities';
 import * as sessionRecordingMaintenanceActivities from './sessionRecordingMaintenanceActivities';
+import * as catalogIndexActivities from './catalogIndexActivities';
 
 export const activities = {
   ...supabaseActivities,
@@ -170,7 +172,8 @@ export const activities = {
   ...socialCommentScopeActivities,
   ...commentSafeCleanupActivities,
   ...socialCommentSyncActivities,
-  ...sessionRecordingMaintenanceActivities
+  ...sessionRecordingMaintenanceActivities,
+  ...catalogIndexActivities,
 };
 
 export type Activities = typeof activities; 
