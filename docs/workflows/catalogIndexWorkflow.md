@@ -73,9 +73,13 @@ The companion API owns actual recurring dispatch integration:
 
 - `GET /api/cron/catalog-index`, authenticated by `CRON_SECRET`, enabled through
   `CATALOG_INDEXING_ENABLED`, dispatched every minute by its Vercel configuration.
-- It starts `catalogIndexWorkflow` with `{backfill:false}`, workflow ID
-  `catalog-index-drain`, conflict policy `USE_EXISTING` and reuse policy
-  `ALLOW_DUPLICATE` (no overlapping periodic drain executions).
+- It starts `catalogIndexWorkflow` with `{backfill:true}`, workflow ID
+  `catalog-index-backfill:all`, conflict policy `USE_EXISTING` and reuse policy
+  `ALLOW_DUPLICATE` (no overlapping periodic global backfill executions).
+  Each new run scans the catalog before draining; unchanged indexed documents
+  reuse embeddings, but scans can revive exhausted jobs. Monitor persistent
+  failures and provider cost. The workflow itself still accepts explicit drain-only
+  runs with `backfill:false`.
 - Service-only `POST /api/catalog/index/start` starts an optional site/global
   backfill with IDs `catalog-index-backfill:<site|all>` and the same queue.
 
