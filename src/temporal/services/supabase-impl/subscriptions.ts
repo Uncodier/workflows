@@ -114,6 +114,53 @@ export function nextSubscriptionBillingDate(current: string): string {
   return date.toISOString();
 }
 
+export function subscriptionInvoiceMetadata(sub: Subscription) {
+  return {
+    subscription_id: sub.id,
+    billing_cycle: new Date(sub.next_billing_date).toISOString(),
+    billing_period_start: new Date(sub.next_billing_date).toISOString().slice(0, 10),
+    billing_period_end: nextSubscriptionBillingDate(sub.next_billing_date).slice(0, 10),
+  };
+}
+
+export interface SubscriptionInvoiceRecord {
+  id: string;
+  amount: number;
+  currency: string;
+  due_date?: string | null;
+  channel?: string | null;
+  public_access_token?: string;
+}
+
+/** Explicit period metadata wins over the issue date; legacy invoices use the cycle's date range. */
+export async function findSubscriptionPeriodInvoice(
+  client: SupabaseClient,
+  sub: Subscription
+): Promise<SubscriptionInvoiceRecord | null> {
+  const period = subscriptionInvoiceMetadata(sub);
+  const query = () => client.from('sales')
+    .select('id, amount, currency, due_date, channel, public_access_token')
+    .eq('site_id', sub.site_id)
+    .eq('subscription_id', sub.id);
+  const candidates = [
+    () => query().eq('product_details->>billing_period_start', period.billing_period_start),
+    () => query().is('product_details->>billing_period_start', null)
+      .like('product_details->>billing_cycle', `${period.billing_period_start}%`),
+    () => query().is('product_details->>billing_period_start', null)
+      .is('product_details->>billing_cycle', null)
+      .gte('sale_date', period.billing_period_start).lt('sale_date', period.billing_period_end),
+  ];
+  for (const candidate of candidates) {
+    const { data, error } = await candidate()
+      .order('created_at', { ascending: true }).limit(1).maybeSingle();
+    if (error) throw new Error(`Failed to find subscription period invoice: ${error.message}`);
+    // All statuses represent an issued invoice. Never silently replace a paid,
+    // cancelled or refunded invoice or overwrite its financial state.
+    if (data) return data;
+  }
+  return null;
+}
+
 export interface SubscriptionSaleData {
   id: string;
   site_id: string;
@@ -129,7 +176,7 @@ export interface SubscriptionSaleData {
   title: string;
   sale_date: string;
   due_date?: string;
-  product_details: { subscription_id: string; billing_cycle: string };
+  product_details: ReturnType<typeof subscriptionInvoiceMetadata>;
   created_at: string;
   updated_at: string;
 }
@@ -152,6 +199,13 @@ export interface SubscriptionSaleOrderData {
 interface SubscriptionRecord {
   id: string;
   public_access_token?: string;
+  amount?: number;
+  currency?: string;
+  due_date?: string | null;
+  channel?: string | null;
+  subscription_id?: string;
+  sale_id?: string;
+  product_details?: { billing_period_start?: string; billing_cycle?: string } | null;
 }
 
 // Primary-key uniqueness is the concurrency guard; never upsert financial data.
@@ -160,20 +214,36 @@ async function getOrCreateSubscriptionRecord(
   table: 'sales' | 'sale_orders',
   payload: SubscriptionSaleData | (SubscriptionSaleOrderData & { sale_id: string })
 ): Promise<SubscriptionRecord> {
-  const find = () => client.from(table)
-    .select('id, public_access_token')
+  const columns = table === 'sales'
+    ? 'id, public_access_token, amount, currency, due_date, channel, subscription_id, product_details'
+    : 'id, public_access_token, sale_id';
+  const validate = (record: SubscriptionRecord): SubscriptionRecord => {
+    if ('subscription_id' in payload) {
+      const details = record.product_details;
+      const period = payload.product_details.billing_period_start;
+      if (record.subscription_id !== payload.subscription_id
+        || (details?.billing_period_start != null && details.billing_period_start !== period)
+        || (details?.billing_period_start == null && details?.billing_cycle != null
+          && details.billing_cycle.slice(0, 10) !== period)) {
+        throw new Error('Existing subscription invoice identity does not match its subscription or billing period');
+      }
+    } else if (record.sale_id !== payload.sale_id) {
+      throw new Error('Existing subscription order is linked to a different invoice');
+    }
+    return record;
+  };
+  const find = () => client.from(table).select(columns)
     .eq('id', payload.id)
     .eq('site_id', payload.site_id)
-    .maybeSingle();
+    .maybeSingle<SubscriptionRecord>();
 
   const existing = await find();
   if (existing.error) {
     throw new Error(`Failed to find subscription ${table}: ${existing.error.message}`);
   }
-  if (existing.data) return existing.data;
+  if (existing.data) return validate(existing.data);
 
-  const inserted = await client.from(table).insert(payload)
-    .select('id, public_access_token').single();
+  const inserted = await client.from(table).insert(payload).select(columns).single<SubscriptionRecord>();
   if (!inserted.error && inserted.data) return inserted.data;
 
   if (inserted.error?.code === '23505') {
@@ -181,7 +251,7 @@ async function getOrCreateSubscriptionRecord(
     if (concurrent.error) {
       throw new Error(`Failed to find concurrent subscription ${table}: ${concurrent.error.message}`);
     }
-    if (concurrent.data) return concurrent.data;
+    if (concurrent.data) return validate(concurrent.data);
   }
   throw new Error(`Failed to generate subscription ${table}: ${inserted.error?.message || 'No record returned'}`);
 }
@@ -190,12 +260,21 @@ export async function generateSubscriptionSale(
   client: SupabaseClient,
   saleData: SubscriptionSaleData,
   saleOrderData: SubscriptionSaleOrderData
-): Promise<SubscriptionRecord & { sale_order: SubscriptionRecord }> {
+): Promise<SubscriptionRecord & { sale_order?: SubscriptionRecord; existing_invoice?: boolean }> {
   console.log('📝 Generating sale for subscription...');
 
   const sale = await getOrCreateSubscriptionRecord(client, 'sales', saleData);
+  // The manual period action shares this UUID. If it wins the insert race,
+  // leave its invoice alone rather than creating a new order or notification.
+  if (sale.channel === 'manual') return { ...sale, existing_invoice: true };
+  const amount = Number(sale.amount ?? saleData.amount);
+  const currency = sale.currency || saleData.currency;
   const order = await getOrCreateSubscriptionRecord(client, 'sale_orders', {
     ...saleOrderData,
+    subtotal: amount,
+    total: amount,
+    currency,
+    items: saleOrderData.items.map((item) => ({ ...item, unit_price: amount })),
     sale_id: sale.id,
     public_access_token: saleOrderData.public_access_token || randomBytes(24).toString('base64url'),
   });

@@ -1,9 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { processSubscriptionRenewalActivity } from '../src/temporal/activities/subscriptionActivities';
+import { notifySubscriptionRenewalActivity, processSubscriptionRenewalActivity } from '../src/temporal/activities/subscriptionActivities';
+import { apiService } from '../src/temporal/services/apiService';
 import { getSupabaseService, type SupabaseService } from '../src/temporal/services/supabaseService';
 import {
   nextSubscriptionBillingDate,
   subscriptionRenewalRecordId,
+  subscriptionInvoiceMetadata,
   type Subscription,
 } from '../src/temporal/services/supabase-impl/subscriptions';
 
@@ -32,12 +34,18 @@ function database() {
   };
   const failures: Record<string, DatabaseError | undefined> = {};
   const lostResponses = new Set<string>();
+  const beforeInsert: Record<string, (() => void) | undefined> = {};
   const operations: { table: string; action: string; payload?: Row; filters: Row }[] = [];
   const client = {
     from: jest.fn((table: string) => {
       let action = 'read';
       let payload: Row | undefined;
       const filters: Row = {};
+      const predicates: ((row: Row) => boolean)[] = [];
+      const valueAt = (row: Row, key: string) => {
+        const [column, property] = key.split('->>');
+        return property ? row[column]?.[property] ?? null : row[column];
+      };
       const execute = async () => {
         operations.push({ table, action, payload, filters: { ...filters } });
         const failure = failures[`${action}:${table}`];
@@ -45,7 +53,8 @@ function database() {
           delete failures[`${action}:${table}`];
           return { data: null, error: failure };
         }
-        const matches = (row: Row) => Object.entries(filters).every(([key, value]) => row[key] === value);
+        const matches = (row: Row) => Object.entries(filters).every(([key, value]) => valueAt(row, key) === value)
+          && predicates.every((predicate) => predicate(row));
         if (action === 'read') return { data: rows[table].find(matches) || null, error: null };
         if (action === 'update') {
           for (const row of rows[table].filter(matches)) Object.assign(row, payload);
@@ -59,6 +68,8 @@ function database() {
             return { data: null, error: { code: '23502', message: `Missing required ${table}.${field}` } };
           }
         }
+        beforeInsert[table]?.();
+        delete beforeInsert[table];
         if (rows[table].some((row) => row.id === payload?.id)) {
           return { data: null, error: { code: '23505', message: 'Duplicate primary key' } };
         }
@@ -69,6 +80,15 @@ function database() {
       const query: any = {
         select: () => query,
         eq: (key: string, value: unknown) => { filters[key] = value; return query; },
+        is: (key: string, value: unknown) => { predicates.push((row) => valueAt(row, key) === value); return query; },
+        like: (key: string, value: string) => {
+          predicates.push((row) => typeof valueAt(row, key) === 'string' && valueAt(row, key).startsWith(value.slice(0, -1)));
+          return query;
+        },
+        gte: (key: string, value: string) => { predicates.push((row) => valueAt(row, key) >= value); return query; },
+        lt: (key: string, value: string) => { predicates.push((row) => valueAt(row, key) < value); return query; },
+        order: () => query,
+        limit: () => query,
         insert: (value: Row) => { action = 'insert'; payload = value; return query; },
         update: (value: Row) => { action = 'update'; payload = value; return query; },
         maybeSingle: execute,
@@ -78,7 +98,7 @@ function database() {
       return query;
     }),
   } as unknown as SupabaseClient;
-  return { rows, failures, lostResponses, operations, client };
+  return { rows, failures, lostResponses, beforeInsert, operations, client };
 }
 
 describe('subscription invoice renewals', () => {
@@ -100,7 +120,8 @@ describe('subscription invoice renewals', () => {
     expect(db.rows.sales[0]).toMatchObject({
       user_id: 'assigned-user', subscription_id: subscription.id, lead_id: subscription.lead_id,
       amount: 1500, amount_due: 1500, currency: 'USD', status: 'pending', sale_date: '2026-10-06',
-      product_details: { subscription_id: subscription.id, billing_cycle: '2026-10-01T00:00:00.000Z' },
+      product_details: { subscription_id: subscription.id, billing_cycle: '2026-10-01T00:00:00.000Z',
+        billing_period_start: '2026-10-01', billing_period_end: '2026-11-01' },
     });
     expect(db.rows.sale_orders[0]).toMatchObject({
       user_id: 'assigned-user', sale_id: result.sale_id, currency: 'USD',
@@ -191,6 +212,150 @@ describe('subscription invoice renewals', () => {
     db.failures['read:sales'] = { message: 'Lookup unavailable' };
     await expect(processSubscriptionRenewalActivity(subscription)).rejects.toThrow('Lookup unavailable');
     expect(db.rows.sales).toHaveLength(0);
+  });
+
+  it.each(['pending', 'completed', 'cancelled', 'refunded'])('reuses a %s manual invoice issued on a different date', async (status) => {
+    const invoice = {
+      id: 'manually-created-invoice', site_id: subscription.site_id, subscription_id: subscription.id,
+      status, amount: 950, amount_due: status === 'completed' ? 0 : 950,
+      currency: 'MXN', sale_date: '2026-09-29', due_date: '2026-10-15', channel: 'manual',
+      product_details: subscriptionInvoiceMetadata(subscription),
+    };
+    db.rows.sales.push(invoice);
+    const original = JSON.stringify(db.rows.sales);
+    db.rows.leads = [];
+    db.rows.sites = [];
+    const result = await processSubscriptionRenewalActivity({ ...subscription, due_date: '2026-10-11' });
+    expect(result).toEqual({
+      sale_id: invoice.id, amount: 950, currency: 'MXN', due_date: '2026-10-15',
+      next_billing_date: '2026-11-01T00:00:00.000Z', existing_invoice: true,
+    });
+    expect(JSON.stringify(db.rows.sales)).toBe(original);
+    expect(db.rows.sale_orders).toHaveLength(0);
+    expect(db.rows.subscriptions[0]).toMatchObject({ next_billing_date: result.next_billing_date, due_date: '2026-11-11' });
+    expect(db.operations.filter((operation) => operation.action === 'insert')).toHaveLength(0);
+  });
+
+  it.each(['2026-10-01', '2026-10-06', '2026-10-31'])('recognizes a legacy manual invoice without period metadata issued on %s', async (saleDate) => {
+    db.rows.sales.push({
+      id: 'legacy-manual', site_id: subscription.site_id, subscription_id: subscription.id,
+      sale_date: saleDate, amount: 1500, currency: 'USD', status: 'pending',
+    });
+    const result = await processSubscriptionRenewalActivity(subscription);
+    expect(result).toMatchObject({ sale_id: 'legacy-manual', existing_invoice: true });
+    expect(db.rows.sales).toHaveLength(1);
+    expect(db.rows.sale_orders).toHaveLength(0);
+  });
+
+  it('recognizes the existing billing_cycle metadata even if the issue date is outside the period', async () => {
+    db.rows.sales.push({
+      id: 'old-generator', site_id: subscription.site_id, subscription_id: subscription.id,
+      sale_date: '2026-11-06', amount: 1500, currency: 'USD', status: 'pending',
+      product_details: { subscription_id: subscription.id, billing_cycle: '2026-10-01T00:00:00.000Z' },
+    });
+    expect(await processSubscriptionRenewalActivity(subscription)).toMatchObject({ sale_id: 'old-generator', existing_invoice: true });
+    expect(db.rows.sales).toHaveLength(1);
+  });
+
+  it.each(['other-site', 'other-subscription', 'previous-date', 'next-date', 'other-cycle', 'other-period'])
+    ('does not suppress renewal because of an invoice for %s', async (scenario) => {
+      const invoice: Row = {
+        id: 'unrelated-invoice', site_id: subscription.site_id, subscription_id: subscription.id,
+        sale_date: '2026-10-06', amount: 1500, currency: 'USD', status: 'pending',
+      };
+      if (scenario === 'other-site') invoice.site_id = 'other-tenant';
+      if (scenario === 'other-subscription') invoice.subscription_id = 'another-subscription';
+      if (scenario === 'previous-date') invoice.sale_date = '2026-09-30';
+      if (scenario === 'next-date') invoice.sale_date = '2026-11-01';
+      if (scenario === 'other-cycle') invoice.product_details = { billing_cycle: '2026-09-01T00:00:00.000Z' };
+      if (scenario === 'other-period') invoice.product_details = { billing_period_start: '2026-09-01' };
+      db.rows.sales.push(invoice);
+      const result = await processSubscriptionRenewalActivity(subscription);
+      expect(result.sale_id).toBe(subscriptionRenewalRecordId(subscription, 'sale'));
+      expect(result.existing_invoice).toBeUndefined();
+      expect(db.rows.sales).toHaveLength(2);
+      expect(db.rows.sale_orders).toHaveLength(1);
+    });
+
+  it('does not resend a new-invoice notification for a reused invoice', async () => {
+    await notifySubscriptionRenewalActivity({
+      sub: subscription,
+      renewalData: { sale_id: 'manual', amount: 1500, currency: 'USD', next_billing_date: '2026-11-01', existing_invoice: true },
+      contact: { email: 'customer@example.test', name: 'Customer', language: 'es-MX' },
+    });
+    expect(apiService.post).not.toHaveBeenCalled();
+    expect(db.operations).toHaveLength(0);
+  });
+
+  it('reuses the manual period invoice when the manual generator wins a shared-UUID insert race', async () => {
+    db.beforeInsert.sales = () => db.rows.sales.push({
+      id: subscriptionRenewalRecordId(subscription, 'sale'), site_id: subscription.site_id,
+      subscription_id: subscription.id, amount: 975, currency: 'MXN', status: 'pending',
+      due_date: '2026-10-18', channel: 'manual', product_details: subscriptionInvoiceMetadata(subscription),
+    });
+    const result = await processSubscriptionRenewalActivity(subscription);
+    expect(result).toMatchObject({ amount: 975, currency: 'MXN', due_date: '2026-10-18', existing_invoice: true });
+    expect(db.rows.sales).toHaveLength(1);
+    expect(db.rows.sale_orders).toHaveLength(0);
+    expect(db.rows.subscriptions[0].next_billing_date).toBe(result.next_billing_date);
+  });
+
+  it.each(['other-subscription', 'other-period'])('fails closed if a deterministic invoice ID was reassigned to %s', async (scenario) => {
+    db.rows.sales.push({
+      id: subscriptionRenewalRecordId(subscription, 'sale'), site_id: subscription.site_id,
+      subscription_id: scenario === 'other-subscription' ? 'other-subscription' : subscription.id,
+      amount: 1500, currency: 'USD', channel: 'manual', sale_date: '2026-09-01',
+      product_details: { billing_period_start: scenario === 'other-period' ? '2026-09-01' : '2026-10-01' },
+    });
+    await expect(processSubscriptionRenewalActivity(subscription)).rejects.toThrow('does not match');
+    expect(db.rows.sales).toHaveLength(1);
+    expect(db.rows.sale_orders).toHaveLength(0);
+    expect(db.rows.subscriptions[0].next_billing_date).toBe(subscription.next_billing_date);
+  });
+
+  it('does not reuse a deterministic order ID reassigned to another invoice', async () => {
+    db.rows.sale_orders.push({ id: subscriptionRenewalRecordId(subscription, 'order'), site_id: subscription.site_id, sale_id: 'other-invoice' });
+    await expect(processSubscriptionRenewalActivity(subscription)).rejects.toThrow('linked to a different invoice');
+    expect(db.rows.subscriptions[0].next_billing_date).toBe(subscription.next_billing_date);
+    expect(db.rows.sale_orders).toHaveLength(1);
+  });
+
+  it('recovers a missing order using the persisted invoice amount and currency, not changed subscription terms', async () => {
+    db.rows.sales.push({
+      id: subscriptionRenewalRecordId(subscription, 'sale'), site_id: subscription.site_id,
+      subscription_id: subscription.id, amount: 950, currency: 'MXN', status: 'pending',
+      product_details: subscriptionInvoiceMetadata(subscription),
+    });
+    const result = await processSubscriptionRenewalActivity({ ...subscription, amount: 2500 });
+    expect(result).toMatchObject({ amount: 950, currency: 'MXN' });
+    expect(db.rows.sales).toHaveLength(1);
+    expect(db.rows.sale_orders[0]).toMatchObject({
+      subtotal: 950, total: 950, currency: 'MXN', sale_id: result.sale_id,
+      items: [{ catalog_item_id: subscription.catalog_item_id, quantity: 1, unit_price: 950 }],
+    });
+  });
+
+  it('retries billing advancement without duplicating a preexisting manual invoice', async () => {
+    db.rows.sales.push({
+      id: 'manual', site_id: subscription.site_id, subscription_id: subscription.id,
+      sale_date: '2026-10-06', amount: 1500, currency: 'USD', status: 'pending',
+    });
+    db.failures['update:subscriptions'] = { message: 'Billing update unavailable' };
+    await expect(processSubscriptionRenewalActivity(subscription)).rejects.toThrow('Billing update unavailable');
+    expect(db.rows.subscriptions[0].next_billing_date).toBe(subscription.next_billing_date);
+    expect(await processSubscriptionRenewalActivity(subscription)).toMatchObject({ sale_id: 'manual', existing_invoice: true });
+    expect(db.rows.sales).toHaveLength(1);
+    expect(db.rows.sale_orders).toHaveLength(0);
+  });
+
+  it('checks a non-calendar monthly period with an exclusive clamped end date', async () => {
+    const sub = { ...subscription, next_billing_date: '2026-01-31T18:00:00Z' };
+    expect(subscriptionInvoiceMetadata(sub)).toMatchObject({ billing_period_start: '2026-01-31', billing_period_end: '2026-02-28' });
+    db.rows.sales.push({
+      id: 'manual-february', site_id: subscription.site_id, subscription_id: subscription.id,
+      sale_date: '2026-02-10', amount: 1500, currency: 'USD', status: 'pending',
+    });
+    expect(await processSubscriptionRenewalActivity(sub)).toMatchObject({ sale_id: 'manual-february', existing_invoice: true });
   });
 
   it('fails closed on order lookup errors and resumes the same invoice on retry', async () => {

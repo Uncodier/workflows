@@ -65,6 +65,24 @@ describe('subscription renewal orchestration', () => {
     expect(mockActivities.processSubscriptionRenewalActivity).toHaveBeenCalledTimes(1);
   });
 
+  it('counts an existing period invoice as processed without sending a new-invoice notification', async () => {
+    mockActivities.fetchDueSubscriptionsActivity.mockResolvedValue([{ id: 'manual' }, { id: 'new' }]);
+    mockActivities.processSubscriptionRenewalActivity
+      .mockResolvedValueOnce({ sale_id: 'manual-sale', existing_invoice: true })
+      .mockResolvedValueOnce({ sale_id: 'new-sale' });
+    await expect(processSubscriptionsWorkflow()).resolves.toEqual({ processed: 2, errors: 0 });
+    expect(mockActivities.notifySubscriptionRenewalActivity).toHaveBeenCalledTimes(1);
+    expect(mockActivities.notifySubscriptionRenewalActivity.mock.calls[0][0].renewalData.sale_id).toBe('new-sale');
+  });
+
+  it('preserves historical notification scheduling without the existing-invoice patch', async () => {
+    mockPatched.mockImplementation((name) => name !== 'subscription-renewals-existing-invoice-v1');
+    mockActivities.fetchDueSubscriptionsActivity.mockResolvedValue([{ id: 'manual' }]);
+    mockActivities.processSubscriptionRenewalActivity.mockResolvedValue({ sale_id: 'manual-sale', existing_invoice: true });
+    await processSubscriptionsWorkflow();
+    expect(mockActivities.notifySubscriptionRenewalActivity).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to individual contacts on batch lookup errors', async () => {
     mockActivities.fetchDueSubscriptionsActivity.mockResolvedValue([{ id: 'subscription' }]);
     mockActivities.fetchSubscriptionContactsActivity.mockRejectedValue(new Error('Contact lookup failed'));

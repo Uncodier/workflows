@@ -18,6 +18,7 @@ export async function processSubscriptionsWorkflow(): Promise<{ processed: numbe
   console.log('🔄 Starting processSubscriptionsWorkflow (Cron)...');
   const useBatchContactLookup = patched('subscription-renewals-batch-contacts-v1');
   const reportFailures = patched('subscription-renewals-report-failures-v1');
+  const skipExistingInvoiceNotifications = patched('subscription-renewals-existing-invoice-v1');
 
   let processed = 0;
   let errors = 0;
@@ -36,6 +37,10 @@ export async function processSubscriptionsWorkflow(): Promise<{ processed: numbe
     for (const sub of subscriptions) {
       try {
         const renewalData = await processSubscriptionRenewalActivity(sub);
+        if (skipExistingInvoiceNotifications && renewalData.existing_invoice) {
+          processed++;
+          continue;
+        }
         
         if (useBatchContactLookup) {
           await notifySubscriptionRenewalActivity({

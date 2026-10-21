@@ -4,6 +4,8 @@ import { advanceSubscriptionDueDate, invoiceDate } from '../utils/invoiceDueDate
 import { 
   fetchDueSubscriptions, 
   generateSubscriptionSale, 
+  findSubscriptionPeriodInvoice,
+  subscriptionInvoiceMetadata,
   resolveSubscriptionUserId,
   subscriptionRenewalRecordId,
   nextSubscriptionBillingDate,
@@ -84,6 +86,7 @@ export interface ProcessSubscriptionRenewalResult {
   next_billing_date: string;
   due_date?: string;
   public_access_token?: string;
+  existing_invoice?: boolean;
 }
 
 export async function processSubscriptionRenewalActivity(sub: Subscription): Promise<ProcessSubscriptionRenewalResult> {
@@ -92,8 +95,21 @@ export async function processSubscriptionRenewalActivity(sub: Subscription): Pro
   const nextBillingStr = nextSubscriptionBillingDate(sub.next_billing_date);
   const dueDate = sub.due_date ? invoiceDate(sub.due_date) : undefined;
   const nextDueDate = dueDate ? advanceSubscriptionDueDate(dueDate, sub.next_billing_date, nextBillingStr) : undefined;
-  const userId = await resolveSubscriptionUserId(supabase, sub);
   const saleId = subscriptionRenewalRecordId(sub, 'sale');
+  const existing = await findSubscriptionPeriodInvoice(supabase, sub);
+  if (existing && (existing.id !== saleId || existing.channel === 'manual')) {
+    await updateSubscriptionNextBilling(supabase, sub.id, nextBillingStr, nextDueDate);
+    console.log(`♻️ Reusing invoice ${existing.id} for subscription ${sub.id} period ${sub.next_billing_date}`);
+    return {
+      sale_id: existing.id,
+      amount: Number(existing.amount),
+      currency: existing.currency,
+      next_billing_date: nextBillingStr,
+      ...(existing.due_date ? { due_date: existing.due_date } : {}),
+      existing_invoice: true,
+    };
+  }
+  const userId = await resolveSubscriptionUserId(supabase, sub);
   const now = new Date().toISOString();
 
   const saleData: SubscriptionSaleData = {
@@ -111,10 +127,7 @@ export async function processSubscriptionRenewalActivity(sub: Subscription): Pro
     title: 'Subscription Renewal',
     sale_date: now.slice(0, 10),
     buyer_user_id: sub.buyer_user_id,
-    product_details: {
-      subscription_id: sub.id,
-      billing_cycle: new Date(sub.next_billing_date).toISOString(),
-    },
+    product_details: subscriptionInvoiceMetadata(sub),
     created_at: now,
     updated_at: now
   };
@@ -143,11 +156,12 @@ export async function processSubscriptionRenewalActivity(sub: Subscription): Pro
 
   return {
     sale_id: sale.id,
-    amount: sub.amount,
-    currency: 'USD',
+    amount: Number(sale.amount ?? sub.amount),
+    currency: sale.currency || 'USD',
     next_billing_date: nextBillingStr,
-    ...(dueDate ? { due_date: dueDate } : {}),
-    public_access_token: sale.sale_order.public_access_token
+    ...(sale.due_date ? { due_date: sale.due_date } : {}),
+    ...(sale.existing_invoice ? { existing_invoice: true } : {}),
+    public_access_token: sale.sale_order?.public_access_token
   };
 }
 
@@ -159,6 +173,7 @@ export interface NotifySubscriptionRenewalParams {
 
 export async function notifySubscriptionRenewalActivity(params: NotifySubscriptionRenewalParams): Promise<void> {
   const { sub, renewalData } = params;
+  if (renewalData.existing_invoice) return;
   const supabase = getSupabaseService().getClient();
 
   let userEmail = params.contact?.email || null;
