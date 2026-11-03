@@ -1,4 +1,5 @@
 import { supabaseServiceRole } from '../../lib/supabase/client';
+import { postgrestTextIn } from '../../lib/supabase/textFilters';
 import { normalizeOutstandNetwork } from '../workflows/helpers/outstandPoll';
 
 const QUERY_BATCH_SIZE = 100;
@@ -46,7 +47,7 @@ export async function getSocialCommentSyncStatesActivity(
         .from('social_comment_sync_state')
         .select('outstand_post_id, network, last_success_at')
         .eq('site_id', siteId)
-        .in('outstand_post_id', chunk)
+        .filter('outstand_post_id', 'in', postgrestTextIn(chunk))
         .order('outstand_post_id', { ascending: true })
         .order('network', { ascending: true })
         .range(offset, offset + QUERY_BATCH_SIZE - 1);
@@ -133,7 +134,7 @@ async function assertPersistedBatch(siteId: string, externalIds: string[]): Prom
       .eq('conversations.site_id', siteId)
       .eq('role', 'user')
       .eq('custom_data->>source', 'comment')
-      .in('custom_data->>origin_message_id', externalIds)
+      .filter('custom_data->>origin_message_id', 'in', postgrestTextIn(externalIds))
       .order('id', { ascending: true })
       .range(offset, offset + QUERY_BATCH_SIZE - 1);
 
@@ -160,7 +161,7 @@ export async function verifySocialCommentIngestionActivity(
       .select('external_id, status')
       .eq('site_id', siteId)
       .eq('object_type', 'social_comment')
-      .in('external_id', chunk);
+      .filter('external_id', 'in', postgrestTextIn(chunk));
 
     if (error) throw new Error(`Failed to verify social comment ingestion: ${error.message}`);
     if (!Array.isArray(data)) throw new Error('Invalid social comment ingestion response');

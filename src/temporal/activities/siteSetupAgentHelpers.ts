@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { ApplicationFailure } from '@temporalio/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CreateAgentsParams, SetupAgent, SetupAgentConfig } from './siteSetupTypes';
 
@@ -18,7 +19,9 @@ export async function fetchSetupSite(client: SupabaseClient, siteId: string) {
   if (typeof data.id !== 'string' || data.id.toLowerCase() !== siteId.toLowerCase()) {
     throw new Error('Site identity does not match setup request');
   }
-  if (data.archived_at) throw new Error('Archived sites cannot be set up');
+  if (data.archived_at) {
+    throw ApplicationFailure.nonRetryable('Archived sites cannot be set up', 'SITE_ARCHIVED');
+  }
   return data;
 }
 

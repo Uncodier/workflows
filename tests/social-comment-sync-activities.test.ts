@@ -8,12 +8,14 @@ import {
   recordSocialCommentSyncSuccessActivity,
   verifySocialCommentIngestionActivity,
 } from '../src/temporal/activities/socialCommentSyncActivities';
+import { postgrestTextIn } from '../src/lib/supabase/textFilters';
 
 function queueQuery(data: unknown = [], error: unknown = null) {
   const query = {
     select: jest.fn().mockReturnThis(),
     eq: jest.fn().mockReturnThis(),
     in: jest.fn().mockReturnThis(),
+    filter: jest.fn().mockReturnThis(),
     order: jest.fn().mockReturnThis(),
     range: jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),
@@ -70,7 +72,7 @@ describe('durable comment polling state', () => {
     expect(mockDatabase.from).toHaveBeenCalledWith('social_comment_sync_state');
     expect(query.select).toHaveBeenCalledWith('outstand_post_id, network, last_success_at');
     expect(query.eq).toHaveBeenCalledWith('site_id', siteId);
-    expect(query.in).toHaveBeenCalledWith('outstand_post_id', ['post-1']);
+    expect(query.filter).toHaveBeenCalledWith('outstand_post_id', 'in', postgrestTextIn(['post-1']));
     expect(query.upsert).not.toHaveBeenCalled();
   });
 
@@ -79,10 +81,21 @@ describe('durable comment polling state', () => {
     const queries = [queueQuery([state(ids[0])]), queueQuery([]), queueQuery([state(ids[200])])];
     await expect(getSocialCommentSyncStatesActivity(siteId, ids)).resolves.toHaveLength(2);
     queries.forEach((query, index) => {
-      expect(query.in).toHaveBeenCalledWith('outstand_post_id', ids.slice(index * 100, index * 100 + 100));
+      expect(query.filter).toHaveBeenCalledWith('outstand_post_id', 'in', postgrestTextIn(ids.slice(index * 100, index * 100 + 100)));
       expect(query.eq).toHaveBeenCalledWith('site_id', siteId);
     });
     expect(mockDatabase.from).toHaveBeenCalledTimes(3);
+  });
+
+  it('escapes persisted account/post boundary identities instead of treating them as missing', async () => {
+    const key = 'outstand-comment-account-boundary:v2:["site-1","instagram","account"]';
+    const query = queueQuery([state(key)]);
+    await expect(getSocialCommentSyncStatesActivity(siteId, [key])).resolves.toEqual([
+      { postId: key, network: 'instagram', lastSuccessAt: now },
+    ]);
+    expect(query.filter).toHaveBeenCalledWith('outstand_post_id', 'in', `(${JSON.stringify(key)})`);
+    expect(query.in).not.toHaveBeenCalled();
+    expect(query.upsert).not.toHaveBeenCalled();
   });
 
   it('pages state rows because one post may have multiple networks', async () => {
@@ -201,9 +214,9 @@ describe('batch ingestion verification', () => {
     expect(mockDatabase.from.mock.calls).toEqual([['synced_objects'], ['messages']]);
     expect(ledger.select).toHaveBeenCalledWith('external_id, status');
     expect(ledger.eq.mock.calls).toEqual([['site_id', siteId], ['object_type', 'social_comment']]);
-    expect(ledger.in).toHaveBeenCalledWith('external_id', [externalId]);
+    expect(ledger.filter).toHaveBeenCalledWith('external_id', 'in', postgrestTextIn([externalId]));
     expect(messages.select).toHaveBeenCalledWith('custom_data, conversations!inner(site_id)');
-    expect(messages.in).toHaveBeenCalledWith('custom_data->>origin_message_id', [externalId]);
+    expect(messages.filter).toHaveBeenCalledWith('custom_data->>origin_message_id', 'in', postgrestTextIn([externalId]));
     expect(messages.eq.mock.calls).toEqual([
       ['conversations.site_id', siteId], ['role', 'user'], ['custom_data->>source', 'comment'],
     ]);
@@ -249,7 +262,7 @@ describe('batch ingestion verification', () => {
     expect(second.range).toHaveBeenCalledWith(100, 199);
     for (const query of [first, second]) {
       expect(query.order).toHaveBeenCalledWith('id', { ascending: true });
-      expect(query.in).toHaveBeenCalledWith('custom_data->>origin_message_id', [externalId, 'last']);
+      expect(query.filter).toHaveBeenCalledWith('custom_data->>origin_message_id', 'in', postgrestTextIn([externalId, 'last']));
       expect(query.eq).toHaveBeenCalledWith('conversations.site_id', siteId);
     }
   });
@@ -264,8 +277,8 @@ describe('batch ingestion verification', () => {
     await verifySocialCommentIngestionActivity(siteId, ids);
     expect(mockDatabase.from).toHaveBeenCalledTimes(6);
     for (const { chunk, ledger, messages } of queries) {
-      expect(ledger.in).toHaveBeenCalledWith('external_id', chunk);
-      expect(messages.in).toHaveBeenCalledWith('custom_data->>origin_message_id', chunk);
+      expect(ledger.filter).toHaveBeenCalledWith('external_id', 'in', postgrestTextIn(chunk));
+      expect(messages.filter).toHaveBeenCalledWith('custom_data->>origin_message_id', 'in', postgrestTextIn(chunk));
       expect(ledger.eq).toHaveBeenCalledWith('site_id', siteId);
       expect(messages.eq).toHaveBeenCalledWith('conversations.site_id', siteId);
     }

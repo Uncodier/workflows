@@ -14,7 +14,7 @@ const legacyTime = '2026-09-30T00:00:00.000Z';
 const row = (postId: string, lastSuccessAt = cutoff) => ({ postId, network: 'x', lastSuccessAt });
 function query(data: any[] = [], error: any = null) {
   const q: any = { then: (resolve: any) => Promise.resolve({ data, error }).then(resolve) };
-  for (const key of ['select', 'eq', 'in', 'range', 'order', 'upsert']) q[key] = jest.fn().mockReturnValue(q);
+  for (const key of ['select', 'eq', 'in', 'filter', 'range', 'order', 'upsert']) q[key] = jest.fn().mockReturnValue(q);
   mockDatabase.from.mockReturnValueOnce(q);
   return q;
 }

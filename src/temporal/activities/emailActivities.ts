@@ -1,5 +1,6 @@
 import { apiService } from '../services/apiService';
-import { isEmailAuthFailure } from '../utils/emailAuthErrors';
+import { isEmailAuthFailure, permanentEmailErrorType } from '../utils/emailAuthErrors';
+import { ApplicationFailure } from '@temporalio/activity';
 
 /**
  * Email Activity interfaces
@@ -94,7 +95,11 @@ export async function sendEmailFromAgentActivity(params: SendEmailParams): Promi
 
   } catch (error) {
     console.error('❌ Email sending failed:', error);
-    throw new Error(`Email sending failed: ${error instanceof Error ? error.message : String(error)}`);
+    if (error instanceof ApplicationFailure) throw error;
+    const message = `Email sending failed: ${error instanceof Error ? error.message : String(error)}`;
+    const type = permanentEmailErrorType(message);
+    if (type) throw ApplicationFailure.nonRetryable(message, type);
+    throw new Error(message);
   }
 }
 
@@ -127,7 +132,7 @@ export async function syncSentEmailsActivity(params: SyncSentEmailsParams): Prom
     if (!response.success) {
       const errorMessage = response.error?.message || 'Unknown error';
       console.error('❌ Sent emails sync failed:', response.error);
-      if (isEmailAuthFailure(errorMessage) || isEmailAuthFailure(response.error?.code)) {
+      if (isEmailAuthFailure(errorMessage)) {
         return {
           success: false,
           error: errorMessage
@@ -196,9 +201,13 @@ export async function deliveryStatusActivity(params: DeliveryStatusParams): Prom
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error('❌ Email delivery status check failed:', errorMessage);
     
-    return {
-      success: false,
-      error: errorMessage
-    };
+    if (isEmailAuthFailure(error)) {
+      return {
+        success: false,
+        error: errorMessage
+      };
+    }
+    // Let Temporal retry transient failures rather than silently completing the activity.
+    throw error;
   }
 } 

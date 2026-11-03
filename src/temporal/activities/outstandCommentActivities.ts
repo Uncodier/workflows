@@ -1,4 +1,5 @@
 import { ApplicationFailure } from '@temporalio/common';
+import { Context } from '@temporalio/activity';
 import { apiService } from '../services/apiService';
 import { handleOutstandApiError } from './outstandHelpers';
 import { extractSocialCommentResponse } from './socialCommentResponse';
@@ -11,10 +12,18 @@ export async function fetchOutstandPostRepliesActivity(
 ): Promise<any> {
   const isLinkedIn = normalizeOutstandNetwork(network) === 'linkedin';
   const requestOptions = isLinkedIn ? { ...options, durableIdentity: true } : options;
+  let context: Context | undefined;
+  try { context = Context.current(); } catch { /* Also callable in offline tests. */ }
   let response;
   try {
-    response = await apiService.get(buildOutstandCommentsPath(siteId, postId, network, requestOptions));
+    // Finish HTTP before the two-minute activity deadline. Abort in-flight reads
+    // on worker cancellation rather than leaving requests running across retries.
+    response = await apiService.request(buildOutstandCommentsPath(siteId, postId, network, requestOptions), {
+      method: 'GET', timeout: 90_000, signal: context?.cancellationSignal,
+    });
+    context?.cancellationSignal.throwIfAborted();
   } catch (error) {
+    context?.cancellationSignal.throwIfAborted();
     if (isLinkedIn) {
       // Do not attach an upstream body/cause to the durable activity failure.
       throw ApplicationFailure.create({ message: 'LinkedIn comments request failed', type: 'OUTSTAND_COMMENTS_ERROR' });

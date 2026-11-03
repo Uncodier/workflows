@@ -1,4 +1,5 @@
 import { supabaseServiceRole } from '../../lib/supabase/client';
+import { postgrestTextIn } from '../../lib/supabase/textFilters';
 import { commentAccountBoundaryKey, commentScopeKey, type SocialCommentScope } from '../workflows/helpers/socialCommentScope';
 import { getSocialCommentSyncStatesActivity, verifySocialCommentIngestionActivity } from './socialCommentSyncActivities';
 
@@ -53,7 +54,8 @@ export async function findLegacySocialCommentClaimsActivity(
     const chunk = externalIds.slice(index, index + 100);
     if (inheritLegacy) {
       const { data, error } = await db().from('synced_objects').select('external_id, metadata')
-        .eq('site_id', scope.siteId).eq('object_type', 'social_comment').in('external_id', chunk);
+        .eq('site_id', scope.siteId).eq('object_type', 'social_comment')
+        .filter('external_id', 'in', postgrestTextIn(chunk));
       if (error || !Array.isArray(data)) throw new Error('Unable to verify legacy social comment claims');
       for (const row of data) {
         if (row.metadata?.outstand_post_id === scope.postId &&
@@ -69,7 +71,8 @@ export async function findLegacySocialCommentClaimsActivity(
         .eq('conversations.site_id', scope.siteId).eq('role', 'user').eq('custom_data->>source', 'comment')
         .eq('custom_data->>publisher_account_id', scope.accountId)
         .eq('custom_data->>outstand_post_id', scope.postId)
-        .in('custom_data->>origin_message_id', chunk).order('id', { ascending: true }).range(offset, offset + 99);
+        .filter('custom_data->>origin_message_id', 'in', postgrestTextIn(chunk))
+        .order('id', { ascending: true }).range(offset, offset + 99);
       if (error || !Array.isArray(data)) throw new Error('Unable to verify legacy social comment messages');
       for (const row of data) matched.add(row.custom_data.origin_message_id);
       if (data.length < 100) break;

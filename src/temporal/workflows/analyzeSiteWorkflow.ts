@@ -1,6 +1,7 @@
-import { proxyActivities, startChild, workflowInfo, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
+import { ApplicationFailure, proxyActivities, startChild, workflowInfo, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import { deepResearchWorkflow } from './deepResearchWorkflow';
+import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
 
 // Define the activity interface with common activities
 const { 
@@ -924,7 +925,7 @@ export async function analyzeSiteWorkflow(
   const { site_id } = options;
   
   if (!site_id) {
-    throw new Error('No site ID provided');
+    throw ApplicationFailure.nonRetryable('No site ID provided', 'ANALYZE_SITE_INVALID_INPUT');
   }
 
   const searchAttributes: Record<string, string[]> = {
@@ -984,6 +985,10 @@ export async function analyzeSiteWorkflow(
       const errorMsg = `Failed to get site information: ${siteResult.error}`;
       console.error(`❌ ${errorMsg}`);
       errors.push(errorMsg);
+      // Also recognize results already recorded by older workers in running histories.
+      if (siteResult.errorCode === 'SITE_ARCHIVED' || siteResult.error === 'Archived sites cannot be set up') {
+        throw ApplicationFailure.nonRetryable(errorMsg, 'SITE_ARCHIVED');
+      }
       throw new Error(errorMsg);
     }
     
@@ -1353,28 +1358,36 @@ export async function analyzeSiteWorkflow(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Company and project research workflow failed: ${errorMessage}`);
     
-    // Update cron status to indicate failure
-    await saveCronStatusActivity({
-      siteId: site_id,
-      workflowId,
-      scheduleId: `analyze-site-${site_id}`,
-      activityName: 'analyzeSiteWorkflow',
-      status: 'FAILED',
-      lastRun: new Date().toISOString(),
-      errorMessage: errorMessage,
-      retryCount: 1
-    });
+    // Failure reporting must not replace the original failure or leave a workflow task looping.
+    try {
+      await saveCronStatusActivity({
+        siteId: site_id,
+        workflowId,
+        scheduleId: `analyze-site-${site_id}`,
+        activityName: 'analyzeSiteWorkflow',
+        status: 'FAILED',
+        lastRun: new Date().toISOString(),
+        errorMessage: errorMessage,
+        retryCount: 1
+      });
+    } catch (reportError) {
+      console.warn('⚠️ Could not save site analysis failure status:', reportError);
+    }
 
     // Log workflow execution failure
-    await logWorkflowExecutionActivity({
-      workflowId,
-      workflowType: 'analyzeSiteWorkflow',
-      status: 'FAILED',
-      input: options,
-      error: errorMessage,
-    });
+    try {
+      await logWorkflowExecutionActivity({
+        workflowId,
+        workflowType: 'analyzeSiteWorkflow',
+        status: 'FAILED',
+        input: options,
+        error: errorMessage,
+      });
+    } catch (reportError) {
+      console.warn('⚠️ Could not log site analysis failure:', reportError);
+    }
 
     // Throw error to properly fail the workflow
-    throw new Error(`Analyze site workflow failed: ${errorMessage}`);
+    throw terminalWorkflowFailure(error, 'Analyze site workflow failed', 'ANALYZE_SITE_WORKFLOW_FAILED');
   }
 } 

@@ -1,4 +1,5 @@
 import { supabaseServiceRole as supabaseAdmin } from '../../lib/supabase/client';
+import { postgrestTextIn } from '../../lib/supabase/textFilters';
 
 function tenantSchema() {
   return process.env.NEXT_PUBLIC_APPS_TENANT_SCHEMA
@@ -73,7 +74,7 @@ export async function claimSyncedObjectsBatchActivity(
         })
         .eq('site_id', siteId)
         .eq('object_type', objectType)
-        .in('external_id', externalIds)
+        .filter('external_id', 'in', postgrestTextIn(externalIds))
         .eq('status', 'processing')
         .lt('claim_expires_at', now);
 

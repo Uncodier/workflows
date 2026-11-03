@@ -22,6 +22,7 @@ jest.mock('../src/temporal/services/supabaseService', () => ({
 import {
   executeDailyStandUpWorkflowsActivity,
   scheduleIndividualDailyStandUpsActivity,
+  scheduleIndividualSiteAnalysisActivity,
 } from '../src/temporal/activities/workflowSchedulingActivities';
 import { nextDailyStandUpRun } from '../src/temporal/utils/dailyStandUpScheduling';
 import { DAILY_WORKFLOW_REUSE_POLICY } from '../src/temporal/utils/workflowIdHelper';
@@ -170,6 +171,25 @@ describe('Daily Standup scheduling activities', () => {
     mockSaveCronStatus.mockResolvedValue(undefined);
   });
   afterEach(() => { jest.useRealTimers(); jest.restoreAllMocks(); });
+
+  it('does not schedule archived site analyses even with stale open-site data', async () => {
+    mockFetchSites.mockResolvedValue([{ ...site, archived_at: '2026-10-26T00:00:00Z' }]);
+    const result = await scheduleIndividualSiteAnalysisActivity({ openSites: [{ siteId: site.id }] });
+    expect(result).toMatchObject({ scheduled: 0, skipped: 1, failed: 0, errors: [] });
+    expect(result.results[0]).toMatchObject({ success: true, error: 'Skipped: Site is archived' });
+    expect(mockFetchCompleteSettings).not.toHaveBeenCalled();
+    expect(mockStartWorkflow).not.toHaveBeenCalled();
+    expect(mockSaveCronStatus).not.toHaveBeenCalled();
+  });
+
+  it('excludes archived sites before hydrating settings while retaining active candidates', async () => {
+    mockFetchSites.mockResolvedValue([site, { ...site, id: 'archived', archived_at: '2026-10-26T00:00:00Z' }]);
+    jest.setSystemTime(new Date('2026-10-25T08:00:00Z'));
+    const result = await scheduleIndividualSiteAnalysisActivity({ openSites: [] });
+    expect(mockFetchCompleteSettings).toHaveBeenCalledWith([site.id]);
+    expect(result).toMatchObject({ scheduled: 0, skipped: 2, failed: 0 });
+    expect(mockStartWorkflow).not.toHaveBeenCalled();
+  });
 
   it('reloads complete settings, ignores stale analysis/map/timezone, and does not snapshot report sections', async () => {
     mockFetchCompleteSettings.mockResolvedValue([settings([2], 'America/New_York', { tuesday: { enabled: true, start: '10:30' } })]);

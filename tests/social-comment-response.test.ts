@@ -1,5 +1,5 @@
 const mockGet = jest.fn();
-jest.mock('../src/temporal/services/apiService', () => ({ apiService: { get: mockGet } }));
+jest.mock('../src/temporal/services/apiService', () => ({ apiService: { request: mockGet } }));
 jest.mock('../src/lib/supabase/client', () => ({ supabaseServiceRole: {} }));
 
 import { fetchOutstandPostRepliesActivity } from '../src/temporal/activities/outstandActivities';
@@ -20,7 +20,7 @@ describe('social comment API boundary', () => {
   ])('recognizes a supported response shape without losing comments', async response => {
     mockGet.mockResolvedValue(response);
     await expect(fetchOutstandPostRepliesActivity('site-1', 'post-1', 'instagram')).resolves.toEqual([comment]);
-    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post-1/comments?tenant_id=site-1&network=instagram');
+    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post-1/comments?tenant_id=site-1&network=instagram', expect.objectContaining({ method: 'GET', timeout: 90_000 }));
   });
 
   it.each([
@@ -43,7 +43,7 @@ describe('social comment API boundary', () => {
   it('sends the exact owned account selector to the authorized API guard', async () => {
     mockGet.mockResolvedValue({ success: true, data: [] });
     await fetchOutstandPostRepliesActivity('site', 'post', 'twitter', { accountId: 'owned-account', durableIdentity: true });
-    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post/comments?tenant_id=site&network=x&account_id=owned-account');
+    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post/comments?tenant_id=site&network=x&account_id=owned-account', expect.objectContaining({ method: 'GET', timeout: 90_000 }));
   });
 
   it('requests the owned publishing account and strips LinkedIn profiles before returning to Temporal', async () => {
@@ -55,7 +55,7 @@ describe('social comment API boundary', () => {
     const result = await fetchOutstandPostRepliesActivity('site-1', 'post-1', 'linkedin', {
       username: 'brand', durableIdentity: true,
     });
-    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post-1/comments?tenant_id=site-1&network=linkedin&username=brand&resolve_author_names=false');
+    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post-1/comments?tenant_id=site-1&network=linkedin&username=brand&resolve_author_names=false', expect.objectContaining({ method: 'GET', timeout: 90_000 }));
     expect(result).toEqual([{ id: 'comment-1', text: 'A comment', author_id: 'urn:li:person:123', platform_specific: { commentUrn: 'urn:li:comment:1' } }]);
     expect(JSON.stringify(result)).not.toContain('Resolved Person');
   });
@@ -65,7 +65,7 @@ describe('social comment API boundary', () => {
     await expect(fetchOutstandPostRepliesActivity('site-1', 'post-1', 'instagram', {
       username: 'brand', durableIdentity: true,
     })).resolves.toEqual([comment]);
-    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post-1/comments?tenant_id=site-1&network=instagram&username=brand');
+    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post-1/comments?tenant_id=site-1&network=instagram&username=brand', expect.objectContaining({ method: 'GET', timeout: 90_000 }));
   });
 
   it('protects pending legacy LinkedIn activities even without new options', async () => {
@@ -74,7 +74,7 @@ describe('social comment API boundary', () => {
     await expect(fetchOutstandPostRepliesActivity('site', 'post', 'linkedin')).resolves.toEqual([
       { id: 'c', text: 'Example', author_id: 'urn:li:person:123', platform_specific: {} },
     ]);
-    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post/comments?tenant_id=site&network=linkedin&resolve_author_names=false');
+    expect(mockGet).toHaveBeenCalledWith('/api/integrations/outstand/posts/post/comments?tenant_id=site&network=linkedin&resolve_author_names=false', expect.objectContaining({ method: 'GET', timeout: 90_000 }));
   });
 
   it.each([[400, true], [403, true], [408, false], [429, false], [502, false]])('sanitizes LinkedIn error bodies without losing HTTP %s retryability', async (status, nonRetryable) => {

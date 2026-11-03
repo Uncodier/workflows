@@ -1,5 +1,7 @@
 import { supabaseServiceRole as db } from '../../lib/supabase/client';
 import { apiService } from '../services/apiService';
+import { ApplicationFailure } from '@temporalio/activity';
+import { permanentEmailErrorType } from '../utils/emailAuthErrors';
 
 /** Fail closed if the site's current billing balance cannot be verified. */
 export async function checkIcpMiningCreditsActivity(siteId: string): Promise<boolean> {
@@ -16,10 +18,18 @@ export async function warnIcpMiningCreditsActivity(params: { siteId: string; wor
   if (siteError || !site?.user_id) throw new Error(`ICP warning site unavailable: ${siteError?.message || 'no owner'}`);
   const { data: profile, error: profileError } = await db.from('profiles').select('email').eq('id', site.user_id).maybeSingle();
   if (profileError || !profile?.email) throw new Error(`ICP warning recipient unavailable: ${profileError?.message || 'no email'}`);
-  const response = await apiService.post('/api/agents/tools/sendEmail', {
-    email: profile.email, site_id: params.siteId,
-    subject: 'Aviso: ICP Mining se ha detenido por falta de créditos',
-    message: `ICP Mining se ha detenido porque se agotaron los créditos durante la ejecución ${params.workflowId}. Recarga los créditos antes de reintentar.`,
-  });
-  if (!response.success) throw new Error(`ICP credit warning failed: ${response.error?.message || 'email API error'}`);
+  try {
+    const response = await apiService.post('/api/agents/tools/sendEmail', {
+      email: profile.email, site_id: params.siteId,
+      subject: 'Aviso: ICP Mining se ha detenido por falta de créditos',
+      message: `ICP Mining se ha detenido porque se agotaron los créditos durante la ejecución ${params.workflowId}. Recarga los créditos antes de reintentar.`,
+    });
+    if (!response.success) throw new Error(`ICP credit warning failed: ${response.error?.message || 'email API error'}`);
+  } catch (error) {
+    if (error instanceof ApplicationFailure) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    const type = permanentEmailErrorType(message);
+    if (type) throw ApplicationFailure.nonRetryable(message, type);
+    throw error;
+  }
 }

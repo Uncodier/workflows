@@ -1,4 +1,5 @@
 import { getSupabaseService } from '../services/supabaseService';
+import { ApplicationFailure } from '@temporalio/common';
 import { fetchSetupSite } from './siteSetupAgentHelpers';
 
 export interface Site {
@@ -15,6 +16,7 @@ export interface GetSiteResult {
   success: boolean;
   site?: Site;
   error?: string;
+  errorCode?: string;
 }
 
 export async function getSiteActivity(siteId: string): Promise<GetSiteResult> {
@@ -56,7 +58,10 @@ export async function getSiteActivity(siteId: string): Promise<GetSiteResult> {
 
     return {
       success: false,
-      error: errorMessage
+      error: errorMessage,
+      ...(error instanceof ApplicationFailure && error.type === 'SITE_ARCHIVED'
+        ? { errorCode: 'SITE_ARCHIVED' }
+        : {})
     };
   }
 }

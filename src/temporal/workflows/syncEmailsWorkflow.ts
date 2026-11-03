@@ -405,13 +405,24 @@ export async function syncEmailsWorkflow(
         console.log(`✅ Email delivery status check completed successfully`);
         console.log(`📊 Delivery status results:`, JSON.stringify(deliveryStatusResponse.data, null, 2));
       } else {
-        console.log(`⚠️ Email delivery status check failed: ${deliveryStatusResponse.error}`);
-        result.errors.push(`Delivery status check failed: ${deliveryStatusResponse.error || 'Unknown error'}`);
+        const deliveryErrorMessage = deliveryStatusResponse.error || 'Unknown error';
+        if (isEmailAuthFailure(deliveryErrorMessage)) {
+          console.warn(`⚠️ Delivery status check skipped (invalid IMAP/credentials): ${deliveryErrorMessage}`);
+          result.errors.push(`Delivery status check skipped: ${deliveryErrorMessage}`);
+        } else {
+          console.log(`⚠️ Email delivery status check failed: ${deliveryErrorMessage}`);
+          result.errors.push(`Delivery status check failed: ${deliveryErrorMessage}`);
+        }
       }
     } catch (deliveryError) {
       const deliveryErrorMessage = deliveryError instanceof Error ? deliveryError.message : String(deliveryError);
-      console.log(`⚠️ Email delivery status check error: ${deliveryErrorMessage}`);
-      result.errors.push(`Delivery status check exception: ${deliveryErrorMessage}`);
+      if (isEmailAuthFailure(deliveryError)) {
+        console.warn(`⚠️ Delivery status check skipped (invalid IMAP/credentials): ${deliveryErrorMessage}`);
+        result.errors.push(`Delivery status check skipped: ${deliveryErrorMessage}`);
+      } else {
+        console.log(`⚠️ Email delivery status check error: ${deliveryErrorMessage}`);
+        result.errors.push(`Delivery status check exception: ${deliveryErrorMessage}`);
+      }
     }
 
     console.log(`🎉 Email sync completed successfully!`);

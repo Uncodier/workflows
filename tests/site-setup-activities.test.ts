@@ -300,6 +300,13 @@ describe('optional setup services', () => {
 });
 
 describe('scoped site lookup', () => {
+  it('returns a stable terminal code for archived sites without exposing site data', async () => {
+    site = { id: siteId, user_id: ownerId, archived_at: '2026-10-26T00:00:00Z' };
+    expect(await getSiteActivity(siteId)).toEqual({
+      success: false, error: 'Archived sites cannot be set up', errorCode: 'SITE_ARCHIVED',
+    });
+  });
+
   it('reads an existing site directly without an unrelated global connectivity probe', async () => {
     expect(await getSiteActivity(siteId)).toMatchObject({ success: true, site: { id: siteId, user_id: ownerId, url: '' } });
     expect(filters).toEqual([{ table: 'sites', criteria: { id: siteId } }]);

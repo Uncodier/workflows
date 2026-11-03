@@ -1416,13 +1416,23 @@ export async function scheduleIndividualSiteAnalysisActivity(
     const client = await getTemporalClient();
     const supabaseService = getSupabaseService();
     
-    // Get ALL sites from database
-    const allSites = await supabaseService.fetchSites();
-    console.log(`   - Total sites in database: ${allSites.length}`);
+    // Archived sites must not create analysis timers, even with stale business hours/settings.
+    const fetchedSites = await supabaseService.fetchSites();
+    const allSites = fetchedSites.filter(site => !site.archived_at);
+    for (const site of fetchedSites.filter(site => !!site.archived_at)) {
+      skipped++;
+      results.push({
+        workflowId: `skipped-${site.id}`,
+        scheduleId: `skipped-${site.id}`,
+        success: true,
+        error: 'Skipped: Site is archived'
+      });
+    }
+    console.log(`   - Active sites in database: ${allSites.length}`);
     
-    if (!allSites || allSites.length === 0) {
+    if (allSites.length === 0) {
       console.log('⚠️ No sites found in database');
-      return { scheduled: 0, skipped: 0, failed: 0, results: [], errors: [] };
+      return { scheduled, skipped, failed, results, errors };
     }
 
     // Ensure we have settings for activity gating

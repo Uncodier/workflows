@@ -1,5 +1,6 @@
 import { executeChild, sleep, workflowInfo } from '@temporalio/workflow';
 import { WorkflowIdReusePolicy } from '@temporalio/common';
+import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
 
 export interface DelayedExecutionOptions {
   delayMs: number;
@@ -95,7 +96,7 @@ export async function delayedExecutionWorkflow(
     
     console.error(`❌ Failed to execute delayed workflow ${targetWorkflow}: ${errorMessage}`);
     
-    throw new Error(`Delayed execution workflow failed: ${errorMessage}`);
+    throw terminalWorkflowFailure(error, 'Delayed execution workflow failed', 'DELAYED_EXECUTION_FAILED');
   }
 }
 
