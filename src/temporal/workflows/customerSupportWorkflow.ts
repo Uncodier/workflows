@@ -12,6 +12,7 @@ import { runChannelGuidance } from './helpers/runChannelGuidance';
 import { channelGuidanceEnabled } from './helpers/channelGuidanceVersion';
 import { customerSupportBaseParams, whatsappCustomerSupportData } from './helpers/customerSupportInput';
 import { startCustomerSupportSupervisor } from './helpers/startCustomerSupportSupervisor';
+import { isDisabledCustomerSupportResult, disabledCustomerSupportResult } from './helpers/disabledCustomerSupport';
 
 // Configure activity options using centralized timeouts
 const { 
@@ -96,6 +97,8 @@ export async function customerSupportMessageWorkflow(
         throw new Error(response?.error || 'Customer support call was not successful');
       }
       
+      if (isDisabledCustomerSupportResult(response.data)) return disabledCustomerSupportResult(response.data);
+
       console.log('✅ Website chat customer support message sent successfully');
       console.log(`📋 Customer support response:`, JSON.stringify(response.data, null, 2));
       
@@ -230,6 +233,8 @@ export async function customerSupportMessageWorkflow(
         throw new Error(response?.error || 'Customer support call was not successful');
       }
       
+      if (isDisabledCustomerSupportResult(response.data)) return disabledCustomerSupportResult(response.data);
+
       console.log('✅ WhatsApp customer support message sent successfully');
       console.log(`📋 Customer support response:`, JSON.stringify(response.data, null, 2));
       

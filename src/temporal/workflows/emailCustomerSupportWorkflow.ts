@@ -7,6 +7,7 @@ import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { TASK_QUEUES } from '../config/taskQueues';
 import { runChannelGuidance } from './helpers/runChannelGuidance';
 import { channelGuidanceEnabled } from './helpers/channelGuidanceVersion';
+import { isDisabledCustomerSupportResult, disabledCustomerSupportResult } from './helpers/disabledCustomerSupport';
 
 // Configure activity options using centralized timeouts
 const { 
@@ -95,6 +96,8 @@ export async function emailCustomerSupportMessageWorkflow(
       throw new Error(response?.error || 'Customer support call was not successful');
     }
     
+    if (isDisabledCustomerSupportResult(response.data)) return disabledCustomerSupportResult(response.data);
+
     console.log('✅ Customer support message sent successfully');
     console.log(`📋 Customer support response:`, JSON.stringify(response.data, null, 2));
     

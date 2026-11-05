@@ -1,6 +1,7 @@
 import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
 import type { EmailData } from './customerSupportActivities';
+import { isDisabledCustomerSupportResult } from '../workflows/helpers/disabledCustomerSupport';
 
 export interface CustomerSupportMessageRequest {
   message: string;
@@ -212,7 +213,7 @@ export async function sendCustomerSupportMessageActivity(
       throw customerSupportApiFailure(response.error);
     }
 
-    if (!isUsableCustomerSupportResponse(response.data)) {
+    if (!isDisabledCustomerSupportResult(response.data) && !isUsableCustomerSupportResponse(response.data)) {
       console.error('❌ Customer support API returned no usable assistant response');
       throw ApplicationFailure.create({
         message: 'Customer support API returned no usable assistant response',

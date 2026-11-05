@@ -51,6 +51,29 @@ beforeEach(() => {
 });
 
 describe('customer-support entry branches await channel guidance', () => {
+  it.each(['website_chat', 'whatsapp', 'email', 'instagram'])
+    ('completes disabled %s intake without outbound or supervisor workflows', async (origin) => {
+      mockSend.mockResolvedValue({ success: true, data: {
+        agent_disabled: true, response_skipped: true, conversation_id: 'conversation-1',
+        lead_id: 'lead-1', messages: { user: { message_id: 'inbound-1' } },
+      } });
+      const data = {
+        message: 'Help', summary: 'Help', site_id: 'site-1', user_id: 'user-1',
+        email: 'customer@example.com', phone: '+1234567890', origin_message_id: 'inbound-1',
+        contact_info: { name: 'Customer', email: 'customer@example.com', phone: '', company: '' },
+      };
+      const result = origin === 'email'
+        ? await emailCustomerSupportMessageWorkflow(data, { origin })
+        : await customerSupportMessageWorkflow(data, { origin });
+      expect(result).toMatchObject({ success: true, data: {
+        processed: true, agent_disabled: true, emailSent: false, whatsappSent: false, channelMessageSent: false,
+      } });
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(mockStartChild).not.toHaveBeenCalled();
+      expect(mockLeadAttention).not.toHaveBeenCalled();
+      expect(mockValidateConfig).not.toHaveBeenCalled();
+    });
+
   it('website request invokes guidance before the customer-support response', async () => {
     const data = { site_id: 'site-1', origin_message_id: 'message-1', message: 'Help' };
     await customerSupportMessageWorkflow(data, { origin: 'website_chat' });
@@ -125,6 +148,20 @@ describe('customer-support entry branches await channel guidance', () => {
     expect(mockGetSiteId).toHaveBeenCalledWith({ command_id: 'command-1', conversation_id: undefined });
     expect(mockValidateConfig).toHaveBeenCalledWith('resolved-site', 'supervise_conversations');
     expect(mockStartChild).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves Zavu WhatsApp attachments through the root channel-delivery branch', async () => {
+    const custom_data = { source: 'zavu_inbound_message', attachments: [
+      { url: 'https://files.example.test/document.pdf', type: 'document', name: 'document.pdf' },
+      { url: 'https://files.example.test/photo.jpg', mimeType: 'image/jpeg' },
+      { url: 'https://files.example.test/note.ogg', mimeType: 'audio/ogg', type: 'audio' },
+    ] };
+    await customerSupportMessageWorkflow({
+      site_id: 'site-1', message: '[document]', origin: 'whatsapp',
+      origin_message_id: 'zavu-document', channel_delivery: true, require_approval: true, custom_data,
+    });
+    expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({ custom_data }),
+      expect.objectContaining({ origin: 'whatsapp', origin_message_id: 'zavu-document' }));
   });
 
   it('social and channel-delivery email both invoke guidance before sending', async () => {

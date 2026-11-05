@@ -5,6 +5,7 @@ import { sendChannelMessageFromAgentWorkflow } from './sendChannelMessageFromAge
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { runChannelGuidance } from './helpers/runChannelGuidance';
 import { channelGuidanceEnabled } from './helpers/channelGuidanceVersion';
+import { isDisabledCustomerSupportResult, disabledCustomerSupportResult } from './helpers/disabledCustomerSupport';
 
 const { sendCustomerSupportMessageActivity } = proxyActivities<Activities>({
   startToCloseTimeout: ACTIVITY_TIMEOUTS.CUSTOMER_SUPPORT,
@@ -73,6 +74,8 @@ export async function channelCustomerSupportMessageWorkflow(
     console.error(`${channel} customer support message failed:`, response?.error || 'Unknown error');
     throw new Error(response?.error || 'Customer support call was not successful');
   }
+
+  if (isDisabledCustomerSupportResult(response.data)) return disabledCustomerSupportResult(response.data);
 
   let channelWorkflowId: string | undefined;
   let channelMessageSent = false;

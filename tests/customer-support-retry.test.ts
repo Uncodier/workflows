@@ -13,6 +13,7 @@ import {
   sendCustomerSupportMessageActivity,
 } from '../src/temporal/activities/sendCustomerSupportMessageActivity';
 import { RETRY_POLICIES } from '../src/temporal/config/timeouts';
+import { disabledCustomerSupportResult } from '../src/temporal/workflows/helpers/disabledCustomerSupport';
 
 const mockPost = apiService.post as jest.MockedFunction<typeof apiService.post>;
 
@@ -26,6 +27,17 @@ const inboundMessage = {
 describe('customer support retries', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('forwards Zavu attachment metadata unchanged to the support API', async () => {
+    const custom_data = { source: 'zavu_inbound_message', attachments: [
+      { url: 'https://files.example.test/document.pdf', type: 'document', name: 'document.pdf' },
+      { url: 'https://files.example.test/note.ogg', type: 'audio', mimeType: 'audio/ogg' },
+    ] };
+    mockPost.mockResolvedValue({ success: true, data: { messages: { assistant: { content: 'Document received' } } } });
+    await sendCustomerSupportMessageActivity({ ...inboundMessage, custom_data }, { origin: 'whatsapp' });
+    expect(mockPost).toHaveBeenCalledWith('/api/agents/customerSupport/message',
+      expect.objectContaining({ origin: 'whatsapp', custom_data }));
   });
 
   it('accepts a non-empty assistant response', () => {
@@ -87,6 +99,34 @@ describe('customer support retries', () => {
       type: 'CUSTOMER_SUPPORT_API_FAILURE',
       nonRetryable: false,
     });
+  });
+
+  it('accepts a persisted inbound message when the agent is disabled without an assistant response', async () => {
+    const data = {
+      agent_disabled: true,
+      response_skipped: true,
+      conversation_id: 'conversation-123',
+      messages: { user: { message_id: 'user-message-123', content: 'I need help' } },
+    };
+    mockPost.mockResolvedValue({ success: true, data });
+
+    await expect(sendCustomerSupportMessageActivity(inboundMessage, { origin: 'website_chat' }))
+      .resolves.toEqual({ success: true, data });
+    expect(disabledCustomerSupportResult(data)).toMatchObject({
+      success: true,
+      data: { processed: true, emailSent: false, whatsappSent: false, channelMessageSent: false },
+    });
+    expect(mockPost).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { agent_disabled: true },
+    { agent_disabled: true, response_skipped: true },
+    { agent_disabled: true, response_skipped: true, conversation_id: 'conversation-123' },
+  ])('does not hide an unpersisted empty response %#', async (data) => {
+    mockPost.mockResolvedValue({ success: true, data });
+    await expect(sendCustomerSupportMessageActivity(inboundMessage, { origin: 'website_chat' }))
+      .rejects.toMatchObject({ type: 'CUSTOMER_SUPPORT_EMPTY_RESPONSE' });
   });
 
   it('marks permanent client failures as non-retryable', async () => {
