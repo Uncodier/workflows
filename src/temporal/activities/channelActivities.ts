@@ -2,8 +2,51 @@ import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
 import type { SendChannelMessageFromAgentParams } from '../workflows/sendChannelMessageFromAgentWorkflow';
 import type { SendVoiceCallFromAgentParams } from '../workflows/sendVoiceCallFromAgentWorkflow';
+import { templateDeliveryMetadata, validateTemplateDelivery, type TemplateDeliveryMetadata, type TemplateRecoveryRequest, type TemplateRecoveryResult } from '../utils/templateDelivery';
 
 const RETRYABLE_CLIENT_STATUSES = new Set([408, 409, 425, 429]);
+
+/** Read-only reconciliation. Retrying this activity can never send to a provider. */
+export async function reconcileTemplateDeliveryActivity(request: TemplateRecoveryRequest): Promise<TemplateRecoveryResult> {
+  if (!request.site_id || !request.conversation_id || !request.message_id) {
+    throw ApplicationFailure.nonRetryable('Missing saved template identity', 'TEMPLATE_RECONCILIATION_INVALID');
+  }
+  const query = new URLSearchParams({ site_id: request.site_id,
+    conversation_id: request.conversation_id, message_id: request.message_id });
+  // request uses exactly the same API base and x-api-key as apiService.get;
+  // specify a shorter HTTP timeout than the bounded read activity timeout.
+  const response = await apiService.request<TemplateRecoveryResult>(
+    `/api/agents/tools/templateDeliveryStatus?${query}`, { method: 'GET', timeout: 15_000 });
+  if (!response.success) {
+    const status = response.error?.status;
+    throw ApplicationFailure.create({ message: 'Template reconciliation unavailable',
+      type: 'TEMPLATE_RECONCILIATION_UNAVAILABLE',
+      nonRetryable: typeof status === 'number' && status >= 400 && status < 500 && !RETRYABLE_CLIENT_STATUSES.has(status),
+    });
+  }
+  const result = response.data;
+  if (!result?.success || (result.local_message_id || result.message_id) !== request.message_id || !result.template_id
+    || result.delivery_format !== 'template' || !['resume', 'complete', 'stop'].includes(result.recovery_action)) {
+    throw ApplicationFailure.nonRetryable('Invalid template reconciliation receipt', 'TEMPLATE_RECONCILIATION_INVALID');
+  }
+  return result;
+}
+
+/** Idempotent control action, NOT a send. API CAS preserves the durable receipt. */
+export async function markTemplateReconciliationRequiredActivity(request: TemplateRecoveryRequest & { template_id: string }): Promise<void> {
+  if (!request.site_id || !request.conversation_id || !request.message_id || !request.template_id) {
+    throw ApplicationFailure.nonRetryable('Missing saved template identity', 'TEMPLATE_RECONCILIATION_INVALID');
+  }
+  const response = await apiService.request('/api/agents/tools/templateDeliveryStatus', {
+    method: 'POST', timeout: 15_000, body: { ...request, action: 'mark_reconciliation_required' },
+  });
+  if (!response.success || response.data?.success !== true) {
+    const status = response.error?.status;
+    throw ApplicationFailure.create({ message: 'Could not persist template reconciliation requirement',
+      type: 'TEMPLATE_RECONCILIATION_MARK_UNAVAILABLE',
+      nonRetryable: typeof status === 'number' && status >= 400 && status < 500 && !RETRYABLE_CLIENT_STATUSES.has(status) });
+  }
+}
 
 export function createChannelApiFailure(
   channel: string,
@@ -26,7 +69,7 @@ export function createChannelApiFailure(
 
 export async function sendChannelMessageFromAgentActivity(
   params: SendChannelMessageFromAgentParams
-): Promise<{ success: boolean; messageId?: string; error?: string }> {
+): Promise<{ success: boolean; messageId?: string; error?: string } & TemplateDeliveryMetadata> {
   console.log(`Sending ${params.channel} message via agent API to ${params.to}`);
 
   if (params.response_format === 'audio' && !params.message_id?.trim()) {
@@ -54,12 +97,16 @@ export async function sendChannelMessageFromAgentActivity(
       throw ApplicationFailure.nonRetryable('Explicit audio cannot use a template', 'AUDIO_TEMPLATE_REQUIRED');
     }
 
+    const templateAudio = params.channel === 'whatsapp' && params.response_format === 'audio';
+    if (templateAudio) validateTemplateDelivery(response.data || {}, params.message_id!);
+
     const messageId = response.data?.messageId || response.data?.message_id;
-    console.log(`${params.channel} sent successfully via agent API:`, messageId);
+    console.log(`${params.channel} API delivery status:`, response.data?.status || 'sent');
 
     return {
       success: true,
       messageId,
+      ...(templateAudio ? templateDeliveryMetadata(response.data || {}) : {}),
     };
   } catch (error) {
     if (params.response_format === 'audio') {

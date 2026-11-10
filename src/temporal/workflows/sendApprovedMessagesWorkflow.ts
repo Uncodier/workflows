@@ -9,6 +9,8 @@ import { resolveApprovedMessageContent } from './helpers/approvedMessageContent'
 import { settleInBatches } from './helpers/settleInBatches';
 import { resolveOutreachActivity } from '../utils/outreachActivity';
 import { responseFormatFields } from './helpers/responseFormat';
+import { pollTemplateDelivery } from './helpers/pollTemplateDelivery';
+import { isTemplatePending, templateDeliveryMetadata, type TemplateDeliveryMetadata } from '../utils/templateDelivery';
 
 const {
   getApprovedMessagesActivity,
@@ -31,6 +33,11 @@ const { sendEmailFromAgentActivity, sendOutreachMessageActivity, sendExactQueued
   retry: RETRY_POLICIES.NETWORK,
 });
 
+const { sendExactQueuedMessageActivity: sendExactAudioOnce } = proxyActivities<Activities>({
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.EMAIL_OPERATIONS,
+  retry: { maximumAttempts: 1 },
+});
+
 export async function sendApprovedMessagesWorkflow(): Promise<any> {
   console.log('🚀 Starting sendApprovedMessagesWorkflow...');
   const useBatchClaims = patched('send-approved-messages-batch-claims-v1');
@@ -38,7 +45,10 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
   const useConfiguredOutreach = patched('outreach-configured-delivery-v1');
   const useExactCommentDelivery = patched('send-approved-comment-exact-target-v1');
   const useExactConnectionDelivery = patched('send-approved-connection-exact-delivery-v1');
+  const useTemplatePolling = patched('approved-audio-template-polling-v1');
   let deferredCount = 0;
+  let pendingCount = 0;
+  const reconciliationNeeded: TemplateDeliveryMetadata[] = [];
 
   const resetResult = await resetStuckSendingMessagesActivity();
   if (resetResult.resetCount > 0) {
@@ -97,8 +107,11 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     const deliveryContent = resolvedMessage.content;
     const messageId = msg.message_id;
     const managedOutreach = useConfiguredOutreach && (msg.custom_data?.outreach_activity !== undefined || !!resolveOutreachActivity(msg.custom_data));
+    const exactTemplateAudio = useTemplatePolling && useResponseFormat && exactConnection && !managedOutreach
+      && channel === 'whatsapp' && msg.custom_data?.response_format === 'audio';
     let sentMessageId: string | undefined;
     let sentRecipient: string | undefined;
+    let deliveryMetadata: TemplateDeliveryMetadata = {};
 
     const COMMENT_CHANNELS = ['facebook', 'instagram', 'threads', 'linkedin', 'x', 'twitter', 'youtube'];
 
@@ -125,9 +138,20 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         sentMessageId = result.messageId;
         sentRecipient = result.recipient;
       } else if (exactConnection) {
-        const result = await sendExactQueuedMessageActivity({ site_id: msg.site_id, message_id: msg.message_id,
-          conversation_id: msg.conversation_id, channel });
+        const request = { site_id: msg.site_id, message_id: msg.message_id,
+          conversation_id: msg.conversation_id, channel };
+        const result = exactTemplateAudio
+          ? await pollTemplateDelivery(() => sendExactAudioOnce({ ...request, response_format: 'audio' }), messageId, request)
+          : await sendExactQueuedMessageActivity(request);
+        if (exactTemplateAudio && isTemplatePending(result)) {
+          pendingCount++;
+          return false; // API keeps queued; do not complete tasks or reset its receipt.
+        }
         if (!result.success) {
+          if (exactTemplateAudio) {
+            if (result.needs_reconciliation) reconciliationNeeded.push(templateDeliveryMetadata(result));
+            return false; // Never defer/reset a saved receipt after failed reconciliation or explicit stop.
+          }
           await deferOutreachMessageActivity({ site_id: msg.site_id, conversation_id: msg.conversation_id,
             message_id: msg.message_id, reason: result.reason || 'Exact delivery unavailable' });
           deferredCount++;
@@ -136,6 +160,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         sent = true;
         sentMessageId = result.messageId;
         sentRecipient = result.recipient;
+        if (exactTemplateAudio) deliveryMetadata = templateDeliveryMetadata(result);
       } else if (channel === 'email') {
         if (!msg.lead_email) {
           throw new Error('No email address for lead');
@@ -313,6 +338,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
           delivery_channel: channel,
           delivery_success: true,
           delivery_details: {
+            ...deliveryMetadata,
             recipient: sentRecipient || (['email', 'whatsapp', 'sms', 'voice'].includes(channel)
               ? channel === 'email' ? msg.lead_email : msg.lead_phone : undefined),
             message_id: sentMessageId,
@@ -348,6 +374,11 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
       }
       return false;
     } catch (error) {
+      if (exactTemplateAudio && !sent) {
+        // No defer/reset, cleanup, or fallback after rejection or uncertain dispatch.
+        // The API owns terminal status and any receipt requiring reconciliation.
+        return false;
+      }
       if (useExactCommentDelivery && msg.custom_data?.source === 'comment') {
         console.error(`Comment delivery failed for saved proposal ${messageId}; retaining it for review`, error);
         return false;
@@ -461,7 +492,9 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
   const results = [...await regularResultsPromise, ...voiceCallResults];
 
   const successCount = results.filter((r) => r.status === 'fulfilled' && r.value === true).length;
-  const failedCount = results.filter((r) => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === false)).length - deferredCount;
+  const failedCount = results.filter((r) => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === false)).length - deferredCount - pendingCount;
 
-  return { processed: messages.length, success: successCount, failed: failedCount, deferred: deferredCount };
+  return { processed: messages.length, success: successCount, failed: failedCount, deferred: deferredCount,
+    ...(useTemplatePolling ? { pending: pendingCount } : {}),
+    ...(reconciliationNeeded.length ? { needs_reconciliation: reconciliationNeeded } : {}) };
 }
