@@ -1,4 +1,5 @@
-import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes, isCancellation } from '@temporalio/workflow';
+import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes, isCancellation, patched } from '@temporalio/workflow';
+import { responseFormatFields } from './helpers/responseFormat';
 import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
 import { emailCustomerSupportMessageWorkflow } from './emailCustomerSupportWorkflow';
@@ -50,6 +51,7 @@ export async function customerSupportMessageWorkflow(
   error?: string;
 }> {
   const useChannelGuidance = channelGuidanceEnabled();
+  const useResponseFormat = patched('customer-support-response-format-v1');
   console.log('🎯 Starting customer support message workflow...');
   
   const effectiveBaseParams = customerSupportBaseParams(messageData, baseParams);
@@ -212,10 +214,13 @@ export async function customerSupportMessageWorkflow(
       
       const whatsappData = messageData.whatsappData;
       
-      const emailDataForCS = whatsappCustomerSupportData(
-        whatsappData, `whatsapp-${whatsappData.messageId || Date.now()}`,
-        useChannelGuidance, effectiveBaseParams.origin_message_id
-      );
+      const emailDataForCS = {
+        ...whatsappCustomerSupportData(
+          whatsappData, `whatsapp-${whatsappData.messageId || Date.now()}`,
+          useChannelGuidance, effectiveBaseParams.origin_message_id
+        ),
+        ...(useResponseFormat ? responseFormatFields(messageData.response_format ?? whatsappData.response_format) : {}),
+      };
       
       // ✅ FIXED: Para WhatsApp siempre procesar - eliminar filtro innecesario
       console.log('📞 Processing WhatsApp message - sending customer support message directly');
@@ -247,6 +252,8 @@ export async function customerSupportMessageWorkflow(
           csResponse: response.data,
           whatsappData,
           agentId: effectiveBaseParams.agentId,
+          useResponseFormat,
+          response_format: useResponseFormat ? emailDataForCS.response_format : undefined,
         });
 
         if (!whatsappParams) {

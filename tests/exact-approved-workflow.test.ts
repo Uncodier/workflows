@@ -6,7 +6,8 @@ const mockActivities: Record<string, jest.Mock> = {
   updateConversationStatusAfterFollowUpActivity: jest.fn(), updateTaskStatusToCompletedActivity: jest.fn(),
   cleanupFailedFollowUpActivity: jest.fn(),
 };
-jest.mock('@temporalio/workflow', () => ({ proxyActivities: () => mockActivities, patched: () => true,
+const mockPatched = jest.fn(() => true);
+jest.mock('@temporalio/workflow', () => ({ proxyActivities: () => mockActivities, patched: mockPatched,
   startChild: jest.fn(), ParentClosePolicy: {} }));
 jest.mock('../src/temporal/workflows/sendWhatsappFromAgentWorkflow', () => ({ sendWhatsappFromAgent: jest.fn() }));
 jest.mock('../src/temporal/workflows/sendChannelMessageFromAgentWorkflow', () => ({ sendChannelMessageFromAgentWorkflow: jest.fn() }));
@@ -20,9 +21,60 @@ const proposal = (channel: string, connectionId: unknown = 'selected') => ({
 });
 beforeEach(() => {
   jest.clearAllMocks();
+  mockPatched.mockReturnValue(true);
   mockActivities.resetStuckSendingMessagesActivity.mockResolvedValue({ resetCount: 0 });
   mockActivities.claimApprovedMessagesBatchActivity.mockResolvedValue(['message']);
   mockActivities.sendExactQueuedMessageActivity.mockResolvedValue({ success: true, messageId: 'provider-id', recipient: 'known-recipient' });
+});
+test.each(['whatsapp', 'telegram', 'messenger'])('approved %s propagates stored response format', async channel => {
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{
+    ...proposal(channel), lead_phone: '+15555550100', custom_data: { channel, response_format: 'audio' },
+  }]);
+  await sendApprovedMessagesWorkflow();
+  expect(startChild).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    args: [expect.objectContaining({ response_format: 'audio', message_id: 'message' })],
+  }));
+});
+test('old approval histories do not add response_format to child commands', async () => {
+  mockPatched.mockImplementation((...args: unknown[]) => args[0] !== 'approved-message-response-format-v1');
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{
+    ...proposal('whatsapp'), lead_phone: '+15555550100', custom_data: { channel: 'whatsapp', response_format: 'audio' },
+  }]);
+  await sendApprovedMessagesWorkflow();
+  expect((startChild as jest.Mock).mock.calls[0][1].args[0]).not.toHaveProperty('response_format');
+});
+
+test('Messenger audio with a saved connection uses channel child and retains pinned metadata', async () => {
+  const custom_data = { channel: 'messenger', connection_id: 'pinned-account', response_format: 'audio' };
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{
+    ...proposal('messenger'), lead_phone: '123456', custom_data,
+  }]);
+  await sendApprovedMessagesWorkflow();
+  expect(mockActivities.sendExactQueuedMessageActivity).not.toHaveBeenCalled();
+  expect(startChild).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    args: [expect.objectContaining({ channel: 'messenger', response_format: 'audio', message_id: 'message', custom_data })],
+  }));
+});
+
+test.each(['text', undefined])('Messenger format=%s preserves exact connection routing', async response_format => {
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{
+    ...proposal('messenger'), lead_phone: '123456',
+    custom_data: { channel: 'messenger', connection_id: 'pinned-account', response_format },
+  }]);
+  await sendApprovedMessagesWorkflow();
+  expect(mockActivities.sendExactQueuedMessageActivity).toHaveBeenCalled();
+  expect(startChild).not.toHaveBeenCalled();
+});
+
+test('old patch branch retains exact routing for Messenger audio', async () => {
+  mockPatched.mockImplementation((...args: unknown[]) => args[0] !== 'approved-message-response-format-v1');
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{
+    ...proposal('messenger'), lead_phone: '123456',
+    custom_data: { channel: 'messenger', connection_id: 'pinned-account', response_format: 'audio' },
+  }]);
+  await sendApprovedMessagesWorkflow();
+  expect(mockActivities.sendExactQueuedMessageActivity).toHaveBeenCalled();
+  expect(startChild).not.toHaveBeenCalled();
 });
 test.each(['email', 'whatsapp', 'sms', 'voice', 'telegram'])('approved %s uses exact stored API dispatch and no default child', async channel => {
   mockActivities.getApprovedMessagesActivity.mockResolvedValue([proposal(channel)]);

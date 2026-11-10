@@ -1,8 +1,13 @@
+import { customerSupportResponseFormat, responseFormatFields, type ResponseFormat } from './responseFormat';
+
 export type CustomerSupportWhatsAppResponse = {
+  response_format?: ResponseFormat;
   messages?: {
     assistant?: {
       content?: string;
       message_id?: string;
+      response_format?: ResponseFormat;
+      custom_data?: { response_format?: ResponseFormat };
     };
   };
   conversation_id?: string | null;
@@ -16,6 +21,7 @@ export type InboundWhatsAppData = {
 };
 
 export type BuiltWhatsAppSendParams = {
+  response_format?: ResponseFormat;
   phone_number: string;
   message: string;
   site_id: string;
@@ -53,9 +59,13 @@ export function buildWhatsAppSendParams(params: {
   csResponse: CustomerSupportWhatsAppResponse | null | undefined;
   whatsappData: InboundWhatsAppData;
   agentId?: string;
+  useResponseFormat?: boolean;
+  response_format?: ResponseFormat;
 }): BuiltWhatsAppSendParams | null {
   const { csResponse, whatsappData, agentId } = params;
-  const message = nonEmpty(csResponse?.messages?.assistant?.content);
+  const responseFormat = params.useResponseFormat ? customerSupportResponseFormat(csResponse, params.response_format) : undefined;
+  const content = csResponse?.messages?.assistant?.content;
+  const message = nonEmpty(content) ? (responseFormat === 'audio' ? content : nonEmpty(content)) : undefined;
   if (!message) {
     return null;
   }
@@ -70,6 +80,7 @@ export function buildWhatsAppSendParams(params: {
     site_id: whatsappData.siteId,
     from: 'Customer Support',
     responseWindowEnabled: true,
+    ...responseFormatFields(responseFormat),
   };
 
   if (agentId) {

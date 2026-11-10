@@ -16,6 +16,7 @@ const {
 });
 
 export interface SendChannelMessageFromAgentParams {
+  response_format?: 'text' | 'audio';
   channel: string;
   to: string;
   message: string;
@@ -35,6 +36,12 @@ export interface SendChannelMessageFromAgentResult {
   executionTime: string;
   timestamp: string;
 }
+
+// Audio sends may have reached the provider even if the activity times out.
+const { sendChannelMessageFromAgentActivity: sendAudioOnce } = proxyActivities<typeof activities>({
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.WHATSAPP_OPERATIONS,
+  retry: { maximumAttempts: 1 },
+});
 
 /**
  * Send Channel Message From Agent Workflow
@@ -64,7 +71,10 @@ export async function sendChannelMessageFromAgentWorkflow(params: SendChannelMes
     upsertSearchAttributes(searchAttributes);
 
     console.log(`📞 Executing activity to send ${params.channel} message...`);
-    const result = await sendChannelMessageFromAgentActivity(params);
+    if (params.response_format === 'audio' && !params.message_id?.trim()) {
+      throw ApplicationFailure.nonRetryable('Explicit audio requires message_id', 'AUDIO_MESSAGE_ID_REQUIRED');
+    }
+    const result = await (params.response_format === 'audio' ? sendAudioOnce : sendChannelMessageFromAgentActivity)(params);
 
     if (!result.success) {
       throw new Error(result.error || `Failed to send ${params.channel} message`);
@@ -86,6 +96,10 @@ export async function sendChannelMessageFromAgentWorkflow(params: SendChannelMes
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Send ${params.channel} from agent workflow failed:`, errorMessage);
 
+    if (params.response_format === 'audio') {
+      if (error instanceof ApplicationFailure && error.nonRetryable) throw error;
+      throw ApplicationFailure.nonRetryable('Audio delivery failed or is unknown; reconcile before retry', 'AUDIO_DELIVERY_FAILED_OR_UNKNOWN');
+    }
     throw terminalWorkflowFailure(
       error,
       `Send ${params.channel} from agent workflow failed`,

@@ -4,6 +4,7 @@ import type { EmailData } from './customerSupportActivities';
 import { isDisabledCustomerSupportResult } from '../workflows/helpers/disabledCustomerSupport';
 
 export interface CustomerSupportMessageRequest {
+  response_format?: 'text' | 'audio';
   message: string;
   systemContext?: string;
   visitor_id?: string;
@@ -180,6 +181,9 @@ export async function sendCustomerSupportMessageActivity(
   if (originMessageId) messageRequest.origin_message_id = originMessageId;
   if (emailData.channel_delivery === true) messageRequest.channel_delivery = true;
   if (emailData.require_approval === true) messageRequest.require_approval = true;
+  if (emailData.response_format === 'text' || emailData.response_format === 'audio') {
+    messageRequest.response_format = emailData.response_format;
+  }
   if (emailData.custom_data && typeof emailData.custom_data === 'object') {
     messageRequest.custom_data = emailData.custom_data;
   }

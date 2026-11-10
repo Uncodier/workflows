@@ -8,6 +8,7 @@ import { resolveApprovedMessageDispatch } from './helpers/approvedMessageDispatc
 import { resolveApprovedMessageContent } from './helpers/approvedMessageContent';
 import { settleInBatches } from './helpers/settleInBatches';
 import { resolveOutreachActivity } from '../utils/outreachActivity';
+import { responseFormatFields } from './helpers/responseFormat';
 
 const {
   getApprovedMessagesActivity,
@@ -33,6 +34,7 @@ const { sendEmailFromAgentActivity, sendOutreachMessageActivity, sendExactQueued
 export async function sendApprovedMessagesWorkflow(): Promise<any> {
   console.log('🚀 Starting sendApprovedMessagesWorkflow...');
   const useBatchClaims = patched('send-approved-messages-batch-claims-v1');
+  const useResponseFormat = patched('approved-message-response-format-v1');
   const useConfiguredOutreach = patched('outreach-configured-delivery-v1');
   const useExactCommentDelivery = patched('send-approved-comment-exact-target-v1');
   const useExactConnectionDelivery = patched('send-approved-connection-exact-delivery-v1');
@@ -78,7 +80,11 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     let sent = false;
     let voiceChildStarted = false;
     const channel = (msg.custom_data?.channel || msg.custom_data?.source || msg.channel || (msg.custom_data?.type === 'email' ? 'email' : 'whatsapp')).toLowerCase();
-    const exactConnection = useExactConnectionDelivery && Object.prototype.hasOwnProperty.call(msg.custom_data || {}, 'connection_id');
+    // Exact delivery's legacy channel enum excludes Messenger. Its audio HTTP
+    // handler resolves the saved connection_id authoritatively (never a default).
+    const messengerAudio = useResponseFormat && channel === 'messenger' && msg.custom_data?.response_format === 'audio';
+    const exactConnection = useExactConnectionDelivery && !messengerAudio
+      && Object.prototype.hasOwnProperty.call(msg.custom_data || {}, 'connection_id');
     const dispatch = resolveApprovedMessageDispatch(
       channel,
       msg.custom_data?.voice_mode
@@ -222,6 +228,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
             responseWindowEnabled: false,
             fromApprovedWorkflow: true,
             approvedWorkflowCustomData: msg.custom_data ?? undefined,
+            ...(useResponseFormat ? responseFormatFields(msg.custom_data?.response_format) : {}),
           }],
           parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
         });
@@ -275,13 +282,14 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
             args: [{
               channel,
               to: recipient,
-              message: deliveryContent,
+              message: useResponseFormat && msg.custom_data?.response_format === 'audio' ? msg.content : deliveryContent,
               site_id: msg.site_id,
               agent_id: msg.custom_data?.userId,
               conversation_id: msg.conversation_id,
               lead_id: msg.lead_id,
               message_id: msg.message_id,
               custom_data: msg.custom_data,
+              ...(useResponseFormat ? responseFormatFields(msg.custom_data?.response_format) : {}),
             }],
             parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
           });

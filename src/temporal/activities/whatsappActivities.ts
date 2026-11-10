@@ -11,6 +11,7 @@ import {
  */
 
 export interface WhatsAppMessageData {
+  response_format?: 'text' | 'audio';
   messageContent: string;
   phoneNumber: string;
   senderName?: string;
@@ -188,6 +189,8 @@ export async function sendWhatsAppResponseActivity(
  * WhatsApp From Agent Activity interfaces
  */
 export interface SendWhatsAppFromAgentParams {
+  response_format?: 'text' | 'audio';
+  message_id?: string;
   phone_number: string;
   message: string;
   site_id: string;
@@ -223,6 +226,9 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
 
   try {
     // Prepare API payload - only include lead_id if it's a valid UUID
+    if (params.response_format === 'audio' && !params.message_id?.trim()) {
+      throw ApplicationFailure.nonRetryable('Explicit audio requires message_id', 'AUDIO_MESSAGE_ID_REQUIRED');
+    }
     const apiPayload: any = {
       phone_number: params.phone_number,
       message: params.message,
@@ -231,6 +237,8 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
       agent_id: params.agent_id,
       conversation_id: params.conversation_id,
       responseWindowEnabled: params.responseWindowEnabled === true,
+      ...(params.response_format !== undefined ? { response_format: params.response_format } : {}),
+      ...(params.message_id ? { message_id: params.message_id } : {}),
     };
 
     // Only include lead_id if it's present and looks like a valid UUID
@@ -248,6 +256,10 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
       throw new Error(`Failed to send WhatsApp message: ${response.error?.message}`);
     }
 
+    if (params.response_format === 'audio' && response.data?.template_required) {
+      throw ApplicationFailure.nonRetryable('Explicit audio cannot use a template', 'AUDIO_TEMPLATE_REQUIRED');
+    }
+
     console.log('✅ WhatsApp sent successfully via agent API:', response.data);
 
     return {
@@ -260,6 +272,13 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
 
   } catch (error) {
     console.error('❌ WhatsApp sending failed:', error);
+    if (params.response_format === 'audio') {
+      if (error instanceof ApplicationFailure) throw error;
+      throw ApplicationFailure.nonRetryable(
+        `Audio delivery failed or is unknown; reconcile before retry: ${error instanceof Error ? error.message : String(error)}`,
+        'AUDIO_DELIVERY_FAILED_OR_UNKNOWN'
+      );
+    }
     throw new Error(`WhatsApp sending failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

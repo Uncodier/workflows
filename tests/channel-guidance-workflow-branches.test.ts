@@ -51,6 +51,29 @@ beforeEach(() => {
 });
 
 describe('customer-support entry branches await channel guidance', () => {
+  it.each([true, false])('propagates chosen channel audio only with response-format patch=%s', async enabled => {
+    mockPatched.mockImplementation(id => id === 'customer-support-response-format-v1' ? enabled : false);
+    mockSend.mockResolvedValue({ success: true, data: {
+      messages: { assistant: { content: 'Audio reply', message_id: 'assistant-id', response_format: 'audio' } },
+      conversation_id: 'conversation-id',
+    } });
+    await channelCustomerSupportMessageWorkflow({ message: 'Help', site_id: 'site', phone: '123' }, { origin: 'telegram' });
+    const childArgs = mockStartChild.mock.calls[0][1].args[0];
+    expect(childArgs).toMatchObject({ message_id: 'assistant-id' });
+    if (enabled) expect(childArgs).toHaveProperty('response_format', 'audio');
+    else expect(childArgs).not.toHaveProperty('response_format');
+  });
+
+  it('forwards explicit text to support and overrides model audio selection', async () => {
+    mockPatched.mockImplementation(id => id === 'customer-support-response-format-v1');
+    mockSend.mockResolvedValue({ success: true, data: {
+      response_format: 'audio', messages: { assistant: { content: 'Reply', message_id: 'assistant-id' } },
+    } });
+    await channelCustomerSupportMessageWorkflow({ message: 'Help', site_id: 'site', phone: '123', response_format: 'text' }, { origin: 'messenger' });
+    expect(mockSend.mock.calls[0][0]).toHaveProperty('response_format', 'text');
+    expect(mockStartChild.mock.calls[0][1].args[0]).toHaveProperty('response_format', 'text');
+  });
+
   it.each(['website_chat', 'whatsapp', 'email', 'instagram'])
     ('completes disabled %s intake without outbound or supervisor workflows', async (origin) => {
       mockSend.mockResolvedValue({ success: true, data: {

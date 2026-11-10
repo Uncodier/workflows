@@ -29,30 +29,48 @@ export async function sendChannelMessageFromAgentActivity(
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   console.log(`Sending ${params.channel} message via agent API to ${params.to}`);
 
-  const response = await apiService.post('/api/agents/tools/sendChannelMessage', {
-    channel: params.channel,
-    to: params.to,
-    message: params.message,
-    site_id: params.site_id,
-    subject: params.subject,
-    agent_id: params.agent_id,
-    conversation_id: params.conversation_id,
-    lead_id: params.lead_id,
-    message_id: params.message_id,
-    custom_data: params.custom_data,
-  });
-
-  if (!response.success) {
-    throw createChannelApiFailure(params.channel, response.error);
+  if (params.response_format === 'audio' && !params.message_id?.trim()) {
+    throw ApplicationFailure.nonRetryable('Explicit audio requires message_id', 'AUDIO_MESSAGE_ID_REQUIRED');
   }
+  try {
+    const response = await apiService.post('/api/agents/tools/sendChannelMessage', {
+      channel: params.channel,
+      to: params.to,
+      message: params.message,
+      site_id: params.site_id,
+      subject: params.subject,
+      agent_id: params.agent_id,
+      conversation_id: params.conversation_id,
+      lead_id: params.lead_id,
+      message_id: params.message_id,
+      custom_data: params.custom_data,
+      ...(params.response_format !== undefined ? { response_format: params.response_format } : {}),
+    });
 
-  const messageId = response.data?.messageId || response.data?.message_id;
-  console.log(`${params.channel} sent successfully via agent API:`, messageId);
+    if (!response.success) {
+      throw createChannelApiFailure(params.channel, response.error);
+    }
+    if (params.response_format === 'audio' && response.data?.template_required) {
+      throw ApplicationFailure.nonRetryable('Explicit audio cannot use a template', 'AUDIO_TEMPLATE_REQUIRED');
+    }
 
-  return {
-    success: true,
-    messageId,
-  };
+    const messageId = response.data?.messageId || response.data?.message_id;
+    console.log(`${params.channel} sent successfully via agent API:`, messageId);
+
+    return {
+      success: true,
+      messageId,
+    };
+  } catch (error) {
+    if (params.response_format === 'audio') {
+      if (error instanceof ApplicationFailure && error.nonRetryable) throw error;
+      throw ApplicationFailure.nonRetryable(
+        `Audio delivery failed or is unknown; reconcile before retry: ${error instanceof Error ? error.message : String(error)}`,
+        'AUDIO_DELIVERY_FAILED_OR_UNKNOWN'
+      );
+    }
+    throw error;
+  }
 }
 
 export async function placeVoiceCallFromAgentActivity(

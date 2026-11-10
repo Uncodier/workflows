@@ -8,7 +8,7 @@ import { updateMessageStatusToSentActivity } from '../src/temporal/activities/up
 
 function query(data: any, error: any = null) {
   const q: any = { then: (resolve: any) => Promise.resolve({ data, error }).then(resolve) };
-  for (const method of ['select', 'eq', 'limit', 'single', 'update']) q[method] = jest.fn().mockReturnValue(q);
+  for (const method of ['select', 'eq', 'or', 'limit', 'single', 'update']) q[method] = jest.fn().mockReturnValue(q);
   mockDatabase.from.mockReturnValueOnce(q);
   return q;
 }
@@ -23,7 +23,16 @@ it('protects comments from already queued destructive cleanup commands', async (
   const q = query([{ id: 'proposal' }]);
   await expect(cleanupFailedFollowUpActivity(request)).resolves.toMatchObject({ message_deleted: false });
   expect(q.eq).toHaveBeenCalledWith('conversations.site_id', 'site');
+  expect(q.or).toHaveBeenCalledWith(expect.stringContaining('custom_data->audio_delivery.not.is.null'));
   expect(mockCleanup).not.toHaveBeenCalled();
+});
+
+it.each([true, false])('preserves API audio receipts for generic success=%s', async delivery_success => {
+  const q = query({ id: 'proposal', conversation_id: 'conversation', custom_data: {
+    response_format: 'audio', status: 'placement_unknown', audio_delivery: { state: 'unknown' },
+  } });
+  await updateMessageStatusToSentActivity({ ...request, delivery_success, delivery_channel: 'whatsapp' });
+  expect(q.update).not.toHaveBeenCalled();
 });
 
 it('preserves legacy non-comment cleanup behavior after a safe read', async () => {

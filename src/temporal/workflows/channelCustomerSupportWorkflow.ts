@@ -1,4 +1,5 @@
-import { proxyActivities, startChild, ParentClosePolicy, isCancellation } from '@temporalio/workflow';
+import { proxyActivities, startChild, ParentClosePolicy, isCancellation, patched } from '@temporalio/workflow';
+import { customerSupportResponseFormat, responseFormatFields } from './helpers/responseFormat';
 import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
 import { sendChannelMessageFromAgentWorkflow } from './sendChannelMessageFromAgentWorkflow';
@@ -25,6 +26,7 @@ export async function channelCustomerSupportMessageWorkflow(
   error?: string;
 }> {
   const useChannelGuidance = channelGuidanceEnabled();
+  const useResponseFormat = patched('customer-support-response-format-v1');
   const channel = baseParams.origin || 'telegram';
   const isEmail = channel === 'email';
   const recipient = isEmail ? messageData.email : messageData.phone;
@@ -56,6 +58,7 @@ export async function channelCustomerSupportMessageWorkflow(
     conversation_id: messageData.conversation_id || undefined,
     visitor_id: messageData.visitor_id || undefined,
     channel_delivery: true,
+    ...(useResponseFormat ? responseFormatFields(messageData.response_format) : {}),
     require_approval: requireApproval,
     custom_data: messageData.custom_data,
     origin_message_id: useChannelGuidance
@@ -109,6 +112,7 @@ export async function channelCustomerSupportMessageWorkflow(
             conversation_id: response.data?.conversation_id,
             lead_id: response.data?.lead_id,
             message_id: assistantMessageId,
+            ...(useResponseFormat ? responseFormatFields(customerSupportResponseFormat(response.data, messageData.response_format)) : {}),
             custom_data: messageData.custom_data,
           },
         ],
