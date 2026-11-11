@@ -45,6 +45,8 @@ export async function scheduleCustomerSupportMessagesWorkflow(
     reason: string;
     error?: string;
     emailId: string;
+    skipped?: boolean;
+    automation_paused_until?: string | null;
     emailSent?: boolean;
     emailWorkflowId?: string;
   }>;
@@ -85,6 +87,8 @@ export async function scheduleCustomerSupportMessagesWorkflow(
     reason: string;
     error?: string;
     emailId: string;
+    skipped?: boolean;
+    automation_paused_until?: string | null;
     emailSent?: boolean;
     emailWorkflowId?: string;
   }> = [];
@@ -202,6 +206,7 @@ export async function scheduleCustomerSupportMessagesWorkflow(
           success: result.success,
           processed: result.data?.processed || false,
           reason: result.data?.reason || 'No reason provided',
+          ...(result.data?.skipped ? { skipped: true, automation_paused_until: result.data.automation_paused_until } : {}),
           error: result.error,
           emailId: trackingId,
           emailSent: result.data?.emailSent || false,

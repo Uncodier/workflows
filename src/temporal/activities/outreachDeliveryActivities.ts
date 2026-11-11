@@ -1,7 +1,9 @@
+import { checkConversationAutomationActivity } from './automationSnoozeActivities';
+import type { AutomationSkipMetadata } from '../utils/automationSnooze';
 import { apiService } from '../services/apiService';
 import { resolveOutreachActivity } from '../utils/outreachActivity';
 
-export interface OutreachDeliveryResult {
+export interface OutreachDeliveryResult extends AutomationSkipMetadata {
   success: boolean;
   deferred?: boolean;
   reason?: string;
@@ -16,6 +18,9 @@ export async function sendOutreachMessageActivity(request: {
   site_id: string;
   message_id: string;
 }): Promise<OutreachDeliveryResult> {
+  const guard = await checkConversationAutomationActivity(request);
+  if (guard.skipped) return { ...guard };
+
   try {
     const response = await apiService.post<OutreachDeliveryResult>(
       '/api/agents/tools/sendOutreachMessage', request

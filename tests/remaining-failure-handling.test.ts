@@ -1,3 +1,6 @@
+jest.mock('../src/temporal/activities/automationSnoozeActivities', () => ({
+  checkConversationAutomationActivity: jest.fn(async () => ({ success: true })),
+}));
 import { ApplicationFailure } from '@temporalio/common';
 const mockPatched = jest.fn();
 const mockWorkflowInfo = jest.fn();

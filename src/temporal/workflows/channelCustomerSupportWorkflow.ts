@@ -1,3 +1,4 @@
+import { automationSkipMetadata, isSnoozedCustomerSupportResult, snoozedCustomerSupportResult } from '../utils/automationSnooze';
 import { proxyActivities, startChild, ParentClosePolicy, isCancellation, patched } from '@temporalio/workflow';
 import { customerSupportResponseFormat, responseFormatFields } from './helpers/responseFormat';
 import type { Activities } from '../activities';
@@ -78,6 +79,8 @@ export async function channelCustomerSupportMessageWorkflow(
     throw new Error(response?.error || 'Customer support call was not successful');
   }
 
+  if (isSnoozedCustomerSupportResult(response.data)) return snoozedCustomerSupportResult(response.data);
+
   if (isDisabledCustomerSupportResult(response.data)) return disabledCustomerSupportResult(response.data);
 
   let channelWorkflowId: string | undefined;
@@ -120,7 +123,8 @@ export async function channelCustomerSupportMessageWorkflow(
       });
 
       const channelResult = await channelHandle.result();
-      channelMessageSent = Boolean(channelResult.success);
+      if (channelResult.skipped) return snoozedCustomerSupportResult({ ...response.data, ...automationSkipMetadata(channelResult) });
+      channelMessageSent = Boolean(channelResult.success && !channelResult.skipped);
     }
   } catch (channelError) {
     if (useChannelGuidance && isCancellation(channelError)) throw channelError;

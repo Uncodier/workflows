@@ -1,3 +1,4 @@
+import type { AutomationSkipMetadata } from '../utils/automationSnooze';
 import {
   ApplicationFailure,
   proxyActivities,
@@ -21,7 +22,7 @@ export interface SendVoiceCallFromAgentParams {
   max_duration_minutes?: number;
 }
 
-export interface SendVoiceCallFromAgentResult {
+export interface SendVoiceCallFromAgentResult extends AutomationSkipMetadata {
   success: true;
   callId: string;
   status: string;

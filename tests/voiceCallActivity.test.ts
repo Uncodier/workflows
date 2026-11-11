@@ -1,3 +1,6 @@
+jest.mock('../src/temporal/activities/automationSnoozeActivities', () => ({
+  checkConversationAutomationActivity: jest.fn(async () => ({ success: true })),
+}));
 const mockPost = jest.fn();
 
 jest.mock('../src/temporal/services/apiService', () => ({

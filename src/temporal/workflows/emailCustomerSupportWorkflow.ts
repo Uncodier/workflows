@@ -1,4 +1,5 @@
-import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes, isCancellation } from '@temporalio/workflow';
+import { automationSkipMetadata, isSnoozedCustomerSupportResult, snoozedCustomerSupportResult } from '../utils/automationSnooze';
+import { proxyActivities, patched, startChild, ParentClosePolicy, upsertSearchAttributes, isCancellation } from '@temporalio/workflow';
 import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
@@ -96,6 +97,8 @@ export async function emailCustomerSupportMessageWorkflow(
       throw new Error(response?.error || 'Customer support call was not successful');
     }
     
+    if (isSnoozedCustomerSupportResult(response.data)) return snoozedCustomerSupportResult(response.data);
+
     if (isDisabledCustomerSupportResult(response.data)) return disabledCustomerSupportResult(response.data);
 
     console.log('✅ Customer support message sent successfully');
@@ -122,6 +125,9 @@ export async function emailCustomerSupportMessageWorkflow(
                   `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
           site_id: emailData.site_id,
           agent_id: baseParams.agentId,
+          ...(patched('conversation-automation-snooze-v1') ? {
+            conversation_id: response.data?.conversation_id, message_id: response.data?.messages?.assistant?.message_id,
+          } : {}),
           lead_id: emailData.analysis_id || undefined
         };
         
@@ -137,8 +143,9 @@ export async function emailCustomerSupportMessageWorkflow(
         
         // Wait for email workflow to complete
         const emailResult = await emailHandle.result();
+        if (emailResult.skipped) return snoozedCustomerSupportResult({ ...response.data, ...automationSkipMetadata(emailResult) });
         
-        if (emailResult.success) {
+        if (emailResult.success && !emailResult.skipped) {
           emailSent = true;
           console.log('✅ Follow-up email sent successfully');
         } else {

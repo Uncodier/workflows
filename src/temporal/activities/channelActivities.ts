@@ -1,3 +1,5 @@
+import { checkConversationAutomationActivity } from './automationSnoozeActivities';
+import { automationSkipMetadata, type AutomationSkipMetadata } from '../utils/automationSnooze';
 import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
 import type { SendChannelMessageFromAgentParams } from '../workflows/sendChannelMessageFromAgentWorkflow';
@@ -69,7 +71,10 @@ export function createChannelApiFailure(
 
 export async function sendChannelMessageFromAgentActivity(
   params: SendChannelMessageFromAgentParams
-): Promise<{ success: boolean; messageId?: string; error?: string } & TemplateDeliveryMetadata> {
+): Promise<{ success: boolean; messageId?: string; error?: string } & TemplateDeliveryMetadata & AutomationSkipMetadata> {
+  const guard = await checkConversationAutomationActivity(params);
+  if (guard.skipped) return { ...guard };
+
   console.log(`Sending ${params.channel} message via agent API to ${params.to}`);
 
   if (params.response_format === 'audio' && !params.message_id?.trim()) {
@@ -93,6 +98,7 @@ export async function sendChannelMessageFromAgentActivity(
     if (!response.success) {
       throw createChannelApiFailure(params.channel, response.error);
     }
+    if (response.data?.skipped === true) return { success: true, ...automationSkipMetadata(response.data) };
     if (params.response_format === 'audio' && response.data?.template_required) {
       throw ApplicationFailure.nonRetryable('Explicit audio cannot use a template', 'AUDIO_TEMPLATE_REQUIRED');
     }
@@ -122,8 +128,11 @@ export async function sendChannelMessageFromAgentActivity(
 
 export async function placeVoiceCallFromAgentActivity(
   params: SendVoiceCallFromAgentParams
-): Promise<{ success: true; callId: string; status: string; deliveryId?: string }> {
+): Promise<{ success: true; callId: string; status: string; deliveryId?: string } & AutomationSkipMetadata> {
+  const guard = await checkConversationAutomationActivity(params);
+  if (guard.skipped) return { ...guard, callId: '', status: 'skipped' };
   const response = await apiService.post<{
+    skipped?: boolean;
     success: true;
     callId: string;
     status: string;
@@ -141,6 +150,9 @@ export async function placeVoiceCallFromAgentActivity(
     max_duration_minutes: params.max_duration_minutes,
   });
 
+  if (response.success && response.data?.skipped === true) return {
+    success: true, callId: '', status: 'skipped', ...automationSkipMetadata(response.data),
+  };
   if (!response.success || !response.data?.callId) {
     const status = response.error?.status;
     const capacityReached = status === 429;

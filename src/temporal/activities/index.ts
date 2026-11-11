@@ -1,3 +1,5 @@
+export * from './automationSnoozeActivities';
+import * as automationSnoozeActivities from './automationSnoozeActivities';
 // Export all activities
 export * from './supabaseActivities';
 export * from './apiActivities';
@@ -118,6 +120,7 @@ import * as catalogIndexActivities from './catalogIndexActivities';
 
 export const activities = {
   ...supabaseActivities,
+  ...automationSnoozeActivities,
   ...apiActivities,
   ...prioritizationActivities,
   ...reportActivities,

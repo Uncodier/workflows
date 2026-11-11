@@ -1,4 +1,5 @@
-import { proxyActivities, upsertSearchAttributes } from '@temporalio/workflow';
+import type { AutomationSkipMetadata } from '../utils/automationSnooze';
+import { proxyActivities, upsertSearchAttributes, patched } from '@temporalio/workflow';
 import type * as activities from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 
@@ -29,7 +30,7 @@ export interface SendEmailFromAgentParams {
 /**
  * Workflow result interface
  */
-export interface SendEmailFromAgentResult {
+export interface SendEmailFromAgentResult extends AutomationSkipMetadata {
   success: boolean;
   messageId: string;
   recipient: string;
@@ -82,8 +83,11 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
       site_id: params.site_id,
       agent_id: params.agent_id,
       conversation_id: params.conversation_id,
-      lead_id: params.lead_id
+      lead_id: params.lead_id,
+      ...(patched('conversation-automation-snooze-v1') ? { message_id: params.message_id } : {}),
     });
+
+    if (emailResult.skipped) return { ...emailResult, executionTime: `${Date.now() - startTime.getTime()}ms` };
 
     const endTime = new Date();
     const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;

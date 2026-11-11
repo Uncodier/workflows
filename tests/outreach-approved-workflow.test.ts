@@ -1,4 +1,5 @@
 const mockActivities: Record<string, jest.Mock> = {
+  checkConversationAutomationActivity: jest.fn(),
   resetStuckSendingMessagesActivity: jest.fn(), getApprovedMessagesActivity: jest.fn(),
   claimApprovedMessagesBatchActivity: jest.fn(), sendOutreachMessageActivity: jest.fn(),
   deferOutreachMessageActivity: jest.fn(), sendEmailFromAgentActivity: jest.fn(),
@@ -18,6 +19,7 @@ import { sendApprovedMessagesWorkflow } from '../src/temporal/workflows/sendAppr
 describe('approved outreach dispatch', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockActivities.checkConversationAutomationActivity.mockResolvedValue({ success: true });
     mockActivities.resetStuckSendingMessagesActivity.mockResolvedValue({ resetCount: 0 });
     mockActivities.claimApprovedMessagesBatchActivity.mockResolvedValue(['message']);
     mockActivities.getApprovedMessagesActivity.mockResolvedValue([{

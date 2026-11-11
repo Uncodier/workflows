@@ -11,11 +11,12 @@ const { markTemplateReconciliationRequiredActivity: markUnconfirmed } = proxyAct
 }>({ startToCloseTimeout: '30 seconds', scheduleToCloseTimeout: '2 minutes', retry: { maximumAttempts: 3 } });
 
 /** Not a retry loop: only the API's durable pending receipt permits resumption. */
-export async function pollTemplateDelivery<T extends TemplateDeliveryMetadata & { success: boolean; messageId?: string }>(
+export async function pollTemplateDelivery<T extends TemplateDeliveryMetadata & { success: boolean; messageId?: string; skipped?: boolean }>(
   send: () => Promise<T>, messageId: string, recoveryRequest?: TemplateRecoveryRequest,
 ): Promise<T> {
   const recoverable = patched('template-poll-read-reconciliation-v1');
   let result = await send();
+  if (result.skipped) return result;
   validateTemplateDelivery(result, messageId);
   const needsReconciliation = async (): Promise<T> => {
     let persisted = false;
@@ -36,6 +37,7 @@ export async function pollTemplateDelivery<T extends TemplateDeliveryMetadata & 
     await sleep(delay);
     try {
       const next = await send();
+      if (next.skipped) return next;
       validateTemplateDelivery(next, messageId);
       result = next; // Keep the prior durable pending receipt if this poll fails.
     } catch (error) {

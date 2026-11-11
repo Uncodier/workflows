@@ -1,7 +1,9 @@
+import type { AutomationSkipMetadata } from '../utils/automationSnooze';
 import {
   ApplicationFailure,
   proxyActivities,
   sleep,
+  patched,
   upsertSearchAttributes,
 } from '@temporalio/workflow';
 import type { Duration } from '@temporalio/common';
@@ -60,7 +62,7 @@ export interface SendWhatsAppFromAgentParams {
 /**
  * Workflow result interface
  */
-export interface SendWhatsAppFromAgentResult {
+export interface SendWhatsAppFromAgentResult extends AutomationSkipMetadata {
   success: boolean;
   messageId: string;
   recipient: string;
@@ -151,7 +153,10 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
       lead_id: params.lead_id,
       responseWindowEnabled: params.responseWindowEnabled,
       ...(params.response_format !== undefined ? { response_format: params.response_format, message_id: params.message_id } : {}),
+      ...(patched('conversation-automation-snooze-v1') ? { message_id: params.message_id } : {}),
     });
+
+    if (whatsappResult.skipped) return { ...whatsappResult, executionTime: `${Date.now() - startTime.getTime()}ms` };
 
     // Step 2: Check if template is required (no response window)
     if (params.response_format === 'audio' && whatsappResult.template_required) {
@@ -207,6 +212,8 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
         if (lastSendError !== null || sendTemplateResult === null) {
           throw lastSendError ?? new Error('sendTemplate failed after 4 attempts');
         }
+
+        if (sendTemplateResult.skipped) return { ...sendTemplateResult, recipient: params.phone_number, executionTime: `${Date.now() - startTime.getTime()}ms` };
 
         const endTime = new Date();
         const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;

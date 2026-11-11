@@ -1,3 +1,4 @@
+import { automationSkipMetadata, isSnoozedCustomerSupportResult, snoozedCustomerSupportResult } from '../utils/automationSnooze';
 import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes, isCancellation, patched } from '@temporalio/workflow';
 import { responseFormatFields } from './helpers/responseFormat';
 import type { Activities } from '../activities';
@@ -99,6 +100,8 @@ export async function customerSupportMessageWorkflow(
         throw new Error(response?.error || 'Customer support call was not successful');
       }
       
+      if (isSnoozedCustomerSupportResult(response.data)) return snoozedCustomerSupportResult(response.data);
+
       if (isDisabledCustomerSupportResult(response.data)) return disabledCustomerSupportResult(response.data);
 
       console.log('✅ Website chat customer support message sent successfully');
@@ -238,6 +241,8 @@ export async function customerSupportMessageWorkflow(
         throw new Error(response?.error || 'Customer support call was not successful');
       }
       
+      if (isSnoozedCustomerSupportResult(response.data)) return snoozedCustomerSupportResult(response.data);
+
       if (isDisabledCustomerSupportResult(response.data)) return disabledCustomerSupportResult(response.data);
 
       console.log('✅ WhatsApp customer support message sent successfully');
@@ -279,8 +284,9 @@ export async function customerSupportMessageWorkflow(
           console.log(`🚀 Parent close policy: ABANDON - WhatsApp workflow will continue independently`);
 
           const whatsappResult = await whatsappHandle.result();
+          if (whatsappResult.skipped) return snoozedCustomerSupportResult({ ...response.data, ...automationSkipMetadata(whatsappResult) });
 
-          if (whatsappResult.success) {
+          if (whatsappResult.success && !whatsappResult.skipped) {
             whatsappSent = true;
             console.log('✅ Follow-up WhatsApp sent successfully');
             console.log(`📨 Message ID: ${whatsappResult.messageId}`);

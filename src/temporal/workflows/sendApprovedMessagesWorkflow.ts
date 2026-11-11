@@ -13,6 +13,7 @@ import { pollTemplateDelivery } from './helpers/pollTemplateDelivery';
 import { isTemplatePending, templateDeliveryMetadata, type TemplateDeliveryMetadata } from '../utils/templateDelivery';
 
 const {
+  checkConversationAutomationActivity,
   getApprovedMessagesActivity,
   claimApprovedMessagesBatchActivity,
   markMessageAsSendingActivity,
@@ -46,6 +47,8 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
   const useExactCommentDelivery = patched('send-approved-comment-exact-target-v1');
   const useExactConnectionDelivery = patched('send-approved-connection-exact-delivery-v1');
   const useTemplatePolling = patched('approved-audio-template-polling-v1');
+  const useSnooze = patched('conversation-automation-snooze-v1');
+  let skippedCount = 0;
   let deferredCount = 0;
   let pendingCount = 0;
   const reconciliationNeeded: TemplateDeliveryMetadata[] = [];
@@ -116,6 +119,10 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     const COMMENT_CHANNELS = ['facebook', 'instagram', 'threads', 'linkedin', 'x', 'twitter', 'youtube'];
 
     try {
+      if (useSnooze) {
+        const guard = await checkConversationAutomationActivity({ site_id: msg.site_id, conversation_id: msg.conversation_id, message_id: messageId });
+        if (guard.skipped) { skippedCount++; return false; }
+      }
       if (resolvedMessage.unresolved.length > 0) {
         throw new Error(
           `Unresolved delivery placeholders: ${resolvedMessage.unresolved.join(', ')}`
@@ -123,6 +130,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
       }
       if (managedOutreach) {
         const result = await sendOutreachMessageActivity({ site_id: msg.site_id, message_id: messageId });
+        if (result.skipped) { skippedCount++; return false; }
         if (!result.success) {
           await deferOutreachMessageActivity({
             site_id: msg.site_id,
@@ -147,6 +155,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
           pendingCount++;
           return false; // API keeps queued; do not complete tasks or reset its receipt.
         }
+        if (result.skipped) { skippedCount++; return false; }
         if (!result.success) {
           if (exactTemplateAudio) {
             if (result.needs_reconciliation) reconciliationNeeded.push(templateDeliveryMetadata(result));
@@ -174,7 +183,9 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
           agent_id: msg.custom_data?.userId,
           lead_id: msg.lead_id,
           from: msg.custom_data?.siteName || 'Sales Agent',
+          ...(useSnooze ? { conversation_id: msg.conversation_id, message_id: msg.message_id } : {}),
         });
+        if (emailResult.skipped) { skippedCount++; return false; }
         if (emailResult.success) {
           sent = true;
           sentMessageId = emailResult.messageId;
@@ -212,7 +223,8 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         if (useExactCommentDelivery && msg.custom_data?.source === 'comment') {
           // Starting a child is not delivery. The API validates the saved target
           // and owns its claim/receipt; do not run generic status writes.
-          await commentChild.result();
+          const result = await commentChild.result();
+          if (result?.skipped) { skippedCount++; return false; }
         }
         
         sent = true;
@@ -246,6 +258,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
             message: msg.content,
             site_id: msg.site_id,
             from: msg.custom_data?.siteName || 'Sales Agent',
+          ...(useSnooze ? { conversation_id: msg.conversation_id, message_id: msg.message_id } : {}),
             agent_id: msg.custom_data?.userId,
             lead_id: msg.lead_id,
             conversation_id: msg.conversation_id,
@@ -298,7 +311,8 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
             parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
           });
           voiceChildStarted = true;
-          await voiceChild.result();
+          const result = await voiceChild.result();
+          if (result?.skipped) { skippedCount++; return false; }
           console.log(`✅ Voice call child completed placement (workflowId: ${workflowId}).`);
         } else {
           const workflowId = `send-${channel}-approved-${msg.message_id}`;
@@ -492,9 +506,10 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
   const results = [...await regularResultsPromise, ...voiceCallResults];
 
   const successCount = results.filter((r) => r.status === 'fulfilled' && r.value === true).length;
-  const failedCount = results.filter((r) => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === false)).length - deferredCount - pendingCount;
+  const failedCount = results.filter((r) => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === false)).length - deferredCount - pendingCount - skippedCount;
 
   return { processed: messages.length, success: successCount, failed: failedCount, deferred: deferredCount,
+    ...(useSnooze ? { skipped: skippedCount } : {}),
     ...(useTemplatePolling ? { pending: pendingCount } : {}),
     ...(reconciliationNeeded.length ? { needs_reconciliation: reconciliationNeeded } : {}) };
 }

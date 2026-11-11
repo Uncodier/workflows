@@ -167,6 +167,7 @@ it('audio template response never creates a template, deletes a message or overw
   expect(mockStatus).not.toHaveBeenCalled();
 });
 it('legacy WhatsApp command retains its old argument shape', async () => {
+  (patched as jest.Mock).mockReturnValue(false);
   await sendWhatsappFromAgent({ ...common, phone_number: '+15555550100' });
   expect(mockLegacySend).toHaveBeenCalledTimes(1);
   expect(mockLegacySend.mock.calls[0][0]).not.toHaveProperty('response_format');

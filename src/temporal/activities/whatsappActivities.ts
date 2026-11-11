@@ -1,3 +1,5 @@
+import { checkConversationAutomationActivity } from './automationSnoozeActivities';
+import { automationSkipMetadata, type AutomationSkipMetadata } from '../utils/automationSnooze';
 import { apiService } from '../services/apiService';
 import { ApplicationFailure } from '@temporalio/common';
 import {
@@ -136,6 +138,7 @@ export async function analyzeWhatsAppMessageActivity(
  */
 export async function sendWhatsAppResponseActivity(
   responseData: {
+    message_id?: string;
     phone: string;
     message: string;
     conversation_id?: string;
@@ -149,7 +152,9 @@ export async function sendWhatsAppResponseActivity(
   success: boolean;
   message_id?: string;
   error?: string;
-}> {
+} & AutomationSkipMetadata> {
+  const guard = await checkConversationAutomationActivity(responseData);
+  if (guard.skipped) return guard;
   console.log('📱 Sending WhatsApp response...');
   console.log(`📞 To: ${responseData.phone}`);
   console.log(`💬 Message: ${responseData.message?.substring(0, 100) || 'No message content'}...`);
@@ -173,7 +178,8 @@ export async function sendWhatsAppResponseActivity(
     console.log('✅ WhatsApp response sent successfully');
     return {
       success: true,
-      message_id: response.data.message_id
+      message_id: response.data.message_id,
+      ...automationSkipMetadata(response.data)
     };
     
   } catch (error) {
@@ -201,7 +207,7 @@ export interface SendWhatsAppFromAgentParams {
   responseWindowEnabled?: boolean;
 }
 
-export interface SendWhatsAppFromAgentResult {
+export interface SendWhatsAppFromAgentResult extends AutomationSkipMetadata {
   success: boolean;
   messageId: string;
   recipient: string;
@@ -213,6 +219,9 @@ export interface SendWhatsAppFromAgentResult {
  * Activity to send WhatsApp message via agent API
  */
 export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgentParams): Promise<SendWhatsAppFromAgentResult> {
+  const guard = await checkConversationAutomationActivity(params);
+  if (guard.skipped) return { ...guard, messageId: '', recipient: params.phone_number, timestamp: new Date().toISOString() };
+
   console.log('📱 Sending WhatsApp from agent:', {
     recipient: params.phone_number,
     from: params.from || 'AI Assistant',
@@ -256,6 +265,8 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
       throw new Error(`Failed to send WhatsApp message: ${response.error?.message}`);
     }
 
+    if (response.data?.skipped === true) return { success: true, ...automationSkipMetadata(response.data),
+      messageId: '', recipient: params.phone_number, timestamp: new Date().toISOString() };
     if (params.response_format === 'audio' && response.data?.template_required) {
       throw ApplicationFailure.nonRetryable('Explicit audio cannot use a template', 'AUDIO_TEMPLATE_REQUIRED');
     }
@@ -354,7 +365,7 @@ export interface SendTemplateParams {
 /**
  * Interface for sendTemplate activity result  
  */
-export interface SendTemplateResult {
+export interface SendTemplateResult extends AutomationSkipMetadata {
   success: boolean;
   messageId: string;
   timestamp: string;
@@ -381,6 +392,9 @@ function sendTemplateActivityError(error: unknown): Error {
  * Activity to send WhatsApp template
  */
 export async function sendTemplateActivity(params: SendTemplateParams): Promise<SendTemplateResult> {
+  const guard = await checkConversationAutomationActivity(params);
+  if (guard.skipped) return { ...guard, messageId: '', timestamp: new Date().toISOString() };
+
   console.log('📤 Sending WhatsApp template:', {
     template_id: params.template_id,
     phone_number: params.phone_number,
@@ -412,6 +426,7 @@ export async function sendTemplateActivity(params: SendTemplateParams): Promise<
 
     return {
       success: true,
+      ...automationSkipMetadata(response.data),
       messageId: response.data.message_id || 'unknown', // ✅ API returns message_id, not messageId
       timestamp: new Date().toISOString()
     };

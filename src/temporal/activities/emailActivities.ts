@@ -1,3 +1,5 @@
+import { checkConversationAutomationActivity } from './automationSnoozeActivities';
+import { automationSkipMetadata, type AutomationSkipMetadata } from '../utils/automationSnooze';
 import { apiService } from '../services/apiService';
 import { isEmailAuthFailure, permanentEmailErrorType } from '../utils/emailAuthErrors';
 import { ApplicationFailure } from '@temporalio/activity';
@@ -6,6 +8,7 @@ import { ApplicationFailure } from '@temporalio/activity';
  * Email Activity interfaces
  */
 export interface SendEmailParams {
+  message_id?: string;
   email: string;
   from?: string;
   subject: string;
@@ -16,7 +19,7 @@ export interface SendEmailParams {
   lead_id?: string;
 }
 
-export interface SendEmailResult {
+export interface SendEmailResult extends AutomationSkipMetadata {
   success: boolean;
   messageId: string;
   recipient: string;
@@ -56,6 +59,9 @@ export interface DeliveryStatusResult {
  * Activity to send email via agent API
  */
 export async function sendEmailFromAgentActivity(params: SendEmailParams): Promise<SendEmailResult> {
+  const guard = await checkConversationAutomationActivity(params);
+  if (guard.skipped) return { ...guard, messageId: '', recipient: params.email, timestamp: new Date().toISOString() };
+
   console.log('📧 Sending email from agent:', {
     recipient: params.email,
     from: params.from,
@@ -76,7 +82,8 @@ export async function sendEmailFromAgentActivity(params: SendEmailParams): Promi
       site_id: params.site_id,
       agent_id: params.agent_id,
       conversation_id: params.conversation_id,
-      lead_id: params.lead_id
+      lead_id: params.lead_id,
+      ...(params.message_id ? { message_id: params.message_id } : {}),
     });
 
     if (!response.success) {
@@ -87,6 +94,7 @@ export async function sendEmailFromAgentActivity(params: SendEmailParams): Promi
 
     return {
       success: true,
+      ...automationSkipMetadata(response.data),
       messageId: response.data.messageId || 'unknown',
       recipient: params.email,
       timestamp: new Date().toISOString(),

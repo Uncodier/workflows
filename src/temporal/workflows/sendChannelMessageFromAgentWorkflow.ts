@@ -1,3 +1,4 @@
+import { automationSkipMetadata, type AutomationSkipMetadata } from '../utils/automationSnooze';
 import {
   ApplicationFailure,
   proxyActivities,
@@ -32,7 +33,7 @@ export interface SendChannelMessageFromAgentParams {
   custom_data?: Record<string, any>;
 }
 
-export interface SendChannelMessageFromAgentResult extends TemplateDeliveryMetadata {
+export interface SendChannelMessageFromAgentResult extends TemplateDeliveryMetadata, AutomationSkipMetadata {
   success: boolean;
   messageId: string;
   recipient: string;
@@ -95,6 +96,7 @@ export async function sendChannelMessageFromAgentWorkflow(params: SendChannelMes
 
     return {
       success: result.success,
+      ...automationSkipMetadata(result),
       messageId: result.messageId || 'unknown',
       recipient: params.to,
       executionTime: `${executionTimeMs}ms`,

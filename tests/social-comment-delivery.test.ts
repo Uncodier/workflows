@@ -1,5 +1,5 @@
 const mockActivities: Record<string, jest.Mock> = Object.fromEntries([
-  'resetStuckSendingMessagesActivity', 'getApprovedMessagesActivity', 'claimApprovedMessagesBatchActivity',
+  'checkConversationAutomationActivity', 'resetStuckSendingMessagesActivity', 'getApprovedMessagesActivity', 'claimApprovedMessagesBatchActivity',
   'updateMessageStatusToSentActivity', 'cleanupFailedFollowUpActivity',
 ].map(name => [name, jest.fn()]));
 const mockStartChild = jest.fn();
@@ -22,7 +22,8 @@ beforeEach(() => {
   jest.spyOn(console, 'log').mockImplementation(() => {});
   jest.spyOn(console, 'error').mockImplementation(() => {});
   mockPatched.mockReturnValue(true);
-  mockActivities.resetStuckSendingMessagesActivity.mockResolvedValue({ resetCount: 0 });
+  mockActivities.checkConversationAutomationActivity.mockResolvedValue({ success: true });
+    mockActivities.resetStuckSendingMessagesActivity.mockResolvedValue({ resetCount: 0 });
   mockActivities.getApprovedMessagesActivity.mockResolvedValue([proposal]);
   mockActivities.claimApprovedMessagesBatchActivity.mockResolvedValue(['saved-proposal']);
   mockStartChild.mockResolvedValue({ result: async () => ({ success: true }) });

@@ -1,3 +1,4 @@
+import { isSnoozedCustomerSupportResult } from '../utils/automationSnooze';
 import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
 import type { EmailData } from './customerSupportActivities';
@@ -217,7 +218,7 @@ export async function sendCustomerSupportMessageActivity(
       throw customerSupportApiFailure(response.error);
     }
 
-    if (!isDisabledCustomerSupportResult(response.data) && !isUsableCustomerSupportResponse(response.data)) {
+    if (!isSnoozedCustomerSupportResult(response.data) && !isDisabledCustomerSupportResult(response.data) && !isUsableCustomerSupportResponse(response.data)) {
       console.error('❌ Customer support API returned no usable assistant response');
       throw ApplicationFailure.create({
         message: 'Customer support API returned no usable assistant response',
