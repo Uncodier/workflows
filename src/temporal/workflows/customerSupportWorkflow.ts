@@ -1,5 +1,6 @@
 import { automationSkipMetadata, isSnoozedCustomerSupportResult, snoozedCustomerSupportResult } from '../utils/automationSnooze';
-import { proxyActivities, startChild, ParentClosePolicy, upsertSearchAttributes, isCancellation, patched } from '@temporalio/workflow';
+import { proxyActivities, startChild, ParentClosePolicy, ChildWorkflowCancellationType, upsertSearchAttributes, isCancellation, patched } from '@temporalio/workflow';
+import { waitForConversationTurn } from './helpers/waitForConversationTurn';
 import { responseFormatFields } from './helpers/responseFormat';
 import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
@@ -51,6 +52,8 @@ export async function customerSupportMessageWorkflow(
   data?: any;
   error?: string;
 }> {
+  const useConversationFifo = patched('conversation-turn-fifo-v1');
+  if (useConversationFifo) await waitForConversationTurn(messageData);
   const useChannelGuidance = channelGuidanceEnabled();
   const useResponseFormat = patched('customer-support-response-format-v1');
   console.log('🎯 Starting customer support message workflow...');
@@ -277,7 +280,8 @@ export async function customerSupportMessageWorkflow(
           const whatsappHandle = await startChild(sendWhatsappFromAgent, {
             workflowId: whatsappWorkflowId,
             args: [whatsappParams],
-            parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+            parentClosePolicy: useConversationFifo ? ParentClosePolicy.PARENT_CLOSE_POLICY_REQUEST_CANCEL : ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+            ...(useConversationFifo ? { cancellationType: ChildWorkflowCancellationType.WAIT_CANCELLATION_COMPLETED } : {}),
           });
 
           console.log(`📨 Started sendWhatsappFromAgent workflow: ${whatsappWorkflowId}`);
@@ -295,6 +299,7 @@ export async function customerSupportMessageWorkflow(
           }
         }
       } catch (whatsappError) {
+        if (useConversationFifo && isCancellation(whatsappError)) throw whatsappError;
         console.error('❌ WhatsApp workflow failed, but customer support was successful:', whatsappError);
         // Don't fail the entire workflow if WhatsApp fails
       }
@@ -457,7 +462,7 @@ export async function customerSupportMessageWorkflow(
     }
     
   } catch (error) {
-    if (useChannelGuidance && isCancellation(error)) throw error;
+    if ((useConversationFifo || useChannelGuidance) && isCancellation(error)) throw error;
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error('❌ Customer support workflow failed:', errorMessage);
     

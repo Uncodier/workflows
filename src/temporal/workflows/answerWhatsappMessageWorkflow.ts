@@ -1,4 +1,4 @@
-import { startChild, ParentClosePolicy, upsertSearchAttributes } from '@temporalio/workflow';
+import { startChild, ParentClosePolicy, ChildWorkflowCancellationType, isCancellation, patched, upsertSearchAttributes } from '@temporalio/workflow';
 import type { 
   WhatsAppMessageData 
 } from '../activities/whatsappActivities';
@@ -43,6 +43,7 @@ export async function answerWhatsappMessageWorkflow(
   error?: string;
   workflow_id: string;
 }> {
+  const useConversationFifo = patched('conversation-turn-fifo-v1');
   const workflowId = `whatsapp-message-${messageData.messageId || Date.now()}`;
 
   if (messageData.siteId) {
@@ -93,7 +94,8 @@ export async function answerWhatsappMessageWorkflow(
       const customerSupportHandle = await startChild(customerSupportMessageWorkflow, {
         workflowId: customerSupportWorkflowId,
         args: [whatsappDataForCS, baseParams],
-        parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+        parentClosePolicy: useConversationFifo ? ParentClosePolicy.PARENT_CLOSE_POLICY_REQUEST_CANCEL : ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+        ...(useConversationFifo ? { cancellationType: ChildWorkflowCancellationType.WAIT_CANCELLATION_COMPLETED } : {}),
       });
       
       customerSupportTriggered = true;
@@ -127,6 +129,7 @@ export async function answerWhatsappMessageWorkflow(
       }
       
     } catch (customerSupportError) {
+      if (useConversationFifo && isCancellation(customerSupportError)) throw customerSupportError;
       console.error('❌ Customer support workflow failed:', customerSupportError);
       customerSupportResult = {
         success: false,
@@ -147,6 +150,7 @@ export async function answerWhatsappMessageWorkflow(
     };
     
   } catch (error) {
+    if (useConversationFifo && isCancellation(error)) throw error;
     console.error('❌ WhatsApp message workflow failed:', error);
     // Throw error to properly fail the workflow
     throw new Error(`WhatsApp message workflow failed: ${error instanceof Error ? error.message : String(error)}`);

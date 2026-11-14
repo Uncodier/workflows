@@ -8,6 +8,10 @@ import { dailyOperationsWorkflow } from './dailyOperationsWorkflow';
 import { sendReportWorkflow } from './sendReportWorkflow';
 import { scheduleCustomerSupportMessagesWorkflow } from './scheduleCustomerSupportMessagesWorkflow';
 import { customerSupportMessageWorkflow } from './customerSupportWorkflow';
+import { conversationTurnQueueWorkflow } from './conversationTurnQueueWorkflow';
+import { conversationIngressWorkflow } from './conversationIngressWorkflow';
+export { conversationIngressWorkflow } from './conversationIngressWorkflow';
+export { conversationTurnQueueWorkflow } from './conversationTurnQueueWorkflow';
 import { emailCustomerSupportMessageWorkflow } from './emailCustomerSupportWorkflow';
 import { channelCustomerSupportMessageWorkflow } from './channelCustomerSupportWorkflow';
 import { sendEmailFromAgent } from './sendEmailFromAgentWorkflow';
@@ -136,6 +140,8 @@ export const workflows = {
   sendReportWorkflow,
   scheduleCustomerSupportMessagesWorkflow,
   customerSupportMessageWorkflow,
+  conversationTurnQueueWorkflow,
+  conversationIngressWorkflow,
   emailCustomerSupportMessageWorkflow,
   channelCustomerSupportMessageWorkflow,
   sendEmailFromAgent,
@@ -197,6 +203,8 @@ export const workflows = {
 
 // Workflow names for Temporal Client (strings)
 export const workflowNames = {
+  conversationIngressWorkflow: 'conversationIngressWorkflow',
+  conversationTurnQueueWorkflow: 'conversationTurnQueueWorkflow',
   dataProcessingWorkflow: 'dataProcessingWorkflow',
   scheduledApiPollingWorkflow: 'scheduledApiPollingWorkflow', 
   syncEmailsWorkflow: 'syncEmailsWorkflow',

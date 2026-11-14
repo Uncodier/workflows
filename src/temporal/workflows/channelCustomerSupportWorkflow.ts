@@ -1,5 +1,5 @@
 import { automationSkipMetadata, isSnoozedCustomerSupportResult, snoozedCustomerSupportResult } from '../utils/automationSnooze';
-import { proxyActivities, startChild, ParentClosePolicy, isCancellation, patched } from '@temporalio/workflow';
+import { proxyActivities, startChild, ParentClosePolicy, ChildWorkflowCancellationType, isCancellation, patched } from '@temporalio/workflow';
 import { customerSupportResponseFormat, responseFormatFields } from './helpers/responseFormat';
 import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
@@ -28,6 +28,7 @@ export async function channelCustomerSupportMessageWorkflow(
 }> {
   const useChannelGuidance = channelGuidanceEnabled();
   const useResponseFormat = patched('customer-support-response-format-v1');
+  const useConversationFifo = patched('conversation-turn-fifo-v1');
   const channel = baseParams.origin || 'telegram';
   const isEmail = channel === 'email';
   const recipient = isEmail ? messageData.email : messageData.phone;
@@ -119,7 +120,8 @@ export async function channelCustomerSupportMessageWorkflow(
             custom_data: messageData.custom_data,
           },
         ],
-        parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+        parentClosePolicy: useConversationFifo ? ParentClosePolicy.PARENT_CLOSE_POLICY_REQUEST_CANCEL : ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+        ...(useConversationFifo ? { cancellationType: ChildWorkflowCancellationType.WAIT_CANCELLATION_COMPLETED } : {}),
       });
 
       const channelResult = await channelHandle.result();
@@ -127,7 +129,7 @@ export async function channelCustomerSupportMessageWorkflow(
       channelMessageSent = Boolean(channelResult.success && !channelResult.skipped);
     }
   } catch (channelError) {
-    if (useChannelGuidance && isCancellation(channelError)) throw channelError;
+    if ((useConversationFifo || useChannelGuidance) && isCancellation(channelError)) throw channelError;
     console.error(`${channel} send workflow failed, but customer support was successful:`, channelError);
   }
 
