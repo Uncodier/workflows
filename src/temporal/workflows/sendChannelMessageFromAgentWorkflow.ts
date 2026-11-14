@@ -8,6 +8,7 @@ import {
 import type * as activities from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
+import { outboundMediaFields, type OutboundMediaFields } from './helpers/outboundMedia';
 import { pollTemplateDelivery } from './helpers/pollTemplateDelivery';
 import { isTemplatePending, templateDeliveryMetadata, type TemplateDeliveryMetadata } from '../utils/templateDelivery';
 
@@ -19,7 +20,7 @@ const {
   retry: RETRY_POLICIES.NETWORK,
 });
 
-export interface SendChannelMessageFromAgentParams {
+export interface SendChannelMessageFromAgentParams extends OutboundMediaFields {
   response_format?: 'text' | 'audio';
   channel: string;
   to: string;
@@ -54,9 +55,13 @@ const { sendChannelMessageFromAgentActivity: sendAudioOnce } = proxyActivities<t
 export async function sendChannelMessageFromAgentWorkflow(params: SendChannelMessageFromAgentParams): Promise<SendChannelMessageFromAgentResult> {
   console.log(`📤 Starting send ${params.channel} from agent workflow...`);
   const startTime = new Date();
+  const useOutboundMedia = patched('send-channel-outbound-media-v1');
+  let media: OutboundMediaFields = {};
 
   try {
-    if (!params.channel || !params.to || !params.message || !params.site_id) {
+    media = useOutboundMedia ? outboundMediaFields(params) : {};
+    if (media.media_url && params.message === undefined) params = { ...params, message: '' };
+    if (!params.channel || !params.to || (!params.message && !media.media_url) || !params.site_id) {
       throw ApplicationFailure.nonRetryable(
         'Missing required parameters: channel, to, message and site_id are required',
         'CHANNEL_MESSAGE_INVALID_INPUT'
@@ -75,6 +80,7 @@ export async function sendChannelMessageFromAgentWorkflow(params: SendChannelMes
     upsertSearchAttributes(searchAttributes);
 
     console.log(`📞 Executing activity to send ${params.channel} message...`);
+    if (media.media_url && params.response_format === 'audio') throw ApplicationFailure.nonRetryable('Existing media cannot request generated speech', 'INVALID_OUTBOUND_MEDIA');
     if (params.response_format === 'audio' && !params.message_id?.trim()) {
       throw ApplicationFailure.nonRetryable('Explicit audio requires message_id', 'AUDIO_MESSAGE_ID_REQUIRED');
     }
@@ -83,7 +89,7 @@ export async function sendChannelMessageFromAgentWorkflow(params: SendChannelMes
     const result = templateAudio
       ? await pollTemplateDelivery(() => sendAudioOnce(params), params.message_id!, {
         site_id: params.site_id, conversation_id: params.conversation_id, message_id: params.message_id! })
-      : await (params.response_format === 'audio' ? sendAudioOnce : sendChannelMessageFromAgentActivity)(params);
+      : await (params.response_format === 'audio' || media.media_url ? sendAudioOnce : sendChannelMessageFromAgentActivity)(params);
 
     if (!result.success && !(templateAudio && (isTemplatePending(result) || result.needs_reconciliation !== undefined))) {
       throw new Error(result.error || `Failed to send ${params.channel} message`);
@@ -104,9 +110,13 @@ export async function sendChannelMessageFromAgentWorkflow(params: SendChannelMes
       ...(templateAudio ? templateDeliveryMetadata(result) : {}),
     };
   } catch (error) {
+    if (useOutboundMedia && (params.media_url !== undefined || params.message_type && params.message_type !== 'text') && !media.media_url) {
+      throw ApplicationFailure.nonRetryable('Invalid outbound media', 'INVALID_OUTBOUND_MEDIA');
+    }
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Send ${params.channel} from agent workflow failed:`, errorMessage);
 
+    if (media.media_url) throw ApplicationFailure.nonRetryable('Media delivery failed or is unknown; reconcile before retry', 'MEDIA_DELIVERY_FAILED_OR_UNKNOWN');
     if (params.response_format === 'audio') {
       if (error instanceof ApplicationFailure && error.nonRetryable) throw error;
       throw ApplicationFailure.nonRetryable('Audio delivery failed or is unknown; reconcile before retry', 'AUDIO_DELIVERY_FAILED_OR_UNKNOWN');

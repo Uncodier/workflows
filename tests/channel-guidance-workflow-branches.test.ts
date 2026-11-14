@@ -51,6 +51,29 @@ beforeEach(() => {
 });
 
 describe('customer-support entry branches await channel guidance', () => {
+  it.each([true, false])('forwards media-only assistant output only with media replay patch=%s', async enabled => {
+    mockPatched.mockImplementation(id => id === 'customer-support-outbound-media-v1' ? enabled : false);
+    const media = { message_type: 'image', media_url: 'https://assets.example.test/a.jpg', mime_type: 'image/jpeg' };
+    mockSend.mockResolvedValue({ success: true, data: { messages: { assistant: { content: '', message_id: 'assistant-id', custom_data: media } } } });
+    await channelCustomerSupportMessageWorkflow({ message: 'Help', site_id: 'site', phone: '123' }, { origin: 'telegram' });
+    if (enabled) expect(mockStartChild).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ args: [expect.objectContaining({ message: '', ...media })] }));
+    else expect(mockStartChild).not.toHaveBeenCalled();
+  });
+
+  it('retains approval guard for media-only support replies', async () => {
+    mockSend.mockResolvedValue({ success: true, data: { messages: { assistant: { content: '', message_type: 'image', media_url: 'https://assets.example.test/a.jpg' } } } });
+    await channelCustomerSupportMessageWorkflow({ message: 'Help', site_id: 'site', phone: '123', require_approval: true }, { origin: 'telegram' });
+    expect(mockStartChild).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('email forwards media-only instead of generic fallback and honors approval=%s', async require_approval => {
+    const media = { message_type: 'document', media_url: 'https://assets.example.test/a.pdf', mime_type: 'application/pdf' };
+    mockSend.mockResolvedValue({ success: true, data: { require_approval, messages: { assistant: { content: '', ...media } } } });
+    await emailCustomerSupportMessageWorkflow({ site_id: 'site', user_id: 'user', summary: 'Help', lead_notification: 'email',
+      contact_info: { email: 'recipient@example.test', name: null, phone: null, company: null } }, { origin: 'email' });
+    const emailChildren = mockStartChild.mock.calls.filter(call => call[1]?.workflowId?.startsWith('send-email-agent-'));
+    if (require_approval) expect(emailChildren).toHaveLength(0);
+    else expect(emailChildren[0][1].args[0]).toMatchObject({ message: '', ...media });
+  });
   it.each([true, false])('propagates chosen channel audio only with response-format patch=%s', async enabled => {
     mockPatched.mockImplementation(id => id === 'customer-support-response-format-v1' ? enabled : false);
     mockSend.mockResolvedValue({ success: true, data: {

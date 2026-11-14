@@ -2,6 +2,7 @@ import { checkConversationAutomationActivity } from './automationSnoozeActivitie
 import { automationSkipMetadata, type AutomationSkipMetadata } from '../utils/automationSnooze';
 import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
+import { outboundMediaFields } from '../workflows/helpers/outboundMedia';
 import type { SendChannelMessageFromAgentParams } from '../workflows/sendChannelMessageFromAgentWorkflow';
 import type { SendVoiceCallFromAgentParams } from '../workflows/sendVoiceCallFromAgentWorkflow';
 import { templateDeliveryMetadata, validateTemplateDelivery, type TemplateDeliveryMetadata, type TemplateRecoveryRequest, type TemplateRecoveryResult } from '../utils/templateDelivery';
@@ -93,12 +94,16 @@ export async function sendChannelMessageFromAgentActivity(
       message_id: params.message_id,
       custom_data: params.custom_data,
       ...(params.response_format !== undefined ? { response_format: params.response_format } : {}),
+      ...outboundMediaFields(params),
     });
 
     if (!response.success) {
       throw createChannelApiFailure(params.channel, response.error);
     }
     if (response.data?.skipped === true) return { success: true, ...automationSkipMetadata(response.data) };
+    if (params.media_url && (response.data?.template_required || response.data?.success === false)) {
+      throw ApplicationFailure.nonRetryable('Media cannot use a text template or unconfirmed delivery', 'MEDIA_DELIVERY_REJECTED');
+    }
     if (params.response_format === 'audio' && response.data?.template_required) {
       throw ApplicationFailure.nonRetryable('Explicit audio cannot use a template', 'AUDIO_TEMPLATE_REQUIRED');
     }
@@ -107,6 +112,7 @@ export async function sendChannelMessageFromAgentActivity(
     if (templateAudio) validateTemplateDelivery(response.data || {}, params.message_id!);
 
     const messageId = response.data?.messageId || response.data?.message_id;
+    if (params.media_url && !messageId) throw ApplicationFailure.nonRetryable('Media provider acceptance not confirmed', 'MEDIA_DELIVERY_REJECTED');
     console.log(`${params.channel} API delivery status:`, response.data?.status || 'sent');
 
     return {
@@ -115,6 +121,7 @@ export async function sendChannelMessageFromAgentActivity(
       ...(templateAudio ? templateDeliveryMetadata(response.data || {}) : {}),
     };
   } catch (error) {
+    if (params.media_url) throw ApplicationFailure.nonRetryable('Media delivery failed or is unknown; reconcile before retry', 'MEDIA_DELIVERY_FAILED_OR_UNKNOWN');
     if (params.response_format === 'audio') {
       if (error instanceof ApplicationFailure && error.nonRetryable) throw error;
       throw ApplicationFailure.nonRetryable(

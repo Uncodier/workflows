@@ -9,6 +9,7 @@ import { TASK_QUEUES } from '../config/taskQueues';
 import { runChannelGuidance } from './helpers/runChannelGuidance';
 import { channelGuidanceEnabled } from './helpers/channelGuidanceVersion';
 import { isDisabledCustomerSupportResult, disabledCustomerSupportResult } from './helpers/disabledCustomerSupport';
+import { customerSupportMedia } from './helpers/outboundMedia';
 
 // Configure activity options using centralized timeouts
 const { 
@@ -42,6 +43,7 @@ export async function emailCustomerSupportMessageWorkflow(
   error?: string;
 }> {
   const useChannelGuidance = channelGuidanceEnabled();
+  const useOutboundMedia = patched('customer-support-outbound-media-v1');
   console.log('🎯 Starting email customer support message workflow...');
   console.log(`📋 Processing email ID: ${emailData.analysis_id}`);
   console.log(`🏢 Site: ${emailData.site_id}, User: ${emailData.user_id}`);
@@ -109,8 +111,12 @@ export async function emailCustomerSupportMessageWorkflow(
     let emailSent = false;
     
     try {
+      const media = useOutboundMedia ? customerSupportMedia(response.data) : {};
+      const assistantContent = response.data?.messages?.assistant?.content;
+      const approved = !useOutboundMedia || (!(emailData as any).require_approval && response.data?.require_approval !== true);
       // Simple validation: if origin is email and we have an email address, send the email
-      if (baseParams.origin === 'email' && emailData.contact_info.email) {
+      if (baseParams.origin === 'email' && emailData.contact_info.email && approved
+        && (!useOutboundMedia || assistantContent?.trim() || media.media_url)) {
         console.log('📧 Starting sendEmailFromAgent workflow - customer support was successful...');
         console.log(`🔄 Origin: ${baseParams.origin} - proceeding with follow-up email`);
         
@@ -121,9 +127,10 @@ export async function emailCustomerSupportMessageWorkflow(
         const emailParams = {
           email: emailData.contact_info.email,
           subject: response.data?.conversation_title || `Re: ${emailData.original_subject || 'Your inquiry'}`,
-          message: response.data?.messages?.assistant?.content ||
+          message: useOutboundMedia ? (assistantContent || '') : response.data?.messages?.assistant?.content ||
                   `Thank you for your message. We have received your inquiry and our customer support team has been notified. We will get back to you shortly.`,
           site_id: emailData.site_id,
+          ...media,
           agent_id: baseParams.agentId,
           ...(patched('conversation-automation-snooze-v1') ? {
             conversation_id: response.data?.conversation_id, message_id: response.data?.messages?.assistant?.message_id,

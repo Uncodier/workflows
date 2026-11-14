@@ -3,11 +3,12 @@ import { automationSkipMetadata, type AutomationSkipMetadata } from '../utils/au
 import { apiService } from '../services/apiService';
 import { isEmailAuthFailure, permanentEmailErrorType } from '../utils/emailAuthErrors';
 import { ApplicationFailure } from '@temporalio/activity';
+import { outboundMediaFields, type OutboundMediaFields } from '../workflows/helpers/outboundMedia';
 
 /**
  * Email Activity interfaces
  */
-export interface SendEmailParams {
+export interface SendEmailParams extends OutboundMediaFields {
   message_id?: string;
   email: string;
   from?: string;
@@ -84,25 +85,35 @@ export async function sendEmailFromAgentActivity(params: SendEmailParams): Promi
       conversation_id: params.conversation_id,
       lead_id: params.lead_id,
       ...(params.message_id ? { message_id: params.message_id } : {}),
+      ...outboundMediaFields(params),
     });
 
     if (!response.success) {
       throw new Error(`Failed to send email: ${response.error?.message}`);
+    }
+    const data = response.data || {};
+    const skipped = automationSkipMetadata(data);
+    // Providers use different receipt keys; none is the saved database message ID.
+    const receipt = [data.messageId, data.external_message_id, data.email_id, data.envelope_id]
+      .find(value => typeof value === 'string' && value.trim().length > 0 && value !== 'unknown');
+    if (!skipped.skipped && params.media_url && (data.success === false || !receipt)) {
+      throw new Error('Media delivery was not accepted or has no provider receipt');
     }
 
     console.log('✅ Email sent successfully:', response.data);
 
     return {
       success: true,
-      ...automationSkipMetadata(response.data),
-      messageId: response.data.messageId || 'unknown',
+      ...skipped,
+      messageId: skipped.skipped ? '' : receipt || 'unknown',
       recipient: params.email,
       timestamp: new Date().toISOString(),
-      external_message_id: response.data.external_message_id // Capturar el ID externo si está presente
+      external_message_id: skipped.skipped ? undefined : receipt
     };
 
   } catch (error) {
     console.error('❌ Email sending failed:', error);
+    if (params.media_url) throw ApplicationFailure.nonRetryable('Media delivery failed or is unknown; reconcile before retry', 'MEDIA_DELIVERY_FAILED_OR_UNKNOWN');
     if (error instanceof ApplicationFailure) throw error;
     const message = `Email sending failed: ${error instanceof Error ? error.message : String(error)}`;
     const type = permanentEmailErrorType(message);

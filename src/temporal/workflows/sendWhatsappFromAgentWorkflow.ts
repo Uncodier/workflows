@@ -12,6 +12,7 @@ import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 import { buildSendTemplateActivityParams } from './helpers/buildSendTemplateParams';
 import { shouldRetrySendTemplate } from './helpers/whatsappTemplateRejection';
 import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
+import { outboundMediaFields, type OutboundMediaFields } from './helpers/outboundMedia';
 
 // Configure activity options using centralized timeouts
 const {
@@ -42,7 +43,7 @@ const { sendWhatsAppFromAgentActivity: sendAudioOnce } = proxyActivities<typeof 
 /**
  * Workflow parameters interface
  */
-export interface SendWhatsAppFromAgentParams {
+export interface SendWhatsAppFromAgentParams extends OutboundMediaFields {
   response_format?: 'text' | 'audio';
   phone_number: string;
   message: string;
@@ -78,15 +79,20 @@ export interface SendWhatsAppFromAgentResult extends AutomationSkipMetadata {
 export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams): Promise<SendWhatsAppFromAgentResult> {
   console.log('📱 Starting send WhatsApp from agent workflow...');
   const startTime = new Date();
+  const useOutboundMedia = patched('send-whatsapp-outbound-media-v1');
+  let media: OutboundMediaFields = {};
 
   let whatsappResult: any = null; // Declare in broader scope for error handling
   
   try {
+    media = useOutboundMedia ? outboundMediaFields(params) : {};
+    if (media.media_url && params.message === undefined) params = { ...params, message: '' };
+    if (media.media_url && params.response_format === 'audio') throw ApplicationFailure.nonRetryable('Existing media cannot request generated speech', 'INVALID_OUTBOUND_MEDIA');
     if (params.response_format === 'audio' && !params.message_id?.trim()) {
       throw ApplicationFailure.nonRetryable('Explicit audio requires message_id', 'AUDIO_MESSAGE_ID_REQUIRED');
     }
     // Validate required parameters
-    if (!params.phone_number || !params.message || !params.site_id) {
+    if (!params.phone_number || (!params.message && !media.media_url) || !params.site_id) {
       throw ApplicationFailure.nonRetryable(
         'Missing required WhatsApp parameters: phone_number, message and site_id are all required',
         'WHATSAPP_INVALID_INPUT'
@@ -116,15 +122,22 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
         }
         const latestContent: string | null = typeof fetchedMessage?.content === 'string'
           ? (params.response_format === 'audio' ? fetchedMessage.content : fetchedMessage.content.trim()) : null;
-        if (!latestContent?.trim()) {
+        if (useOutboundMedia) {
+          const savedMedia = outboundMediaFields(fetchedMessage.custom_data || {});
+          if (media.media_url && !savedMedia.media_url) throw new Error('MESSAGE_DELETED');
+          media = savedMedia;
+          if (media.media_url && fetchedMessage.custom_data?.response_format === 'audio') throw new Error('INVALID_OUTBOUND_MEDIA');
+          if (media.media_url && params.response_format === 'audio') throw new Error('INVALID_OUTBOUND_MEDIA');
+        }
+        if (!latestContent?.trim() && !media.media_url) {
           console.log('🛑 Message content empty or missing - aborting WhatsApp send sequence');
           throw new Error('MESSAGE_DELETED');
         }
-        currentMessageContent = latestContent;
+        currentMessageContent = latestContent || '';
         console.log('✏️ Using refreshed message content for sending');
       } catch (earlyFetchErr) {
         const msg = earlyFetchErr instanceof Error ? earlyFetchErr.message : String(earlyFetchErr);
-        if (msg === 'MESSAGE_DELETED' || params.response_format === 'audio') {
+        if (msg === 'MESSAGE_DELETED' || params.response_format === 'audio' || media.media_url) {
           throw earlyFetchErr; // Propagate special abort condition
         }
         // If fetch failed for other reasons (e.g., network), proceed with original content
@@ -143,7 +156,7 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
     });
 
     // Step 1: Send WhatsApp using the agent API
-    whatsappResult = await (params.response_format === 'audio' ? sendAudioOnce : sendWhatsAppFromAgentActivity)({
+    whatsappResult = await (params.response_format === 'audio' || media.media_url ? sendAudioOnce : sendWhatsAppFromAgentActivity)({
       phone_number: params.phone_number,
       message: currentMessageContent,
       site_id: params.site_id,
@@ -152,11 +165,13 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
       conversation_id: params.conversation_id,
       lead_id: params.lead_id,
       responseWindowEnabled: params.responseWindowEnabled,
+      ...media,
       ...(params.response_format !== undefined ? { response_format: params.response_format, message_id: params.message_id } : {}),
       ...(patched('conversation-automation-snooze-v1') ? { message_id: params.message_id } : {}),
     });
 
     if (whatsappResult.skipped) return { ...whatsappResult, executionTime: `${Date.now() - startTime.getTime()}ms` };
+    if (media.media_url && whatsappResult.template_required) throw ApplicationFailure.nonRetryable('Media cannot use a text template', 'MEDIA_TEMPLATE_REQUIRED');
 
     // Step 2: Check if template is required (no response window)
     if (params.response_format === 'audio' && whatsappResult.template_required) {
@@ -434,6 +449,7 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
     }
 
   } catch (error) {
+    if (useOutboundMedia && params.media_url !== undefined && !media.media_url) throw ApplicationFailure.nonRetryable('Invalid outbound media', 'INVALID_OUTBOUND_MEDIA');
     const endTime = new Date();
     const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
     
@@ -446,7 +462,7 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
     // (template failures are handled separately above)
     // The HTTP audio delivery owns its receipt/status, including uncertain sends.
     // Never overwrite it or delete the message/cache after a timeout.
-    if (params.response_format !== 'audio' && (params.message_id || params.conversation_id)) {
+    if (params.response_format !== 'audio' && !media.media_url && (params.message_id || params.conversation_id)) {
       try {
         console.log('📝 Updating message status to failed for workflow error...', {
           message_id: params.message_id || 'not-provided',
@@ -487,6 +503,7 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
       console.log('ℹ️ No message_id or conversation_id provided - skipping status update');
     }
     
+    if (media.media_url) throw ApplicationFailure.nonRetryable('Media delivery failed or is unknown; reconcile before retry', 'MEDIA_DELIVERY_FAILED_OR_UNKNOWN');
     if (params.response_format === 'audio') {
       if (error instanceof ApplicationFailure && error.nonRetryable) throw error;
       throw ApplicationFailure.nonRetryable('Audio delivery failed or is unknown; reconcile before retry', 'AUDIO_DELIVERY_FAILED_OR_UNKNOWN');

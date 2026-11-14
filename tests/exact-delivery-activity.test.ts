@@ -16,3 +16,10 @@ test('uncertain delivery returns refusal, no default send endpoint', async () =>
   expect(await sendExactQueuedMessageActivity(request)).toMatchObject({ success: false });
   expect(apiService.post).toHaveBeenCalledTimes(1);
 });
+test('media safety flag is worker-only; API reloads saved media identity and unknown sends are terminal', async () => {
+  (apiService.post as jest.Mock).mockRejectedValueOnce(new Error('timeout'));
+  await expect(sendExactQueuedMessageActivity({ ...request, existing_media: true }))
+    .rejects.toMatchObject({ nonRetryable: true, type: 'MEDIA_DELIVERY_FAILED_OR_UNKNOWN' });
+  expect(apiService.post).toHaveBeenCalledWith('/api/agents/tools/sendExactDelivery', request);
+  expect(apiService.post).toHaveBeenCalledTimes(1);
+});

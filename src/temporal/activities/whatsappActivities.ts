@@ -1,3 +1,4 @@
+import { outboundMediaFields, type OutboundMediaFields } from '../workflows/helpers/outboundMedia';
 import { checkConversationAutomationActivity } from './automationSnoozeActivities';
 import { automationSkipMetadata, type AutomationSkipMetadata } from '../utils/automationSnooze';
 import { apiService } from '../services/apiService';
@@ -194,7 +195,7 @@ export async function sendWhatsAppResponseActivity(
 /**
  * WhatsApp From Agent Activity interfaces
  */
-export interface SendWhatsAppFromAgentParams {
+export interface SendWhatsAppFromAgentParams extends OutboundMediaFields {
   response_format?: 'text' | 'audio';
   message_id?: string;
   phone_number: string;
@@ -248,6 +249,7 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
       responseWindowEnabled: params.responseWindowEnabled === true,
       ...(params.response_format !== undefined ? { response_format: params.response_format } : {}),
       ...(params.message_id ? { message_id: params.message_id } : {}),
+      ...outboundMediaFields(params),
     };
 
     // Only include lead_id if it's present and looks like a valid UUID
@@ -267,6 +269,9 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
 
     if (response.data?.skipped === true) return { success: true, ...automationSkipMetadata(response.data),
       messageId: '', recipient: params.phone_number, timestamp: new Date().toISOString() };
+    if (params.media_url && (response.data?.template_required || response.data?.success === false)) {
+      throw ApplicationFailure.nonRetryable('Media cannot use a text template or unconfirmed delivery', 'MEDIA_DELIVERY_REJECTED');
+    }
     if (params.response_format === 'audio' && response.data?.template_required) {
       throw ApplicationFailure.nonRetryable('Explicit audio cannot use a template', 'AUDIO_TEMPLATE_REQUIRED');
     }
@@ -275,7 +280,7 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
 
     return {
       success: true,
-      messageId: response.data.message_id || 'unknown', // ✅ API returns message_id, not messageId
+      messageId: response.data.message_id || response.data.messageId || 'unknown', // Both endpoint receipt variants.
       recipient: params.phone_number,
       timestamp: new Date().toISOString(),
       template_required: response.data.template_required || false // ✅ Include template_required from API response
@@ -283,6 +288,7 @@ export async function sendWhatsAppFromAgentActivity(params: SendWhatsAppFromAgen
 
   } catch (error) {
     console.error('❌ WhatsApp sending failed:', error);
+    if (params.media_url) throw ApplicationFailure.nonRetryable('Media delivery failed or is unknown; reconcile before retry', 'MEDIA_DELIVERY_FAILED_OR_UNKNOWN');
     if (params.response_format === 'audio') {
       if (error instanceof ApplicationFailure) throw error;
       throw ApplicationFailure.nonRetryable(

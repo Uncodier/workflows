@@ -9,6 +9,7 @@ import { resolveApprovedMessageContent } from './helpers/approvedMessageContent'
 import { settleInBatches } from './helpers/settleInBatches';
 import { resolveOutreachActivity } from '../utils/outreachActivity';
 import { responseFormatFields } from './helpers/responseFormat';
+import { outboundMediaFields } from './helpers/outboundMedia';
 import { pollTemplateDelivery } from './helpers/pollTemplateDelivery';
 import { isTemplatePending, templateDeliveryMetadata, type TemplateDeliveryMetadata } from '../utils/templateDelivery';
 
@@ -38,11 +39,22 @@ const { sendExactQueuedMessageActivity: sendExactAudioOnce } = proxyActivities<A
   startToCloseTimeout: ACTIVITY_TIMEOUTS.EMAIL_OPERATIONS,
   retry: { maximumAttempts: 1 },
 });
+const { sendChannelMessageFromAgentActivity: sendApprovedDmOnce } = proxyActivities<Activities>({
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.WHATSAPP_OPERATIONS,
+  retry: { maximumAttempts: 1 },
+});
+const { sendWhatsAppFromAgentActivity: sendApprovedWhatsAppMediaOnce,
+  sendEmailFromAgentActivity: sendApprovedEmailMediaOnce } = proxyActivities<Activities>({
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.EMAIL_OPERATIONS,
+  retry: { maximumAttempts: 1 },
+});
 
 export async function sendApprovedMessagesWorkflow(): Promise<any> {
   console.log('🚀 Starting sendApprovedMessagesWorkflow...');
   const useBatchClaims = patched('send-approved-messages-batch-claims-v1');
   const useResponseFormat = patched('approved-message-response-format-v1');
+  const useOutboundMedia = patched('approved-message-outbound-media-v1');
+  const useOutstandMedia = patched('approved-outstand-media-delivery-v1');
   const useConfiguredOutreach = patched('outreach-configured-delivery-v1');
   const useExactCommentDelivery = patched('send-approved-comment-exact-target-v1');
   const useExactConnectionDelivery = patched('send-approved-connection-exact-delivery-v1');
@@ -90,6 +102,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
   console.log(`Processing ${messages.length} approved messages in parallel...`);
 
   async function processOneMessage(msg: (typeof messages)[number]): Promise<boolean> {
+    const media = useOutboundMedia ? outboundMediaFields(msg.custom_data || {}) : {};
     let sent = false;
     let voiceChildStarted = false;
     const channel = (msg.custom_data?.channel || msg.custom_data?.source || msg.channel || (msg.custom_data?.type === 'email' ? 'email' : 'whatsapp')).toLowerCase();
@@ -145,12 +158,39 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         sent = true;
         sentMessageId = result.messageId;
         sentRecipient = result.recipient;
-      } else if (exactConnection) {
+      } else if (useOutstandMedia && media.media_url && channel === 'instagram' && !exactConnection) {
+        // The API reloads the scoped saved assistant and Outstand conversation.
+        // No account/default-channel fallback is permitted for this saved identity.
+        const result = await sendApprovedDmOnce({ channel, to: msg.lead_phone || msg.conversation_id,
+          site_id: msg.site_id, message: msg.content || '', message_id: messageId,
+          conversation_id: msg.conversation_id, lead_id: msg.lead_id, custom_data: msg.custom_data,
+          ...media });
+        if (result.skipped) { skippedCount++; return false; }
+        if (!result.success || !result.messageId) throw new Error('Outstand DM acceptance not confirmed');
+        // Outstand returns async pending. The API binds the receipt, webhook owns final status.
+        pendingCount++;
+        return false;
+      } else if (useOutstandMedia && media.media_url && !exactConnection && ['whatsapp', 'email'].includes(channel)) {
+        // Legacy adapters resolve their current configured account; API reloads the saved scoped media.
+        // Never substitute a Zavu connection or text template if that adapter refuses delivery.
+        const provider = msg.custom_data?.channel_delivery?.provider || msg.custom_data?.delivery_provider || msg.custom_data?.provider;
+        if (provider === 'zavu') throw new Error('Saved Zavu media requires an exact connection; refusing legacy adapter fallback');
+        const identity = { site_id: msg.site_id, message_id: messageId, conversation_id: msg.conversation_id,
+          lead_id: msg.lead_id, agent_id: msg.custom_data?.userId, message: msg.content || '', ...media };
+        const result = channel === 'whatsapp'
+          ? await sendApprovedWhatsAppMediaOnce({ ...identity, phone_number: msg.lead_phone, responseWindowEnabled: true })
+          : await sendApprovedEmailMediaOnce({ ...identity, email: msg.lead_email,
+            subject: msg.custom_data?.title || msg.custom_data?.subject || 'Follow-up' });
+        if (result.skipped) { skippedCount++; return false; }
+        if (!result.success || !result.messageId || result.messageId === 'unknown'
+          || ('template_required' in result && result.template_required)) throw new Error('Media adapter acceptance not confirmed');
+        return true; // API owns receipt/status; no worker overwrite or alternate provider call.
+      } else if (exactConnection || media.media_url) {
         const request = { site_id: msg.site_id, message_id: msg.message_id,
           conversation_id: msg.conversation_id, channel };
         const result = exactTemplateAudio
           ? await pollTemplateDelivery(() => sendExactAudioOnce({ ...request, response_format: 'audio' }), messageId, request)
-          : await sendExactQueuedMessageActivity(request);
+          : media.media_url ? await sendExactAudioOnce({ ...request, existing_media: true }) : await sendExactQueuedMessageActivity(request);
         if (exactTemplateAudio && isTemplatePending(result)) {
           pendingCount++;
           return false; // API keeps queued; do not complete tasks or reset its receipt.
@@ -393,6 +433,7 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         // The API owns terminal status and any receipt requiring reconciliation.
         return false;
       }
+      if (media.media_url && !sent) return false; // Keep the saved media/receipt; no text fallback, cleanup or automatic redispatch.
       if (useExactCommentDelivery && msg.custom_data?.source === 'comment') {
         console.error(`Comment delivery failed for saved proposal ${messageId}; retaining it for review`, error);
         return false;

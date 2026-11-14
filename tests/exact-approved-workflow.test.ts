@@ -3,6 +3,8 @@ const mockActivities: Record<string, jest.Mock> = {
   resetStuckSendingMessagesActivity: jest.fn(), getApprovedMessagesActivity: jest.fn(),
   claimApprovedMessagesBatchActivity: jest.fn(), sendOutreachMessageActivity: jest.fn(),
   sendExactQueuedMessageActivity: jest.fn(), deferOutreachMessageActivity: jest.fn(), sendEmailFromAgentActivity: jest.fn(),
+  sendChannelMessageFromAgentActivity: jest.fn(),
+  sendWhatsAppFromAgentActivity: jest.fn(),
   updateMessageStatusToSentActivity: jest.fn(), updateMessageTimestampActivity: jest.fn(),
   updateConversationStatusAfterFollowUpActivity: jest.fn(), updateTaskStatusToCompletedActivity: jest.fn(),
   cleanupFailedFollowUpActivity: jest.fn(),
@@ -11,10 +13,24 @@ const mockActivities: Record<string, jest.Mock> = {
 };
 const mockPatched = jest.fn(() => true);
 const mockExactOptions = jest.fn();
+const mockDmOptions = jest.fn();
+const mockLegacyMediaOptions = jest.fn();
 jest.mock('@temporalio/workflow', () => ({ ...jest.requireActual('@temporalio/workflow'), proxyActivities: (options: any) => ({ ...mockActivities,
   sendExactQueuedMessageActivity: (...args: any[]) => {
     mockExactOptions(options);
     return mockActivities.sendExactQueuedMessageActivity(...args);
+  },
+  sendChannelMessageFromAgentActivity: (...args: any[]) => {
+    mockDmOptions(options);
+    return mockActivities.sendChannelMessageFromAgentActivity(...args);
+  },
+  sendWhatsAppFromAgentActivity: (...args: any[]) => {
+    mockLegacyMediaOptions(options);
+    return mockActivities.sendWhatsAppFromAgentActivity(...args);
+  },
+  sendEmailFromAgentActivity: (...args: any[]) => {
+    mockLegacyMediaOptions(options);
+    return mockActivities.sendEmailFromAgentActivity(...args);
   },
 }), patched: mockPatched,
   startChild: jest.fn(), sleep: jest.fn(), ParentClosePolicy: {} }));
@@ -31,6 +47,81 @@ const proposal = (channel: string, connectionId: unknown = 'selected') => ({
 
 const queuedAudio = () => ({ ...proposal('whatsapp'), custom_data: {
   channel: 'whatsapp', connection_id: 'selected', response_format: 'audio' } });
+test('approved media-only uses exact saved-record delivery once, without child/text fallback or cleanup', async () => {
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{ ...proposal('telegram'), content: '', custom_data: {
+    channel: 'telegram', message_type: 'image', media_url: 'https://assets.example.test/a.jpg' } }]);
+  mockActivities.sendExactQueuedMessageActivity.mockRejectedValueOnce(new Error('timeout'));
+  expect(await sendApprovedMessagesWorkflow()).toMatchObject({ success: 0, failed: 1 });
+  expect(mockActivities.sendExactQueuedMessageActivity).toHaveBeenCalledTimes(1);
+  expect(mockActivities.sendExactQueuedMessageActivity).toHaveBeenCalledWith({ site_id: 'site', message_id: 'message', conversation_id: 'conversation', channel: 'telegram', existing_media: true });
+  expect(mockExactOptions.mock.calls[0][0].retry.maximumAttempts).toBe(1);
+  expect(startChild).not.toHaveBeenCalled();
+  expect(mockActivities.updateMessageStatusToSentActivity).not.toHaveBeenCalled();
+  expect(mockActivities.cleanupFailedFollowUpActivity).not.toHaveBeenCalled();
+  expect(mockActivities.deferOutreachMessageActivity).not.toHaveBeenCalled();
+});
+test('managed outreach media retains the central outreach policy and lease boundary', async () => {
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{ ...proposal('telegram'), content: '', custom_data: {
+    channel: 'telegram', outreach_activity: 'lead_outreach', message_type: 'image', media_url: 'https://assets.example.test/a.jpg' } }]);
+  mockActivities.sendOutreachMessageActivity.mockResolvedValueOnce({ success: true, messageId: 'provider' });
+  await sendApprovedMessagesWorkflow();
+  expect(mockActivities.sendOutreachMessageActivity).toHaveBeenCalledTimes(1);
+  expect(mockActivities.sendExactQueuedMessageActivity).not.toHaveBeenCalled();
+  expect(startChild).not.toHaveBeenCalled();
+});
+test('approved Outstand Instagram media without a Zavu connection uses one scoped native DM send and stays pending', async () => {
+  const media = { message_type: 'image', media_url: 'https://assets.example.test/a.jpg', mime_type: 'image/jpeg' };
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{ ...proposal('instagram'), content: '', custom_data: { channel: 'instagram', ...media } }]);
+  mockActivities.sendChannelMessageFromAgentActivity.mockResolvedValueOnce({ success: true, messageId: 'outstand-provider' });
+  expect(await sendApprovedMessagesWorkflow()).toMatchObject({ success: 0, failed: 0, pending: 1 });
+  expect(mockActivities.sendChannelMessageFromAgentActivity).toHaveBeenCalledWith(expect.objectContaining({ channel: 'instagram', message: '',
+    site_id: 'site', message_id: 'message', conversation_id: 'conversation', ...media }));
+  expect(mockDmOptions.mock.calls[0][0].retry.maximumAttempts).toBe(1);
+  expect(mockActivities.sendExactQueuedMessageActivity).not.toHaveBeenCalled();
+  expect(mockActivities.updateMessageStatusToSentActivity).not.toHaveBeenCalled();
+  expect(mockActivities.updateTaskStatusToCompletedActivity).not.toHaveBeenCalled();
+});
+test('unknown approved Outstand DM send is not retried through exact, child, or text', async () => {
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{ ...proposal('instagram'), content: '', custom_data: {
+    channel: 'instagram', message_type: 'video', media_url: 'https://assets.example.test/a.mp4' } }]);
+  mockActivities.sendChannelMessageFromAgentActivity.mockRejectedValueOnce(new Error('timeout'));
+  expect(await sendApprovedMessagesWorkflow()).toMatchObject({ success: 0, failed: 1 });
+  expect(mockActivities.sendChannelMessageFromAgentActivity).toHaveBeenCalledTimes(1);
+  expect(mockActivities.sendExactQueuedMessageActivity).not.toHaveBeenCalled();
+  expect(mockActivities.cleanupFailedFollowUpActivity).not.toHaveBeenCalled();
+  expect(startChild).not.toHaveBeenCalled();
+});
+test.each(['whatsapp', 'email'])('approved legacy %s media-only uses current adapter once with saved identity', async channel => {
+  const activity = channel === 'whatsapp' ? mockActivities.sendWhatsAppFromAgentActivity : mockActivities.sendEmailFromAgentActivity;
+  const media = { message_type: 'document', media_url: 'https://assets.example.test/a.pdf', mime_type: 'application/pdf' };
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{ ...proposal(channel), content: '', lead_phone: '+15555550100', lead_email: 'recipient@example.test',
+    custom_data: { channel, ...media } }]);
+  activity.mockResolvedValueOnce({ success: true, messageId: 'provider' });
+  expect(await sendApprovedMessagesWorkflow()).toMatchObject({ success: 1, failed: 0 });
+  expect(activity).toHaveBeenCalledWith(expect.objectContaining({ site_id: 'site', message_id: 'message', conversation_id: 'conversation', message: '', ...media }));
+  expect(mockLegacyMediaOptions.mock.calls[0][0].retry.maximumAttempts).toBe(1);
+  expect(mockActivities.sendExactQueuedMessageActivity).not.toHaveBeenCalled();
+  expect(mockActivities.updateMessageStatusToSentActivity).not.toHaveBeenCalled();
+  expect(startChild).not.toHaveBeenCalled();
+});
+test('legacy WhatsApp media never substitutes a text template after adapter refusal', async () => {
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{ ...proposal('whatsapp'), content: '', custom_data: {
+    channel: 'whatsapp', message_type: 'image', media_url: 'https://assets.example.test/a.jpg' } }]);
+  mockActivities.sendWhatsAppFromAgentActivity.mockResolvedValueOnce({ success: true, messageId: 'saved', template_required: true });
+  expect(await sendApprovedMessagesWorkflow()).toMatchObject({ success: 0, failed: 1 });
+  expect(mockActivities.sendWhatsAppFromAgentActivity).toHaveBeenCalledTimes(1);
+  expect(startChild).not.toHaveBeenCalled();
+  expect(mockActivities.sendExactQueuedMessageActivity).not.toHaveBeenCalled();
+  expect(mockActivities.cleanupFailedFollowUpActivity).not.toHaveBeenCalled();
+});
+test('saved Zavu media with missing connection never guesses a legacy adapter', async () => {
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{ ...proposal('whatsapp'), content: '', custom_data: {
+    channel: 'whatsapp', channel_delivery: { provider: 'zavu' }, message_type: 'image', media_url: 'https://assets.example.test/a.jpg' } }]);
+  expect(await sendApprovedMessagesWorkflow()).toMatchObject({ success: 0, failed: 1 });
+  expect(mockActivities.sendWhatsAppFromAgentActivity).not.toHaveBeenCalled();
+  expect(mockActivities.sendExactQueuedMessageActivity).not.toHaveBeenCalled();
+  expect(mockActivities.cleanupFailedFollowUpActivity).not.toHaveBeenCalled();
+});
 const pending = { success: true, status: 'template_pending', template_pending: true,
   delivery_format: 'template', requested_response_format: 'audio', message_id: 'message', template_id: 'template' };
 test('exact queued pending polls and only completes once after API acceptance', async () => {

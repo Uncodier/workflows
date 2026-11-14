@@ -3,6 +3,7 @@ import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
 import type { EmailData } from './customerSupportActivities';
 import { isDisabledCustomerSupportResult } from '../workflows/helpers/disabledCustomerSupport';
+import { customerSupportMedia } from '../workflows/helpers/outboundMedia';
 
 export interface CustomerSupportMessageRequest {
   response_format?: 'text' | 'audio';
@@ -60,6 +61,7 @@ export function getCustomerSupportResponseContent(data: unknown): string | undef
 }
 
 export function isUsableCustomerSupportResponse(data: unknown): boolean {
+  try { if (customerSupportMedia(data).media_url) return true; } catch { return false; }
   const content = getCustomerSupportResponseContent(data);
   if (!content) return false;
 

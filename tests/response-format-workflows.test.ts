@@ -14,6 +14,7 @@ jest.mock('@temporalio/workflow', () => ({
     return ({
     sendWhatsAppFromAgentActivity: options.retry.maximumAttempts === 1 ? mockSend : mockLegacySend,
     sendChannelMessageFromAgentActivity: options.retry.maximumAttempts === 1 ? mockSend : mockLegacySend,
+    sendEmailFromAgentActivity: options.retry.maximumAttempts === 1 ? mockSend : mockLegacySend,
     fetchRecordByTableAndIdActivity: mockFetch,
     updateMessageStatusToSentActivity: mockStatus,
     cleanupFailedFollowUpActivity: mockCleanup,
@@ -27,6 +28,7 @@ jest.mock('@temporalio/workflow', () => ({
 }));
 import { sendWhatsappFromAgent } from '../src/temporal/workflows/sendWhatsappFromAgentWorkflow';
 import { sendChannelMessageFromAgentWorkflow } from '../src/temporal/workflows/sendChannelMessageFromAgentWorkflow';
+import { sendEmailFromAgent } from '../src/temporal/workflows/sendEmailFromAgentWorkflow';
 import { patched, sleep } from '@temporalio/workflow';
 
 const common = { site_id: 'site', message: 'Hello', message_id: 'message', conversation_id: 'conversation', lead_id: 'lead' };
@@ -182,4 +184,52 @@ it('makes ambiguous activity timeout terminal for workflow-level retries as well
     .rejects.toMatchObject({ type: 'AUDIO_DELIVERY_FAILED_OR_UNKNOWN', nonRetryable: true });
   expect(mockStatus).not.toHaveBeenCalled();
   expect(mockCleanup).not.toHaveBeenCalled();
+});
+
+it('sends channel media-only through one-attempt proxy without a text command', async () => {
+  await sendChannelMessageFromAgentWorkflow({ ...common, message: '', channel: 'telegram', to: '123',
+    message_type: 'image', media_url: 'https://assets.example.test/a.jpg' });
+  expect(mockSend).toHaveBeenCalledTimes(1);
+  expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({ message: '', message_type: 'image', media_url: 'https://assets.example.test/a.jpg' }));
+  expect(mockLegacySend).not.toHaveBeenCalled();
+});
+
+it('refreshes saved WhatsApp media-only metadata and does not retry/template/cleanup an ambiguous send', async () => {
+  const media = { message_type: 'image' as const, media_url: 'https://assets.example.test/latest.jpg' };
+  mockFetch.mockResolvedValue({ content: '', custom_data: media });
+  mockSend.mockRejectedValueOnce(new Error('timeout'));
+  await expect(sendWhatsappFromAgent({ ...common, message: '', phone_number: '+15555550100',
+    message_type: 'image', media_url: 'https://assets.example.test/original.jpg' }))
+    .rejects.toMatchObject({ type: 'MEDIA_DELIVERY_FAILED_OR_UNKNOWN', nonRetryable: true });
+  expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({ message: '', ...media }));
+  expect(mockSend).toHaveBeenCalledTimes(1);
+  expect(mockLegacySend).not.toHaveBeenCalled();
+  expect(mockTemplate).not.toHaveBeenCalled();
+  expect(mockStatus).not.toHaveBeenCalled();
+  expect(mockCleanup).not.toHaveBeenCalled();
+});
+
+it('keeps pre-media replay branch on legacy channel retry proxy', async () => {
+  (patched as jest.Mock).mockImplementation(id => id !== 'send-channel-outbound-media-v1');
+  await sendChannelMessageFromAgentWorkflow({ ...common, channel: 'telegram', to: '123' });
+  expect(mockLegacySend).toHaveBeenCalledTimes(1);
+  expect(mockSend).not.toHaveBeenCalled();
+});
+it('email media-only uses one attempt and does not overwrite receipts after an unknown delivery', async () => {
+  mockSend.mockRejectedValueOnce(new Error('timeout'));
+  await expect(sendEmailFromAgent({ ...common, message: '', email: 'recipient@example.test', subject: 'File',
+    message_type: 'document', media_url: 'https://assets.example.test/a.pdf' }))
+    .rejects.toMatchObject({ nonRetryable: true, type: 'MEDIA_DELIVERY_FAILED_OR_UNKNOWN' });
+  expect(mockSend).toHaveBeenCalledTimes(1);
+  expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({ message: '', media_url: 'https://assets.example.test/a.pdf', message_type: 'document' }));
+  expect(mockLegacySend).not.toHaveBeenCalled();
+  expect(mockStatus).not.toHaveBeenCalled();
+});
+it('email old histories retain legacy argument shape and retry proxy', async () => {
+  (patched as jest.Mock).mockReturnValue(false);
+  await sendEmailFromAgent({ ...common, email: 'recipient@example.test', subject: 'Hello' });
+  expect(mockLegacySend).toHaveBeenCalledTimes(1);
+  expect(mockLegacySend.mock.calls[0][0]).not.toHaveProperty('media_url');
+  expect(mockLegacySend.mock.calls[0][0]).not.toHaveProperty('message_id');
+  expect(mockSend).not.toHaveBeenCalled();
 });

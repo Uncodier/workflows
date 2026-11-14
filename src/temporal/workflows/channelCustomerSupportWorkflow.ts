@@ -1,6 +1,7 @@
 import { automationSkipMetadata, isSnoozedCustomerSupportResult, snoozedCustomerSupportResult } from '../utils/automationSnooze';
 import { proxyActivities, startChild, ParentClosePolicy, ChildWorkflowCancellationType, isCancellation, patched } from '@temporalio/workflow';
 import { customerSupportResponseFormat, responseFormatFields } from './helpers/responseFormat';
+import { customerSupportMedia } from './helpers/outboundMedia';
 import type { Activities } from '../activities';
 import type { EmailData } from '../activities/customerSupportActivities';
 import { sendChannelMessageFromAgentWorkflow } from './sendChannelMessageFromAgentWorkflow';
@@ -28,6 +29,7 @@ export async function channelCustomerSupportMessageWorkflow(
 }> {
   const useChannelGuidance = channelGuidanceEnabled();
   const useResponseFormat = patched('customer-support-response-format-v1');
+  const useOutboundMedia = patched('customer-support-outbound-media-v1');
   const useConversationFifo = patched('conversation-turn-fifo-v1');
   const channel = baseParams.origin || 'telegram';
   const isEmail = channel === 'email';
@@ -90,13 +92,14 @@ export async function channelCustomerSupportMessageWorkflow(
   try {
     const assistantMessage = response.data?.messages?.assistant?.content || response.data?.message;
     const assistantMessageId = response.data?.messages?.assistant?.message_id;
+    const media = useOutboundMedia ? customerSupportMedia(response.data) : {};
     const subject = isEmail
       ? response.data?.conversation_title || `Re: ${emailDataForCS.original_subject || 'Your inquiry'}`
       : undefined;
 
-    if (requireApproval) {
+    if (requireApproval || (useOutboundMedia && response.data?.require_approval === true)) {
       console.log(`Skipping ${channel} instant send - require_approval=true, waiting for Accept`);
-    } else if (!assistantMessage) {
+    } else if (!assistantMessage && !media.media_url) {
       console.log(`Skipping ${channel} send - no assistant message content from customer support`);
     } else if (!recipient) {
       console.log(`Skipping ${channel} send - no recipient provided in inbound messageData`);
@@ -109,7 +112,8 @@ export async function channelCustomerSupportMessageWorkflow(
           {
             channel,
             to: recipient,
-            message: assistantMessage,
+            message: assistantMessage || '',
+            ...media,
             site_id: response.data?.site_id || emailDataForCS.site_id,
             subject,
             agent_id: baseParams.agentId,

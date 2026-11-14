@@ -15,6 +15,7 @@ export interface ExactQueuedDeliveryResult extends TemplateDeliveryMetadata, Aut
 export async function sendExactQueuedMessageActivity(request: {
   site_id: string; message_id: string; conversation_id: string; channel: string;
   response_format?: 'audio';
+  existing_media?: boolean;
 }): Promise<ExactQueuedDeliveryResult> {
   const guard = await checkConversationAutomationActivity(request);
   if (guard.skipped) return { ...guard };
@@ -23,7 +24,7 @@ export async function sendExactQueuedMessageActivity(request: {
   try {
     // The API resolves the immutable format from the saved message. This flag
     // selects activity safety semantics only, not a new HTTP argument.
-    const { response_format: _format, ...body } = request;
+    const { response_format: _format, existing_media: _media, ...body } = request;
     const response = await apiService.post<ExactQueuedDeliveryResult>('/api/agents/tools/sendExactDelivery', body);
     if (response.success && response.data?.skipped === true) return { ...response.data, success: true };
     if (response.success && response.data?.success) {
@@ -32,9 +33,10 @@ export async function sendExactQueuedMessageActivity(request: {
         ? { ...response.data, messageId: response.data.messageId || response.data.message_id }
         : response.data;
     }
-    if (templateAudio) throw new Error('Exact audio delivery was not confirmed');
+    if (templateAudio || request.existing_media) throw new Error('Exact delivery was not confirmed');
     return { success: false, reason: 'Exact selected delivery could not be confirmed' };
   } catch {
+    if (request.existing_media) throw ApplicationFailure.nonRetryable('Exact media delivery failed or is unknown; reconcile before retry', 'MEDIA_DELIVERY_FAILED_OR_UNKNOWN');
     if (templateAudio) throw ApplicationFailure.nonRetryable(
       'Exact audio delivery failed or is unknown; reconcile before retry', 'AUDIO_DELIVERY_FAILED_OR_UNKNOWN');
     // Never send via the default account or invalidate a lead after an uncertain response.

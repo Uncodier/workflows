@@ -1,13 +1,14 @@
 import { customerSupportResponseFormat, responseFormatFields, type ResponseFormat } from './responseFormat';
+import { customerSupportMedia, type OutboundMediaFields } from './outboundMedia';
 
-export type CustomerSupportWhatsAppResponse = {
+export type CustomerSupportWhatsAppResponse = OutboundMediaFields & {
   response_format?: ResponseFormat;
   messages?: {
-    assistant?: {
+    assistant?: OutboundMediaFields & {
       content?: string;
       message_id?: string;
       response_format?: ResponseFormat;
-      custom_data?: { response_format?: ResponseFormat };
+      custom_data?: OutboundMediaFields & { response_format?: ResponseFormat };
     };
   };
   conversation_id?: string | null;
@@ -20,7 +21,7 @@ export type InboundWhatsAppData = {
   conversationId?: string | null;
 };
 
-export type BuiltWhatsAppSendParams = {
+export type BuiltWhatsAppSendParams = OutboundMediaFields & {
   response_format?: ResponseFormat;
   phone_number: string;
   message: string;
@@ -60,13 +61,16 @@ export function buildWhatsAppSendParams(params: {
   whatsappData: InboundWhatsAppData;
   agentId?: string;
   useResponseFormat?: boolean;
+  useOutboundMedia?: boolean;
   response_format?: ResponseFormat;
 }): BuiltWhatsAppSendParams | null {
   const { csResponse, whatsappData, agentId } = params;
+  if (params.useOutboundMedia && (csResponse as any)?.require_approval === true) return null;
   const responseFormat = params.useResponseFormat ? customerSupportResponseFormat(csResponse, params.response_format) : undefined;
   const content = csResponse?.messages?.assistant?.content;
+  const media = params.useOutboundMedia ? customerSupportMedia(csResponse) : {};
   const message = nonEmpty(content) ? (responseFormat === 'audio' ? content : nonEmpty(content)) : undefined;
-  if (!message) {
+  if (!message && !media.media_url) {
     return null;
   }
 
@@ -76,11 +80,12 @@ export function buildWhatsAppSendParams(params: {
 
   const result: BuiltWhatsAppSendParams = {
     phone_number: whatsappData.phoneNumber,
-    message,
+    message: message || '',
     site_id: whatsappData.siteId,
     from: 'Customer Support',
     responseWindowEnabled: true,
     ...responseFormatFields(responseFormat),
+    ...media,
   };
 
   if (agentId) {

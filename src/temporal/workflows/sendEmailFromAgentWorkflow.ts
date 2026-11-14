@@ -1,5 +1,6 @@
 import type { AutomationSkipMetadata } from '../utils/automationSnooze';
-import { proxyActivities, upsertSearchAttributes, patched } from '@temporalio/workflow';
+import { ApplicationFailure, proxyActivities, upsertSearchAttributes, patched } from '@temporalio/workflow';
+import { outboundMediaFields, type OutboundMediaFields } from './helpers/outboundMedia';
 import type * as activities from '../activities';
 import { ACTIVITY_TIMEOUTS, RETRY_POLICIES } from '../config/timeouts';
 
@@ -15,7 +16,7 @@ const {
 /**
  * Workflow parameters interface
  */
-export interface SendEmailFromAgentParams {
+export interface SendEmailFromAgentParams extends OutboundMediaFields {
   email: string;
   from?: string;
   subject: string;
@@ -45,10 +46,14 @@ export interface SendEmailFromAgentResult extends AutomationSkipMetadata {
 export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Promise<SendEmailFromAgentResult> {
   console.log('📧 Starting send email from agent workflow...');
   const startTime = new Date();
+  const useOutboundMedia = patched('send-email-outbound-media-v1');
+  let media: OutboundMediaFields = {};
 
   try {
+    media = useOutboundMedia ? outboundMediaFields(params) : {};
+    if (media.media_url && params.message === undefined) params = { ...params, message: '' };
     // Validate required parameters
-    if (!params.email || !params.subject || !params.message || !params.site_id) {
+    if (!params.email || !params.subject || (!params.message && !media.media_url) || !params.site_id) {
       throw new Error('Missing required email parameters: email, subject, message and site_id are all required');
     }
 
@@ -75,7 +80,7 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
     });
 
     // Send email using the agent API
-    const emailResult = await sendEmailFromAgentActivity({
+    const emailResult = await (media.media_url ? sendMediaOnce : sendEmailFromAgentActivity)({
       email: params.email,
       from: params.from,
       subject: params.subject,
@@ -84,6 +89,7 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
       agent_id: params.agent_id,
       conversation_id: params.conversation_id,
       lead_id: params.lead_id,
+      ...media,
       ...(patched('conversation-automation-snooze-v1') ? { message_id: params.message_id } : {}),
     });
 
@@ -100,7 +106,7 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
 
     // Actualizar custom_data.channel = "email" solo si tenemos message_id o conversation_id
     // (significa que hay un mensaje existente en BD para actualizar)
-    if (params.message_id || params.conversation_id) {
+    if (!media.media_url && (params.message_id || params.conversation_id)) {
       try {
         console.log('📝 Updating message custom_data with channel = email...', {
           message_id: params.message_id || 'not-provided',
@@ -145,6 +151,8 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
     };
 
   } catch (error) {
+    if (useOutboundMedia && params.media_url !== undefined && !media.media_url) throw ApplicationFailure.nonRetryable('Invalid outbound media', 'INVALID_OUTBOUND_MEDIA');
+    if (media.media_url) throw ApplicationFailure.nonRetryable('Media delivery failed or is unknown; reconcile before retry', 'MEDIA_DELIVERY_FAILED_OR_UNKNOWN');
     const endTime = new Date();
     const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;
     
@@ -191,4 +199,8 @@ export async function sendEmailFromAgent(params: SendEmailFromAgentParams): Prom
     
     throw error;
   }
-} 
+}
+const { sendEmailFromAgentActivity: sendMediaOnce } = proxyActivities<typeof activities>({
+  startToCloseTimeout: ACTIVITY_TIMEOUTS.EMAIL_OPERATIONS,
+  retry: { maximumAttempts: 1 },
+});

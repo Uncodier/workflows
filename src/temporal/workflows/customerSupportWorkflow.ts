@@ -56,6 +56,7 @@ export async function customerSupportMessageWorkflow(
   if (useConversationFifo) await waitForConversationTurn(messageData);
   const useChannelGuidance = channelGuidanceEnabled();
   const useResponseFormat = patched('customer-support-response-format-v1');
+  const useOutboundMedia = patched('customer-support-outbound-media-v1');
   console.log('🎯 Starting customer support message workflow...');
   
   const effectiveBaseParams = customerSupportBaseParams(messageData, baseParams);
@@ -261,6 +262,7 @@ export async function customerSupportMessageWorkflow(
           whatsappData,
           agentId: effectiveBaseParams.agentId,
           useResponseFormat,
+          useOutboundMedia,
           response_format: useResponseFormat ? emailDataForCS.response_format : undefined,
         });
 
