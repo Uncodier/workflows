@@ -2,14 +2,16 @@ import { supabaseServiceRole as db } from '../../lib/supabase/client';
 import { apiService } from '../services/apiService';
 import { ApplicationFailure } from '@temporalio/activity';
 import { permanentEmailErrorType } from '../utils/emailAuthErrors';
+import { SPENDABLE_CREDIT_FIELDS, spendableCredits } from '../utils/spendableCredits';
 
 /** Fail closed if the site's current billing balance cannot be verified. */
 export async function checkIcpMiningCreditsActivity(siteId: string): Promise<boolean> {
-  const { data, error } = await db.from('billing').select('credits_available').eq('site_id', siteId).maybeSingle();
-  if (error || !data || typeof data.credits_available !== 'number' || !Number.isFinite(data.credits_available)) {
+  const { data, error } = await db.from('billing').select(SPENDABLE_CREDIT_FIELDS).eq('site_id', siteId).maybeSingle();
+  const available = error ? null : spendableCredits(data);
+  if (available === null) {
     throw new Error(`ICP credits unavailable: ${error?.message || 'missing or invalid billing balance'}`);
   }
-  return data.credits_available > 0;
+  return available > 0;
 }
 
 /** Called once by the parent mining execution, never by an individual lead. */

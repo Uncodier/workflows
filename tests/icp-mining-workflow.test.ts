@@ -10,6 +10,9 @@ const mockActivities = {
   claimIcpMiningExecutionActivity: jest.fn(), checkpointIcpMiningExecutionActivity: jest.fn(),
   isIcpDispatcherEnabledActivity: jest.fn(),
   checkIcpMiningCreditsActivity: jest.fn(), warnIcpMiningCreditsActivity: jest.fn(),
+  readSelectedIcpPeopleActivity: jest.fn(), finalizeSelectedIcpSliceActivity: jest.fn(),
+  getSelectedIcpPersonActivity: jest.fn(), acknowledgeSelectedIcpPersonActivity: jest.fn(),
+  reconcileSelectedIcpPersonAckActivity: jest.fn(),
 };
 jest.mock('@temporalio/workflow', () => ({
   ...jest.requireActual('@temporalio/workflow'), proxyActivities: () => mockActivities,
@@ -26,6 +29,7 @@ describe('configurable independent ICP workflow', () => {
     jest.resetAllMocks();
     mockActivities.isIcpDispatcherEnabledActivity.mockResolvedValue(false);
     mockActivities.checkIcpMiningCreditsActivity.mockResolvedValue(true);
+    mockActivities.readSelectedIcpPeopleActivity.mockResolvedValue({ selectedOnly: false, searchExhausted: false, pending: 0, members: [] });
     jest.spyOn(console, 'log').mockImplementation(() => undefined);
     mockPatched.mockImplementation((key: string) => key !== 'icp-mining-owned-checkpoints-v1');
     mockActivities.getIcpMiningConfigurationActivity.mockResolvedValue({ targetLeads: 3, researchEnabled: true });
@@ -80,6 +84,38 @@ describe('configurable independent ICP workflow', () => {
     expect(mockActivities.markIcpMiningStartedActivity).not.toHaveBeenCalled();
     expect(mockActivities.markIcpMiningCompletedActivity).not.toHaveBeenCalled();
   });
+  it.each(['matched', 'no_match', 'needs_review'] as const)(
+    'owned run reconciles the exact %s receipt without rerunning enrichment or research', async outcome => {
+      mockPatched.mockReturnValue(true);
+      mockActivities.claimIcpMiningExecutionActivity.mockResolvedValue({ acquired: true, icp: {
+        id: 'icp', site_id: 'site', role_query_id: 'role', status: 'running', processed_targets: 10,
+        found_matches: 3, current_page: 1, current_page_offset: 0, checkpoint_version: 2,
+      } });
+      const ordinal = '9007199254740993';
+      mockActivities.readSelectedIcpPeopleActivity.mockResolvedValue({ selectedOnly: true, searchExhausted: false, pending: 1,
+        members: [{ ordinal, person_id: '000123', created_by: 'creator' }] });
+      mockActivities.getSelectedIcpPersonActivity.mockResolvedValue({ person: { id: '000123' } });
+      const matched = outcome === 'matched';
+      mockExecuteChild.mockResolvedValueOnce({ success: true, outcome, personId: 'persisted-person', errors: [],
+        ...(matched ? { leadId: 'lead' } : {}), ...(outcome === 'needs_review' ? { identityReviews: [
+          { id: 'review', site_id: 'site', selected: true, status: 'pending', error: 'Ambiguous organization' }] } : {}) });
+      if (matched) mockExecuteChild.mockResolvedValueOnce({ success: true, errors: [] });
+      // Simulate all ordinary ACK attempts delivering unusable or late responses.
+      mockActivities.acknowledgeSelectedIcpPersonActivity.mockResolvedValue({ version: 5, processed: 18, found: 5 });
+      const checkpoint = { version: 3, processed: 11, found: matched ? 4 : 3 };
+      mockActivities.reconcileSelectedIcpPersonAckActivity.mockResolvedValue(checkpoint);
+      expect(await idealClientProfileMiningWorkflow({ site_id: 'site', userId: 'user' })).toMatchObject({
+        processed: 1, foundMatches: matched ? 1 : 0 });
+      const receipt = { id: 'icp', site_id: 'site', run_id: 'run', ordinal, person_id: '000123',
+        outcome, lead_id: matched ? 'lead' : undefined, ...checkpoint };
+      expect(mockActivities.acknowledgeSelectedIcpPersonActivity).toHaveBeenCalledWith(receipt);
+      expect(mockActivities.reconcileSelectedIcpPersonAckActivity).toHaveBeenCalledWith(receipt);
+      expect(mockActivities.getSelectedIcpPersonActivity).toHaveBeenCalledTimes(1);
+      expect(mockExecuteChild.mock.calls.map(([fn]) => fn)).toEqual(matched ? [enrichLeadWorkflow, leadResearchWorkflow] : [enrichLeadWorkflow]);
+      expect(mockActivities.checkpointIcpMiningExecutionActivity).toHaveBeenCalledWith(expect.objectContaining({
+        ...checkpoint, version: 4, status: 'pending' }));
+    },
+  );
   const selectedId = 'abcdef12-3456-7890-abcd-ef1234567890';
   const selectedRow = { id: selectedId, site_id: 'site', status: 'pending', role_query_id: 'role', total_targets: 100, processed_targets: 0 };
   const pageResult = { success: true, processed: 3, foundMatches: 3, leadsCreated: [], errors: [], hasMore: true, pageCompleted: false };
@@ -144,6 +180,25 @@ describe('configurable independent ICP workflow', () => {
   });
   const page = { role_query_id: 'role', site_id: 'site', userId: 'user', page: 0, page_size: 10,
     icp_mining_id: 'icp', max_matches: 3, research_enabled: true };
+
+  const savedPage = { page: 0, candidates: [{ person: { id: 1 } }], hasMore: true };
+  const resume = { ...page, execution: { run_id: 'run', version: 12, processed: 130, found: 113 }, snapshot: savedPage };
+  it('rejects a placeholder before consuming any candidate in a previously saved page', async () => {
+    mockActivities.getRoleQueryByIdActivity.mockResolvedValue({ success: true, roleQuery: { query: { person_id: '__selected_people_only__' } } });
+    expect(await idealClientProfilePageSearchWorkflow(resume)).toMatchObject({ success: false, retryableFailure: true,
+      pageCompleted: false, processed: 0, foundMatches: 0, checkpoint: { version: 12, processed: 130, found: 113, page: 0, offset: 0, snapshot: savedPage } });
+    expect(mockExecuteChild).not.toHaveBeenCalled();
+    expect(mockActivities.callPersonRoleSearchActivity).not.toHaveBeenCalled();
+    expect(mockActivities.checkpointIcpMiningExecutionActivity).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('resumes a normal saved page without refetching candidates (guard=%s)', async guard => {
+    mockPatched.mockImplementation((key: string) => key !== 'icp-verify-cached-role-query-v1' || guard);
+    expect(await idealClientProfilePageSearchWorkflow({ ...resume, research_enabled: false })).toMatchObject({ processed: 1, foundMatches: 1 });
+    expect(mockActivities.getRoleQueryByIdActivity).toHaveBeenCalledTimes(guard ? 1 : 0);
+    expect(mockActivities.callPersonRoleSearchActivity).not.toHaveBeenCalled();
+    expect(mockExecuteChild).toHaveBeenCalledTimes(1);
+  });
   it('processes only remaining candidates and preserves raw person/company payload for enrichment', async () => {
     const result = await idealClientProfilePageSearchWorkflow({ ...page, start_index: 5 });
     expect(result).toMatchObject({ processed: 3, foundMatches: 3, pageCompleted: false });

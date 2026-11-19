@@ -36,6 +36,7 @@ export * from './finderActivities';
 export * from './activityControlActivities';
 export * from './icpMiningConfigurationActivity';
 export * from './icpMiningExecutionActivities';
+export * from './icpSelectedPeopleActivities';
 export * from './icpMiningSchedulingActivity';
 export * from './icpDispatcherActivities';
 export * from './icpMiningCreditActivities';
@@ -95,6 +96,7 @@ import * as finderActivities from './finderActivities';
 import * as activityControlActivities from './activityControlActivities';
 import * as icpMiningConfigurationActivities from './icpMiningConfigurationActivity';
 import * as icpMiningExecutionActivities from './icpMiningExecutionActivities';
+import * as icpSelectedPeopleActivities from './icpSelectedPeopleActivities';
 import * as icpMiningSchedulingActivities from './icpMiningSchedulingActivity';
 import * as icpDispatcherActivities from './icpDispatcherActivities';
 import * as icpMiningCreditActivities from './icpMiningCreditActivities';
@@ -156,6 +158,7 @@ export const activities = {
   ...activityControlActivities,
   ...icpMiningConfigurationActivities,
   ...icpMiningExecutionActivities,
+  ...icpSelectedPeopleActivities,
   ...icpMiningSchedulingActivities,
   ...icpDispatcherActivities,
   ...icpMiningCreditActivities,

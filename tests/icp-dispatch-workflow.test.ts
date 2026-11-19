@@ -2,18 +2,26 @@ const mockActivities = {
   dispatchIcpMiningActivity: jest.fn(), beginIcpDispatchActivity: jest.fn(), finishIcpDispatchActivity: jest.fn(),
   checkpointIcpMiningExecutionActivity: jest.fn(), getSiteActivity: jest.fn(), saveCronStatusActivity: jest.fn(),
   checkIcpMiningCreditsActivity: jest.fn(), warnIcpMiningCreditsActivity: jest.fn(),
+  readSelectedIcpPeopleActivity: jest.fn(), finalizeSelectedIcpSliceActivity: jest.fn(),
+  getSelectedIcpPersonActivity: jest.fn(), acknowledgeSelectedIcpPersonActivity: jest.fn(), getLeadActivity: jest.fn(),
+  reconcileSelectedIcpPersonAckActivity: jest.fn(), settleIcpDispatchPreflightActivity: jest.fn(),
 };
 const mockExecuteChild = jest.fn();
+const mockPatched = jest.fn();
+const mockSourceAttemptLimits: number[] = [];
 jest.mock('@temporalio/workflow', () => ({
-  proxyActivities: () => mockActivities, executeChild: (...args: any[]) => mockExecuteChild(...args),
+  proxyActivities: (policy: any) => ({ ...mockActivities, getSelectedIcpPersonActivity: (...args: unknown[]) => {
+    mockSourceAttemptLimits.push(policy.retry.maximumAttempts); return mockActivities.getSelectedIcpPersonActivity(...args);
+  } }), executeChild: (...args: any[]) => mockExecuteChild(...args),
   workflowInfo: () => ({ runId: 'run-id', workflowId: 'slice-workflow' }),
-  patched: () => true,
+  patched: (key: string) => mockPatched(key),
   CancellationScope: { nonCancellable: (fn: () => Promise<unknown>) => fn() },
 }));
 jest.mock('../src/temporal/workflows/idealClientProfilePageSearchWorkflow', () => ({ idealClientProfilePageSearchWorkflow: jest.fn() }));
 import { icpDispatcherWorkflow } from '../src/temporal/workflows/icpDispatcherWorkflow';
 import { icpMiningSliceWorkflow } from '../src/temporal/workflows/icpMiningSliceWorkflow';
 import { processPageSafely } from '../src/temporal/workflows/icpMining/processPageSafely';
+import { ActivityFailure, ApplicationFailure, CancelledFailure } from '@temporalio/common';
 
 const reservation = { id: 'reservation', site_id: 'site', reserved_candidates: 2, reserved_matches: 1, research_enabled: false };
 const icp = { id: 'list', role_query_id: 'role', current_page: 0, current_page_offset: 3,
@@ -23,11 +31,16 @@ const result = { success: true, processed: 1, foundMatches: 1, total: 100, error
 
 beforeEach(() => {
   jest.resetAllMocks();
+  mockSourceAttemptLimits.length = 0;
+  mockPatched.mockReturnValue(true);
   mockActivities.beginIcpDispatchActivity.mockResolvedValue({ reservation, icp });
   mockActivities.getSiteActivity.mockResolvedValue({ success: true, site: { user_id: 'user' } });
   mockActivities.checkpointIcpMiningExecutionActivity.mockResolvedValue({ success: true });
   mockActivities.finishIcpDispatchActivity.mockResolvedValue({ success: true });
+  mockActivities.settleIcpDispatchPreflightActivity.mockResolvedValue({ next_eligible_at: '2026-10-03T08:00:00Z' });
   mockActivities.checkIcpMiningCreditsActivity.mockResolvedValue(true);
+  mockActivities.readSelectedIcpPeopleActivity.mockResolvedValue({ selectedOnly: false, searchExhausted: false, pending: 0, members: [] });
+  mockActivities.finalizeSelectedIcpSliceActivity.mockResolvedValue(undefined);
   mockExecuteChild.mockResolvedValue(result);
 });
 
@@ -35,8 +48,74 @@ it('settles without starting a page when credits have run out', async () => {
   mockActivities.checkIcpMiningCreditsActivity.mockResolvedValue(false);
   expect(await icpMiningSliceWorkflow({ reservationId: 'reservation' })).toMatchObject({ success: false, processed: 0 });
   expect(mockExecuteChild).not.toHaveBeenCalled();
-  expect(mockActivities.finishIcpDispatchActivity).toHaveBeenCalledTimes(1);
+  expect(mockActivities.settleIcpDispatchPreflightActivity).toHaveBeenCalledWith({ id: 'reservation', runId: 'run-id',
+    workflowId: 'slice-workflow', errors: ['ICP mining skipped: no credits available'], retryAfterSeconds: 21600 });
+  expect(mockActivities.finishIcpDispatchActivity).not.toHaveBeenCalled();
+  expect(mockActivities.saveCronStatusActivity).toHaveBeenLastCalledWith(expect.objectContaining({
+    status: 'FAILED', nextRun: '2026-10-03T08:00:00Z' }));
   expect(mockActivities.warnIcpMiningCreditsActivity).not.toHaveBeenCalled();
+});
+
+it.each(['getSiteActivity', 'saveCronStatusActivity', 'checkIcpMiningCreditsActivity', 'readSelectedIcpPeopleActivity'] as const)(
+  'cleans up a confirmed untouched reservation if %s fails before paid work', async activity => {
+    mockActivities[activity].mockRejectedValueOnce(new Error('preflight denied'));
+    await expect(icpMiningSliceWorkflow({ reservationId: 'reservation' })).rejects.toThrow('preflight denied');
+    expect(mockExecuteChild).not.toHaveBeenCalled();
+    expect(mockActivities.getSelectedIcpPersonActivity).not.toHaveBeenCalled();
+    expect(mockActivities.settleIcpDispatchPreflightActivity).toHaveBeenCalledTimes(1);
+    expect(mockActivities.settleIcpDispatchPreflightActivity).toHaveBeenCalledWith({ id: 'reservation', runId: 'run-id',
+      workflowId: 'slice-workflow', errors: ['ICP dispatch preflight: preflight denied'], retryAfterSeconds: 300 });
+    expect(mockActivities.finishIcpDispatchActivity).not.toHaveBeenCalled();
+    expect(mockActivities.finalizeSelectedIcpSliceActivity).not.toHaveBeenCalled();
+    expect(mockActivities.checkpointIcpMiningExecutionActivity).not.toHaveBeenCalled();
+  },
+);
+
+it('also releases a pristine reservation for a site that is now unavailable', async () => {
+  mockActivities.getSiteActivity.mockResolvedValue({ success: false });
+  await expect(icpMiningSliceWorkflow({ reservationId: 'reservation' })).rejects.toThrow('site unavailable');
+  expect(mockActivities.settleIcpDispatchPreflightActivity).toHaveBeenCalledTimes(1);
+  expect(mockExecuteChild).not.toHaveBeenCalled();
+});
+
+it('never guesses ownership if begin was rejected or its ACK lost', async () => {
+  mockActivities.beginIcpDispatchActivity.mockRejectedValue(new Error('begin unconfirmed'));
+  await expect(icpMiningSliceWorkflow({ reservationId: 'reservation' })).rejects.toThrow('begin unconfirmed');
+  expect(mockActivities.settleIcpDispatchPreflightActivity).not.toHaveBeenCalled();
+  expect(mockActivities.finishIcpDispatchActivity).not.toHaveBeenCalled();
+  expect(mockExecuteChild).not.toHaveBeenCalled();
+});
+
+it('never falls back to a stale checkpoint or finish on unconfirmed preflight settlement', async () => {
+  mockActivities.checkIcpMiningCreditsActivity.mockResolvedValue(false);
+  mockActivities.settleIcpDispatchPreflightActivity.mockRejectedValue(new Error('owner lost'));
+  await expect(icpMiningSliceWorkflow({ reservationId: 'reservation' })).rejects.toThrow('owner lost');
+  expect(mockActivities.settleIcpDispatchPreflightActivity).toHaveBeenCalledTimes(1);
+  expect(mockActivities.finishIcpDispatchActivity).not.toHaveBeenCalled();
+  expect(mockActivities.checkpointIcpMiningExecutionActivity).not.toHaveBeenCalled();
+  expect(mockExecuteChild).not.toHaveBeenCalled();
+});
+
+it('retains the original no-credit finish command on histories without preflight settlement', async () => {
+  mockPatched.mockImplementation(key => key !== 'icp-dispatch-preflight-settlement-v1');
+  mockActivities.checkIcpMiningCreditsActivity.mockResolvedValue(false);
+  expect(await icpMiningSliceWorkflow({ reservationId: 'reservation' })).toMatchObject({ success: false });
+  expect(mockActivities.finishIcpDispatchActivity).toHaveBeenCalledTimes(1);
+  expect(mockActivities.settleIcpDispatchPreflightActivity).not.toHaveBeenCalled();
+});
+
+it.each([0, 1])('selected-only slice never starts a provider search with %s pending members', async pending => {
+  mockActivities.readSelectedIcpPeopleActivity.mockResolvedValue({ selectedOnly: true, searchExhausted: false, pending,
+    members: pending ? [{ ordinal: '9007199254740993', person_id: '123', created_by: 'carlos' }] : [] });
+  mockActivities.getSelectedIcpPersonActivity.mockResolvedValue({ person: { id: '123' } });
+  mockExecuteChild.mockResolvedValue({ success: true, leadId: 'selected-lead', errors: [] });
+  mockActivities.acknowledgeSelectedIcpPersonActivity.mockResolvedValue({ version: 1, processed: 4, found: 2 });
+  await icpMiningSliceWorkflow({ reservationId: 'reservation' });
+  expect(mockExecuteChild).toHaveBeenCalledTimes(pending);
+  if (pending) expect(mockExecuteChild.mock.calls[0][1].args[0]).toMatchObject({ person_id: '123', userId: 'carlos' });
+  expect(mockActivities.checkpointIcpMiningExecutionActivity).toHaveBeenCalledWith(expect.objectContaining({
+    page: icp.current_page, offset: icp.current_page_offset, snapshot: icp.current_page_snapshot, total: undefined }));
+  expect(mockActivities.finalizeSelectedIcpSliceActivity).toHaveBeenCalledWith(expect.objectContaining({ searchExhausted: false }));
 });
 
 it('warns the owner once after a credit failure in the page', async () => {
@@ -46,10 +125,148 @@ it('warns the owner once after a credit failure in the page', async () => {
   expect(mockActivities.warnIcpMiningCreditsActivity).toHaveBeenCalledWith({ siteId: 'site', workflowId: 'slice-workflow' });
 });
 
+describe('selected ACK recovery in a reserved slice', () => {
+  const ordinal = '9007199254740993';
+  const expected = { id: 'list', site_id: 'site', run_id: 'run-id', ordinal, person_id: '00017',
+    version: 1, processed: 4, found: 2, lead_id: 'lead', outcome: 'matched' };
+
+  beforeEach(() => {
+    mockActivities.readSelectedIcpPeopleActivity.mockResolvedValue({ selectedOnly: true, searchExhausted: false, pending: 1,
+      members: [{ ordinal, person_id: '00017', created_by: 'creator' }] });
+    mockActivities.getSelectedIcpPersonActivity.mockResolvedValue({ person: { id: '00017' } });
+    mockActivities.acknowledgeSelectedIcpPersonActivity.mockRejectedValue(new Error('ACK timed out'));
+    mockExecuteChild.mockResolvedValue({ success: true, leadId: 'lead', errors: [] });
+  });
+
+  it('reconciles an exhausted ACK from the recorded result and settles with the authoritative totals', async () => {
+    mockActivities.reconcileSelectedIcpPersonAckActivity.mockResolvedValue({ version: 1, processed: 4, found: 2 });
+    const slice = await icpMiningSliceWorkflow({ reservationId: 'reservation' });
+    expect(slice).toMatchObject({ success: true, processed: 1, foundMatches: 1 });
+    expect(mockActivities.acknowledgeSelectedIcpPersonActivity).toHaveBeenCalledWith(expected);
+    expect(mockActivities.reconcileSelectedIcpPersonAckActivity).toHaveBeenCalledWith(expected);
+    expect(mockExecuteChild).toHaveBeenCalledTimes(1);
+    expect(mockActivities.getSelectedIcpPersonActivity).toHaveBeenCalledTimes(1);
+    expect(mockSourceAttemptLimits).toEqual([1]);
+    expect(mockActivities.checkpointIcpMiningExecutionActivity).toHaveBeenCalledWith(expect.objectContaining({
+      version: 2, processed: 4, found: 2, page: 0, offset: 3, snapshot: icp.current_page_snapshot, status: 'pending' }));
+    expect(mockActivities.finishIcpDispatchActivity).toHaveBeenCalledTimes(1);
+    expect(mockActivities.settleIcpDispatchPreflightActivity).not.toHaveBeenCalled();
+  });
+
+  it.each(['conflict', 'wrong totals', 'later version', 'source timeout', 'unconfirmed paid child'])(
+    'never releases or retries paid work for %s', async failure => {
+      if (failure === 'wrong totals') {
+        mockActivities.reconcileSelectedIcpPersonAckActivity.mockResolvedValue({ version: 1, processed: 4, found: 1 });
+      } else if (failure === 'later version') {
+        mockActivities.reconcileSelectedIcpPersonAckActivity.mockResolvedValue({ version: 2, processed: 4, found: 2 });
+      } else if (failure === 'source timeout') {
+        mockActivities.getSelectedIcpPersonActivity.mockRejectedValue(new Error('source timeout'));
+      } else if (failure === 'unconfirmed paid child') {
+        mockExecuteChild.mockRejectedValue(new Error('child timed out'));
+      } else mockActivities.reconcileSelectedIcpPersonAckActivity.mockRejectedValue(new Error('receipt conflict'));
+      await expect(icpMiningSliceWorkflow({ reservationId: 'reservation' })).rejects.toThrow();
+      expect(mockExecuteChild).toHaveBeenCalledTimes(failure === 'source timeout' ? 0 : 1);
+      expect(mockActivities.checkpointIcpMiningExecutionActivity).not.toHaveBeenCalled();
+      expect(mockActivities.finalizeSelectedIcpSliceActivity).not.toHaveBeenCalled();
+      expect(mockActivities.finishIcpDispatchActivity).not.toHaveBeenCalled();
+      expect(mockActivities.settleIcpDispatchPreflightActivity).not.toHaveBeenCalled();
+    },
+  );
+
+  it('releases a confirmed second license-check denial only when the provider was not called', async () => {
+    const cause = ApplicationFailure.nonRetryable('Creator no longer licensed', 'SELECTED_SOURCE_NOT_STARTED');
+    mockActivities.getSelectedIcpPersonActivity.mockRejectedValue(new ActivityFailure('Activity task failed',
+      'getSelectedIcpPersonActivity', '7', 'NON_RETRYABLE_FAILURE', 'worker', cause));
+    expect(await icpMiningSliceWorkflow({ reservationId: 'reservation' })).toMatchObject({ success: false, processed: 0 });
+    expect(mockActivities.getSelectedIcpPersonActivity).toHaveBeenCalledWith({ id: 'list', site_id: 'site', run_id: 'run-id', ordinal,
+      classifyPreflight: true });
+    expect(mockSourceAttemptLimits).toEqual([1]);
+    expect(mockExecuteChild).not.toHaveBeenCalled();
+    expect(mockActivities.acknowledgeSelectedIcpPersonActivity).not.toHaveBeenCalled();
+    expect(mockActivities.checkpointIcpMiningExecutionActivity).not.toHaveBeenCalled();
+    expect(mockActivities.finishIcpDispatchActivity).not.toHaveBeenCalled();
+    expect(mockActivities.settleIcpDispatchPreflightActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it('never uses pristine preflight cleanup when a prior member already committed', async () => {
+    mockActivities.readSelectedIcpPeopleActivity.mockResolvedValue({ selectedOnly: true, searchExhausted: false, pending: 2,
+      members: [{ ordinal: '1', person_id: 'A', created_by: 'creator' }, { ordinal: '2', person_id: 'B', created_by: 'creator' }] });
+    mockActivities.getSelectedIcpPersonActivity.mockResolvedValueOnce({ person: { id: 'A' } })
+      .mockRejectedValueOnce(ApplicationFailure.nonRetryable('Creator revoked', 'SELECTED_SOURCE_NOT_STARTED'));
+    mockExecuteChild.mockResolvedValue({ success: true, outcome: 'no_match', errors: [] });
+    mockActivities.acknowledgeSelectedIcpPersonActivity.mockResolvedValue({ version: 1, processed: 4, found: 1 });
+    expect(await icpMiningSliceWorkflow({ reservationId: 'reservation' })).toMatchObject({ success: false, processed: 1, foundMatches: 0 });
+    expect(mockExecuteChild).toHaveBeenCalledTimes(1);
+    expect(mockActivities.settleIcpDispatchPreflightActivity).not.toHaveBeenCalled();
+    expect(mockActivities.checkpointIcpMiningExecutionActivity).toHaveBeenCalledWith(expect.objectContaining({
+      version: 2, processed: 4, found: 1, status: 'pending' }));
+    expect(mockActivities.finishIcpDispatchActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['source-message-only', 'error from child', 'ACK denied', 'cancelled ACK'])('does not infer unpaid work or retry on %s', async mode => {
+    const denial = ApplicationFailure.nonRetryable('SELECTED_SOURCE_NOT_STARTED', 'SELECTED_SOURCE_NOT_STARTED');
+    if (mode === 'source-message-only') mockActivities.getSelectedIcpPersonActivity.mockRejectedValue(new Error(denial.message));
+    else if (mode === 'error from child') mockExecuteChild.mockRejectedValue(denial);
+    else mockActivities.acknowledgeSelectedIcpPersonActivity.mockRejectedValue(new ActivityFailure('Activity failed',
+      'acknowledgeSelectedIcpPersonActivity', '8', 'NON_RETRYABLE_FAILURE', 'worker', mode === 'cancelled ACK'
+        ? new CancelledFailure('cancelled') : ApplicationFailure.nonRetryable('owned elsewhere', 'ICP_RECEIPT_DENIED')));
+    await expect(icpMiningSliceWorkflow({ reservationId: 'reservation' })).rejects.toThrow();
+    expect(mockActivities.reconcileSelectedIcpPersonAckActivity).not.toHaveBeenCalled();
+    expect(mockActivities.checkpointIcpMiningExecutionActivity).not.toHaveBeenCalled();
+    expect(mockActivities.finishIcpDispatchActivity).not.toHaveBeenCalled();
+    expect(mockActivities.settleIcpDispatchPreflightActivity).not.toHaveBeenCalled();
+  });
+
+  it('retains the historical member error path without the ACK recovery marker', async () => {
+    mockPatched.mockImplementation(key => key !== 'icp-selected-member-ack-recovery-v1');
+    expect(await icpMiningSliceWorkflow({ reservationId: 'reservation' })).toMatchObject({ success: false, processed: 0 });
+    expect(mockActivities.acknowledgeSelectedIcpPersonActivity).toHaveBeenCalledWith({ id: 'list', site_id: 'site',
+      run_id: 'run-id', ordinal, version: 1, lead_id: 'lead', outcome: 'matched' });
+    expect(mockSourceAttemptLimits).toEqual([3]);
+    expect(mockActivities.getSelectedIcpPersonActivity).toHaveBeenCalledWith({ id: 'list', site_id: 'site', run_id: 'run-id', ordinal });
+    expect(mockActivities.reconcileSelectedIcpPersonAckActivity).not.toHaveBeenCalled();
+    expect(mockActivities.finishIcpDispatchActivity).toHaveBeenCalledTimes(1);
+  });
+});
+
+it('consumes a saved member despite legacy counters without consuming a stale search snapshot', async () => {
+  const snapshot = { page: 12, candidates: [{ person: { id: 'not-a-member' } }], hasMore: true };
+  mockActivities.beginIcpDispatchActivity.mockResolvedValue({ reservation, icp: { ...icp,
+    total_targets: 129, processed_targets: 130, found_matches: 113, selected_processed_targets: 0,
+    current_page: 12, current_page_offset: null, current_page_snapshot: snapshot } });
+  mockActivities.readSelectedIcpPeopleActivity.mockResolvedValue({ selectedOnly: true, searchExhausted: false,
+    pending: 129, members: Array.from({ length: 10 }, (_, i) => ({ ordinal: String(17+i), person_id: `selected-${17+i}`, created_by: 'creator' })) });
+  mockActivities.getSelectedIcpPersonActivity.mockResolvedValue({ person: { id: 'selected-17' } });
+  mockExecuteChild.mockResolvedValue({ success: true, leadId: 'lead-17', errors: [] });
+  mockActivities.acknowledgeSelectedIcpPersonActivity.mockResolvedValue({ version: 1, processed: 131, found: 114 });
+  expect(await icpMiningSliceWorkflow({ reservationId: 'reservation' })).toMatchObject({ success: true, processed: 1, foundMatches: 1 });
+  expect(mockExecuteChild).toHaveBeenCalledTimes(1);
+  expect(mockExecuteChild.mock.calls[0][1].args[0]).toMatchObject({ person_id: 'selected-17', userId: 'creator' });
+  expect(mockActivities.acknowledgeSelectedIcpPersonActivity).toHaveBeenCalledWith(expect.objectContaining({
+    id: 'list', site_id: 'site', run_id: 'run-id', ordinal: '17', lead_id: 'lead-17', outcome: 'matched' }));
+  expect(mockActivities.checkpointIcpMiningExecutionActivity).toHaveBeenCalledWith(expect.objectContaining({
+    page: 12, snapshot, status: 'pending', processed: 131, found: 114, total: undefined }));
+  expect(mockActivities.finishIcpDispatchActivity).toHaveBeenCalledTimes(1);
+});
+
 it('does not warn for ordinary page failures', async () => {
   mockExecuteChild.mockResolvedValue({ ...result, success: false, errors: ['Provider unavailable'] });
   await icpMiningSliceWorkflow({ reservationId: 'reservation' });
   expect(mockActivities.warnIcpMiningCreditsActivity).not.toHaveBeenCalled();
+});
+
+it.each([false, true])('finalizes an exhausted mixed list without a new search (has pending membership: %s)', async pending => {
+  mockActivities.beginIcpDispatchActivity.mockResolvedValue({ reservation, icp: { ...icp,
+    total_targets: 10, processed_targets: 13, selected_processed_targets: 3, current_page: 1, current_page_offset: 0, current_page_snapshot: null } });
+  mockActivities.readSelectedIcpPeopleActivity.mockResolvedValue({ selectedOnly: false, searchExhausted: false,
+    pending: pending ? 1 : 0, members: pending ? [{ ordinal: '17', person_id: '17', created_by: 'creator' }] : [] });
+  mockActivities.getSelectedIcpPersonActivity.mockResolvedValue({ person: { id: '17' } });
+  mockExecuteChild.mockResolvedValue({ success: true, leadId: 'lead-17', errors: [] });
+  mockActivities.acknowledgeSelectedIcpPersonActivity.mockResolvedValue({ version: 1, processed: 14, found: 2 });
+  await icpMiningSliceWorkflow({ reservationId: 'reservation' });
+  expect(mockExecuteChild).toHaveBeenCalledTimes(Number(pending));
+  if (pending) expect(mockExecuteChild.mock.calls[0][1].args[0]).toMatchObject({ person_id: '17' });
+  expect(mockActivities.finalizeSelectedIcpSliceActivity).toHaveBeenCalledWith(expect.objectContaining({ searchExhausted: true }));
 });
 
 it('warns once if the page throws a credit error, without releasing an uncertain reservation', async () => {
@@ -105,6 +322,7 @@ it.each(['child', 'checkpoint'])('never releases a reservation after an unconfir
   else mockActivities.checkpointIcpMiningExecutionActivity.mockRejectedValue(new Error('checkpoint failed'));
   await expect(icpMiningSliceWorkflow({ reservationId: 'reservation' })).rejects.toThrow();
   expect(mockActivities.finishIcpDispatchActivity).not.toHaveBeenCalled();
+  expect(mockActivities.settleIcpDispatchPreflightActivity).not.toHaveBeenCalled();
 });
 
 it('limits candidates independently from matches and preserves the remaining page snapshot', async () => {

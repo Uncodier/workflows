@@ -28,6 +28,19 @@ describe('ICP pre-handler admission retries', () => {
     jest.restoreAllMocks();
   });
 
+  it.each([
+    { person_id: '__selected_people_only__' },
+    { selected_request_id: 'selection' },
+    { selected_actor_id: 'creator' },
+    { source: 'selected_people' },
+  ])('rejects selected-list metadata before sending or retrying a role search: %j', async query => {
+    fetchMock.mockResolvedValue(jsonResponse({ search_results: [] }));
+    const result = await service.post('/api/finder/person_role_search', { ...query, page: 3, page_size: 10 });
+    expect(result).toMatchObject({ success: false, error: { code: 'SELECTED_LIST_NOT_SEARCHABLE', requestNotStarted: true } });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
   it('waits for the 43-second production cooldown then succeeds in the same activity', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(body(), 429, { 'Retry-After': '43' }))
       .mockResolvedValueOnce(jsonResponse({ emails: [{ email: 'valid@example.test' }] }));

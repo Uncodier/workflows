@@ -5,6 +5,7 @@ import { TASK_QUEUES } from '../config/taskQueues';
 import { resolveIcpMiningConfiguration } from '../utils/icpMiningConfiguration';
 import { selectIcpDispatchCandidates, type IcpDispatchCandidate } from '../utils/icpDispatchSelection';
 import { toIcpMiningClaimResult } from '../utils/icpMiningPayload';
+import { SPENDABLE_CREDIT_FIELDS, spendableCredits } from '../utils/spendableCredits';
 
 export interface IcpDispatchReservation {
   id: string; site_id: string; icp_mining_id: string; workflow_id: string; run_id: string | null;
@@ -58,22 +59,23 @@ export async function dispatchIcpMiningActivity(options: { dispatchId: string })
   if (!config.enabled) return summary;
   if (!options.dispatchId || options.dispatchId.length > 500) throw new Error('ICP dispatch identity required');
   const day = new Date().toISOString().slice(0, 10);
-  const [sites, settings, lists, siteState, listState, ledger, billing] = await Promise.all([
+  const [sites, settings, lists, siteState, listState, ledger, billing, members] = await Promise.all([
     rows(() => db.from('sites').select('id,user_id').is('archived_at', null).order('id')),
     rows(() => db.from('settings').select('site_id,activities').order('site_id')),
-    rows(() => db.from('icp_mining').select('id,site_id,total_targets,processed_targets,current_page_offset,execution_active,snapshot_page:current_page_snapshot->page')
+    rows(() => db.from('icp_mining').select('id,site_id,total_targets,processed_targets,selected_processed_targets,search_exhausted,source:icp_criteria->>source,current_page_offset,execution_active,snapshot_page:current_page_snapshot->page')
       .in('status', ['pending', 'running']).order('id')),
     rows(() => db.from('icp_dispatch_site_state').select('*').order('site_id')),
     rows(() => db.from('icp_dispatch_list_state').select('*').order('icp_mining_id')),
     rows(() => db.from('icp_dispatch_runs').select('id,site_id,icp_mining_id,workflow_id,run_id,state,budget_day,reserved_candidates,reserved_matches,found,research_enabled,processed')
       .or(`budget_day.eq.${day},state.in.(reserved,running,blocked)`).order('id')),
-    rows(() => db.from('billing').select('site_id,credits_available').order('site_id')),
+    rows(() => db.from('billing').select(`site_id,${SPENDABLE_CREDIT_FIELDS}`).order('site_id')),
+    rows(() => db.from('icp_mining_people').select('ordinal,icp_mining_id').eq('processing_status', 'pending').order('ordinal')),
   ]);
   const active = ledger.filter(row => row.state !== 'settled');
   const legacyActive = lists.filter(list => list.execution_active && !active.some(row => row.icp_mining_id === list.id));
   summary.active = active.length + legacyActive.length;
   const siteById = new Map(sites.map(site => [site.id, site]));
-  const creditsBySite = new Map(billing.map(row => [row.site_id, row.credits_available]));
+  const creditsBySite = new Map(billing.map(row => [row.site_id, spendableCredits(row)]));
   const settingsBySite = new Map(settings.map(setting => [setting.site_id, setting]));
   const states = new Map(siteState.map(state => [state.site_id, state]));
   const listStates = new Map(listState.map(state => [state.icp_mining_id, state]));
@@ -88,6 +90,8 @@ export async function dispatchIcpMiningActivity(options: { dispatchId: string })
     budgets.set(row.site_id, budget);
   }
   const candidates: IcpDispatchCandidate[] = [];
+  const pendingMembers = new Map<string, number>();
+  for (const member of members) pendingMembers.set(member.icp_mining_id, (pendingMembers.get(member.icp_mining_id) || 0) + 1);
   const invalidSites = new Set<string>();
   for (const list of lists) {
     const site = siteById.get(list.site_id);
@@ -100,14 +104,22 @@ export async function dispatchIcpMiningActivity(options: { dispatchId: string })
       continue;
     }
     if (!controls.allLists && !controls.listIds.includes(list.id)) continue;
-    // Do not reserve or start a paid page when the site has no credits.
-    if (!(typeof creditsBySite.get(site.id) === 'number' && creditsBySite.get(site.id) > 0)) continue;
+    // Missing/invalid balances cannot reserve a new turn; wallet funds are spendable.
+    const available = creditsBySite.get(site.id);
+    if (available == null || available <= 0) continue;
     const daily = budgets.get(site.id) || { found: 0, reserved: 0, candidates: 0 };
     const state = states.get(site.id);
     const ls = listStates.get(list.id);
+    const hasSearchWork = list.source !== 'selected_people' && !list.search_exhausted;
+    const pending = pendingMembers.get(list.id) ?? 0;
+    // A selected-only queue is independent of the historical scan ledger and
+    // any saved provider page. For a mixed list, count each work source once.
+    const remainingTargets = !hasSearchWork ? pending : Number(list.total_targets) > 0
+      ? pending + Math.max(0, Number(list.total_targets) - (Number(list.processed_targets ?? 0) - Number(list.selected_processed_targets ?? 0)))
+      : null;
     candidates.push({ siteId: site.id, userId: site.user_id, icpId: list.id,
-      remainingTargets: Number(list.total_targets) > 0 ? Math.max(0, Number(list.total_targets) - Number(list.processed_targets || 0)) : null,
-      hasCheckpoint: list.snapshot_page !== null && list.snapshot_page !== undefined,
+      remainingTargets,
+      hasCheckpoint: hasSearchWork && list.snapshot_page != null,
       lastSiteDispatchAt: state?.last_dispatched_at ?? null, lastListDispatchAt: ls?.last_dispatched_at ?? null,
       nextEligibleAt: state?.next_eligible_at, listNextEligibleAt: ls?.next_eligible_at,
       dailyFound: daily.found, dailyReservedMatches: daily.reserved,

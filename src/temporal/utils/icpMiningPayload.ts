@@ -23,6 +23,7 @@ export interface IcpPageSnapshot {
 }
 
 export interface IcpMiningExecutionDto extends IcpMiningWorkflowDto {
+  selected_processed_targets?: number;
   checkpoint_version: number;
   current_page_snapshot: IcpPageSnapshot | null;
 }
@@ -37,7 +38,7 @@ export type IcpMiningClaimResult =
 // Keep a literal select string so the Supabase query parser can infer its result.
 export const ICP_MINING_WORKFLOW_SELECT = 'id, site_id, role_query_id, name, status, total_targets, processed_targets, found_matches, current_page, current_page_offset, created_at';
 const WORKFLOW_FIELDS = ICP_MINING_WORKFLOW_SELECT.split(', ');
-const EXECUTION_FIELDS = [...WORKFLOW_FIELDS, 'checkpoint_version', 'current_page_snapshot'] as const;
+const EXECUTION_FIELDS = [...WORKFLOW_FIELDS, 'checkpoint_version', 'current_page_snapshot', 'selected_processed_targets'] as const;
 
 function project<T>(row: Record<string, unknown>, fields: readonly string[]): T {
   const dto: Record<string, unknown> = {};

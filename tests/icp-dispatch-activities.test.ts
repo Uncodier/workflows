@@ -31,7 +31,7 @@ beforeEach(() => {
   store.settings = [{ site_id: site, activities: { icp_lead_generation: { target_leads: 150, all_lists: true } } }];
   store.icp_mining = [{ id: list, site_id: site, total_targets: 1188, processed_targets: 0, current_page_offset: 0, snapshot_page: 0, execution_active: false }];
   store.icp_dispatch_site_state = []; store.icp_dispatch_list_state = []; store.icp_dispatch_runs = [];
-  store.billing = [{ site_id: site, credits_available: 100 }];
+  store.billing = [{ site_id: site, credits_available: 100, account_balance: 0 }];
   mockRpc.mockImplementation(async (name, params) => ({ data: name === 'reserve_icp_dispatch' ? { acquired: true,
     reservation: { id: 'reservation', site_id: site, icp_mining_id: list, workflow_id: params.p_workflow_id,
       reserved_candidates: 10, reserved_matches: 10, research_enabled: false } } : { success: true }, error: null }));
@@ -42,6 +42,64 @@ it('does not reserve or start paid mining for a site with no credits', async () 
   expect(await dispatchIcpMiningActivity({ dispatchId: 'tick' })).toMatchObject({ started: 0 });
   expect(mockRpc).not.toHaveBeenCalled();
   expect(mockStart).not.toHaveBeenCalled();
+});
+
+it.each([[0, 2], [0.4, 0.6], [2, null], [2, -1]])('dispatches with regular %s and wallet %s', async (regular, wallet) => {
+  store.billing[0] = { site_id: site, credits_available: regular, account_balance: wallet };
+  expect(await dispatchIcpMiningActivity({ dispatchId: 'tick' })).toMatchObject({ started: 1 });
+  expect(mockRpc).toHaveBeenCalledWith('reserve_icp_dispatch', expect.objectContaining({ p_site_id: site }));
+  expect(reads.find(read => read.table === 'billing')!.select).toContain('account_balance');
+});
+
+it.each([0, -2, -3, NaN, Infinity, -Infinity, '3', true, undefined])('does not reserve with insufficient/invalid wallet %p', async wallet => {
+  store.billing[0] = { site_id: site, credits_available: wallet === 0 ? 0 : 2, account_balance: wallet };
+  expect(await dispatchIcpMiningActivity({ dispatchId: 'tick' })).toMatchObject({ started: 0 });
+  expect(mockRpc).not.toHaveBeenCalled();
+  expect(mockStart).not.toHaveBeenCalled();
+});
+
+it.each([null, NaN, Infinity, '3', true, undefined])('does not reserve with invalid regular credits %p', async regular => {
+  store.billing[0] = { site_id: site, credits_available: regular, account_balance: 5 };
+  expect(await dispatchIcpMiningActivity({ dispatchId: 'tick' })).toMatchObject({ started: 0 });
+  expect(mockRpc).not.toHaveBeenCalled();
+  expect(mockStart).not.toHaveBeenCalled();
+});
+
+it('does not reserve without a billing row', async () => {
+  store.billing = [];
+  expect(await dispatchIcpMiningActivity({ dispatchId: 'tick' })).toMatchObject({ started: 0 });
+  expect(mockRpc).not.toHaveBeenCalled();
+  expect(mockStart).not.toHaveBeenCalled();
+});
+
+it('reserves a selected-only list from pending membership, even after an unrelated 130/129 scan', async () => {
+  Object.assign(store.icp_mining[0], { source: 'selected_people', total_targets: 129, processed_targets: 130,
+    selected_processed_targets: 0, current_page: 13, snapshot_page: null });
+  store.icp_mining_people = Array.from({ length: 129 }, (_, i) => ({ ordinal: String(i + 1), icp_mining_id: list }));
+  expect(await dispatchIcpMiningActivity({ dispatchId: 'resume' })).toMatchObject({ started: 1 });
+  expect(mockRpc).toHaveBeenCalledWith('reserve_icp_dispatch', expect.objectContaining({ p_icp_id: list }));
+  store.icp_mining_people = [];
+  expect(await dispatchIcpMiningActivity({ dispatchId: 'drained' })).toMatchObject({ started: 0 });
+  expect(mockRpc).toHaveBeenCalledTimes(1);
+});
+
+it('does not prioritize an obsolete search snapshot when scheduling a selected-only list', async () => {
+  Object.assign(store.icp_mining[0], { source: 'selected_people', total_targets: 129, processed_targets: 130, snapshot_page: 12 });
+  store.icp_mining_people = [{ icp_mining_id: list, ordinal: '1' }];
+  const searchList = '00000000-0000-4000-8000-000000000003';
+  store.icp_mining.push({ id: searchList, site_id: site, total_targets: 10, processed_targets: 0, snapshot_page: null });
+  await dispatchIcpMiningActivity({ dispatchId: 'tick' });
+  expect(mockRpc).toHaveBeenCalledWith('reserve_icp_dispatch', expect.objectContaining({ p_icp_id: searchList }));
+});
+
+it('excludes expired trial and plan credits before reserving, but allows wallet-only funds', async () => {
+  store.billing[0] = { site_id: site, credits_available: 7, account_balance: 0,
+    trial_credits_available: 5, trial_started_at: '2000-01-01T00:00:00Z', trial_ends_at: '2000-01-16T00:00:00Z',
+    plan_credits_available: 2, plan_credit_period_start: '2000-01-01T00:00:00Z', plan_credit_period_end: '2000-02-01T00:00:00Z' };
+  expect(await dispatchIcpMiningActivity({ dispatchId: 'tick' })).toMatchObject({ started: 0 });
+  expect(mockRpc).not.toHaveBeenCalled();
+  store.billing[0].account_balance = 1;
+  expect(await dispatchIcpMiningActivity({ dispatchId: 'next-tick' })).toMatchObject({ started: 1 });
 });
 
 it('fails closed when billing balances cannot be read', async () => {

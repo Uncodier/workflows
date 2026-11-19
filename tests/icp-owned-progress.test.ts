@@ -30,6 +30,33 @@ function fixture() {
 }
 
 describe('owned ICP processing', () => {
+  it.each([false, true])('does not reopen a finished search when checking membership (pending members: %s)', async hasMembers => {
+    const f = fixture();
+    Object.assign(f.row(), { current_page: 1, processed_targets: 13, selected_processed_targets: 3 });
+    f.args.respectSearchTotal = true;
+    const finalize = jest.fn();
+    const members = hasMembers ? [{ ordinal: '4', person_id: '19', created_by: 'creator' }] : [];
+    f.args.selected = { read: async () => ({ selectedOnly: false, searchExhausted: false, pending: members.length, members }), finalize,
+      deps: { getSelectedIcpPersonActivity: async () => ({ person: { id: '19' } }),
+        enrich: async () => ({ success: true, leadId: 'lead', errors: [] }),
+        acknowledgeSelectedIcpPersonActivity: async () => {
+          Object.assign(f.row(), { checkpoint_version: 1 });
+          return { version: 1, processed: 14, found: 1 };
+        } } };
+    await processOwnedIcp(f.args);
+    expect(f.dependencies.callPersonRoleSearchActivity).not.toHaveBeenCalled();
+    expect(finalize).toHaveBeenCalledWith(expect.objectContaining({ searchExhausted: true }));
+  });
+
+  it('releases a verified manual claim without spending if the initial membership read fails', async () => {
+    const f = fixture();
+    f.args.respectSearchTotal = true;
+    f.args.selected = { read: async () => { throw new Error('license unavailable'); }, finalize: jest.fn() };
+    await expect(processOwnedIcp(f.args)).rejects.toThrow('license unavailable');
+    expect(f.row()).toMatchObject({ status: 'pending', processed_targets: 0, checkpoint_version: 1 });
+    expect(f.dependencies.callPersonRoleSearchActivity).not.toHaveBeenCalled();
+    expect(f.args.selected.finalize).not.toHaveBeenCalled();
+  });
   it('leaves the failed candidate pending and resumes it without losing or duplicating earlier matches', async () => {
     const f = fixture();
     f.dependencies.enrich.mockImplementationOnce(async () => ({ success: true, leadId: 'lead-1', errors: [] }))

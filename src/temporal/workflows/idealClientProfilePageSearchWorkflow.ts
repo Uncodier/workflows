@@ -75,7 +75,7 @@ export async function idealClientProfilePageSearchWorkflow(
       research: params => executeChild(leadResearchWorkflow, {
         workflowId: `icp-research-${params.lead_id}-${workflowInfo().runId}`, args: [params],
       }),
-    });
+    }, patched('icp-verify-cached-role-query-v1'));
   }
   const { role_query_id, page, page_size, site_id, userId, icp_mining_id } = options;
   const workflowId = `icp-page-search-${icp_mining_id || role_query_id}-page${page}`;

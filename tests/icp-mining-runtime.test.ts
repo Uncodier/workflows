@@ -9,6 +9,7 @@ const mockActivities = {
   getIcpMiningConfigurationActivity: jest.fn(), getPendingIcpMiningActivity: jest.fn(),
   getIcpMiningByIdActivity: jest.fn(), getSiteActivity: jest.fn(),
   claimIcpMiningExecutionActivity: jest.fn(), checkpointIcpMiningExecutionActivity: jest.fn(),
+  readSelectedIcpPeopleActivity: jest.fn(), finalizeSelectedIcpSliceActivity: jest.fn(),
   isIcpDispatcherEnabledActivity: jest.fn(),
   checkIcpMiningCreditsActivity: jest.fn(), warnIcpMiningCreditsActivity: jest.fn(),
 };
@@ -50,6 +51,7 @@ describe('ICP execution-time settings and terminal status', () => {
     mockActivities.getIcpMiningConfigurationActivity.mockImplementation(getIcpMiningConfigurationActivity);
     mockActivities.getPendingIcpMiningActivity.mockResolvedValue({ success: true, items: [] });
     mockActivities.claimIcpMiningExecutionActivity.mockResolvedValue({ acquired: true, icp: row });
+    mockActivities.readSelectedIcpPeopleActivity.mockResolvedValue({ selectedOnly: false, searchExhausted: false, pending: 0, members: [] });
     mockActivities.checkpointIcpMiningExecutionActivity.mockResolvedValue({ success: true });
     mockExecuteChild.mockResolvedValue({ success: true, processed: 3, foundMatches: 3, errors: [],
       hasMore: true, pageCompleted: false, checkpoint: { processed: 3, found: 3, version: 4,

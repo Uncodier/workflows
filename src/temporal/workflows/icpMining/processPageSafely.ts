@@ -4,6 +4,7 @@ import type { IdealClientProfilePageSearchOptions, IdealClientProfilePageSearchR
 import type { LeadResearchOptions, LeadResearchResult } from '../leadResearchWorkflow';
 import { needsLeadDeepResearch } from '../../utils/leadResearchState';
 import { isIcpCreditFailure } from '../../utils/icpDispatchSelection';
+import { isSelectedListQuery, SELECTED_LIST_SEARCH_ERROR } from '../../utils/selectedListQuery';
 
 type Deps = Pick<Activities, 'getRoleQueryByIdActivity' | 'callPersonRoleSearchActivity' | 'getSegmentIdFromRoleQueryActivity'
   | 'checkpointIcpMiningExecutionActivity' | 'getLeadActivity'> & {
@@ -11,7 +12,7 @@ type Deps = Pick<Activities, 'getRoleQueryByIdActivity' | 'callPersonRoleSearchA
   research: (options: LeadResearchOptions) => Promise<LeadResearchResult>;
 };
 
-export async function processPageSafely(options: IdealClientProfilePageSearchOptions, deps: Deps): Promise<IdealClientProfilePageSearchResult> {
+export async function processPageSafely(options: IdealClientProfilePageSearchOptions, deps: Deps, verifyQuery = false): Promise<IdealClientProfilePageSearchResult> {
   if (!options.execution || !options.icp_mining_id) throw new Error('Owned page execution identity required');
   if (!Number.isInteger(options.page) || options.page < 0
     || !Number.isInteger(options.start_index ?? 0) || (options.start_index ?? 0) < 0 || (options.start_index ?? 0) > 9
@@ -42,10 +43,21 @@ export async function processPageSafely(options: IdealClientProfilePageSearchOpt
   if (snapshot && snapshot.page !== page) throw new Error('Saved ICP page does not match its cursor');
   if (snapshot && (!Array.isArray(snapshot.candidates) || snapshot.candidates.length > 10
     || offset > snapshot.candidates.length)) throw new Error('Invalid saved ICP candidates');
-  if (!snapshot) {
+  let searchQuery;
+  if (verifyQuery || !snapshot) {
     const query = await deps.getRoleQueryByIdActivity(options.role_query_id);
     if (!query.success || !query.roleQuery) throw new Error(query.error || 'ICP query unavailable');
-    const response = await deps.callPersonRoleSearchActivity({ query: query.roleQuery.query, page, page_size: 10,
+    searchQuery = query.roleQuery.query;
+    if (verifyQuery && (!searchQuery || typeof searchQuery !== 'object' || Array.isArray(searchQuery) || isSelectedListQuery(searchQuery))) {
+      // Return a no-progress checkpoint so the owning slice can release and
+      // settle its reservation without advancing, billing, or consuming a snapshot.
+      return { success: false, processed: 0, foundMatches: 0, leadsCreated: [], hasMore: true,
+        pageCompleted: false, retryableFailure: true, errors: [isSelectedListQuery(searchQuery) ? SELECTED_LIST_SEARCH_ERROR : 'Invalid saved role query'],
+        checkpoint: { version, processed, found, page, offset, snapshot } };
+    }
+  }
+  if (!snapshot) {
+    const response = await deps.callPersonRoleSearchActivity({ query: searchQuery, page, page_size: 10,
       site_id: options.site_id, userId: options.userId });
     if (!response.success) {
       errors.push(response.error || 'ICP provider unavailable'); retryableFailure = true;

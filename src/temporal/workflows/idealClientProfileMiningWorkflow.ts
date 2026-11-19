@@ -5,6 +5,9 @@ import { selectNextIcp } from './icpMining/selectIcp';
 import { processSingleIcp } from './icpMining/processSingle';
 import { processConfiguredIcp } from './icpMining/processConfigured';
 import { processOwnedIcp } from './icpMining/processOwned';
+import { SELECTED_ACK_RECOVERY_PATCH, ICP_RECEIPT_RETRY } from './icpMining/processSelectedPeople';
+import { enrichLeadWorkflow } from './enrichLeadWorkflow';
+import { leadResearchWorkflow } from './leadResearchWorkflow';
 import type { IcpMiningWorkflowDto } from '../utils/icpMiningPayload';
 import { isIcpCreditFailure } from '../utils/icpDispatchSelection';
 import type {
@@ -22,13 +25,16 @@ const {
   checkpointIcpMiningExecutionActivity,
   isIcpDispatcherEnabledActivity,
   checkIcpMiningCreditsActivity,
+  readSelectedIcpPeopleActivity, finalizeSelectedIcpSliceActivity, getSelectedIcpPersonActivity,
+  acknowledgeSelectedIcpPersonActivity, getLeadActivity,
 } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes',
   retry: { maximumAttempts: 3 },
 });
-const { warnIcpMiningCreditsActivity } = proxyActivities<Activities>({
+const { warnIcpMiningCreditsActivity, getSelectedIcpPersonActivity: getSelectedPersonOnce } = proxyActivities<Activities>({
   startToCloseTimeout: '5 minutes', retry: { maximumAttempts: 1 },
 });
+const { reconcileSelectedIcpPersonAckActivity } = proxyActivities<Activities>(ICP_RECEIPT_RETRY);
 
 // DB activities for ICP mining orchestration
 const {
@@ -191,10 +197,21 @@ async function runIcpMining(
   let listIds: string[] = [];
   let miningOptions: IdealClientProfileMiningOptions & { icpCreditGuard?: boolean } = options;
   const ownedExecution = configurableMining && patched('icp-mining-owned-checkpoints-v1');
+  const selectedGuard = ownedExecution && patched('icp-selected-members-v1');
   const creditGuard = patched('icp-mining-credit-guard-v1');
   const processIcp = (args: Parameters<typeof processSingleIcp>[0]) => ownedExecution
     ? processOwnedIcp({ ...args, execution: { runId: workflowInfo().runId, workflowId: workflowInfo().workflowId },
-      claim: claimIcpMiningExecutionActivity, checkpoint: checkpointIcpMiningExecutionActivity })
+      respectSearchTotal: selectedGuard && patched('icp-owned-respect-search-total-v1'),
+      claim: claimIcpMiningExecutionActivity, checkpoint: checkpointIcpMiningExecutionActivity,
+      ...(selectedGuard ? { selected: { read: readSelectedIcpPeopleActivity, finalize: finalizeSelectedIcpSliceActivity,
+        deps: { getSelectedIcpPersonActivity, acknowledgeSelectedIcpPersonActivity, getLeadActivity,
+          ...(patched(SELECTED_ACK_RECOVERY_PATCH) ? { reconcileSelectedIcpPersonAckActivity,
+            getSelectedIcpPersonActivity: getSelectedPersonOnce } : {}),
+          enrich: (params, ordinal) => executeChild(enrichLeadWorkflow, {
+            workflowId: `icp-selected-enrich-${args.icp.id}-${workflowInfo().runId}-${ordinal}`, args: [params] }),
+          research: (params, ordinal) => executeChild(leadResearchWorkflow, {
+            workflowId: `icp-selected-research-${args.icp.id}-${workflowInfo().runId}-${ordinal}`, args: [params] }),
+        } } } : {}) })
     : configurableMining ? processConfiguredIcp(args) : processSingleIcp(args);
 
   // Preserve the recorded validation commands for histories started before decoupling.

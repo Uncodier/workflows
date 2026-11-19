@@ -61,6 +61,9 @@ temporal-workflows/
 
 ## Available Workflows
 
+- [Selected Finder membership consumption](ICP_SELECTED_PEOPLE.md) — durable member
+  checkpoints, creator attribution, no-search selected-only lists and offline checks.
+
 - [Minimum-data site setup](workflows/SITE_SETUP_WORKFLOW.md) — current required
   input, independent stages, partial results, queue alignment and replay safety.
 

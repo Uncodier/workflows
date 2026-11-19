@@ -1,6 +1,7 @@
 import { apiConfig } from '../../config/config';
 import { redactSensitiveHeaders } from './headerSecurity';
 import { admissionRetryAfterMs, canRetryIcpAdmission } from './apiAdmissionRetry';
+import { isSelectedListQuery, SELECTED_LIST_SEARCH_ERROR } from '../utils/selectedListQuery';
 
 export { redactSensitiveHeaders } from './headerSecurity';
 
@@ -99,6 +100,12 @@ export class ApiService {
     endpoint: string, 
     options: ApiRequestOptions = {}
   ): Promise<ApiResponse<T>> {
+    // An old workflow can still schedule the search activity on a new worker.
+    // This database placeholder is not a Finder filter; never POST it or retry it.
+    if (endpoint === '/api/finder/person_role_search' && isSelectedListQuery(options.body)) {
+      return { success: false, error: { code: 'SELECTED_LIST_NOT_SEARCHABLE',
+        message: SELECTED_LIST_SEARCH_ERROR, requestNotStarted: true } };
+    }
     if (!canRetryIcpAdmission(endpoint, options.method ?? 'GET')) {
       return this.requestOnce<T>(endpoint, options);
     }

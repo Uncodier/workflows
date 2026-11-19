@@ -1,10 +1,11 @@
 import type { Activities } from '../../activities';
-import type { EnrichLeadOptions, EnrichLeadResult } from '../enrichLeadWorkflow';
+import type { EnrichLeadOptions } from '../enrichLeadWorkflow';
 import type { generatePersonEmailWorkflow } from '../generatePersonEmailWorkflow';
 import { domainOf, finderLeadProfile, mergeFinderData } from '../../utils/finderData';
 import { emailCandidates, personContactDocuments, usablePhoneNumbers } from '../../utils/icpContactCandidates';
 import type { IcpOrganizationReview } from '../../utils/icpIdentityReview';
 import { isIcpCreditFailure } from '../../utils/icpDispatchSelection';
+import { selectedPersonGuard, type SelectedMemberAttribution, type SelectedEnrichLeadResult } from './selectedMemberAttribution';
 
 type Deps = Pick<Activities, 'prepareFinderPersonActivity' | 'checkExistingLeadForPersonActivity' | 'validateContactInformation'
   | 'lookEmailOnIcyPeas' | 'callPersonWorkEmailsActivity' | 'callPersonContactsLookupPersonalEmailsActivity'
@@ -13,16 +14,17 @@ type Deps = Pick<Activities, 'prepareFinderPersonActivity' | 'checkExistingLeadF
   };
 
 /** Raw contacts are retained, but only usable contacts can terminate enrichment. */
-export async function enrichWithValidatedContacts(options: EnrichLeadOptions, deps: Deps,
-  policy: { trustProviderEmails?: boolean; isolateIdentityReviews?: boolean; stopOnCreditFailure?: boolean; reuseExistingLeadOnly?: boolean; resolveRoleIdentity?: boolean } = {}): Promise<EnrichLeadResult> {
+export async function enrichWithValidatedContacts(options: EnrichLeadOptions & SelectedMemberAttribution, deps: Deps,
+  policy: { trustProviderEmails?: boolean; isolateIdentityReviews?: boolean; stopOnCreditFailure?: boolean; reuseExistingLeadOnly?: boolean; resolveRoleIdentity?: boolean } = {}): Promise<SelectedEnrichLeadResult> {
   const start = Date.now();
   const errors: string[] = [];
   const responses: Record<string, any> = {};
   let identityReviews: IcpOrganizationReview[] | undefined;
-  const finish = (data: Partial<EnrichLeadResult>): EnrichLeadResult => ({ success: false, errors,
+  const finish = (data: Partial<SelectedEnrichLeadResult>): SelectedEnrichLeadResult => ({ success: false, errors,
     ...(identityReviews?.length ? { identityReviews } : {}),
     executionTime: `${((Date.now() - start) / 1000).toFixed(2)}s`, completedAt: new Date().toISOString(), ...data });
   try {
+    const guard = selectedPersonGuard(options);
     const prepared = await deps.prepareFinderPersonActivity({ ...options, source_search_result: options.source_search_result!,
       ...(policy.isolateIdentityReviews ? { isolate_identity_reviews: true } : {}) });
     errors.push(...prepared.errors);
@@ -33,10 +35,22 @@ export async function enrichWithValidatedContacts(options: EnrichLeadOptions, de
       // No contacts are bought and no lead is linked to a guessed organization.
       return finish({ success: true, outcome: 'needs_review', personId: person.id });
     }
-    const checked = await deps.checkExistingLeadForPersonActivity({ person_id: person.id, site_id: options.site_id,
+    const conflict = (receipt: { success: boolean; selectedIdentityReview?: SelectedEnrichLeadResult['selectedIdentityReview'] }) => {
+      const review = receipt.selectedIdentityReview;
+      if (!review) return undefined;
+      if (receipt.success || !guard.selected_person_id || review.siteId !== options.site_id
+        || review.providerId !== guard.selected_person_id || review.reason !== 'conflicting_lead_identity') {
+        throw new Error('Unconfirmed selected Finder identity conflict');
+      }
+      return finish({ success: true, outcome: 'needs_review', personId: person.id, selectedIdentityReview: review });
+    };
+    const checked = await deps.checkExistingLeadForPersonActivity({ person_id: person.id, site_id: options.site_id, ...guard,
       ...(policy.resolveRoleIdentity ? { icp_role_identity: true } : {}) });
+    const checkReview = conflict(checked);
+    if (checkReview) return checkReview;
     if (!checked.success) throw new Error(checked.error || 'Lead lookup failed');
     const lead = checked.existingLead;
+    const leadGuard = guard.selected_person_id && lead?.id ? { ...guard, expected_lead_id: lead.id } : guard;
     const trustedExistingWorkEmail = emailCandidates({ email: lead?.email,
       verified: lead?.metadata?.emailVerified === true,
       validation_status: lead?.metadata?.email_validation?.status }).some(candidate => candidate.verified);
@@ -46,9 +60,12 @@ export async function enrichWithValidatedContacts(options: EnrichLeadOptions, de
       // fresh Finder evidence; do not buy contact lookups or rewrite identities.
       const saved = await deps.upsertLeadForPersonActivity({
         person_id: person.id, site_id: options.site_id, segment_id: options.segment_id,
+        ...(options.selected_member_attribution ? { userId: options.userId } : {}),
         name: person.full_name, person_emails: [], profile: finderLeadProfile(person, prepared.role),
-        validated_contact_policy: true, icp_reuse_only: true,
+        ...leadGuard, validated_contact_policy: true, icp_reuse_only: true,
       });
+      const updateReview = conflict(saved);
+      if (updateReview) return updateReview;
       if (!saved.success || !saved.leadId) throw new Error(saved.error || 'Existing ICP lead was not updated');
       return finish({ success: true, outcome: 'matched', personId: person.id, leadId: saved.leadId });
     }
@@ -97,7 +114,7 @@ export async function enrichWithValidatedContacts(options: EnrichLeadOptions, de
     await acceptEmails([leadEmail, ...documents.flatMap(doc => [doc.emails, doc.work_emails])], work);
     await acceptEmails([lead?.personal_email, ...documents.map(doc => doc.personal_emails)], personal);
     const available = () => !!(work.length || personal.length || phones.length);
-    const params = { site_id: options.site_id, person_id: String(person.external_person_id || options.person_id),
+    const params = { site_id: options.site_id, person_id: guard.selected_person_id ?? String(person.external_person_id || options.person_id),
       userId: options.userId, company_name: options.company_name };
     const lookup = async (key: string, call: () => Promise<any>, accept: (result: any) => Promise<void>) => {
       try {
@@ -136,7 +153,7 @@ export async function enrichWithValidatedContacts(options: EnrichLeadOptions, de
         userId: options.userId, person_raw_result: person.raw_result }), result =>
         acceptEmails([result.validatedEmail ? { email: result.validatedEmail, verified: true } : undefined], work));
     }
-    const savedPerson = await deps.upsertPersonActivity({ id: person.id,
+    const savedPerson = await deps.upsertPersonActivity({ id: person.id, ...guard,
       emails: work, personal_emails: personal, phones,
       raw_result: mergeFinderData(person.raw_result, { finder_contact_enrichment: responses }),
     });
@@ -147,9 +164,11 @@ export async function enrichWithValidatedContacts(options: EnrichLeadOptions, de
     const saved = await deps.upsertLeadForPersonActivity({ person_id: person.id, site_id: options.site_id, userId: options.userId,
       name: person.full_name, email: work[0], personal_email: personal[0], phone: phones[0], person_emails: work,
       company_id: prepared.companyId || lead?.company_id, segment_id: options.segment_id,
-      linkedin_url: person.linkedin_profile, profile, validated_contact_policy: true,
+      ...leadGuard, linkedin_url: person.linkedin_profile, profile, validated_contact_policy: true,
       ...(policy.reuseExistingLeadOnly ? { icp_reuse_only: true } : {}),
     });
+    const saveReview = conflict(saved);
+    if (saveReview) return saveReview;
     if (!saved.success || !saved.leadId) throw new Error(saved.error || 'Lead was not saved');
     return finish({ success: true, outcome: 'matched', personId: person.id, leadId: saved.leadId,
       enrichedData: { workEmails: work.map(email => ({ email, validation_status: 'valid' })), personalEmails: personal.map(email => ({ email })), phoneNumbers: phones.map(phone_number => ({ phone_number })) } });
