@@ -67,6 +67,7 @@ test('terminally marks saved assistant and preserves other metadata', async () =
     keep: 'metadata', status: 'skipped', automation_skipped: true, automation_skip_reason: 'agent_snoozed',
   }) }));
   expect(update.eq).toHaveBeenCalledWith('role', 'assistant');
+  expect(update.eq).toHaveBeenCalledWith('custom_data', JSON.stringify(message.custom_data));
   expect(update.eq).toHaveBeenCalledWith('updated_at', message.updated_at);
 });
 test('stale generation stays blocked after pause expiry, including generation crossing human reply', async () => {
@@ -112,4 +113,10 @@ test('saved team member send reaches provider despite active snooze', async () =
   expect(await sendEmailFromAgentActivity({ ...identity, email: 'lead@example.test', subject: 'Reply', message: 'Reply' }))
     .toMatchObject({ success: true, messageId: 'provider' });
   expect(mockPost).toHaveBeenCalledTimes(1);
+});
+
+test.each(['attempting','accepted','failed'])('a later pause cannot turn an existing %s channel attempt into a skipped receipt',async state=>{
+  const {update} = rows({...message,custom_data:{status:'reconciliation_required',pinned_text_delivery:{state}}});
+  await expect(checkConversationAutomationActivity(identity)).rejects.toThrow('reconcile');
+  expect(update.update).not.toHaveBeenCalled();
 });

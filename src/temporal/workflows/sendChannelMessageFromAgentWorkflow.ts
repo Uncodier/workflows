@@ -21,6 +21,7 @@ const {
 });
 
 export interface SendChannelMessageFromAgentParams extends OutboundMediaFields {
+  delivery_receipt_required?: boolean;
   response_format?: 'text' | 'audio';
   channel: string;
   to: string;
@@ -89,7 +90,7 @@ export async function sendChannelMessageFromAgentWorkflow(params: SendChannelMes
     const result = templateAudio
       ? await pollTemplateDelivery(() => sendAudioOnce(params), params.message_id!, {
         site_id: params.site_id, conversation_id: params.conversation_id, message_id: params.message_id! })
-      : await (params.response_format === 'audio' || media.media_url ? sendAudioOnce : sendChannelMessageFromAgentActivity)(params);
+      : await (params.delivery_receipt_required || params.response_format === 'audio' || media.media_url ? sendAudioOnce : sendChannelMessageFromAgentActivity)(params);
 
     if (!result.success && !(templateAudio && (isTemplatePending(result) || result.needs_reconciliation !== undefined))) {
       throw new Error(result.error || `Failed to send ${params.channel} message`);
@@ -104,6 +105,7 @@ export async function sendChannelMessageFromAgentWorkflow(params: SendChannelMes
       success: result.success,
       ...automationSkipMetadata(result),
       messageId: result.messageId || 'unknown',
+      ...(params.delivery_receipt_required && result.status ? { status: result.status } : {}),
       recipient: params.to,
       executionTime: `${executionTimeMs}ms`,
       timestamp: endTime.toISOString(),

@@ -1,5 +1,13 @@
 # Channel media delivery deployment
 
+For immediate Zavu replies, deploy the API's saved-turn destination checks before
+the `zavu-saved-channel-reply-v1` worker patch. New executions carry the provider
+event as a constraint and name the delivery child by the saved assistant reply,
+not by an event ID shared across accounts. The responder comes from generation,
+not a role-based input. No child starts without saved reply and conversation IDs.
+The version marker preserves the existing commands on replay; it does not add a
+second sender or change the widget. See the [API delivery contract](../../API/docs/CHANNEL_MESSAGE_ADMISSION.md#reply-on-the-original-connection).
+
 The worker now forwards the API's canonical outbound media contract:
 `message_type` (`image`, `video`, `audio`, `document`), `media_url`, and optional
 `mime_type`. Empty saved text is valid when the assistant reply includes media.

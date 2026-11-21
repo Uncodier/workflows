@@ -1,3 +1,4 @@
+import { isUnavailableChannelResult } from '../workflows/helpers/channelDeliveryOutcome';
 import { isSnoozedCustomerSupportResult } from '../utils/automationSnooze';
 import { ApplicationFailure } from '@temporalio/common';
 import { apiService } from '../services/apiService';
@@ -220,7 +221,9 @@ export async function sendCustomerSupportMessageActivity(
       throw customerSupportApiFailure(response.error);
     }
 
-    if (!isSnoozedCustomerSupportResult(response.data) && !isDisabledCustomerSupportResult(response.data) && !isUsableCustomerSupportResponse(response.data)) {
+    const historyOnly = messageRequest.custom_data?.source === 'zavu_inbound_message' && messageRequest.channel_delivery === true
+      && isUnavailableChannelResult(response.data);
+    if (!historyOnly && !isSnoozedCustomerSupportResult(response.data) && !isDisabledCustomerSupportResult(response.data) && !isUsableCustomerSupportResponse(response.data)) {
       console.error('❌ Customer support API returned no usable assistant response');
       throw ApplicationFailure.create({
         message: 'Customer support API returned no usable assistant response',

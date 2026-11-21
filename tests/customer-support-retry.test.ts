@@ -161,3 +161,14 @@ describe('customer support retries', () => {
     expect(RETRY_POLICIES.CUSTOMER_SUPPORT).not.toHaveProperty('initialIntervalMs');
   });
 });
+
+test('a disabled channel is terminal only for authenticated handoff with a saved inbound receipt', async()=>{
+  mockPost.mockClear();
+  const input = {message:'Help',site_id:'s',channel_delivery:true,custom_data:{source:'zavu_inbound_message'}};
+  const saved = {success:true,skipped:'channel_unavailable',conversation_id:'c',messages:{user:{message_id:'i'}}};
+  jest.mocked(apiService.post).mockResolvedValue({success:true,data:saved});
+  await expect(sendCustomerSupportMessageActivity(input,{origin:'telegram'})).resolves.toEqual({success:true,data:saved});
+  jest.mocked(apiService.post).mockResolvedValue({success:true,data:{...saved,messages:{}}});
+  await expect(sendCustomerSupportMessageActivity(input,{origin:'telegram'})).rejects.toMatchObject({type:'CUSTOMER_SUPPORT_EMPTY_RESPONSE'});
+  expect(apiService.post).toHaveBeenCalledTimes(2);
+});

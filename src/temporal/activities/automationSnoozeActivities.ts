@@ -36,6 +36,11 @@ export async function checkConversationAutomationActivity(request: AutomationDis
   const reason = automationSkipReason(conversation, message || { role: 'assistant' }, Date.now());
   if (!reason) return { success: true };
 
+  const metadata = message?.custom_data;
+  const pinnedAttempt = metadata?.pinned_text_delivery || (metadata?.native_media_delivery?.inbound_message_id && metadata.native_media_delivery);
+  if (pinnedAttempt && !(pinnedAttempt.state === 'skipped' && metadata.automation_skipped === true)) {
+    throw new Error('Cannot suppress a previously attempted channel delivery; reconcile the original receipt');
+  }
   if (message?.role === 'assistant' && message.custom_data?.automation_skipped !== true &&
       !['sent', 'delivered', 'read'].includes(message.custom_data?.status)) {
     // CAS avoids overwriting concurrent approval/provider metadata. A conflict
@@ -44,6 +49,7 @@ export async function checkConversationAutomationActivity(request: AutomationDis
       ...message.custom_data, status: 'skipped', automation_skipped: true,
       automation_skip_reason: reason, automation_skipped_at: new Date().toISOString(),
     }, updated_at: new Date().toISOString() }).eq('id', message.id).eq('conversation_id', conversationId).eq('role', 'assistant');
+    update = metadata == null ? update.is('custom_data', null) : update.eq('custom_data', JSON.stringify(metadata));
     if (message.updated_at) update = update.eq('updated_at', message.updated_at);
     const { data, error: updateError } = await update.select('id');
     if (updateError || !data?.length) throw new Error('Automation guard could not persist terminal suppression');

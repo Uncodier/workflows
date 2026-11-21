@@ -1,3 +1,4 @@
+import { isAcceptedChannelReceipt } from '../workflows/helpers/channelDeliveryOutcome';
 import { checkConversationAutomationActivity } from './automationSnoozeActivities';
 import { automationSkipMetadata, type AutomationSkipMetadata } from '../utils/automationSnooze';
 import { ApplicationFailure } from '@temporalio/common';
@@ -5,7 +6,7 @@ import { apiService } from '../services/apiService';
 import { outboundMediaFields } from '../workflows/helpers/outboundMedia';
 import type { SendChannelMessageFromAgentParams } from '../workflows/sendChannelMessageFromAgentWorkflow';
 import type { SendVoiceCallFromAgentParams } from '../workflows/sendVoiceCallFromAgentWorkflow';
-import { templateDeliveryMetadata, validateTemplateDelivery, type TemplateDeliveryMetadata, type TemplateRecoveryRequest, type TemplateRecoveryResult } from '../utils/templateDelivery';
+import { isTemplatePending, templateDeliveryMetadata, validateTemplateDelivery, type TemplateDeliveryMetadata, type TemplateRecoveryRequest, type TemplateRecoveryResult } from '../utils/templateDelivery';
 
 const RETRYABLE_CLIENT_STATUSES = new Set([408, 409, 425, 429]);
 
@@ -113,11 +114,16 @@ export async function sendChannelMessageFromAgentActivity(
 
     const messageId = response.data?.messageId || response.data?.message_id;
     if (params.media_url && !messageId) throw ApplicationFailure.nonRetryable('Media provider acceptance not confirmed', 'MEDIA_DELIVERY_REJECTED');
+    if (params.delivery_receipt_required && !(templateAudio && isTemplatePending(response.data || {}))
+      && !isAcceptedChannelReceipt({ ...response.data, messageId })) {
+      throw ApplicationFailure.nonRetryable('Original response has no verifiable provider acceptance', 'CHANNEL_RECEIPT_UNCONFIRMED');
+    }
     console.log(`${params.channel} API delivery status:`, response.data?.status || 'sent');
 
     return {
       success: true,
       messageId,
+      ...(params.delivery_receipt_required ? {status: response.data?.status} : {}),
       ...(templateAudio ? templateDeliveryMetadata(response.data || {}) : {}),
     };
   } catch (error) {

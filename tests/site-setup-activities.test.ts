@@ -40,6 +40,7 @@ beforeEach(() => {
   siteError = undefined;
   mockFrom.mockImplementation((table: string) => {
     const criteria: Record<string, unknown> = {};
+    let templatesOnly = false;
     filters.push({ table, criteria });
     const query = {
       select: jest.fn(() => query),
@@ -53,9 +54,14 @@ beforeEach(() => {
         } }),
       })),
       eq: jest.fn((key: string, value: unknown) => { criteria[key] = value; return query; }),
+      or: (filter: string) => {
+        if (filter !== 'configuration->>agentOrigin.is.null,configuration->>agentOrigin.neq.independent') throw new Error('Unexpected origin filter');
+        templatesOnly = true; return query;
+      },
       maybeSingle: jest.fn(async () => ({ data: site, error: siteError ? { message: siteError } : null })),
       then: (resolve: (result: unknown) => unknown) => Promise.resolve(resolve({
-        data: rows.filter(row => Object.entries(criteria).every(([key, value]) => row[key] === value)),
+        data: rows.filter(row => Object.entries(criteria).every(([key, value]) => row[key] === value)
+          && (!templatesOnly || (row.configuration as { agentOrigin?: string } | undefined)?.agentOrigin !== 'independent')),
         error: lookupError ? { message: lookupError } : null,
       })),
     };
@@ -65,6 +71,16 @@ beforeEach(() => {
 });
 
 describe('minimum-data agent setup', () => {
+  it('creates a missing default rather than adopting an independently created agent of the same role and name', async () => {
+    const independent = { id: 'custom-support', name: 'Customer Support', role: 'Customer Support', type: 'support',
+      status: 'active', site_id: siteId, user_id: ownerId, configuration: { agentOrigin: 'independent' } };
+    rows.push(independent);
+    const params = { site_id: siteId, agent_types: ['support'] };
+    expect(await createAgentsActivity(params)).toMatchObject({ total_created: 1, total_existing: 0 });
+    expect(await createAgentsActivity(params)).toMatchObject({ total_created: 0, total_existing: 1, agents: [{ agent_id: rows[1].id }] });
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toBe(independent);
+  });
   it('accepts the API contract and persists only valid minimal schema fields', async () => {
     const params: SiteSetupParams = { site_id: siteId, user_id: actorId, setup_type: 'basic', options: { enable_chat: true } };
     const result = await createAgentsActivity(params);

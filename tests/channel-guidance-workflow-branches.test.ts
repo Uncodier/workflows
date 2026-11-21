@@ -51,6 +51,32 @@ beforeEach(() => {
 });
 
 describe('customer-support entry branches await channel guidance', () => {
+  it.each([true, false])('uses the saved turn and responder for Zavu delivery only on new histories (patch=%s)', async enabled => {
+    mockPatched.mockImplementation(id => id === 'zavu-saved-channel-reply-v1' && enabled);
+    const message = { message: 'Hello', site_id: 'site', phone: '+15555550100', origin_message_id: 'provider-id',
+      custom_data: { source: 'zavu_inbound_message', connection_id: 'number-b' } };
+    mockSend.mockResolvedValue({ success: true, data: { agent_id: 'actual-agent', conversation_id: 'conversation',
+      messages: { assistant: { content: 'Reply', message_id: 'saved-reply' } } } });
+    const result = await channelCustomerSupportMessageWorkflow(message, { origin: 'whatsapp', agentId: 'legacy-input' });
+    expect(mockStartChild).toHaveBeenCalledTimes(1);
+    expect(mockStartChild.mock.calls[0][1]).toMatchObject({
+      workflowId: enabled ? 'send-channel-reply-saved-reply' : 'send-whatsapp-agent-provider-id',
+      args: [expect.objectContaining({ site_id: 'site', channel: 'whatsapp', agent_id: enabled ? 'actual-agent' : 'legacy-input',
+        message_id: 'saved-reply', conversation_id: 'conversation', custom_data: enabled
+          ? { ...message.custom_data, origin_message_id: message.origin_message_id } : message.custom_data })],
+    });
+    expect(result.data.channelMessageSent).toBe(true);
+  });
+
+  it.each([{ conversation_id: 'conversation' }, { site_id: 'other', conversation_id: 'conversation', id: 'reply' },
+    { id: 'reply' }])('never starts an unbound Zavu send for %j', async fields => {
+    mockSend.mockResolvedValue({ success: true, data: { ...fields, messages: { assistant: { content: 'Reply', message_id: fields.id } } } });
+    const result = await channelCustomerSupportMessageWorkflow({ site_id: 'site', phone: 'user', message: 'Hello', origin_message_id: 'event',
+      custom_data: { source: 'zavu_inbound_message' } }, { origin: 'telegram' });
+    expect(mockStartChild).not.toHaveBeenCalled();
+    expect(result.data.channelMessageSent).toBe(false);
+  });
+
   it.each([true, false])('forwards media-only assistant output only with media replay patch=%s', async enabled => {
     mockPatched.mockImplementation(id => id === 'customer-support-outbound-media-v1' ? enabled : false);
     const media = { message_type: 'image', media_url: 'https://assets.example.test/a.jpg', mime_type: 'image/jpeg' };
@@ -244,5 +270,33 @@ describe('customer-support entry branches await channel guidance', () => {
     expect(mockSend).toHaveBeenCalledWith(
       { ...data, channel_guidance_run_plan_ids: ['verified-plan'] }, { origin: 'email' },
     );
+  });
+});
+
+describe('pinned outcome patch', () => {
+  const inbound = { message: 'Hello', site_id: 's', phone: 'contact', origin_message_id: 'i', custom_data: {source:'zavu_inbound_message'} };
+  const saved = {conversation_id:'c', messages:{assistant:{message_id:'r', content:'Reply'}}};
+  const run = () => channelCustomerSupportMessageWorkflow(inbound, {origin:'telegram'});
+  beforeEach(() => { mockPatched.mockImplementation(id => ['zavu-saved-channel-reply-v1','zavu-channel-delivery-outcome-v1'].includes(id));
+    mockSend.mockResolvedValue({success:true, data:saved}); });
+  it.each([{success:true}, {success:true,status:'sent',messageId:'unknown'}, {success:false,status:'failed',messageId:'x'},
+    {success:true,status:'sent',messageId:'x',needs_reconciliation:true}])('does not complete for bare or contradictory child evidence %j', async result => {
+    mockStartChild.mockResolvedValue({result:async()=>result});
+    expect(await run()).toMatchObject({success:false,data:{channelMessageSent:false,deliveryOutcome:{version:1,sendWorkflowId:'send-channel-reply-r'}}});
+  });
+  it('preserves original stage and saved IDs on a failed child, without another child or generation',async()=>{
+    mockStartChild.mockResolvedValue({result:async()=>{throw new Error('Lost response');}});
+    expect(await run()).toMatchObject({success:false,data:{deliveryOutcome:{state:'unknown',stage:'delivery',messageId:'r',conversationId:'c'}}});
+    expect(mockSend).toHaveBeenCalledTimes(1);expect(mockStartChild).toHaveBeenCalledTimes(1);
+  });
+  it('records provider acceptance distinctly from final arrival',async()=>{
+    mockStartChild.mockResolvedValue({result:async()=>({success:true,status:'queued',messageId:'p'})});
+    expect(await run()).toMatchObject({success:true,data:{deliveryOutcome:{state:'accepted',status:'queued',providerMessageId:'p'}}});
+    expect(mockStartChild.mock.calls[0][1].args[0].delivery_receipt_required).toBe(true);
+  });
+  it('a generation timeout never schedules delivery',async()=>{
+    mockSend.mockRejectedValueOnce(new Error('Response lost'));
+    expect(await run()).toMatchObject({success:false,data:{deliveryOutcome:{state:'unknown',stage:'generation'}}});
+    expect(mockStartChild).not.toHaveBeenCalled();
   });
 });

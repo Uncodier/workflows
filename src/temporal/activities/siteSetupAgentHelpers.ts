@@ -102,7 +102,8 @@ export type SetupAgentRow = ReturnType<typeof buildSetupAgentRow>;
 export async function findExistingSetupAgent(client: SupabaseClient, row: SetupAgentRow, consumed: ReadonlySet<string>) {
   const { data, error } = await client.from('agents')
     .select('id, name, type, status, role, description, activities')
-    .eq('site_id', row.site_id).eq('type', row.type);
+    .eq('site_id', row.site_id).eq('type', row.type)
+    .or('configuration->>agentOrigin.is.null,configuration->>agentOrigin.neq.independent');
   if (error) throw new Error(`Unable to check existing agents: ${error.message}`);
   // Creator is historical metadata, not tenant/role identity. An exact setup ID
   // remains authoritative even after the user customizes its role or name.
