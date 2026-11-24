@@ -11,6 +11,7 @@ import { extractSearchAttributesFromInput } from '../utils/searchAttributes';
 import { upsertSearchAttributes } from '@temporalio/workflow';
 import { mergeFinderData, isRecord } from '../utils/finderData';
 import { isProtectedResearchField, withoutResearchIdentity } from '../utils/researchData';
+import { CHAT_INTERVENTION, workflowOwnerFilter } from '../utils/dispatchOwner';
 
 // Lead interfaces
 export interface Lead {
@@ -2479,20 +2480,27 @@ export async function cleanupFailedFollowUpActivity(request: {
       }
 
       cleanupSummary.messages_in_conversation = messages?.length || 0;
+      if (messages?.some(m => m.custom_data?.dispatch_owner === CHAT_INTERVENTION)) {
+        return { success: true, message_deleted: false, conversation_deleted: false };
+      }
       console.log(`📊 Found ${cleanupSummary.messages_in_conversation} messages in conversation`);
 
       // Step 3.1: Delete specific message if provided
       if (request.message_id) {
         console.log(`🗑️ Deleting specific message ${request.message_id}...`);
         
-        const { error: deleteMessageError } = await supabaseServiceRole
+        const { data: deleted, error: deleteMessageError } = await supabaseServiceRole
           .from('messages')
           .delete()
           .eq('id', request.message_id)
-          .eq('conversation_id', targetConversationId);
+          .eq('conversation_id', targetConversationId)
+          .or(workflowOwnerFilter)
+          .select('id');
 
         if (deleteMessageError) {
           console.error(`❌ Error deleting message ${request.message_id}:`, deleteMessageError);
+        } else if (!deleted?.length) {
+          return { success: true, message_deleted: false, conversation_deleted: false };
         } else {
           messageDeleted = true;
           console.log(`✅ Successfully deleted message ${request.message_id}`);
@@ -2507,25 +2515,21 @@ export async function cleanupFailedFollowUpActivity(request: {
       if (cleanupSummary.messages_in_conversation === 0) {
         console.log(`🗑️ Deleting conversation ${targetConversationId} (${cleanupSummary.messages_in_conversation} messages remaining - empty conversation cleanup)...`);
         
-        // First delete any remaining messages
-        const { error: deleteMessagesError } = await supabaseServiceRole
-          .from('messages')
-          .delete()
-          .eq('conversation_id', targetConversationId);
-
-        if (deleteMessagesError) {
-          console.error(`⚠️ Error deleting messages from conversation:`, deleteMessagesError);
-        }
-
-        // Then delete the conversation
-        const { error: deleteConversationError } = await supabaseServiceRole
+        // Never sweep messages based on our earlier snapshot. Message inserts
+        // lock this parent and maintain message_count in the same transaction.
+        const { data: removed, error: deleteConversationError } = await supabaseServiceRole
           .from('conversations')
           .delete()
           .eq('id', targetConversationId)
-          .eq('site_id', request.site_id);
+          .eq('site_id', request.site_id)
+          .eq('message_count', 0)
+          .select('id');
 
         if (deleteConversationError) {
           console.error(`❌ Error deleting conversation ${targetConversationId}:`, deleteConversationError);
+        } else if (!removed?.length) {
+          // The parent is no longer empty. Do not clean up its tasks either.
+          return { success: true, message_deleted: messageDeleted, conversation_deleted: false };
         } else {
           conversationDeleted = true;
           console.log(`✅ Successfully deleted conversation ${targetConversationId}`);

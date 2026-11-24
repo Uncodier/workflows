@@ -1,4 +1,5 @@
 import { getSupabaseService } from '../services/supabaseService';
+import { workflowOwnerFilter } from '../utils/dispatchOwner';
 
 const APPROVED_MESSAGE_BATCH_SIZE = 100;
 const RELATED_RECORD_BATCH_SIZE = 100;
@@ -32,10 +33,8 @@ export async function getApprovedMessagesActivity(): Promise<any[]> {
 
   const { supabaseServiceRole } = await import('../../lib/supabase/client');
 
-  // Fetch messages with status 'accepted'
-  // We filter by custom_data->>status = 'accepted'
-  // We assume 'accepted' means approved by user.
-  // We order by created_at to process oldest first.
+  // Filter ownership on the server: a page of older manual sends must not
+  // starve ordinary approvals or reach the invalid-message repair path.
   const { data: messages, error } = await supabaseServiceRole
     .from('messages')
     .select(`
@@ -46,6 +45,7 @@ export async function getApprovedMessagesActivity(): Promise<any[]> {
       created_at
     `)
     .eq('custom_data->>status', 'accepted')
+    .or(workflowOwnerFilter)
     .or(`custom_data->>outreach_deferred_until.is.null,custom_data->>outreach_deferred_until.lte.${new Date().toISOString()}`)
     .order('created_at', { ascending: true })
     .limit(APPROVED_MESSAGE_BATCH_SIZE);
@@ -185,6 +185,7 @@ export async function getApprovedMessagesActivity(): Promise<any[]> {
         updated_at: new Date().toISOString(),
       })
       .eq('id', invalidMessage.id)
+      .or(workflowOwnerFilter)
       .eq('custom_data->>status', 'accepted');
 
     if (updateError) {

@@ -13,6 +13,7 @@ import { outboundMediaFields } from './helpers/outboundMedia';
 import { pollTemplateDelivery } from './helpers/pollTemplateDelivery';
 import { isTemplatePending, templateDeliveryMetadata, type TemplateDeliveryMetadata } from '../utils/templateDelivery';
 import { savedTextIdentity } from '../utils/routedWhatsAppText';
+import { CHAT_INTERVENTION } from '../utils/dispatchOwner';
 
 const {
   checkConversationAutomationActivity,
@@ -74,7 +75,12 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     console.warn('⚠️ resetStuckSendingMessages failed (non-fatal):', resetResult.error);
   }
 
-  const approvedMessages = await getApprovedMessagesActivity();
+  const snapshot = await getApprovedMessagesActivity();
+  // An older activity may have returned an API-owned row. Do not even run
+  // snooze, enrichment failure handling or a single-message dispatch on it.
+  const approvedMessages = patched('approved-message-dispatch-owner-v1')
+    ? snapshot?.filter(message => message.custom_data?.dispatch_owner !== CHAT_INTERVENTION)
+    : snapshot;
   
   if (!approvedMessages || approvedMessages.length === 0) {
     console.log('✅ No approved messages to send.');

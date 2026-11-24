@@ -24,6 +24,7 @@ it('protects comments from already queued destructive cleanup commands', async (
   await expect(cleanupFailedFollowUpActivity(request)).resolves.toMatchObject({ message_deleted: false });
   expect(q.eq).toHaveBeenCalledWith('conversations.site_id', 'site');
   expect(q.or).toHaveBeenCalledWith(expect.stringContaining('custom_data->audio_delivery.not.is.null'));
+  expect(q.or).toHaveBeenCalledWith(expect.stringContaining('custom_data->>dispatch_owner.eq.chat_intervention'));
   expect(mockCleanup).not.toHaveBeenCalled();
 });
 

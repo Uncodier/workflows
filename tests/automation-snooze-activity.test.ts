@@ -107,8 +107,8 @@ test.each([
   expect(await send()).toMatchObject({ success: true, skipped: true });
   expect(mockPost).not.toHaveBeenCalled();
 });
-test('saved team member send reaches provider despite active snooze', async () => {
-  rows({ ...message, role: 'team_member' });
+test.each([{}, { dispatch_owner: 'chat_intervention', status: 'accepted', command_status: 'pending' }])('direct team member send reaches provider despite active snooze (%j)', async custom_data => {
+  rows({ ...message, role: 'team_member', custom_data });
   mockPost.mockResolvedValue({ success: true, data: { messageId: 'provider' } });
   expect(await sendEmailFromAgentActivity({ ...identity, email: 'lead@example.test', subject: 'Reply', message: 'Reply' }))
     .toMatchObject({ success: true, messageId: 'provider' });

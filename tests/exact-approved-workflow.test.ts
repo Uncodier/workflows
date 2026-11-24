@@ -47,6 +47,16 @@ const proposal = (channel: string, connectionId: unknown = 'selected') => ({
 
 const queuedAudio = () => ({ ...proposal('whatsapp'), custom_data: {
   channel: 'whatsapp', connection_id: 'selected', response_format: 'audio' } });
+test.each([true, false])('drops a marked old activity snapshot before any dispatch/cleanup (batch=%s)', async batch => {
+  mockPatched.mockImplementation((...args: unknown[]) => args[0] !== 'send-approved-messages-batch-claims-v1' || batch);
+  mockActivities.getApprovedMessagesActivity.mockResolvedValue([{ ...proposal('email'), custom_data: {
+    dispatch_owner: 'chat_intervention', status: 'accepted', command_status: 'pending' } }]);
+  expect(await sendApprovedMessagesWorkflow()).toEqual({ processed: 0, success: 0, failed: 0 });
+  expect(mockActivities.claimApprovedMessagesBatchActivity).not.toHaveBeenCalled();
+  expect(mockActivities.checkConversationAutomationActivity).not.toHaveBeenCalled();
+  expect(mockActivities.cleanupFailedFollowUpActivity).not.toHaveBeenCalled();
+  mockPatched.mockReturnValue(true);
+});
 test('approved media-only uses exact saved-record delivery once, without child/text fallback or cleanup', async () => {
   mockActivities.getApprovedMessagesActivity.mockResolvedValue([{ ...proposal('telegram'), content: '', custom_data: {
     channel: 'telegram', message_type: 'image', media_url: 'https://assets.example.test/a.jpg' } }]);

@@ -2,6 +2,7 @@ import { checkConversationAutomationActivity } from './automationSnoozeActivitie
 import type { AutomationSkipMetadata } from '../utils/automationSnooze';
 import { apiService } from '../services/apiService';
 import { resolveOutreachActivity } from '../utils/outreachActivity';
+import { workflowOwnerFilter } from '../utils/dispatchOwner';
 
 export interface OutreachDeliveryResult extends AutomationSkipMetadata {
   success: boolean;
@@ -68,6 +69,6 @@ export async function deferOutreachMessageActivity(request: {
     },
     updated_at: new Date(now).toISOString(),
   }).eq('id', request.message_id).eq('conversation_id', request.conversation_id)
-    .eq('custom_data->>status', 'sending');
+    .eq('custom_data->>status', 'sending').or(workflowOwnerFilter);
   if (updateError) throw new Error(`Could not defer outreach message: ${updateError.message}`);
 }
