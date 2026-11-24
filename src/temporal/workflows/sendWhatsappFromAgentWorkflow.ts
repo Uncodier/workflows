@@ -1,6 +1,7 @@
 import type { AutomationSkipMetadata } from '../utils/automationSnooze';
 import {
   ApplicationFailure,
+  isCancellation,
   proxyActivities,
   sleep,
   patched,
@@ -13,6 +14,8 @@ import { buildSendTemplateActivityParams } from './helpers/buildSendTemplatePara
 import { shouldRetrySendTemplate } from './helpers/whatsappTemplateRejection';
 import { terminalWorkflowFailure } from './helpers/terminalWorkflowFailure';
 import { outboundMediaFields, type OutboundMediaFields } from './helpers/outboundMedia';
+import { routeSavedWhatsAppText, completeRoutedWhatsAppFollowUp } from './helpers/routeSavedWhatsAppText';
+import { savedTextIdentity, type RoutedWhatsAppTextReceipt } from '../utils/routedWhatsAppText';
 
 // Configure activity options using centralized timeouts
 const {
@@ -45,7 +48,7 @@ const { sendWhatsAppFromAgentActivity: sendAudioOnce } = proxyActivities<typeof 
  */
 export interface SendWhatsAppFromAgentParams extends OutboundMediaFields {
   response_format?: 'text' | 'audio';
-  phone_number: string;
+  phone_number?: string; // Required on legacy sends, never authoritative for routed text.
   message: string;
   site_id: string;
   from?: string;
@@ -63,10 +66,10 @@ export interface SendWhatsAppFromAgentParams extends OutboundMediaFields {
 /**
  * Workflow result interface
  */
-export interface SendWhatsAppFromAgentResult extends AutomationSkipMetadata {
+export interface SendWhatsAppFromAgentResult extends AutomationSkipMetadata, Partial<RoutedWhatsAppTextReceipt> {
   success: boolean;
-  messageId: string;
-  recipient: string;
+  messageId?: string; // Routed sends expose this legacy alias only for an accepted provider ID.
+  recipient?: string; // The routed API does not return a recipient.
   executionTime: string;
   timestamp: string;
 }
@@ -81,6 +84,17 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
   const startTime = new Date();
   const useOutboundMedia = patched('send-whatsapp-outbound-media-v1');
   let media: OutboundMediaFields = {};
+  // Decide the version before fetching. A replay partway through an old send
+  // must not start routing (or change its legacy error/cleanup behavior).
+  const useTextRouter = params.message_id !== undefined && params.conversation_id !== undefined
+    && (params.response_format === undefined || params.response_format === 'text')
+    && params.media_url === undefined && params.mime_type === undefined
+    && (params.message_type === undefined || params.message_type === 'text') && patched('whatsapp-saved-text-router-v1');
+  let routed = useTextRouter ? savedTextIdentity(params) : undefined;
+  if (useTextRouter && !routed) {
+    // Invalid purported saved IDs are not permission to call a legacy sender.
+    throw ApplicationFailure.nonRetryable('Invalid saved WhatsApp identity', 'WHATSAPP_ROUTED_TEXT_INVALID_INPUT');
+  }
 
   let whatsappResult: any = null; // Declare in broader scope for error handling
   
@@ -92,7 +106,7 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
       throw ApplicationFailure.nonRetryable('Explicit audio requires message_id', 'AUDIO_MESSAGE_ID_REQUIRED');
     }
     // Validate required parameters
-    if (!params.phone_number || (!params.message && !media.media_url) || !params.site_id) {
+    if (!routed && (!params.phone_number || (!params.message && !media.media_url) || !params.site_id)) {
       throw ApplicationFailure.nonRetryable(
         'Missing required WhatsApp parameters: phone_number, message and site_id are all required',
         'WHATSAPP_INVALID_INPUT'
@@ -120,6 +134,20 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
           console.log('🛑 Message not found - aborting WhatsApp send sequence');
           throw new Error('MESSAGE_DELETED');
         }
+        if (routed) {
+          if ((fetchedMessage.id !== undefined && fetchedMessage.id !== routed.message_id)
+            || (fetchedMessage.conversation_id !== undefined && fetchedMessage.conversation_id !== routed.conversation_id)) {
+            throw new Error('Saved WhatsApp identity mismatch');
+          }
+          // Caller omitted audio/media but the saved record is not plain text.
+          // Explicit audio keeps its existing dispatch. Never downgrade ambiguous
+          // audio or a prior native-media receipt to an unrelated text operation.
+          const saved = fetchedMessage.custom_data;
+          if ((saved?.response_format !== undefined && saved.response_format !== 'text') || saved?.audio_delivery
+            || (saved?.native_media_delivery && !saved.media_url)) {
+            throw new Error('Saved WhatsApp message is not plain text');
+          }
+        }
         const latestContent: string | null = typeof fetchedMessage?.content === 'string'
           ? (params.response_format === 'audio' ? fetchedMessage.content : fetchedMessage.content.trim()) : null;
         if (useOutboundMedia) {
@@ -137,7 +165,7 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
         console.log('✏️ Using refreshed message content for sending');
       } catch (earlyFetchErr) {
         const msg = earlyFetchErr instanceof Error ? earlyFetchErr.message : String(earlyFetchErr);
-        if (msg === 'MESSAGE_DELETED' || params.response_format === 'audio' || media.media_url) {
+        if (routed || msg === 'MESSAGE_DELETED' || params.response_format === 'audio' || media.media_url) {
           throw earlyFetchErr; // Propagate special abort condition
         }
         // If fetch failed for other reasons (e.g., network), proceed with original content
@@ -145,6 +173,20 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
       }
     }
 
+    if (routed && !media.media_url) {
+      const receipt = await routeSavedWhatsAppText(routed);
+      if (receipt.status === 'accepted' && params.fromApprovedWorkflow && params.lead_id) {
+        await completeRoutedWhatsAppFollowUp(routed, params.lead_id, params.approvedWorkflowCustomData);
+      }
+      const endTime = new Date();
+      return { ...receipt, ...(receipt.status === 'accepted' && { messageId: receipt.provider_message_id }),
+        ...(receipt.status === 'skipped' && { delivered: false, conversation_id: routed.conversation_id }),
+        executionTime: `${endTime.getTime() - startTime.getTime()}ms`, timestamp: endTime.toISOString() };
+    }
+
+    // A saved record refreshed as media keeps the native, single-attempt path.
+    if (!params.phone_number) throw ApplicationFailure.nonRetryable('Missing WhatsApp recipient for legacy send', 'WHATSAPP_INVALID_INPUT');
+    routed = undefined;
     console.log('📤 Sending WhatsApp via agent API:', {
       recipient: params.phone_number,
       from: params.from || 'AI Assistant',
@@ -449,6 +491,11 @@ export async function sendWhatsappFromAgent(params: SendWhatsAppFromAgentParams)
     }
 
   } catch (error) {
+    if (routed) {
+      if (isCancellation(error)) throw error;
+      throw ApplicationFailure.nonRetryable('Cannot verify saved WhatsApp text delivery; reconcile before retry',
+        'WHATSAPP_ROUTED_TEXT_UNCONFIRMED');
+    }
     if (useOutboundMedia && params.media_url !== undefined && !media.media_url) throw ApplicationFailure.nonRetryable('Invalid outbound media', 'INVALID_OUTBOUND_MEDIA');
     const endTime = new Date();
     const executionTime = `${endTime.getTime() - startTime.getTime()}ms`;

@@ -29,6 +29,8 @@ interface ApiRequestOptions {
   headers?: Record<string, string>;
   timeout?: number;
   signal?: AbortSignal;
+  /** Non-idempotent receipt protocols must not follow redirects or unwrap legacy envelopes. */
+  strictReceipt?: boolean;
 }
 
 interface ApiResponse<T = any> {
@@ -106,7 +108,7 @@ export class ApiService {
       return { success: false, error: { code: 'SELECTED_LIST_NOT_SEARCHABLE',
         message: SELECTED_LIST_SEARCH_ERROR, requestNotStarted: true } };
     }
-    if (!canRetryIcpAdmission(endpoint, options.method ?? 'GET')) {
+    if (options.strictReceipt || !canRetryIcpAdmission(endpoint, options.method ?? 'GET')) {
       return this.requestOnce<T>(endpoint, options);
     }
 
@@ -186,6 +188,7 @@ export class ApiService {
         headers: requestHeaders,
         body: serializedBody,
         signal: controller.signal,
+        ...(options.strictReceipt && { redirect: 'error' }),
       });
 
       console.log(`📡 Fetch completed, status: ${response.status} ${response.statusText}`);
@@ -250,7 +253,7 @@ export class ApiService {
       console.log(`✅ API Response received`);
       
       // If the API response already has success/data structure, return it directly
-      if (data && typeof data === 'object' && 'success' in data && 'data' in data) {
+      if (!options.strictReceipt && data && typeof data === 'object' && 'success' in data && 'data' in data) {
         return data;
       }
       

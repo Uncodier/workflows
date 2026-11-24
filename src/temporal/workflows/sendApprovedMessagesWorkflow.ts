@@ -12,6 +12,7 @@ import { responseFormatFields } from './helpers/responseFormat';
 import { outboundMediaFields } from './helpers/outboundMedia';
 import { pollTemplateDelivery } from './helpers/pollTemplateDelivery';
 import { isTemplatePending, templateDeliveryMetadata, type TemplateDeliveryMetadata } from '../utils/templateDelivery';
+import { savedTextIdentity } from '../utils/routedWhatsAppText';
 
 const {
   checkConversationAutomationActivity,
@@ -123,6 +124,10 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     const deliveryContent = resolvedMessage.content;
     const messageId = msg.message_id;
     const managedOutreach = useConfiguredOutreach && (msg.custom_data?.outreach_activity !== undefined || !!resolveOutreachActivity(msg.custom_data));
+    const routedChild = dispatch === 'whatsapp-child' && !managedOutreach && !exactConnection && !media.media_url
+      && !msg.custom_data?.audio_delivery && !msg.custom_data?.native_media_delivery
+      && (msg.custom_data?.response_format === undefined || msg.custom_data.response_format === 'text')
+      && !!savedTextIdentity(msg) && patched('approved-whatsapp-saved-text-child-v1');
     const exactTemplateAudio = useTemplatePolling && useResponseFormat && exactConnection && !managedOutreach
       && channel === 'whatsapp' && msg.custom_data?.response_format === 'audio';
     let sentMessageId: string | undefined;
@@ -132,7 +137,9 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
     const COMMENT_CHANNELS = ['facebook', 'instagram', 'threads', 'linkedin', 'x', 'twitter', 'youtube'];
 
     try {
-      if (useSnooze) {
+      // Routed text checks suppression in the API (also on every poll). The
+      // legacy guard may write skipped on a message with a prior routed attempt.
+      if (useSnooze && !routedChild) {
         const guard = await checkConversationAutomationActivity({ site_id: msg.site_id, conversation_id: msg.conversation_id, message_id: messageId });
         if (guard.skipped) { skippedCount++; return false; }
       }
@@ -271,10 +278,10 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
         console.log(`✅ ${channel} child started (workflowId: ${channelWorkflowId}).`);
         return true;
       } else if (dispatch === 'whatsapp-child') {
-        if (!msg.lead_phone) {
+        if (!msg.lead_phone && !routedChild) {
           throw new Error('No phone number for lead');
         }
-        console.log(`📱 Dispatching WhatsApp to ${msg.lead_phone} (child runs in background)...`);
+        console.log('📱 Dispatching saved WhatsApp message (child runs in background)...');
         if (!useBatchClaims) {
           const claim = await markMessageAsSendingActivity({
             message_id: msg.message_id,
@@ -284,12 +291,11 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
           if (!claim.success) return false;
         }
 
-        let cleanPhone = msg.lead_phone.replace(/[^\d+]/g, '');
-        if (cleanPhone.startsWith('+')) {
-          cleanPhone = '+' + cleanPhone.slice(1).replace(/\+/g, '');
-        } else {
-          cleanPhone = cleanPhone.replace(/\+/g, '');
-        }
+        // The child refreshes media before selecting its path. A phone, if
+        // present, is for that legacy path only; routed text never forwards it.
+        let cleanPhone = msg.lead_phone?.replace(/[^\d+]/g, '');
+        if (cleanPhone) cleanPhone = cleanPhone.startsWith('+')
+          ? '+' + cleanPhone.slice(1).replace(/\+/g, '') : cleanPhone.replace(/\+/g, '');
         const whatsappWorkflowId = `send-whatsapp-approved-${msg.message_id}-${Date.now()}`;
         await startChild(sendWhatsappFromAgent, {
           workflowId: whatsappWorkflowId,
@@ -428,6 +434,11 @@ export async function sendApprovedMessagesWorkflow(): Promise<any> {
       }
       return false;
     } catch (error) {
+      if (routedChild) {
+        // An uncertain child start must not invalidate a contact, overwrite the
+        // router's receipt, or delete the saved message out from under the child.
+        return false;
+      }
       if (exactTemplateAudio && !sent) {
         // No defer/reset, cleanup, or fallback after rejection or uncertain dispatch.
         // The API owns terminal status and any receipt requiring reconciliation.

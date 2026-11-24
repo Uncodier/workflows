@@ -1,0 +1,19 @@
+# Saved outbound WhatsApp text
+
+The provider-aware path is for a saved outbound text with a site, conversation and message ID. The worker calls the internal `POST /api/agents/whatsapp/sendRoutedText` with those three IDs only. The API reloads the message, destination, eligible site connections and snooze state. The `whatsapp_text_delivery` receipt in `messages.custom_data` owns the attempt. Starting the workflow is not proof of delivery.
+
+* For an unbound new chat, try enabled, licensed WhatsApp connections in their configured order (Zavu), then the site's configured WhatsApp / agent WhatsApp accounts (Twilio). A stored provider preference is honored first. Never pull a sender from global credentials or another site.
+* An explicit per-message `connection_id` is exact. For a conversation with a known sender, a backup must have the same verified business number in site settings. An ambiguous inbound history is not permission to use an arbitrary sender.
+* Use an explicit international contact number or a verified inbound address in this conversation. With provider evidence, `whatsapp:14155550100` and `whatsapp:+14155550100` identify the same contact. A bare CRM phone alone, or conflicting saved contacts, cannot establish a country or redirect a reply. New sends fail preflight without contacting a provider; correct the contact before retrying.
+* An automatic Twilio support reply is saved as `ready` only when linked to its signed inbound text (site, message SID, business and recipient numbers, account and body). The proof uses the existing webhook admission key/TTL; pre-upgrade unbound rows are not retroactively approved. Required approvals, internal/skipped replies, media, audio and pinned Zavu replies keep their existing handling.
+* On a definitive sender-specific refusal before acceptance (Twilio `400/63007` or the documented [Zavu `409 channel_not_connected` for WhatsApp](https://docs.zavu.dev/api-reference/send-a-message)), record the refused connection and move to the next eligible connection. A Zavu idempotency replay is not that refusal. Never retry a recipient, policy or template rejection through a different account.
+* A template belongs to its provider/account. Outside a verified sender-specific response window, prepare a template for the new sender; never forward a Twilio Content SID to Zavu. At the 24-hour cutoff, check the **existing** template one last time. Only confirmed approval on that route can dispatch; do not start a new route at the deadline.
+* A timeout does not trigger a second send. The worker reads the saved outcome (`GET`), resumes a verified idle pending poll on its next timer, or stops. An exact-token `PATCH` can mark a pending receipt for reconciliation without touching the provider or overwriting a concurrent acceptance. Check the workflow's `reconciliation_persisted` flag if recovery storage itself was unavailable. A provider ID means acceptance, not delivery to the handset.
+
+## Rollout and incident recovery
+
+1. Deploy the API handler, leaving `WHATSAPP_ROUTED_TEXT_WORKER_READY` unset. Existing Zavu chat interventions continue using their original workflow.
+2. Roll out the versioned worker and verify the workers that receive **new** runs support the router. New saved texts on the legacy WhatsApp workflow now call the API handler.
+3. Set `WHATSAPP_ROUTED_TEXT_WORKER_READY=true` on the API to also use that workflow for new saved Zavu chat interventions. Turn this switch off before rolling back workers.
+
+No database migration or scheduled re-send is required. An existing workflow already retrying a Twilio SID is not migrated automatically. Before any manual requeue, verify that all prior attempts were explicitly refused and the previous execution is closed. An unknown provider result needs reconciliation, not another send.

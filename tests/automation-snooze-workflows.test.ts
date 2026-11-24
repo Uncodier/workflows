@@ -46,6 +46,7 @@ test.each([
 test.each(['email', 'whatsapp', 'channel'])('%s skipped send never writes sent status or sleeps', async kind => {
   mockActivities.sendEmailFromAgentActivity.mockResolvedValue(skip);
   mockActivities.sendWhatsAppFromAgentActivity.mockResolvedValue(skip);
+  mockActivities.sendRoutedWhatsAppTextActivity.mockResolvedValue({ ...skip, status: 'skipped', message_id: 'message' });
   mockActivities.sendChannelMessageFromAgentActivity.mockResolvedValue(skip);
   const result = kind === 'email' ? await sendEmailFromAgent(outbound)
     : kind === 'whatsapp' ? await sendWhatsappFromAgent(outbound)
@@ -65,6 +66,7 @@ test('template pending poll sees new snooze and terminates without receipt valid
   expect(mockActivities.markTemplateReconciliationRequiredActivity).not.toHaveBeenCalled();
 });
 test('legacy WhatsApp template send snooze does not retry or mark sent', async () => {
+  mockPatched.mockImplementation((...args: unknown[]) => args[0] !== 'whatsapp-saved-text-router-v1');
   mockActivities.sendWhatsAppFromAgentActivity.mockResolvedValue({ success: true, messageId: 'message', template_required: true });
   mockActivities.createTemplateActivity.mockResolvedValue({ success: true, template_id: 'template' });
   mockActivities.sendTemplateActivity.mockResolvedValue(skip);
@@ -85,7 +87,8 @@ test('approved preflight skips without dispatch, defer, retry or sent side-effec
   expect(mockActivities.updateMessageStatusToSentActivity).not.toHaveBeenCalled();
   expect(mockStartChild).not.toHaveBeenCalled();
 });
-test('new WhatsApp histories preserve saved identity even without explicit response format', async () => {
+test('pre-router WhatsApp snooze histories preserve saved identity even without explicit response format', async () => {
+  mockPatched.mockImplementation((...args: unknown[]) => args[0] !== 'whatsapp-saved-text-router-v1');
   mockActivities.sendWhatsAppFromAgentActivity.mockResolvedValue(skip);
   await sendWhatsappFromAgent(outbound);
   expect(mockActivities.sendWhatsAppFromAgentActivity).toHaveBeenCalledWith(expect.objectContaining({ message_id: 'message' }));

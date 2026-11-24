@@ -1,9 +1,38 @@
 # Optional outbound response format
 
 `sendWhatsappFromAgent` and `sendChannelMessageFromAgentWorkflow` accept optional
-`response_format: 'text' | 'audio'`. Omission keeps legacy delivery and retries;
-it is not converted to explicit text. Audio synthesis/cache/provider dispatch
+`response_format: 'text' | 'audio'`. Omission is not converted to explicit text.
+Legacy delivery/retries are unchanged except for saved plain WhatsApp text below. Audio synthesis/cache/provider dispatch
 belong to the HTTP API, not Temporal.
+
+## Saved plain WhatsApp text
+
+`sendWhatsappFromAgent` (`whatsapp-saved-text-router-v1`) routes a saved text
+message by posting **only** `{site_id, conversation_id, message_id}` to
+`/api/agents/whatsapp/sendRoutedText`. This applies to manual sends and the
+legacy WhatsApp approval child, not exact/managed delivery, pinned channel
+replies, audio, media, or unsaved sends. The API resolves recipient/content,
+checks suppression and owns provider choice, CAS, and message status.
+
+Only `accepted` with a matching local `message_id`, `connection_id`, and real
+`provider_message_id` confirms provider acceptance (not delivery). Only an
+explicit `template_pending` with the same local ID, connection and template
+permits another POST. Polls use the original three IDs after durable timers of
+1 minute, 30 minutes and then hourly up through 24h31m. A later alternate
+template/connection must come from the API, never a worker fallback.
+
+Every send POST has one attempt. With `whatsapp-routed-text-poll-recovery-v1`,
+a lost response leads to a **read-only GET** by the same three IDs. An accepted
+provider receipt completes the workflow; only a matching idle template receipt
+permits another timer. Exhaustion (or a stopped pending poll) uses **PATCH**
+with its exact attempt UUID, provider, connection and template to mark it for
+reconciliation. If both storage and recovery are unavailable, the result says
+`reconciliation_persisted: false`. Never POST another send on timeout alone.
+No generic status/timestamp rewrite, contact cleanup or legacy retry is safe.
+`failed` and `skipped` also stop. An accepted
+approved send may update its conversation and task, **not** the message. The
+approved batch still starts these children in the background. Old workflow
+histories replay their original activity sequence.
 
 ## Customer-support contract
 

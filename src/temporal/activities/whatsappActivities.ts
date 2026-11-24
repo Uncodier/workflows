@@ -4,6 +4,9 @@ import { automationSkipMetadata, type AutomationSkipMetadata } from '../utils/au
 import { apiService } from '../services/apiService';
 import { ApplicationFailure } from '@temporalio/common';
 import {
+  parseRoutedTextReceipt, routedTextPollBinding, savedTextIdentity, type RoutedTextPollBinding, type RoutedWhatsAppTextReceipt, type RoutedWhatsAppTextRequest,
+} from '../utils/routedWhatsAppText';
+import {
   parseApiErrorTypeFromMessage,
   TEMPLATE_REJECTED_ERROR_TYPE,
 } from '../workflows/helpers/whatsappTemplateRejection';
@@ -214,6 +217,49 @@ export interface SendWhatsAppFromAgentResult extends AutomationSkipMetadata {
   recipient: string;
   timestamp: string;
   template_required?: boolean; // ✅ Nueva propiedad para indicar si se requiere template
+}
+
+/** One HTTP attempt. The router resolves the saved recipient, checks suppression,
+ * and owns CAS on the receipt/status; the legacy worker guard can write messages.
+ */
+export async function sendRoutedWhatsAppTextActivity(request: RoutedWhatsAppTextRequest): Promise<RoutedWhatsAppTextReceipt> {
+  const body = savedTextIdentity(request);
+  if (!body) throw ApplicationFailure.nonRetryable('Missing saved WhatsApp identity', 'WHATSAPP_ROUTED_TEXT_INVALID_INPUT');
+  try {
+    const response = await apiService.request<unknown>('/api/agents/whatsapp/sendRoutedText', {
+      method: 'POST', body, timeout: 110_000, strictReceipt: true,
+    });
+    if (response.success === true) return parseRoutedTextReceipt(response.data, body.message_id);
+  } catch {
+    // A lost response (including invalid JSON/receipt) is never evidence of rejection.
+  }
+  throw ApplicationFailure.nonRetryable('No valid routed WhatsApp text receipt; reconcile before retry',
+    'WHATSAPP_ROUTED_TEXT_UNCONFIRMED');
+}
+
+/** Recovery has no send capability. Unlike the sender, both activities may be
+ * retried: GET reads durable state, PATCH requires the exact observed CAS token. */
+export async function readRoutedWhatsAppTextActivity(request: RoutedWhatsAppTextRequest): Promise<RoutedWhatsAppTextReceipt> {
+  const id = savedTextIdentity(request);
+  if (!id) throw ApplicationFailure.nonRetryable('Invalid routed receipt identity', 'WHATSAPP_ROUTED_TEXT_INVALID_INPUT');
+  const query = new URLSearchParams({ ...id });
+  const res = await apiService.request<unknown>(`/api/agents/whatsapp/sendRoutedText?${query}`, { method: 'GET', timeout: 15_000, strictReceipt: true });
+  if (!res.success) throw new Error('Routed WhatsApp receipt read unavailable');
+  const receipt = parseRoutedTextReceipt(res.data, id.message_id);
+  if (receipt.status === 'template_pending' && !routedTextPollBinding(receipt)) throw new Error('Unbound routed WhatsApp poll');
+  return receipt;
+}
+
+export async function stopRoutedWhatsAppPollActivity(request: RoutedWhatsAppTextRequest & RoutedTextPollBinding): Promise<RoutedWhatsAppTextReceipt> {
+  const id = savedTextIdentity(request);
+  const binding = routedTextPollBinding({ ...request, status: 'template_pending', success: true });
+  if (!id || !binding) throw ApplicationFailure.nonRetryable('Invalid routed poll marker', 'WHATSAPP_ROUTED_TEXT_INVALID_INPUT');
+  const res = await apiService.request<unknown>('/api/agents/whatsapp/sendRoutedText', { method: 'PATCH', timeout: 15_000,
+    strictReceipt: true, body: { ...id, ...binding } });
+  if (!res.success) throw new Error('Routed WhatsApp poll marker unavailable');
+  const receipt = parseRoutedTextReceipt(res.data, id.message_id);
+  if (receipt.status === 'template_pending') throw new Error('Routed poll marker unconfirmed');
+  return receipt;
 }
 
 /**
