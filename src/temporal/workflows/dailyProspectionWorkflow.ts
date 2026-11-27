@@ -86,6 +86,13 @@ export interface DailyProspectionResult {
   followUpWorkflowsStarted?: number;
   followUpResults?: any[];
   unassignedLeads?: any[];
+  // This measures queued generation workflows, never confirmed deliveries.
+  outreachQueue?: {
+    target: number;
+    started: number;
+    shortfall: number;
+    reason?: 'no_more_pages' | 'max_pages_reached' | 'queue_throttled' | 'insufficient_candidates_after_assignment_or_start_failures';
+  };
   // New fields for channel filtering
   leadsFiltered?: number;
   filteredLeads?: any[];
@@ -271,21 +278,23 @@ async function searchLeadsWithPagination(
   minLeadsRequired: number,
   channelsValidation: any,
   site: any,
-  outreachActivity?: OutreachActivityKey
+  outreachActivity?: OutreachActivityKey,
+  resume?: { page: number; cursor: { createdAt: string; id: string } }
 ): Promise<{
   allLeads: any[];
   totalPagesSearched: number;
   totalCandidatesFound: number;
   stopped: 'found_leads' | 'max_pages_reached' | 'no_more_pages';
   paginationLog: string[];
+  nextPage?: { page: number; cursor: { createdAt: string; id: string } };
 }> {
   const { site_id, hoursThreshold } = options;
   const allLeads: any[] = [];
   const paginationLog: string[] = [];
-  let currentPage = 0;
+  let currentPage = resume?.page ?? 0;
   let totalCandidatesFound = 0;
   let hasMorePages = true;
-  let outreachCursor: { createdAt: string; id: string } | undefined;
+  let outreachCursor = resume?.cursor;
   
   console.log(`🔄 Starting paginated lead search:`);
   console.log(`   - Max pages to search: ${maxPages}`);
@@ -365,7 +374,8 @@ async function searchLeadsWithPagination(
           totalPagesSearched: currentPage,
           totalCandidatesFound,
           stopped: 'found_leads',
-          paginationLog
+          paginationLog,
+          ...(hasMorePages && outreachCursor ? { nextPage: { page: currentPage, cursor: outreachCursor } } : {}),
         };
       }
       
@@ -532,8 +542,20 @@ export async function dailyProspectionWorkflow(
       executionTime: `${Date.now() - startTime}ms`, completedAt: new Date().toISOString(),
     };
   }
+  const fillOutreachQueue = !!outreachConfiguration && patched('cold-outreach-fill-configured-batch-v1');
+  const configuredRunLimit = fillOutreachQueue ? options.maxLeads : maxLeads;
   const effectiveMaxLeads = outreachConfiguration
-    ? Math.min(maxLeads || outreachConfiguration.dailyMessageLimit, outreachConfiguration.dailyMessageLimit) : maxLeads;
+    ? Math.min(configuredRunLimit || outreachConfiguration.dailyMessageLimit, outreachConfiguration.dailyMessageLimit) : maxLeads;
+  const searchTarget = fillOutreachQueue ? effectiveMaxLeads
+    : outreachConfiguration ? Math.min(minLeadsRequired, outreachConfiguration.dailyMessageLimit) : minLeadsRequired;
+  const searchPageLimit = fillOutreachQueue && options.maxPages === undefined
+    ? Math.max(maxPages, Math.ceil(searchTarget / 30)) : maxPages;
+  const queueProgress = (started: number, reason?: NonNullable<DailyProspectionResult['outreachQueue']>['reason']) => ({
+    target: effectiveMaxLeads,
+    started,
+    shortfall: Math.max(0, effectiveMaxLeads - started),
+    ...(started < effectiveMaxLeads && reason ? { reason } : {}),
+  });
 
   // Log workflow execution start
   await logWorkflowExecutionActivity({
@@ -702,8 +724,8 @@ export async function dailyProspectionWorkflow(
       // Use the new paginated search function
       paginationResults = await searchLeadsWithPagination(
         options,
-        maxPages,
-        outreachConfiguration ? Math.min(minLeadsRequired, outreachConfiguration.dailyMessageLimit) : minLeadsRequired,
+        searchPageLimit,
+        searchTarget,
         channelsValidation,
         site,
         outreachActivity
@@ -887,11 +909,13 @@ export async function dailyProspectionWorkflow(
         channelFilteringInfo: filteringInfo,
         paginationInfo: paginationResults ? {
           totalPagesSearched: paginationResults.totalPagesSearched,
-          maxPagesConfigured: maxPages,
-          minLeadsRequired: minLeadsRequired,
+          maxPagesConfigured: searchPageLimit,
+          minLeadsRequired: fillOutreachQueue ? searchTarget : minLeadsRequired,
           stoppedReason: paginationResults.stopped,
           paginationLog: paginationResults.paginationLog
         } : undefined,
+        ...(fillOutreachQueue ? { outreachQueue: queueProgress(0, paginationResults?.stopped === 'max_pages_reached'
+          ? 'max_pages_reached' : 'no_more_pages') } : {}),
         errors,
         executionTime: `${((Date.now() - startTime) / 1000).toFixed(2)}s`,
         completedAt: new Date().toISOString()
@@ -923,15 +947,22 @@ export async function dailyProspectionWorkflow(
     const selectionCandidates = selectedLeads.length > 0 ? selectedLeads : leads;
     // AI ranking cannot introduce a lead outside the site/segment-filtered candidate set.
     const leadsById = new Map(leads.map((lead: any) => [lead.id, lead]));
-    const leadsToSelect = outreachActivity
+    const rankedLeads = outreachActivity
       ? selectionCandidates.map((lead: any) => leadsById.get(typeof lead === 'string' ? lead : lead.id || lead.lead_id)).filter(Boolean)
       : selectionCandidates;
+    // Ranking controls order, not eligibility. Reuse the eligible pool if ranking
+    // omits candidates, but never queue leads assigned to humans.
+    const leadsToSelect = fillOutreachQueue
+      ? [...new Map([...rankedLeads, ...leads].map(lead => [lead.id, lead])).values()]
+      : rankedLeads;
     
     // Limit the number of leads to process if specified
-    const leadsToProcess = effectiveMaxLeads ? leadsToSelect.slice(0, effectiveMaxLeads) : leadsToSelect;
+    const assignedLeadIds = assignedLeads.map((lead: any) => lead.id || lead.lead_id);
+    const eligibleForQueue = fillOutreachQueue ? leadsToSelect.filter(lead => !assignedLeadIds.includes(lead.id)) : leadsToSelect;
+    const leadsToProcess = effectiveMaxLeads ? eligibleForQueue.slice(0, effectiveMaxLeads) : eligibleForQueue;
     leadsProcessed = leadsToProcess.length;
     
-    if (maxLeads && leadsToSelect.length > maxLeads) {
+    if (!fillOutreachQueue && maxLeads && leadsToSelect.length > maxLeads) {
       console.log(`⚠️ Processing only first ${maxLeads} leads out of ${leadsToSelect.length} selected by sales agent`);
       errors.push(`Limited processing to ${maxLeads} leads (${leadsToSelect.length} total selected)`);
     }
@@ -1016,8 +1047,8 @@ export async function dailyProspectionWorkflow(
       channelFilteringInfo: filteringInfo,
       paginationInfo: paginationResults ? {
         totalPagesSearched: paginationResults.totalPagesSearched,
-        maxPagesConfigured: maxPages,
-        minLeadsRequired: minLeadsRequired,
+        maxPagesConfigured: searchPageLimit,
+        minLeadsRequired: fillOutreachQueue ? searchTarget : minLeadsRequired,
         stoppedReason: paginationResults.stopped,
         paginationLog: paginationResults.paginationLog
       } : undefined,
@@ -1055,6 +1086,7 @@ export async function dailyProspectionWorkflow(
         result.followUpWorkflowsStarted = 0;
         result.followUpResults = [];
         result.unassignedLeads = [];
+        if (fillOutreachQueue) result.outreachQueue = queueProgress(0, 'queue_throttled');
         
         console.log(`🎉 Daily prospection workflow completed (queue throttled)!`);
         console.log(`📊 Summary: Daily prospection for site ${siteName} completed in ${executionTime}`);
@@ -1091,8 +1123,8 @@ export async function dailyProspectionWorkflow(
     }
     
     // Identify leads that were NOT assigned to humans
-    const assignedLeadIds = assignedLeads.map((lead: any) => lead.id || lead.lead_id);
-    const unassignedLeads = leadsToProcess.filter((lead: any) => !assignedLeadIds.includes(lead.id));
+    const unassignedLeads = fillOutreachQueue ? [...eligibleForQueue]
+      : leadsToProcess.filter((lead: any) => !assignedLeadIds.includes(lead.id));
     
     console.log(`📊 Follow-up analysis:`);
     console.log(`   - Total leads processed: ${leadsToProcess.length}`);
@@ -1102,10 +1134,42 @@ export async function dailyProspectionWorkflow(
     const followUpResults: any[] = [];
     let followUpWorkflowsStarted = 0;
     
-    if (unassignedLeads.length > 0) {
+    let nextPage = paginationResults?.nextPage;
+    let stoppedReason = paginationResults?.stopped;
+    const seenLeadIds = new Set(fillOutreachQueue ? leads.map(lead => lead.id) : []);
+    if (unassignedLeads.length > 0 || (fillOutreachQueue && nextPage)) {
       console.log(`🚀 Starting lead follow-up workflows for ${unassignedLeads.length} unassigned leads...`);
       
-      for (const lead of unassignedLeads) {
+      for (let index = 0; ; index++) {
+        if (fillOutreachQueue && followUpWorkflowsStarted >= effectiveMaxLeads) break;
+        if (index === unassignedLeads.length) {
+          if (!fillOutreachQueue || !nextPage) break;
+          if (nextPage.page >= searchPageLimit) {
+            stoppedReason = 'max_pages_reached';
+            if (result.paginationInfo) result.paginationInfo.stoppedReason = stoppedReason;
+            break;
+          }
+          const extra = await searchLeadsWithPagination(options, searchPageLimit,
+            effectiveMaxLeads - followUpWorkflowsStarted, channelsValidation, site, outreachActivity, nextPage);
+          nextPage = extra.nextPage;
+          stoppedReason = extra.stopped;
+          if (result.paginationInfo) {
+            result.paginationInfo.totalPagesSearched = extra.totalPagesSearched;
+            result.paginationInfo.stoppedReason = extra.stopped;
+            result.paginationInfo.paginationLog.push(...extra.paginationLog);
+          }
+          for (const candidate of extra.allLeads) {
+            if (seenLeadIds.has(candidate.id)) continue;
+            seenLeadIds.add(candidate.id);
+            if (!assignedLeadIds.includes(candidate.id)) unassignedLeads.push(candidate);
+          }
+          if (index === unassignedLeads.length) {
+            if (!nextPage) break;
+            index--; // Continue scanning when a page yielded only previously seen leads.
+            continue;
+          }
+        }
+        const lead = unassignedLeads[index];
         try {
           console.log(`📞 Starting follow-up workflow for lead: ${lead.name || lead.email} (ID: ${lead.id})`);
           
@@ -1175,7 +1239,12 @@ export async function dailyProspectionWorkflow(
     // Update result with follow-up information
     result.followUpWorkflowsStarted = followUpWorkflowsStarted;
     result.followUpResults = followUpResults;
-    result.unassignedLeads = unassignedLeads;
+    result.unassignedLeads = fillOutreachQueue ? unassignedLeads.slice(0, followUpResults.length) : unassignedLeads;
+    if (fillOutreachQueue) {
+      result.outreachQueue = queueProgress(followUpWorkflowsStarted,
+        stoppedReason === 'no_more_pages' || stoppedReason === 'max_pages_reached' ? stoppedReason
+          : 'insufficient_candidates_after_assignment_or_start_failures');
+    }
 
     console.log(`🎉 Daily prospection workflow completed successfully!`);
     console.log(`📊 Summary: Daily prospection for site ${siteName} completed in ${executionTime}`);

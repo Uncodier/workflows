@@ -61,6 +61,14 @@ the selections are configured. Email aliases are not independent connected accou
 
 - Cold Outreach (`dailyProspectionWorkflow`) and Follow Up
   (`leadQualificationWorkflow`) read the current configuration before selecting leads.
+- Cold Outreach searches for enough eligible leads to queue the configured daily
+  limit (bounded by any per-run `maxLeads`). Sales ranking sets priority; the
+  workflow uses remaining eligible candidates and resumes pagination to replace
+  leads assigned to humans or whose generation workflows could not be started.
+  `outreachQueue` reports the target, starts and any shortfall, including audience
+  exhaustion, the page safety limit and queue throttling. A workflow start is not
+  a generated message or a confirmed delivery; only the delivery policy controls
+  the actual shared daily send budget.
 - Configured outreach scheduling calls `nextConfiguredOutreachRun(now, configuration)`;
   it uses the site's timezone, eligible weekdays and either the daily opening or
   the custom clock time. Legacy unconfigured Follow Up retains `09:00`. As with Daily
